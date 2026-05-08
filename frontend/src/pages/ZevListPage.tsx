@@ -18,7 +18,10 @@ import { ZevGeneralSettingsFields } from '../components/ZevGeneralSettingsFields
 import { formatShortDate, useAppSettings } from '../lib/appSettings'
 import { useAuth } from '../lib/auth'
 import { FormModal } from '../components/FormModal'
-import { createZevWithOwner, deleteZev, fetchParticipants, fetchUsers, fetchZevs, formatApiError, updateZev } from '../lib/api'
+import { createZevWithOwner, deleteZev, fetchParticipants, fetchZevs, updateZev } from '../lib/api/zev'
+import { fetchUsers } from '../lib/api/auth'
+import { formatApiError } from '../lib/api/errors'
+import { queryKeys } from '../lib/api/queryKeys'
 import { useTranslation } from 'react-i18next'
 import { getDefaultZevForm, mapZevToForm } from '../lib/zevForm'
 import type { OwnerMeteringPointInput, Zev, ZevInput, ZevWizardInput, ZevWizardResult } from '../types/api'
@@ -61,14 +64,14 @@ export function ZevListPage() {
     const queryClient = useQueryClient()
     const { dialog, confirm, handleConfirm, handleCancel, isLoading: dialogLoading } = useConfirmDialog()
 
-    const { data, isLoading, isError } = useQuery({ queryKey: ['zevs'], queryFn: fetchZevs })
+    const { data, isLoading, isError } = useQuery({ queryKey: queryKeys.zev.list(), queryFn: fetchZevs })
     const usersQuery = useQuery({
-        queryKey: ['users'],
+        queryKey: queryKeys.auth.users(),
         queryFn: fetchUsers,
         enabled: isAdmin,
     })
     const participantsQuery = useQuery({
-        queryKey: ['participants'],
+        queryKey: queryKeys.zev.participants(),
         queryFn: fetchParticipants,
         enabled: isAdmin,
     })
@@ -99,7 +102,7 @@ export function ZevListPage() {
             setCreatedCredentials(result.owner)
             setCreatedZevName(result.zev.name)
             setWizardStep(5)
-            void queryClient.invalidateQueries({ queryKey: ['zevs'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.list() })
         },
         onError: (error) => setCreateError(formatApiError(error, 'Failed to create ZEV.')),
     })
@@ -111,7 +114,7 @@ export function ZevListPage() {
             setEditForm(getDefaultZevForm())
             setShowEditModal(false)
             setEditError(null)
-            void queryClient.invalidateQueries({ queryKey: ['zevs'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.list() })
         },
         onError: (error) => setEditError(formatApiError(error, 'Failed to update ZEV.')),
     })
@@ -119,7 +122,7 @@ export function ZevListPage() {
     const deleteMutation = useMutation({
         mutationFn: deleteZev,
         onSuccess: () => {
-            void queryClient.invalidateQueries({ queryKey: ['zevs'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.list() })
         },
     })
 
@@ -130,7 +133,7 @@ export function ZevListPage() {
             setOwnerTargetZev(null)
             setNewOwnerId('')
             setOwnerError(null)
-            void queryClient.invalidateQueries({ queryKey: ['zevs'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.list() })
         },
         onError: (error) => setOwnerError(formatApiError(error, 'Failed to assign owner.')),
     })

@@ -160,11 +160,20 @@ class EmailTemplate(models.Model):
 class EmailLog(models.Model):
     """Audit log for invoice emails."""
 
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        SENT = "sent", "Sent"
+        FAILED = "failed", "Failed"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name="email_logs")
     recipient = models.EmailField()
     subject = models.CharField(max_length=500)
-    status = models.CharField(max_length=20, default="pending")  # pending / sent / failed
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
     error_message = models.TextField(blank=True)
     sent_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

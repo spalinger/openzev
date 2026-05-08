@@ -358,8 +358,6 @@ class ParticipantAccountLinkingTests(TestCase):
 
 		self.assertEqual(link_resp.status_code, 403)
 		self.assertEqual(create_resp.status_code, 403)
-
-
 class ZevOwnerRoleSyncTests(TestCase):
 	def setUp(self):
 		self.client = APIClient()

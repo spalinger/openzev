@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { fetchEmailTemplate } from '../lib/api'
+import { fetchEmailTemplate } from '../lib/api/invoices'
+import { queryKeys } from '../lib/api/queryKeys'
 
 type ZevEmailTemplateFieldsProps = {
     subjectTemplate: string
@@ -29,7 +30,7 @@ export function ZevEmailTemplateFields({
     const { t } = useTranslation()
 
     const globalTemplateQuery = useQuery({
-        queryKey: ['admin-email-template', 'invoice_email'],
+        queryKey: queryKeys.admin.emailTemplate('invoice_email'),
         queryFn: () => fetchEmailTemplate('invoice_email'),
     })
 

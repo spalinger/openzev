@@ -229,3 +229,86 @@ class TariffPermissionTests(TestCase):
 		self.assertEqual(roundtripped.energy_type, "grid")
 		self.assertEqual(str(roundtripped.percentage), "7.25")
 		self.assertIsNone(roundtripped.fixed_price_chf)
+
+	def test_rejects_overlapping_energy_tariffs_for_same_scope(self):
+		client = APIClient()
+		owner = User.objects.create_user(
+			username="tariff_overlap_owner",
+			password="pass1234",
+			role=UserRole.ZEV_OWNER,
+		)
+		zev = Zev.objects.create(name="Tariff Overlap ZEV", owner=owner, zev_type="vzev")
+		auth(client, owner)
+
+		first_resp = client.post(
+			"/api/v1/tariffs/tariffs/",
+			{
+				"zev": str(zev.id),
+				"name": "Base Local Energy",
+				"category": TariffCategory.ENERGY,
+				"billing_mode": BillingMode.ENERGY,
+				"energy_type": "local",
+				"valid_from": "2026-01-01",
+				"valid_to": "2026-12-31",
+			},
+			format="json",
+		)
+		self.assertEqual(first_resp.status_code, 201)
+
+		second_resp = client.post(
+			"/api/v1/tariffs/tariffs/",
+			{
+				"zev": str(zev.id),
+				"name": "Overlapping Local Energy",
+				"category": TariffCategory.ENERGY,
+				"billing_mode": BillingMode.ENERGY,
+				"energy_type": "local",
+				"valid_from": "2026-06-01",
+				"valid_to": "2027-05-31",
+			},
+			format="json",
+		)
+
+		self.assertEqual(second_resp.status_code, 400)
+		self.assertIn("valid_from", second_resp.data)
+
+	def test_allows_adjacent_non_overlapping_energy_tariffs(self):
+		client = APIClient()
+		owner = User.objects.create_user(
+			username="tariff_nonoverlap_owner",
+			password="pass1234",
+			role=UserRole.ZEV_OWNER,
+		)
+		zev = Zev.objects.create(name="Tariff NonOverlap ZEV", owner=owner, zev_type="vzev")
+		auth(client, owner)
+
+		first_resp = client.post(
+			"/api/v1/tariffs/tariffs/",
+			{
+				"zev": str(zev.id),
+				"name": "Local Energy 2026",
+				"category": TariffCategory.ENERGY,
+				"billing_mode": BillingMode.ENERGY,
+				"energy_type": "local",
+				"valid_from": "2026-01-01",
+				"valid_to": "2026-12-31",
+			},
+			format="json",
+		)
+		self.assertEqual(first_resp.status_code, 201)
+
+		second_resp = client.post(
+			"/api/v1/tariffs/tariffs/",
+			{
+				"zev": str(zev.id),
+				"name": "Local Energy 2027",
+				"category": TariffCategory.ENERGY,
+				"billing_mode": BillingMode.ENERGY,
+				"energy_type": "local",
+				"valid_from": "2027-01-01",
+				"valid_to": None,
+			},
+			format="json",
+		)
+
+		self.assertEqual(second_resp.status_code, 201)

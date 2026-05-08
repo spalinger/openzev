@@ -10,11 +10,12 @@ import {
     deleteOAuthProviderConfig,
     fetchFeatureFlags,
     fetchOAuthProviderConfigs,
-    formatApiError,
     updateAppSettings,
     updateFeatureFlag,
     updateOAuthProviderConfig,
-} from '../lib/api'
+} from '../lib/api/auth'
+import { formatApiError } from '../lib/api/errors'
+import { queryKeys } from '../lib/api/queryKeys'
 import {
     DATE_TIME_FORMAT_OPTIONS,
     LONG_DATE_FORMAT_OPTIONS,
@@ -79,19 +80,19 @@ export function AdminSystemSettingsPage() {
     }, [settings.date_format_long, settings.date_format_short, settings.date_time_format])
 
     const featureFlagsQuery = useQuery({
-        queryKey: ['feature-flags'],
+        queryKey: queryKeys.auth.featureFlags(),
         queryFn: fetchFeatureFlags,
     })
 
     const oauthProvidersQuery = useQuery({
-        queryKey: ['oauth-provider-configs'],
+        queryKey: queryKeys.auth.oauthProviderConfigs(),
         queryFn: fetchOAuthProviderConfigs,
     })
 
     const saveRegionalMutation = useMutation({
         mutationFn: updateAppSettings,
         onSuccess: (data) => {
-            queryClient.setQueryData(['app-settings'], data)
+            queryClient.setQueryData(queryKeys.auth.appSettings(), data)
             pushToast(t('adminSystemSettings.regional.updated'), 'success')
         },
         onError: () => pushToast(t('adminSystemSettings.regional.updateFailed'), 'error'),
@@ -100,7 +101,7 @@ export function AdminSystemSettingsPage() {
     const featureToggleMutation = useMutation({
         mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) => updateFeatureFlag(id, { enabled }),
         onSuccess: () => {
-            void queryClient.invalidateQueries({ queryKey: ['feature-flags'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.auth.featureFlags() })
             pushToast(t('features.updated'), 'success')
         },
         onError: (error) => pushToast(formatApiError(error), 'error'),
@@ -109,7 +110,7 @@ export function AdminSystemSettingsPage() {
     const createOAuthMutation = useMutation({
         mutationFn: (payload: OAuthProviderConfigInput) => createOAuthProviderConfig(payload),
         onSuccess: () => {
-            void queryClient.invalidateQueries({ queryKey: ['oauth-provider-configs'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.auth.oauthProviderConfigs() })
             pushToast(t('adminOAuth.createSuccess'), 'success')
             closeOAuthForm()
         },
@@ -119,7 +120,7 @@ export function AdminSystemSettingsPage() {
     const updateOAuthMutation = useMutation({
         mutationFn: ({ id, payload }: { id: number; payload: Partial<OAuthProviderConfigInput> }) => updateOAuthProviderConfig(id, payload),
         onSuccess: () => {
-            void queryClient.invalidateQueries({ queryKey: ['oauth-provider-configs'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.auth.oauthProviderConfigs() })
             pushToast(t('adminOAuth.updateSuccess'), 'success')
             closeOAuthForm()
         },
@@ -129,7 +130,7 @@ export function AdminSystemSettingsPage() {
     const deleteOAuthMutation = useMutation({
         mutationFn: (id: number) => deleteOAuthProviderConfig(id),
         onSuccess: () => {
-            void queryClient.invalidateQueries({ queryKey: ['oauth-provider-configs'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.auth.oauthProviderConfigs() })
             pushToast(t('adminOAuth.deleteSuccess'), 'success')
         },
         onError: (error) => pushToast(formatApiError(error), 'error'),

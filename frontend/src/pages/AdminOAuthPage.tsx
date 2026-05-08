@@ -6,9 +6,10 @@ import {
     createOAuthProviderConfig,
     deleteOAuthProviderConfig,
     fetchOAuthProviderConfigs,
-    formatApiError,
     updateOAuthProviderConfig,
-} from '../lib/api'
+} from '../lib/api/auth'
+import { formatApiError } from '../lib/api/errors'
+import { queryKeys } from '../lib/api/queryKeys'
 import type { OAuthProviderConfig, OAuthProviderConfigInput } from '../types/api'
 import { useToast } from '../lib/toast'
 import { useConfirmDialog } from '../lib/confirmDialog'
@@ -39,14 +40,14 @@ export function AdminOAuthPage() {
     const [formError, setFormError] = useState<string | null>(null)
 
     const providersQuery = useQuery({
-        queryKey: ['oauth-provider-configs'],
+        queryKey: queryKeys.auth.oauthProviderConfigs(),
         queryFn: fetchOAuthProviderConfigs,
     })
 
     const createMutation = useMutation({
         mutationFn: (payload: OAuthProviderConfigInput) => createOAuthProviderConfig(payload),
         onSuccess: () => {
-            void queryClient.invalidateQueries({ queryKey: ['oauth-provider-configs'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.auth.oauthProviderConfigs() })
             pushToast(t('adminOAuth.createSuccess'), 'success')
             closeForm()
         },
@@ -57,7 +58,7 @@ export function AdminOAuthPage() {
         mutationFn: ({ id, payload }: { id: number; payload: Partial<OAuthProviderConfigInput> }) =>
             updateOAuthProviderConfig(id, payload),
         onSuccess: () => {
-            void queryClient.invalidateQueries({ queryKey: ['oauth-provider-configs'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.auth.oauthProviderConfigs() })
             pushToast(t('adminOAuth.updateSuccess'), 'success')
             closeForm()
         },
@@ -67,7 +68,7 @@ export function AdminOAuthPage() {
     const deleteMutation = useMutation({
         mutationFn: (id: number) => deleteOAuthProviderConfig(id),
         onSuccess: () => {
-            void queryClient.invalidateQueries({ queryKey: ['oauth-provider-configs'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.auth.oauthProviderConfigs() })
             pushToast(t('adminOAuth.deleteSuccess'), 'success')
         },
         onError: (error) => pushToast(formatApiError(error), 'error'),

@@ -4,7 +4,8 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../lib/auth'
 import { useManagedZev } from '../lib/managedZev'
-import { fetchUsers } from '../lib/api'
+import { fetchUsers } from '../lib/api/auth'
+import { queryKeys } from '../lib/api/queryKeys'
 import { LanguageSelector } from './LanguageSelector'
 import pkg from '../../package.json'
 
@@ -13,7 +14,7 @@ export function Layout() {
     const { user, logout, isImpersonating, impersonator, stopImpersonation } = useAuth()
     const { managedZevs, selectedZevId, selectedZev, isSelectable, isLoading: managedZevLoading, setSelectedZevId } = useManagedZev()
     const usersQuery = useQuery({
-        queryKey: ['users'],
+        queryKey: queryKeys.auth.users(),
         queryFn: fetchUsers,
         enabled: user?.role === 'admin',
     })

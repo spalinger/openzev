@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { fetchDashboardStats } from '../lib/api'
+import { fetchDashboardStats } from '../lib/api/invoices'
+import { queryKeys } from '../lib/api/queryKeys'
 
 export function AdminDashboardPage() {
     const { t } = useTranslation()
     const { data: stats, isLoading, error } = useQuery({
-        queryKey: ['dashboard'],
+        queryKey: queryKeys.invoices.dashboard(),
         queryFn: fetchDashboardStats,
         refetchInterval: 30000, // Refresh every 30 seconds
     })

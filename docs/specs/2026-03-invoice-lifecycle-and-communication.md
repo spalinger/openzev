@@ -99,7 +99,7 @@ Ordering: `["sort_order", "item_type", "description"]`.
 | `invoice` | FK → `Invoice` (`CASCADE`) | Associated invoice |
 | `recipient` | `EmailField` | Recipient email address |
 | `subject` | `CharField(500)` | Rendered email subject |
-| `status` | `CharField(20)` | `pending`, `sent`, or `failed` |
+| `status` | `EmailLog.Status` (`TextChoices`) | `pending`, `sent`, or `failed` |
 | `error_message` | `TextField` | Error details (empty on success) |
 | `sent_at` | `DateTimeField` (nullable) | Timestamp of successful delivery |
 | `created_at` | `DateTimeField` (auto) | Log creation time |

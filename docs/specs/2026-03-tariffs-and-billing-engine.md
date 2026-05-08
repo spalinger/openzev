@@ -69,6 +69,10 @@ re-implement the engine from scratch.
 
 A tariff is **active on day `d`** iff `valid_from ≤ d` and (`valid_to IS NULL` or `valid_to ≥ d`).
 
+For energy-based tariffs (`billing_mode ∈ {energy, percentage_of_energy}`),
+OpenZEV rejects overlapping validity windows for the same tuple of:
+`(zev, category, billing_mode, energy_type)`.
+
 ### 3.2 TariffPeriod (price bands within a tariff)
 
 | Field | Type | Description |

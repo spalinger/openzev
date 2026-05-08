@@ -876,9 +876,9 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         # Email statistics
         email_stats = EmailLog.objects.aggregate(
             total_emails=Count('id'),
-            sent_emails=Count('id', filter=Q(status='sent')),
-            failed_emails=Count('id', filter=Q(status='failed')),
-            pending_emails=Count('id', filter=Q(status='pending')),
+            sent_emails=Count('id', filter=Q(status=EmailLog.Status.SENT)),
+            failed_emails=Count('id', filter=Q(status=EmailLog.Status.FAILED)),
+            pending_emails=Count('id', filter=Q(status=EmailLog.Status.PENDING)),
         )
         
         return Response({

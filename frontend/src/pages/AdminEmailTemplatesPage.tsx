@@ -5,7 +5,8 @@ import {
     fetchEmailTemplate,
     resetEmailTemplate,
     updateEmailTemplate,
-} from '../lib/api'
+} from '../lib/api/invoices'
+import { queryKeys } from '../lib/api/queryKeys'
 import { useToast } from '../lib/toast'
 
 type TemplateKey = 'invoice_email' | 'participant_invitation' | 'email_verification'
@@ -55,7 +56,7 @@ function EmailTemplateEditor({
     const queryClient = useQueryClient()
 
     const query = useQuery({
-        queryKey: ['admin-email-template', templateKey],
+        queryKey: queryKeys.admin.emailTemplate(templateKey),
         queryFn: () => fetchEmailTemplate(templateKey),
     })
 
@@ -73,7 +74,7 @@ function EmailTemplateEditor({
         mutationFn: () => updateEmailTemplate(templateKey, subject, body),
         onSuccess: (result) => {
             pushToast(result.detail ?? t('common.save'), 'success')
-            void queryClient.invalidateQueries({ queryKey: ['admin-email-template', templateKey] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.admin.emailTemplate(templateKey) })
         },
         onError: () => pushToast(t('common.error'), 'error'),
     })
@@ -82,7 +83,7 @@ function EmailTemplateEditor({
         mutationFn: () => resetEmailTemplate(templateKey),
         onSuccess: (result) => {
             pushToast(result.detail ?? t('admin.resetToDefault'), 'success')
-            void queryClient.invalidateQueries({ queryKey: ['admin-email-template', templateKey] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.admin.emailTemplate(templateKey) })
         },
         onError: () => pushToast(t('common.error'), 'error'),
     })

@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { fetchFeatureFlags, formatApiError, updateFeatureFlag } from '../lib/api'
+import { fetchFeatureFlags, updateFeatureFlag } from '../lib/api/auth'
+import { formatApiError } from '../lib/api/errors'
+import { queryKeys } from '../lib/api/queryKeys'
 import { useToast } from '../lib/toast'
 
 export function AdminFeaturesPage() {
@@ -9,7 +11,7 @@ export function AdminFeaturesPage() {
     const { pushToast } = useToast()
 
     const flagsQuery = useQuery({
-        queryKey: ['feature-flags'],
+        queryKey: queryKeys.auth.featureFlags(),
         queryFn: fetchFeatureFlags,
     })
 
@@ -17,7 +19,7 @@ export function AdminFeaturesPage() {
         mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) =>
             updateFeatureFlag(id, { enabled }),
         onSuccess: () => {
-            void queryClient.invalidateQueries({ queryKey: ['feature-flags'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.auth.featureFlags() })
             pushToast(t('features.updated'), 'success')
         },
         onError: (error) => pushToast(formatApiError(error), 'error'),

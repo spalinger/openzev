@@ -1,64 +1,37 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo, useState, type FormEvent } from 'react'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import {
-    faDownload,
-    faEllipsis,
-    faEnvelope,
-    faPen,
-    faPlus,
-    faTrash,
-    faTriangleExclamation,
-} from '@fortawesome/free-solid-svg-icons'
-import { ActionMenu, type ActionMenuItem } from '../components/ActionMenu'
+import { useMemo, useState } from 'react'
 import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
-import { FormModal } from '../components/FormModal'
+import { ParticipantCardsSection } from '../features/participants/ParticipantCardsSection'
+import {
+    ParticipantCredentialsNotice,
+    type ParticipantCredentialsNoticeData,
+} from '../features/participants/ParticipantCredentialsNotice'
+import { ParticipantFormModal } from '../features/participants/ParticipantFormModal'
+import { ParticipantToolbar, type ParticipantReadinessFilter } from '../features/participants/ParticipantToolbar'
 import {
     createParticipant,
     deleteParticipant,
     downloadParticipantContractPdf,
     fetchParticipants,
     fetchZevs,
-    formatApiError,
     sendParticipantInvitation,
     updateParticipant,
-} from '../lib/api'
-import { formatShortDate, useAppSettings } from '../lib/appSettings'
+} from '../lib/api/zev'
+import { formatApiError } from '../lib/api/errors'
+import { useAppSettings } from '../lib/appSettings'
 import { useAuth } from '../lib/auth'
 import { useManagedZev } from '../lib/managedZev'
+import { queryKeys } from '../lib/api/queryKeys'
 import { useTranslation } from 'react-i18next'
 import { useToast } from '../lib/toast'
 import type { Participant, ParticipantInput } from '../types/api'
 
-const defaultForm: ParticipantInput = {
-    zev: '',
-    title: '',
-    first_name: '',
-    last_name: '',
-    email: '',
-    phone: '',
-    address_line1: '',
-    address_line2: '',
-    postal_code: '',
-    city: '',
-    notes: '',
-    valid_from: new Date().toISOString().slice(0, 10),
-    valid_to: null,
-}
-
-type ParticipantReadinessFilter = 'all' | 'attention' | 'ready'
 type ParticipantValidityState = 'current' | 'upcoming' | 'ended'
 
 function getParticipantValidityState(participant: Participant, todayIso: string): ParticipantValidityState {
     if (participant.valid_from > todayIso) return 'upcoming'
     if (participant.valid_to && participant.valid_to < todayIso) return 'ended'
     return 'current'
-}
-
-function participantValidityBadgeClass(state: ParticipantValidityState): string {
-    if (state === 'current') return 'badge badge-success'
-    if (state === 'upcoming') return 'badge badge-info'
-    return 'badge badge-neutral'
 }
 
 export function ParticipantsPage() {
@@ -70,32 +43,17 @@ export function ParticipantsPage() {
     const { selectedZevId } = useManagedZev()
     const { t } = useTranslation()
     const isManagedScope = user?.role === 'admin' || user?.role === 'zev_owner'
-    const { data, isLoading, isError } = useQuery({ queryKey: ['participants'], queryFn: fetchParticipants })
-    const zevsQuery = useQuery({ queryKey: ['zevs'], queryFn: fetchZevs })
-    const [form, setForm] = useState<ParticipantInput>(defaultForm)
+    const { data, isLoading, isError } = useQuery({
+        queryKey: queryKeys.zev.participants(selectedZevId || undefined),
+        queryFn: fetchParticipants,
+    })
+    const zevsQuery = useQuery({ queryKey: queryKeys.zev.list(), queryFn: fetchZevs })
     const [editingId, setEditingId] = useState<string | null>(null)
     const [showModal, setShowModal] = useState(false)
-    const [error, setError] = useState<string | null>(null)
     const [searchTerm, setSearchTerm] = useState('')
     const [readinessFilter, setReadinessFilter] = useState<ParticipantReadinessFilter>('all')
-    const [credentialsNotice, setCredentialsNotice] = useState<{
-        participantName: string
-        username: string
-        password: string
-        message: string
-    } | null>(null)
+    const [credentialsNotice, setCredentialsNotice] = useState<ParticipantCredentialsNoticeData | null>(null)
 
-    const titleOptions = useMemo(
-        () => [
-            { value: '' as const, label: t('pages.zevs.titles.none') },
-            { value: 'mr' as const, label: t('pages.zevs.titles.mr') },
-            { value: 'mrs' as const, label: t('pages.zevs.titles.mrs') },
-            { value: 'ms' as const, label: t('pages.zevs.titles.ms') },
-            { value: 'dr' as const, label: t('pages.zevs.titles.dr') },
-            { value: 'prof' as const, label: t('pages.zevs.titles.prof') },
-        ],
-        [t],
-    )
     const titleLabelByValue = useMemo(
         () => ({
             mr: t('pages.zevs.titles.mr'),
@@ -110,8 +68,6 @@ export function ParticipantsPage() {
     const createMutation = useMutation({
         mutationFn: createParticipant,
         onSuccess: (participant) => {
-            setForm(defaultForm)
-            setError(null)
             setShowModal(false)
             pushToast(t('pages.participants.messages.created'), 'success')
             if (participant.account_username && participant.initial_password) {
@@ -122,29 +78,27 @@ export function ParticipantsPage() {
                     message: t('pages.participants.messages.credentialsGenerated'),
                 })
             }
-            void queryClient.invalidateQueries({ queryKey: ['participants'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(selectedZevId || undefined) })
         },
-        onError: (error) => setError(formatApiError(error, t('pages.participants.messages.createFailed'))),
+        onError: (error) => pushToast(formatApiError(error, t('pages.participants.messages.createFailed')), 'error'),
     })
 
     const updateMutation = useMutation({
         mutationFn: ({ id, payload }: { id: string; payload: Partial<ParticipantInput> }) => updateParticipant(id, payload),
         onSuccess: () => {
             setEditingId(null)
-            setForm(defaultForm)
-            setError(null)
             setShowModal(false)
             pushToast(t('pages.participants.messages.updated'), 'success')
-            void queryClient.invalidateQueries({ queryKey: ['participants'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(selectedZevId || undefined) })
         },
-        onError: (error) => setError(formatApiError(error, t('pages.participants.messages.updateFailed'))),
+        onError: (error) => pushToast(formatApiError(error, t('pages.participants.messages.updateFailed')), 'error'),
     })
 
     const deleteMutation = useMutation({
         mutationFn: deleteParticipant,
         onSuccess: () => {
             pushToast(t('pages.participants.messages.deleted'), 'success')
-            void queryClient.invalidateQueries({ queryKey: ['participants'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(selectedZevId || undefined) })
         },
     })
 
@@ -175,54 +129,35 @@ export function ParticipantsPage() {
 
     function startEdit(participant: Participant) {
         setEditingId(participant.id)
-        setForm({
-            zev: participant.zev,
-            title: participant.title || '',
-            first_name: participant.first_name,
-            last_name: participant.last_name,
-            email: participant.email || '',
-            phone: participant.phone || '',
-            address_line1: participant.address_line1 || '',
-            address_line2: participant.address_line2 || '',
-            postal_code: participant.postal_code || '',
-            city: participant.city || '',
-            notes: participant.notes || '',
-            valid_from: participant.valid_from,
-            valid_to: participant.valid_to || null,
-        })
         setShowModal(true)
     }
 
     function openCreateModal() {
+        if (!selectedZevId) {
+            pushToast(t('pages.participants.messages.selectZev'), 'error')
+            return
+        }
         setEditingId(null)
-        setForm((previous) => ({ ...defaultForm, zev: isManagedScope ? selectedZevId : previous.zev }))
-        setError(null)
         setShowModal(true)
     }
 
     function closeModal() {
         setShowModal(false)
         setEditingId(null)
-        setForm(defaultForm)
-        setError(null)
     }
 
-    function submit(event: FormEvent<HTMLFormElement>) {
-        event.preventDefault()
-        const zevForSubmit = isManagedScope ? selectedZevId : form.zev
-        if (!zevForSubmit) {
-            setError(t('pages.participants.messages.selectZev'))
+    function submit(payload: ParticipantInput) {
+        if (!selectedZevId) {
+            pushToast(t('pages.participants.messages.selectZev'), 'error')
             return
         }
-        if (!form.email) {
-            setError(t('pages.participants.messages.emailRequired'))
-            return
-        }
+
         if (editingId) {
-            updateMutation.mutate({ id: editingId, payload: { ...form, zev: zevForSubmit } })
+            updateMutation.mutate({ id: editingId, payload: { ...payload, zev: selectedZevId } })
             return
         }
-        createMutation.mutate({ ...form, zev: zevForSubmit })
+
+        createMutation.mutate({ ...payload, zev: selectedZevId })
     }
 
     function participantWarnings(participant: Participant): string[] {
@@ -248,6 +183,7 @@ export function ParticipantsPage() {
     const participants = (data?.results ?? []).filter((participant) => !isManagedScope || !selectedZevId || participant.zev === selectedZevId)
     const ownerIdByZevId = new Map((zevsQuery.data?.results ?? []).map((zev) => [zev.id, zev.owner]))
     const isOwnerParticipant = (participant: Participant) => ownerIdByZevId.get(participant.zev) === participant.user
+    const editingParticipant = participants.find((participant) => participant.id === editingId)
     const todayIso = new Date().toISOString().slice(0, 10)
     const participantCards = [...participants]
         .map((participant) => {
@@ -287,6 +223,28 @@ export function ParticipantsPage() {
     const noMeteringCount = participantCards.filter((entry) => !entry.participant.has_metering_point_assignment).length
     const hasFilters = !!normalizedSearch || readinessFilter !== 'all'
 
+    function clearFilters() {
+        setSearchTerm('')
+        setReadinessFilter('all')
+    }
+
+    function downloadContract(participant: Participant) {
+        void downloadParticipantContractPdf(
+            participant.id,
+            `contract_${participant.last_name}_${participant.first_name}.pdf`,
+        ).catch(() => pushToast(t('pages.participants.contractDownloadError'), 'error'))
+    }
+
+    function confirmDeleteParticipant(participant: Participant, displayName: string) {
+        confirm({
+            title: t('pages.participants.deleteTitle'),
+            message: t('pages.participants.deleteMessage', { name: displayName }),
+            confirmText: t('pages.participants.deleteConfirm'),
+            isDangerous: true,
+            onConfirm: () => deleteMutation.mutate(participant.id),
+        })
+    }
+
     return (
         <div className="page-stack">
             <header>
@@ -294,339 +252,44 @@ export function ParticipantsPage() {
                 <p className="muted">{t('pages.participants.description')}</p>
             </header>
 
-            {credentialsNotice && (
-                <section className="card">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                        <div>
-                            <h3 style={{ marginTop: 0, marginBottom: '0.5rem' }}>{t('pages.participants.credentialsTitle')}</h3>
-                            <p className="muted" style={{ marginTop: 0 }}>{credentialsNotice.message}</p>
-                            <p style={{ marginBottom: '0.35rem' }}><strong>{credentialsNotice.participantName}</strong></p>
-                            <p style={{ margin: '0.2rem 0' }}>{t('pages.participants.usernameLabel')} <strong>{credentialsNotice.username}</strong></p>
-                            <p style={{ margin: '0.2rem 0' }}>{t('pages.participants.passwordLabel')} <strong>{credentialsNotice.password}</strong></p>
-                        </div>
-                        <button className="button button-secondary" type="button" onClick={() => setCredentialsNotice(null)}>
-                            {t('pages.participants.dismiss')}
-                        </button>
-                    </div>
-                </section>
-            )}
+            {credentialsNotice && <ParticipantCredentialsNotice notice={credentialsNotice} onDismiss={() => setCredentialsNotice(null)} />}
 
-            <section className="card participant-toolbar">
-                <div className="participant-toolbar-header">
-                    <div className="participant-summary" aria-label={t('pages.participants.summaryLabel')}>
-                        <span className="participant-summary-stat">
-                            <span className="participant-summary-label">{t('pages.participants.summary.total')}</span>
-                            <span className="participant-summary-value">{participantCards.length}</span>
-                        </span>
-                        <span className="participant-summary-stat">
-                            <span className="participant-summary-label">{t('pages.participants.summary.owners')}</span>
-                            <span className="participant-summary-value">{ownerCount}</span>
-                        </span>
-                        <span className="participant-summary-stat">
-                            <span className="participant-summary-label">{t('pages.participants.summary.attention')}</span>
-                            <span className="participant-summary-value">{warningCount}</span>
-                        </span>
-                        <span className="participant-summary-stat">
-                            <span className="participant-summary-label">{t('pages.participants.summary.noMetering')}</span>
-                            <span className="participant-summary-value">{noMeteringCount}</span>
-                        </span>
-                    </div>
+            <ParticipantToolbar
+                totalCount={participantCards.length}
+                ownerCount={ownerCount}
+                warningCount={warningCount}
+                noMeteringCount={noMeteringCount}
+                searchTerm={searchTerm}
+                readinessFilter={readinessFilter}
+                onSearchTermChange={setSearchTerm}
+                onReadinessFilterChange={setReadinessFilter}
+                onOpenCreateModal={openCreateModal}
+            />
 
-                    <button className="button button-primary" type="button" onClick={openCreateModal}>
-                        <FontAwesomeIcon icon={faPlus} fixedWidth />
-                        {t('pages.participants.newParticipant')}
-                    </button>
-                </div>
-
-                <div className="participant-filter-grid">
-                    <label>
-                        <span>{t('pages.participants.filters.search')}</span>
-                        <input
-                            value={searchTerm}
-                            onChange={(event) => setSearchTerm(event.target.value)}
-                            placeholder={t('pages.participants.filters.searchPlaceholder')}
-                        />
-                    </label>
-                    <label>
-                        <span>{t('pages.participants.filters.readiness')}</span>
-                        <select value={readinessFilter} onChange={(event) => setReadinessFilter(event.target.value as ParticipantReadinessFilter)}>
-                            <option value="all">{t('pages.participants.filters.all')}</option>
-                            <option value="attention">{t('pages.participants.filters.attention')}</option>
-                            <option value="ready">{t('pages.participants.filters.ready')}</option>
-                        </select>
-                    </label>
-                </div>
-            </section>
-
-            <FormModal
+            <ParticipantFormModal
                 isOpen={showModal}
                 title={editingId ? t('pages.participants.editTitle') : t('pages.participants.createTitle')}
                 onClose={closeModal}
-                maxWidth="960px"
-            >
-                <form onSubmit={submit} className="form-grid">
-                    <label>
-                        <span>{t('pages.participants.form.title')}</span>
-                        <select
-                            value={form.title ?? ''}
-                            onChange={(event) => setForm((prev) => ({ ...prev, title: event.target.value as ParticipantInput['title'] }))}
-                        >
-                            {titleOptions.map((option) => (
-                                <option key={option.value || 'none'} value={option.value}>
-                                    {option.label}
-                                </option>
-                            ))}
-                        </select>
-                    </label>
-                    <label>
-                        <span>{t('pages.participants.form.firstName')}</span>
-                        <input
-                            value={form.first_name}
-                            onChange={(event) => setForm((prev) => ({ ...prev, first_name: event.target.value }))}
-                            required
-                        />
-                    </label>
-                    <label>
-                        <span>{t('pages.participants.form.lastName')}</span>
-                        <input
-                            value={form.last_name}
-                            onChange={(event) => setForm((prev) => ({ ...prev, last_name: event.target.value }))}
-                            required
-                        />
-                    </label>
-                    <label>
-                        <span>{t('pages.participants.form.email')}</span>
-                        <input
-                            type="email"
-                            value={form.email}
-                            onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))}
-                            required
-                        />
-                    </label>
-                    <label>
-                        <span>{t('pages.participants.form.phone')}</span>
-                        <input
-                            value={form.phone ?? ''}
-                            onChange={(event) => setForm((prev) => ({ ...prev, phone: event.target.value }))}
-                        />
-                    </label>
-                    <label style={{ gridColumn: '1 / -1' }}>
-                        <span>{t('pages.participants.form.addressLine1')}</span>
-                        <input
-                            value={form.address_line1 ?? ''}
-                            onChange={(event) => setForm((prev) => ({ ...prev, address_line1: event.target.value }))}
-                        />
-                    </label>
-                    <label style={{ gridColumn: '1 / -1' }}>
-                        <span>{t('pages.participants.form.addressLine2')}</span>
-                        <input
-                            value={form.address_line2 ?? ''}
-                            onChange={(event) => setForm((prev) => ({ ...prev, address_line2: event.target.value }))}
-                        />
-                    </label>
-                    <label>
-                        <span>{t('pages.participants.form.postalCode')}</span>
-                        <input
-                            value={form.postal_code ?? ''}
-                            onChange={(event) => setForm((prev) => ({ ...prev, postal_code: event.target.value }))}
-                        />
-                    </label>
-                    <label>
-                        <span>{t('pages.participants.form.city')}</span>
-                        <input
-                            value={form.city ?? ''}
-                            onChange={(event) => setForm((prev) => ({ ...prev, city: event.target.value }))}
-                        />
-                    </label>
-                    <label>
-                        <span>{t('pages.participants.form.validFrom')}</span>
-                        <input
-                            type="date"
-                            value={form.valid_from}
-                            onChange={(event) => setForm((prev) => ({ ...prev, valid_from: event.target.value }))}
-                            required
-                        />
-                    </label>
-                    <label>
-                        <span>{t('pages.participants.form.validTo')}</span>
-                        <input
-                            type="date"
-                            value={form.valid_to ?? ''}
-                            onChange={(event) => setForm((prev) => ({ ...prev, valid_to: event.target.value || null }))}
-                        />
-                    </label>
-                    <label style={{ gridColumn: '1 / -1' }}>
-                        <span>{t('pages.participants.form.notes')}</span>
-                        <textarea
-                            value={form.notes ?? ''}
-                            onChange={(event) => setForm((prev) => ({ ...prev, notes: event.target.value }))}
-                            rows={3}
-                        />
-                    </label>
+                onSubmit={submit}
+                initialParticipant={editingParticipant}
+                selectedZevId={selectedZevId || ''}
+                isPending={createMutation.isPending || updateMutation.isPending}
+            />
 
-                    {error && <div className="error-banner" style={{ gridColumn: '1 / -1' }}>{error}</div>}
-
-                    <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
-                        <button className="button button-secondary" type="button" onClick={closeModal}>
-                            {t('common.cancel')}
-                        </button>
-                        <button className="button button-primary" type="submit" disabled={createMutation.isPending || updateMutation.isPending}>
-                            {editingId ? t('pages.participants.saveParticipant') : t('common.create')}
-                        </button>
-                    </div>
-                </form>
-            </FormModal>
-
-            {participantCards.length === 0 ? (
-                <section className="card" style={{ display: 'grid', gap: '0.75rem' }}>
-                    <h3 style={{ margin: 0 }}>{t('pages.participants.emptyState.title')}</h3>
-                    <p className="muted" style={{ margin: 0 }}>{t('pages.participants.emptyState.description')}</p>
-                    <div>
-                        <button className="button button-primary" type="button" onClick={openCreateModal}>
-                            <FontAwesomeIcon icon={faPlus} fixedWidth />
-                            {t('pages.participants.emptyState.createAction')}
-                        </button>
-                    </div>
-                </section>
-            ) : filteredParticipants.length === 0 ? (
-                <section className="card" style={{ display: 'grid', gap: '0.75rem' }}>
-                    <h3 style={{ margin: 0 }}>{t('pages.participants.noResults.title')}</h3>
-                    <p className="muted" style={{ margin: 0 }}>{t('pages.participants.noResults.description')}</p>
-                    {hasFilters && (
-                        <div>
-                            <button
-                                className="button button-secondary"
-                                type="button"
-                                onClick={() => {
-                                    setSearchTerm('')
-                                    setReadinessFilter('all')
-                                }}
-                            >
-                                {t('pages.participants.filters.clear')}
-                            </button>
-                        </div>
-                    )}
-                </section>
-            ) : (
-                <div className="table-card participant-card-list">
-                    {filteredParticipants.map(({ participant, warnings, ownerRow, validityState, displayName, address }) => {
-                        const menuItems: ActionMenuItem[] = []
-
-                        menuItems.push({
-                            key: 'invitation',
-                            label: t('pages.participants.sendInvitation'),
-                            icon: <FontAwesomeIcon icon={faEnvelope} fixedWidth />,
-                            disabled: invitationMutation.isPending || !participant.email,
-                            onClick: () => invitationMutation.mutate(participant.id),
-                        })
-
-                        if (!ownerRow) {
-                            menuItems.push({
-                                key: 'delete',
-                                label: t('common.delete'),
-                                icon: <FontAwesomeIcon icon={faTrash} fixedWidth />,
-                                disabled: deleteMutation.isPending || dialogLoading,
-                                danger: true,
-                                onClick: () => confirm({
-                                    title: t('pages.participants.deleteTitle'),
-                                    message: t('pages.participants.deleteMessage', { name: displayName }),
-                                    confirmText: t('pages.participants.deleteConfirm'),
-                                    isDangerous: true,
-                                    onConfirm: () => deleteMutation.mutate(participant.id),
-                                }),
-                            })
-                        }
-
-                        const directAction = menuItems.length === 1 && !ownerRow ? menuItems[0] : null
-                        const overflowItems = directAction ? [] : menuItems
-
-                        return (
-                            <article key={participant.id} className="participant-card">
-                                <div className="participant-card-header">
-                                    <div className="participant-card-title">
-                                        <div className="participant-card-badges">
-                                            {ownerRow && <span className="badge badge-info">{t('pages.participants.owner')}</span>}
-                                            <span className={participantValidityBadgeClass(validityState)}>
-                                                {t(`pages.participants.validity.${validityState}`)}
-                                            </span>
-                                            {warnings.length > 0 && (
-                                                <span className="badge badge-warning">
-                                                    <FontAwesomeIcon icon={faTriangleExclamation} fixedWidth />
-                                                    {t('pages.participants.attentionNeeded')}
-                                                </span>
-                                            )}
-                                        </div>
-                                        <strong>{displayName}</strong>
-                                    </div>
-
-                                    <div className="participant-card-actions">
-                                        <button className="button button-primary button-compact" type="button" onClick={() => startEdit(participant)}>
-                                            <FontAwesomeIcon icon={faPen} fixedWidth />
-                                            {t('common.edit')}
-                                        </button>
-                                        <button
-                                            className="button button-secondary button-compact"
-                                            type="button"
-                                            onClick={() => downloadParticipantContractPdf(
-                                                participant.id,
-                                                `contract_${participant.last_name}_${participant.first_name}.pdf`,
-                                            ).catch(() => pushToast(t('pages.participants.contractDownloadError'), 'error'))}
-                                        >
-                                            <FontAwesomeIcon icon={faDownload} fixedWidth />
-                                            {t('pages.participants.downloadContract')}
-                                        </button>
-                                        {directAction && (
-                                            <button
-                                                className={`button ${directAction.danger ? 'button-danger' : 'button-secondary'} button-compact`}
-                                                type="button"
-                                                disabled={directAction.disabled}
-                                                onClick={directAction.onClick}
-                                            >
-                                                {directAction.icon}
-                                                {directAction.label}
-                                            </button>
-                                        )}
-                                        {overflowItems.length > 0 && (
-                                            <ActionMenu
-                                                label={t('pages.participants.moreActions')}
-                                                icon={<FontAwesomeIcon icon={faEllipsis} fixedWidth />}
-                                                items={overflowItems}
-                                            />
-                                        )}
-                                    </div>
-                                </div>
-
-                                <div className="participant-card-body">
-                                    <div className="participant-card-grid">
-                                        <div className="participant-card-section">
-                                            <div className="participant-card-label">{t('pages.participants.section.contact')}</div>
-                                            <div>{participant.email || t('pages.participants.noEmailValue')}</div>
-                                            <div className="muted">{participant.phone || t('pages.participants.noPhone')}</div>
-                                        </div>
-                                        <div className="participant-card-section">
-                                            <div className="participant-card-label">{t('pages.participants.section.address')}</div>
-                                            <div>{address || t('pages.participants.noAddressValue')}</div>
-                                        </div>
-                                        <div className="participant-card-section">
-                                            <div className="participant-card-label">{t('pages.participants.section.validity')}</div>
-                                            <div>{formatShortDate(participant.valid_from, settings)}</div>
-                                            <div className="muted">{participant.valid_to ? formatShortDate(participant.valid_to, settings) : t('pages.participants.openEnded')}</div>
-                                        </div>
-                                    </div>
-
-                                    {warnings.length > 0 && (
-                                        <div className="participant-warning-list">
-                                            {warnings.map((warning) => (
-                                                <span key={warning} className="badge badge-warning">{warning}</span>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            </article>
-                        )
-                    })}
-                </div>
-            )}
+            <ParticipantCardsSection
+                participantCards={participantCards}
+                filteredParticipants={filteredParticipants}
+                hasFilters={hasFilters}
+                settings={settings}
+                onOpenCreateModal={openCreateModal}
+                onClearFilters={clearFilters}
+                onStartEdit={startEdit}
+                onDownloadContract={downloadContract}
+                onInvite={(participantId) => invitationMutation.mutate(participantId)}
+                onConfirmDelete={confirmDeleteParticipant}
+                invitationPending={invitationMutation.isPending}
+                deletePendingOrDialogLoading={deleteMutation.isPending || dialogLoading}
+            />
 
             {dialog && (
                 <ConfirmDialog

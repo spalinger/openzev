@@ -15,13 +15,11 @@ import {
     YAxis,
 } from 'recharts'
 import {
-    fetchInvoices,
     fetchHourlyProfile,
     fetchMeteringDashboardSummary,
-    downloadAnnualStatement,
-    downloadAllAnnualStatements,
-    downloadFinancialSummary,
-} from '../lib/api'
+} from '../lib/api/metering'
+import { downloadAnnualStatement, downloadAllAnnualStatements, downloadFinancialSummary, fetchInvoices } from '../lib/api/invoices'
+import { queryKeys } from '../lib/api/queryKeys'
 import { formatShortDate, formatDateTime, formatMonthYear, useAppSettings } from '../lib/appSettings'
 import { useAuth } from '../lib/auth'
 import { useManagedZev } from '../lib/managedZev'
@@ -68,7 +66,14 @@ export function DashboardPage() {
     }, [selectedZevId, interval])
 
     const summaryQuery = useQuery({
-        queryKey: ['metering-dashboard-summary', user?.role, selectedZevId, selectedParticipantId, period.from, period.to, bucket],
+        queryKey: queryKeys.metering.dashboardSummary({
+            role: user?.role,
+            zevId: selectedZevId,
+            participantId: selectedParticipantId,
+            from: period.from,
+            to: period.to,
+            bucket,
+        }),
         queryFn: () =>
             fetchMeteringDashboardSummary({
                 dateFrom: period.from,
@@ -80,12 +85,12 @@ export function DashboardPage() {
         enabled: user?.role === 'participant' || (isZevScopedRole && !!selectedZevId),
     })
     const participantInvoicesQuery = useQuery({
-        queryKey: ['participant-dashboard-invoices'],
+        queryKey: queryKeys.invoices.list(selectedZevId || undefined),
         queryFn: fetchInvoices,
         enabled: user?.role === 'participant',
     })
     const hourlyProfileQuery = useQuery({
-        queryKey: ['hourly-profile', selectedZevId, selectedParticipantId, period.from, period.to],
+        queryKey: queryKeys.metering.hourlyProfile(period.from, period.to, selectedZevId || undefined, selectedParticipantId || undefined),
         queryFn: () =>
             fetchHourlyProfile({
                 dateFrom: period.from,

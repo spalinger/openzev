@@ -4,19 +4,21 @@ import AppFooter from '../components/AppFooter'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../lib/auth'
-import { fetchFeatureFlags, fetchOAuthProviders, oauthLoginInitiate, register as apiRegister, formatApiError } from '../lib/api'
+import { fetchFeatureFlags, fetchOAuthProviders, oauthLoginInitiate, register as apiRegister } from '../lib/api/auth'
+import { formatApiError } from '../lib/api/errors'
+import { queryKeys } from '../lib/api/queryKeys'
 
 export function LoginPage() {
     const { t } = useTranslation()
     const navigate = useNavigate()
     const { login } = useAuth()
     const featureFlagsQuery = useQuery({
-        queryKey: ['public-feature-flags'],
+        queryKey: queryKeys.auth.featureFlags(),
         queryFn: fetchFeatureFlags,
         staleTime: 60_000,
     })
     const oauthProvidersQuery = useQuery({
-        queryKey: ['oauth-providers-public'],
+        queryKey: queryKeys.auth.oauthProviders(),
         queryFn: fetchOAuthProviders,
         staleTime: 60_000,
     })
@@ -44,8 +46,14 @@ export function LoginPage() {
         event.preventDefault()
         setLoading(true)
         setError(null)
+        const form = event.currentTarget
+        const formData = new FormData(form)
+        const submittedEmail = String(formData.get('email') ?? '').trim()
+        const submittedPassword = String(formData.get('password') ?? '')
+        setEmail(submittedEmail)
+        setPassword(submittedPassword)
         try {
-            const me = await login(email, password)
+            const me = await login(submittedEmail, submittedPassword)
             navigate(me.must_change_password ? '/account' : '/')
         } catch {
             setError(t('auth.invalid'))
@@ -104,12 +112,26 @@ export function LoginPage() {
 
                     <label>
                         <span>{t('auth.email')}</span>
-                        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                        <input
+                            type="email"
+                            name="email"
+                            autoComplete="username"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            required
+                        />
                     </label>
 
                     <label>
                         <span>{t('auth.password')}</span>
-                        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+                        <input
+                            type="password"
+                            name="password"
+                            autoComplete="current-password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            required
+                        />
                     </label>
 
                     {error ? <div className="error-banner">{error}</div> : null}

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { fetchMe, impersonateParticipant as impersonateParticipantRequest, login as loginRequest } from './api'
+import { fetchMe, impersonateParticipant as impersonateParticipantRequest, login as loginRequest } from './api/auth'
 import type { AuthTokens, User } from '../types/api'
 
 interface AuthContextValue {
