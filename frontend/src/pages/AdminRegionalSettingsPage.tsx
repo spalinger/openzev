@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { updateAppSettings } from '../lib/api'
+import { updateAppSettings } from '../lib/api/auth'
+import { queryKeys } from '../lib/api/queryKeys'
 import {
     DATE_TIME_FORMAT_OPTIONS,
     LONG_DATE_FORMAT_OPTIONS,
@@ -33,7 +34,7 @@ export function AdminRegionalSettingsPage() {
     const saveMutation = useMutation({
         mutationFn: updateAppSettings,
         onSuccess: (data) => {
-            queryClient.setQueryData(['app-settings'], data)
+            queryClient.setQueryData(queryKeys.auth.appSettings(), data)
             pushToast('Regional settings updated.', 'success')
         },
         onError: () => pushToast('Failed to update regional settings.', 'error'),

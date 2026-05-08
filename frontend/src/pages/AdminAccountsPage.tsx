@@ -7,15 +7,14 @@ import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
 import { FormModal } from '../components/FormModal'
 import {
     createParticipantAccount,
-    deleteUser,
     fetchParticipants,
-    fetchUsers,
     fetchZevs,
-    formatApiError,
     linkParticipantAccount,
     unlinkParticipantAccount,
-    updateUser,
-} from '../lib/api'
+} from '../lib/api/zev'
+import { deleteUser, fetchUsers, updateUser } from '../lib/api/auth'
+import { formatApiError } from '../lib/api/errors'
+import { queryKeys } from '../lib/api/queryKeys'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../lib/auth'
 import { useToast } from '../lib/toast'
@@ -37,9 +36,9 @@ export function AdminAccountsPage() {
     const { t } = useTranslation()
     const { dialog, confirm, handleConfirm, handleCancel, isLoading: dialogLoading } = useConfirmDialog()
 
-    const usersQuery = useQuery({ queryKey: ['users'], queryFn: fetchUsers })
-    const participantsQuery = useQuery({ queryKey: ['participants'], queryFn: fetchParticipants })
-    const zevsQuery = useQuery({ queryKey: ['zevs'], queryFn: fetchZevs })
+    const usersQuery = useQuery({ queryKey: queryKeys.auth.users(), queryFn: fetchUsers })
+    const participantsQuery = useQuery({ queryKey: queryKeys.zev.participants(), queryFn: fetchParticipants })
+    const zevsQuery = useQuery({ queryKey: queryKeys.zev.list(), queryFn: fetchZevs })
 
     const [showLinkModal, setShowLinkModal] = useState(false)
     const [linkParticipant, setLinkParticipant] = useState<Participant | null>(null)
@@ -67,8 +66,8 @@ export function AdminAccountsPage() {
             setSelectedUserToLink('')
             setLinkError(null)
             pushToast(t('pages.accounts.feedback.linkSuccess'), 'success')
-            void queryClient.invalidateQueries({ queryKey: ['participants'] })
-            void queryClient.invalidateQueries({ queryKey: ['users'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants() })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.auth.users() })
         },
         onError: (error) => setLinkError(formatApiError(error, t('pages.accounts.feedback.linkFailed'))),
     })
@@ -77,8 +76,8 @@ export function AdminAccountsPage() {
         mutationFn: (participantId: string) => unlinkParticipantAccount(participantId),
         onSuccess: () => {
             pushToast(t('pages.accounts.feedback.unlinkSuccess'), 'success')
-            void queryClient.invalidateQueries({ queryKey: ['participants'] })
-            void queryClient.invalidateQueries({ queryKey: ['users'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants() })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.auth.users() })
         },
         onError: (error) => pushToast(formatApiError(error, t('pages.accounts.feedback.unlinkFailed')), 'error'),
     })
@@ -97,8 +96,8 @@ export function AdminAccountsPage() {
                 participantName: `${result.participant.first_name} ${result.participant.last_name}`,
             })
             pushToast(t('pages.accounts.feedback.createSuccess'), 'success')
-            void queryClient.invalidateQueries({ queryKey: ['participants'] })
-            void queryClient.invalidateQueries({ queryKey: ['users'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants() })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.auth.users() })
         },
         onError: (error) => setCreateAccountError(formatApiError(error, t('pages.accounts.feedback.createFailed'))),
     })
@@ -111,7 +110,7 @@ export function AdminAccountsPage() {
             setEditUserForm(defaultEditUserForm)
             setEditUserError(null)
             pushToast(t('pages.accounts.feedback.updateSuccess'), 'success')
-            void queryClient.invalidateQueries({ queryKey: ['users'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.auth.users() })
         },
         onError: (error) => setEditUserError(formatApiError(error, t('pages.accounts.feedback.updateFailed'))),
     })
@@ -120,8 +119,8 @@ export function AdminAccountsPage() {
         mutationFn: (userId: number) => deleteUser(userId),
         onSuccess: () => {
             pushToast(t('pages.accounts.feedback.deleteSuccess'), 'success')
-            void queryClient.invalidateQueries({ queryKey: ['users'] })
-            void queryClient.invalidateQueries({ queryKey: ['participants'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.auth.users() })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants() })
         },
         onError: (error) => pushToast(formatApiError(error, t('pages.accounts.feedback.deleteFailed')), 'error'),
     })

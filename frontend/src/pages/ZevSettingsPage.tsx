@@ -3,7 +3,9 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ZevEmailTemplateFields } from '../components/ZevEmailTemplateFields'
 import { ZevGeneralSettingsFields } from '../components/ZevGeneralSettingsFields'
-import { formatApiError, updateZev } from '../lib/api'
+import { updateZev } from '../lib/api/zev'
+import { formatApiError } from '../lib/api/errors'
+import { queryKeys } from '../lib/api/queryKeys'
 import { useManagedZev } from '../lib/managedZev'
 import { getDefaultZevForm, mapZevToForm } from '../lib/zevForm'
 import { useToast } from '../lib/toast'
@@ -32,7 +34,7 @@ export function ZevSettingsPage() {
         onSuccess: () => {
             setError(null)
             pushToast('ZEV settings updated.', 'success')
-            void queryClient.invalidateQueries({ queryKey: ['zevs'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.list() })
         },
         onError: (mutationError) => setError(formatApiError(mutationError, 'Failed to update ZEV settings.')),
     })

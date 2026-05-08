@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.core.exceptions import ValidationError as DjangoValidationError
 from .models import BillingMode, EnergyType, Tariff, TariffPeriod
 
 ENERGY_BILLING_MODES = {BillingMode.ENERGY, BillingMode.PERCENTAGE_OF_ENERGY}
@@ -19,6 +20,11 @@ class TariffPeriodSerializer(serializers.ModelSerializer):
 
 class TariffSerializer(serializers.ModelSerializer):
     periods = TariffPeriodSerializer(many=True, read_only=True)
+
+    def _raise_validation_error_from_model(self, exc: DjangoValidationError):
+        if hasattr(exc, "message_dict"):
+            raise serializers.ValidationError(exc.message_dict)
+        raise serializers.ValidationError(exc.messages)
 
     def validate(self, attrs):
         billing_mode = attrs.get("billing_mode") or getattr(self.instance, "billing_mode", BillingMode.ENERGY)
@@ -47,6 +53,27 @@ class TariffSerializer(serializers.ModelSerializer):
             attrs["percentage"] = None
 
         return attrs
+
+    def create(self, validated_data):
+        tariff = Tariff(**validated_data)
+        try:
+            tariff.full_clean()
+        except DjangoValidationError as exc:
+            self._raise_validation_error_from_model(exc)
+        tariff.save()
+        return tariff
+
+    def update(self, instance, validated_data):
+        for field_name, value in validated_data.items():
+            setattr(instance, field_name, value)
+
+        try:
+            instance.full_clean()
+        except DjangoValidationError as exc:
+            self._raise_validation_error_from_model(exc)
+
+        instance.save()
+        return instance
 
     class Meta:
         model = Tariff

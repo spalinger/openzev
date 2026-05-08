@@ -4,7 +4,8 @@ import { useLocation, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../lib/auth'
 import { useToast } from '../lib/toast'
-import { changePassword, deleteSocialAccount, fetchOAuthProviders, fetchSocialAccounts, oauthLinkInitiate, updateProfile } from '../lib/api'
+import { changePassword, deleteSocialAccount, fetchOAuthProviders, fetchSocialAccounts, oauthLinkInitiate, updateProfile } from '../lib/api/auth'
+import { queryKeys } from '../lib/api/queryKeys'
 import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
 
 export function AccountProfilePage() {
@@ -18,11 +19,11 @@ export function AccountProfilePage() {
 
     // Social accounts & OAuth providers
     const socialAccountsQuery = useQuery({
-        queryKey: ['social-accounts'],
+        queryKey: queryKeys.auth.socialAccounts(),
         queryFn: fetchSocialAccounts,
     })
     const oauthProvidersQuery = useQuery({
-        queryKey: ['oauth-providers-public'],
+        queryKey: queryKeys.auth.oauthProviders(),
         queryFn: fetchOAuthProviders,
     })
 
@@ -31,7 +32,7 @@ export function AccountProfilePage() {
         const linked = searchParams.get('oauth_linked')
         const oauthError = searchParams.get('oauth_error')
         if (linked === 'true') {
-            void queryClient.invalidateQueries({ queryKey: ['social-accounts'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.auth.socialAccounts() })
             pushToast(t('account.linkSuccess'), 'success')
             const next = new URLSearchParams(searchParams)
             next.delete('oauth_linked')
@@ -73,7 +74,7 @@ export function AccountProfilePage() {
     const profileMutation = useMutation({
         mutationFn: () => updateProfile(profileForm),
         onSuccess: () => {
-            queryClient.refetchQueries({ queryKey: ['me'] })
+            queryClient.refetchQueries({ queryKey: queryKeys.auth.me() })
             pushToast(t('account.profileUpdatedSuccess'), 'success')
         },
         onError: (error: any) => {
@@ -100,7 +101,7 @@ export function AccountProfilePage() {
     const unlinkMutation = useMutation({
         mutationFn: (id: number) => deleteSocialAccount(id),
         onSuccess: () => {
-            void queryClient.invalidateQueries({ queryKey: ['social-accounts'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.auth.socialAccounts() })
             pushToast(t('account.unlinkSuccess'), 'success')
         },
         onError: () => {

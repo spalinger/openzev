@@ -1,4 +1,5 @@
 import uuid
+from datetime import date
 from django.db import models
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -214,32 +215,39 @@ class MeteringPointAssignment(models.Model):
         ]
 
     def clean(self):
+        if not self.participant_id or not self.metering_point_id or not self.valid_from:
+            return
+
+        errors = {}
+
         if self.participant.zev_id != self.metering_point.zev_id:
-            raise ValidationError("Participant must belong to the same ZEV as the metering point.")
+            errors["participant"] = "Participant must belong to the same ZEV as the metering point."
         if self.valid_to and self.valid_to < self.valid_from:
-            raise ValidationError("valid_to must be on or after valid_from.")
+            errors["valid_to"] = "valid_to must be on or after valid_from."
+
+        if self.valid_from < self.participant.valid_from:
+            errors["valid_from"] = (
+                f"Assignment valid_from cannot be before the participant's "
+                f"valid_from ({self.participant.valid_from})."
+            )
+        if self.valid_to and self.participant.valid_to and self.valid_to > self.participant.valid_to:
+            errors["valid_to"] = (
+                f"Assignment valid_to cannot be after the participant's "
+                f"valid_to ({self.participant.valid_to})."
+            )
+
+        if errors:
+            raise ValidationError(errors)
 
         # Do not allow overlapping assignments for a metering point.
         existing = MeteringPointAssignment.objects.filter(metering_point=self.metering_point)
         if self.pk:
             existing = existing.exclude(pk=self.pk)
-        overlap_exists = existing.filter(valid_from__lte=(self.valid_to or timezone.datetime.max.date())).filter(
+        overlap_exists = existing.filter(valid_from__lte=(self.valid_to or date.max)).filter(
             models.Q(valid_to__isnull=True) | models.Q(valid_to__gte=self.valid_from)
         ).exists()
         if overlap_exists:
             raise ValidationError("A metering point can only have one active assignment at a time.")
-
-        # Dates must fall within the participant's validity window.
-        if self.valid_from < self.participant.valid_from:
-            raise ValidationError(
-                f"Assignment valid_from cannot be before the participant's "
-                f"valid_from ({self.participant.valid_from})."
-            )
-        if self.valid_to and self.participant.valid_to and self.valid_to > self.participant.valid_to:
-            raise ValidationError(
-                f"Assignment valid_to cannot be after the participant's "
-                f"valid_to ({self.participant.valid_to})."
-            )
 
     def __str__(self):
         valid_to = self.valid_to.isoformat() if self.valid_to else "open"

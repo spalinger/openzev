@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../lib/auth'
-import { oauthTokenExchange } from '../lib/api'
+import { oauthTokenExchange } from '../lib/api/auth'
 
 /**
  * Handles the redirect back from the OAuth provider callback.

@@ -13,7 +13,7 @@ services:
       - ./backend:/app
       - backend_media:/app/media
     ports:
-      - "8000:8000"
+      - "8001:8000"
     depends_on:
       - db
       - redis
@@ -40,7 +40,7 @@ services:
       context: .
       dockerfile: frontend/Dockerfile
       args:
-        VITE_API_BASE_URL: http://localhost:8000/api/v1
+        VITE_API_BASE_URL: http://localhost:8001/api/v1
     ports:
       - "8080:80"
     depends_on:
@@ -55,7 +55,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
 
   redis:
     image: redis:8-alpine

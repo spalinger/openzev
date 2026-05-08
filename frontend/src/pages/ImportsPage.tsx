@@ -18,10 +18,13 @@ import {
     bulkDeleteImportLogs,
     deleteImportLog,
     fetchImportLogs,
-    fetchZevs,
     previewCsvImport,
     uploadMeteringFile,
-} from '../lib/api'
+} from '../lib/api/metering'
+import {
+    fetchZevs,
+} from '../lib/api/zev'
+import { queryKeys } from '../lib/api/queryKeys'
 import { formatDateTime, useAppSettings } from '../lib/appSettings'
 import { useAuth } from '../lib/auth'
 import { useManagedZev } from '../lib/managedZev'
@@ -63,8 +66,8 @@ export function ImportsPage() {
     const { t } = useTranslation()
     const isManagedScope = user?.role === 'admin' || user?.role === 'zev_owner'
 
-    const { data, isLoading, isError } = useQuery({ queryKey: ['imports'], queryFn: fetchImportLogs })
-    const zevsQuery = useQuery({ queryKey: ['zevs'], queryFn: fetchZevs })
+    const { data, isLoading, isError } = useQuery({ queryKey: queryKeys.metering.importLogs(), queryFn: fetchImportLogs })
+    const zevsQuery = useQuery({ queryKey: queryKeys.zev.list(), queryFn: fetchZevs })
 
     const [wizardOpen, setWizardOpen] = useState(false)
     const [wizardStep, setWizardStep] = useState<1 | 2>(1)
@@ -122,7 +125,7 @@ export function ImportsPage() {
             setWizardStep(1)
             setFile(null)
             setPreview(null)
-            void queryClient.invalidateQueries({ queryKey: ['imports'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.metering.importLogs() })
         },
         onError: (error) => {
             const errorMessage = (error as { response?: { data?: { error?: string } } })?.response?.data?.error
@@ -143,7 +146,7 @@ export function ImportsPage() {
                 }),
                 'success',
             )
-            void queryClient.invalidateQueries({ queryKey: ['imports'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.metering.importLogs() })
         },
         onError: () => pushToast(t('pages.imports.messages.deleteFailed'), 'error'),
     })
@@ -163,7 +166,7 @@ export function ImportsPage() {
                 }),
                 'success',
             )
-            void queryClient.invalidateQueries({ queryKey: ['imports'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.metering.importLogs() })
         },
         onError: () => pushToast(t('pages.imports.messages.deleteFailed'), 'error'),
     })

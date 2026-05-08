@@ -12,7 +12,10 @@ import {
     XAxis,
     YAxis,
 } from 'recharts'
-import { fetchChartData, fetchMeteringPoints, fetchRawMeteringData, fetchZevs, api, formatApiError } from '../lib/api'
+import { fetchZevs, fetchMeteringPoints } from '../lib/api/zev'
+import { fetchChartData, fetchMeteringDataQualityStatus, fetchRawMeteringData } from '../lib/api/metering'
+import { formatApiError } from '../lib/api/errors'
+import { queryKeys } from '../lib/api/queryKeys'
 import { BillingPeriodSelector } from '../components/BillingPeriodSelector'
 import { useAuth } from '../lib/auth'
 import { useManagedZev } from '../lib/managedZev'
@@ -21,7 +24,7 @@ import {
     getCurrentBillingPeriod,
 } from '../lib/billingPeriod'
 import { formatDateTime, formatMonthYear, formatShortDate, useAppSettings } from '../lib/appSettings'
-import type { ChartDataPoint, RawMeteringDailyRow, RawMeteringReading, DataQualityStatusResponse } from '../types/api'
+import type { ChartDataPoint, RawMeteringDailyRow, RawMeteringReading } from '../types/api'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -153,36 +156,32 @@ export function MeteringChartPage() {
     }, [selectedZevId, interval])
 
     // Data queries
-    const zevsQuery = useQuery({ queryKey: ['zevs'], queryFn: fetchZevs })
-    const mpQuery = useQuery({ queryKey: ['metering-points'], queryFn: fetchMeteringPoints })
+    const zevsQuery = useQuery({ queryKey: queryKeys.zev.list(), queryFn: fetchZevs })
+    const mpQuery = useQuery({ queryKey: queryKeys.metering.points(selectedZevId || undefined), queryFn: fetchMeteringPoints })
 
     const chartQuery = useQuery({
-        queryKey: ['chart-data', selectedMpId, period.from, period.to, bucket],
+        queryKey: queryKeys.metering.chartData(selectedMpId, period.from, period.to, bucket),
         queryFn: () =>
             fetchChartData({ meteringPoint: selectedMpId, dateFrom: period.from, dateTo: period.to, bucket }),
         enabled: !!selectedMpId,
     })
 
     const rawDataQuery = useQuery({
-        queryKey: ['raw-metering-data', selectedMpId, period.from, period.to],
+        queryKey: queryKeys.metering.rawData(selectedMpId, period.from, period.to),
         queryFn: () =>
             fetchRawMeteringData({ meteringPoint: selectedMpId, dateFrom: period.from, dateTo: period.to }),
         enabled: !!selectedMpId,
     })
 
     const qualityQuery = useQuery({
-        queryKey: ['metering-data-quality', period.from, period.to, selectedZevId],
-        queryFn: async () => {
-            const params = new URLSearchParams({
-                date_from: period.from,
-                date_to: period.to,
-                ...(selectedZevId && isManagedScope ? { zev_id: selectedZevId } : {}),
-            })
-            const { data } = await api.get<DataQualityStatusResponse>(
-                `/metering/readings/data-quality-status/?${params}`
-            )
-            return data
-        },
+        queryKey: queryKeys.metering.qualityStatus(period.from, period.to, isManagedScope ? selectedZevId || undefined : undefined, selectedMpId || undefined),
+        queryFn: () =>
+            fetchMeteringDataQualityStatus({
+                dateFrom: period.from,
+                dateTo: period.to,
+                zevId: selectedZevId && isManagedScope ? selectedZevId : undefined,
+                meteringPointId: selectedMpId || undefined,
+            }),
         enabled: true,
     })
 

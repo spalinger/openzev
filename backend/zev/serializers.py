@@ -1,6 +1,5 @@
 from rest_framework import serializers
-from django.db import models
-from django.utils import timezone
+from django.core.exceptions import ValidationError as DjangoValidationError
 from .models import Zev, Participant, MeteringPoint, MeteringPointAssignment
 from accounts.models import UserRole
 from .services import create_zev_with_owner_setup, ensure_participant_account
@@ -20,50 +19,16 @@ class MeteringPointAssignmentSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at", "updated_at"]
 
     def validate(self, attrs):
-        metering_point = attrs.get("metering_point") or getattr(self.instance, "metering_point", None)
-        participant = attrs.get("participant") or getattr(self.instance, "participant", None)
-        valid_from = attrs.get("valid_from") or getattr(self.instance, "valid_from", None)
-        valid_to = attrs.get("valid_to", getattr(self.instance, "valid_to", None))
+        candidate = self.instance or MeteringPointAssignment()
+        for field_name, value in attrs.items():
+            setattr(candidate, field_name, value)
 
-        if metering_point and participant and metering_point.zev_id != participant.zev_id:
-            raise serializers.ValidationError({"participant": "Participant must belong to the metering point's ZEV."})
-
-        if valid_to and valid_from and valid_to < valid_from:
-            raise serializers.ValidationError({"valid_to": "valid_to must be on or after valid_from."})
-
-        # Only one active assignment window per metering point is allowed.
-        if metering_point:
-            existing = MeteringPointAssignment.objects.filter(metering_point=metering_point)
-            if self.instance:
-                existing = existing.exclude(pk=self.instance.pk)
-            overlap_exists = existing.filter(valid_from__lte=(valid_to or timezone.datetime.max.date())).filter(
-                models.Q(valid_to__isnull=True) | models.Q(valid_to__gte=valid_from)
-            ).exists()
-            if overlap_exists:
-                raise serializers.ValidationError(
-                    "A metering point can only have one active assignment at a time."
-                )
-
-        # Assignment dates must fall within the participant's validity window.
-        if participant and valid_from:
-            if valid_from < participant.valid_from:
-                raise serializers.ValidationError(
-                    {
-                        "valid_from": (
-                            "Assignment valid_from cannot be before the participant's "
-                            f"valid_from ({participant.valid_from})."
-                        )
-                    }
-                )
-            if valid_to and participant.valid_to and valid_to > participant.valid_to:
-                raise serializers.ValidationError(
-                    {
-                        "valid_to": (
-                            "Assignment valid_to cannot be after the participant's "
-                            f"valid_to ({participant.valid_to})."
-                        )
-                    }
-                )
+        try:
+            candidate.full_clean()
+        except DjangoValidationError as exc:
+            if hasattr(exc, "message_dict"):
+                raise serializers.ValidationError(exc.message_dict)
+            raise serializers.ValidationError(exc.messages)
 
         return attrs
 

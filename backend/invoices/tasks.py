@@ -69,7 +69,7 @@ def send_invoice_email_task(self, invoice_id: str, recipient_email: str = None):
         invoice=invoice,
         recipient=recipient,
         subject=subject,
-        status="pending",
+        status=EmailLog.Status.PENDING,
     )
 
     try:
@@ -80,7 +80,7 @@ def send_invoice_email_task(self, invoice_id: str, recipient_email: str = None):
             "application/pdf",
         )
         email.send()
-        log.status = "sent"
+        log.status = EmailLog.Status.SENT
         log.sent_at = djtimezone.now()
         log.save()
 
@@ -93,7 +93,7 @@ def send_invoice_email_task(self, invoice_id: str, recipient_email: str = None):
         invoice.save(update_fields=invoice_update_fields)
         logger.info("Sent invoice %s to %s", invoice.invoice_number, recipient)
     except Exception as exc:
-        log.status = "failed"
+        log.status = EmailLog.Status.FAILED
         log.error_message = str(exc)
         log.save()
         logger.error("Failed to send invoice %s: %s", invoice.invoice_number, exc)

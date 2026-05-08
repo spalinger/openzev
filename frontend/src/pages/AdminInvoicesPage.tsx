@@ -4,7 +4,9 @@ import { useTranslation } from 'react-i18next'
 import { DataGrid, type GridColDef, type GridRenderCellParams } from '@mui/x-data-grid'
 import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
 import { formatShortDate, useAppSettings } from '../lib/appSettings'
-import { deleteInvoice, fetchInvoices, formatApiError } from '../lib/api'
+import { deleteInvoice, fetchInvoices } from '../lib/api/invoices'
+import { formatApiError } from '../lib/api/errors'
+import { queryKeys } from '../lib/api/queryKeys'
 import { useToast } from '../lib/toast'
 import type { Invoice } from '../types/api'
 
@@ -27,14 +29,14 @@ export function AdminInvoicesPage() {
     const { dialog, confirm, handleConfirm, handleCancel, isLoading: dialogLoading } = useConfirmDialog()
 
     const invoicesQuery = useQuery({
-        queryKey: ['invoices'],
+        queryKey: queryKeys.invoices.list(),
         queryFn: fetchInvoices,
     })
 
     const deleteMutation = useMutation({
         mutationFn: (id: string) => deleteInvoice(id),
         onSuccess: () => {
-            void queryClient.invalidateQueries({ queryKey: ['invoices'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.list() })
             pushToast(t('adminInvoices.deleted'), 'success')
         },
         onError: (error) => pushToast(formatApiError(error), 'error'),

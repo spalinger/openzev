@@ -1,4 +1,6 @@
 import uuid
+from datetime import date
+from django.core.exceptions import ValidationError
 from django.db import models
 from zev.models import Zev
 
@@ -54,6 +56,43 @@ class Tariff(models.Model):
 
     class Meta:
         ordering = ["zev", "category", "name", "-valid_from"]
+
+    def clean(self):
+        errors = {}
+
+        if self.valid_to and self.valid_to < self.valid_from:
+            errors["valid_to"] = "valid_to must be on or after valid_from."
+
+        if self.billing_mode in {BillingMode.ENERGY, BillingMode.PERCENTAGE_OF_ENERGY} and not self.energy_type:
+            errors["energy_type"] = "Energy-based tariffs require an energy type."
+
+        if (
+            self.zev_id
+            and self.energy_type
+            and self.valid_from
+            and self.billing_mode in {BillingMode.ENERGY, BillingMode.PERCENTAGE_OF_ENERGY}
+        ):
+            candidate_end = self.valid_to or date.max
+            overlaps = Tariff.objects.exclude(pk=self.pk).filter(
+                zev_id=self.zev_id,
+                category=self.category,
+                billing_mode=self.billing_mode,
+                energy_type=self.energy_type,
+                valid_from__lte=candidate_end,
+            ).filter(
+                models.Q(valid_to__isnull=True) | models.Q(valid_to__gte=self.valid_from)
+            )
+            if overlaps.exists():
+                errors["valid_from"] = (
+                    "Overlapping tariff windows are not allowed for the same ZEV, category, billing mode, and energy type."
+                )
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         descriptor = self.get_energy_type_display() if self.energy_type else self.get_billing_mode_display()

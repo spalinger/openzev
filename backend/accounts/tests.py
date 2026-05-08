@@ -4,10 +4,22 @@ from django.test.utils import override_settings
 from rest_framework.test import APIClient
 from urllib.parse import parse_qs, urlparse
 
-from .models import AppSettings, FeatureFlag, OAuthProvider, User, UserRole, VatRate
+from .models import (
+	AppSettings,
+	FeatureFlag,
+	OAuthExchangeCode,
+	OAuthProvider,
+	OAuthState,
+	User,
+	UserRole,
+	VatRate,
+)
 from invoices.models import Invoice, InvoiceStatus
 from zev.models import MeteringPoint, MeteringPointAssignment, MeteringPointType, Participant, Zev
-from datetime import date
+from datetime import date, timedelta
+from django.utils import timezone
+
+from .tasks import cleanup_expired_oauth_tokens
 
 
 class UserModelTests(TestCase):
@@ -781,3 +793,45 @@ class RbacEndpointMatrixTests(TestCase):
 					resp = client.delete(url)
 
 				self.assertEqual(resp.status_code, 401)
+
+
+class OAuthTokenCleanupTaskTests(TestCase):
+	def test_cleanup_deletes_only_expired_oauth_tokens(self):
+		provider = OAuthProvider.objects.create(
+			name="cleanup-provider",
+			display_name="Cleanup Provider",
+			client_id="client-id",
+			client_secret="secret",
+			authorization_url="https://example.com/oauth/authorize",
+			token_url="https://example.com/oauth/token",
+			userinfo_url="https://example.com/oauth/userinfo",
+			redirect_url="https://app.example.com/api/v1/auth/oauth/callback/cleanup-provider/",
+			scope="openid email profile",
+			enabled=True,
+		)
+		user = User.objects.create_user(
+			username="oauth-cleanup-user",
+			email="oauth-cleanup@example.com",
+			password="pass1234",
+			role=UserRole.PARTICIPANT,
+		)
+
+		expired_state = OAuthState.objects.create(state="expired-state", provider=provider)
+		fresh_state = OAuthState.objects.create(state="fresh-state", provider=provider)
+		expired_code = OAuthExchangeCode.objects.create(code="expired-code", user=user)
+		fresh_code = OAuthExchangeCode.objects.create(code="fresh-code", user=user)
+
+		now = timezone.now()
+		OAuthState.objects.filter(pk=expired_state.pk).update(created_at=now - timedelta(minutes=11))
+		OAuthState.objects.filter(pk=fresh_state.pk).update(created_at=now - timedelta(minutes=5))
+		OAuthExchangeCode.objects.filter(pk=expired_code.pk).update(created_at=now - timedelta(seconds=61))
+		OAuthExchangeCode.objects.filter(pk=fresh_code.pk).update(created_at=now - timedelta(seconds=30))
+
+		result = cleanup_expired_oauth_tokens()
+
+		self.assertEqual(result["deleted_states"], 1)
+		self.assertEqual(result["deleted_codes"], 1)
+		self.assertFalse(OAuthState.objects.filter(pk=expired_state.pk).exists())
+		self.assertTrue(OAuthState.objects.filter(pk=fresh_state.pk).exists())
+		self.assertFalse(OAuthExchangeCode.objects.filter(pk=expired_code.pk).exists())
+		self.assertTrue(OAuthExchangeCode.objects.filter(pk=fresh_code.pk).exists())

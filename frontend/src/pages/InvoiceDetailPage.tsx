@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { fetchInvoice } from '../lib/api'
+import { fetchInvoice } from '../lib/api/invoices'
+import { queryKeys } from '../lib/api/queryKeys'
 import { formatShortDate, useAppSettings } from '../lib/appSettings'
 
 function humanizeType(type: string): string {
@@ -16,7 +17,7 @@ export function InvoiceDetailPage() {
     const { settings } = useAppSettings()
 
     const invoiceQuery = useQuery({
-        queryKey: ['invoice', invoiceId],
+        queryKey: queryKeys.invoices.detail(invoiceId as string),
         queryFn: () => fetchInvoice(invoiceId as string),
         enabled: !!invoiceId,
     })

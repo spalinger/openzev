@@ -2,7 +2,9 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCheck, faPen, faPlus, faTrash, faXmark } from '@fortawesome/free-solid-svg-icons'
-import { createVatRate, deleteVatRate, fetchVatRates, formatApiError, updateVatRate } from '../lib/api'
+import { createVatRate, deleteVatRate, fetchVatRates, updateVatRate } from '../lib/api/auth'
+import { formatApiError } from '../lib/api/errors'
+import { queryKeys } from '../lib/api/queryKeys'
 import { formatShortDate, useAppSettings } from '../lib/appSettings'
 import { useTranslation } from 'react-i18next'
 import { useToast } from '../lib/toast'
@@ -31,7 +33,7 @@ export function AdminVatSettingsPage() {
     const [editingId, setEditingId] = useState<number | null>(null)
 
     const vatRatesQuery = useQuery({
-        queryKey: ['vat-rates'],
+        queryKey: queryKeys.auth.vatRates(),
         queryFn: fetchVatRates,
     })
 
@@ -54,7 +56,7 @@ export function AdminVatSettingsPage() {
             return createVatRate(payload)
         },
         onSuccess: (_, variables) => {
-            void queryClient.invalidateQueries({ queryKey: ['vat-rates'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.auth.vatRates() })
             setForm(defaultForm)
             setEditingId(null)
             pushToast(variables.id ? t('adminVatSettings.messages.updated') : t('adminVatSettings.messages.created'), 'success')
@@ -65,7 +67,7 @@ export function AdminVatSettingsPage() {
     const deleteMutation = useMutation({
         mutationFn: deleteVatRate,
         onSuccess: () => {
-            void queryClient.invalidateQueries({ queryKey: ['vat-rates'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.auth.vatRates() })
             pushToast(t('adminVatSettings.messages.deleted'), 'success')
         },
         onError: (error) => pushToast(formatApiError(error, t('adminVatSettings.messages.deleteFailed')), 'error'),

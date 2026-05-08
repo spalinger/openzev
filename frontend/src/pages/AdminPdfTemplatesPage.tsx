@@ -12,7 +12,8 @@ import {
     updateContractPdfTemplate,
     updateInvoicePdfTemplate,
     updateAnnualStatementPdfTemplate,
-} from '../lib/api'
+} from '../lib/api/invoices'
+import { queryKeys } from '../lib/api/queryKeys'
 import type { PdfTemplateResponse } from '../types/api'
 import { useToast } from '../lib/toast'
 
@@ -585,7 +586,7 @@ export function AdminPdfTemplatesPage() {
     ]
 
     const invoiceTemplateQuery = useQuery({
-        queryKey: ['admin-pdf-template'],
+        queryKey: queryKeys.admin.invoicePdfTemplate(),
         queryFn: fetchInvoicePdfTemplate,
     })
 
@@ -593,7 +594,7 @@ export function AdminPdfTemplatesPage() {
         mutationFn: updateInvoicePdfTemplate,
         onSuccess: (result) => {
             pushToast(result.detail ?? t('common.save'), 'success')
-            void queryClient.invalidateQueries({ queryKey: ['admin-pdf-template'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.admin.invoicePdfTemplate() })
         },
         onError: () => pushToast(t('common.error'), 'error'),
     })
@@ -602,13 +603,13 @@ export function AdminPdfTemplatesPage() {
         mutationFn: resetInvoicePdfTemplate,
         onSuccess: (result) => {
             pushToast(result.detail ?? t('admin.resetToDefault'), 'success')
-            void queryClient.invalidateQueries({ queryKey: ['admin-pdf-template'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.admin.invoicePdfTemplate() })
         },
         onError: () => pushToast(t('common.error'), 'error'),
     })
 
     const contractTemplateQuery = useQuery({
-        queryKey: ['admin-contract-pdf-template'],
+        queryKey: queryKeys.admin.contractPdfTemplate(),
         queryFn: fetchContractPdfTemplate,
     })
 
@@ -616,7 +617,7 @@ export function AdminPdfTemplatesPage() {
         mutationFn: updateContractPdfTemplate,
         onSuccess: (result) => {
             pushToast(result.detail ?? t('common.save'), 'success')
-            void queryClient.invalidateQueries({ queryKey: ['admin-contract-pdf-template'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.admin.contractPdfTemplate() })
         },
         onError: () => pushToast(t('common.error'), 'error'),
     })
@@ -625,13 +626,13 @@ export function AdminPdfTemplatesPage() {
         mutationFn: resetContractPdfTemplate,
         onSuccess: (result) => {
             pushToast(result.detail ?? t('admin.resetToDefault'), 'success')
-            void queryClient.invalidateQueries({ queryKey: ['admin-contract-pdf-template'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.admin.contractPdfTemplate() })
         },
         onError: () => pushToast(t('common.error'), 'error'),
     })
 
     const annualStatementTemplateQuery = useQuery({
-        queryKey: ['admin-annual-statement-pdf-template'],
+        queryKey: queryKeys.admin.annualStatementPdfTemplate(),
         queryFn: fetchAnnualStatementPdfTemplate,
     })
 
@@ -639,7 +640,7 @@ export function AdminPdfTemplatesPage() {
         mutationFn: updateAnnualStatementPdfTemplate,
         onSuccess: (result) => {
             pushToast(result.detail ?? t('common.save'), 'success')
-            void queryClient.invalidateQueries({ queryKey: ['admin-annual-statement-pdf-template'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.admin.annualStatementPdfTemplate() })
         },
         onError: () => pushToast(t('common.error'), 'error'),
     })
@@ -648,7 +649,7 @@ export function AdminPdfTemplatesPage() {
         mutationFn: resetAnnualStatementPdfTemplate,
         onSuccess: (result) => {
             pushToast(result.detail ?? t('admin.resetToDefault'), 'success')
-            void queryClient.invalidateQueries({ queryKey: ['admin-annual-statement-pdf-template'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.admin.annualStatementPdfTemplate() })
         },
         onError: () => pushToast(t('common.error'), 'error'),
     })

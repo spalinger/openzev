@@ -1,6 +1,7 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchAppSettings } from './api'
+import { fetchAppSettings } from './api/auth'
+import { queryKeys } from './api/queryKeys'
 import { useAuth } from './auth'
 import type { AppSettings, DateTimeFormat, LongDateFormat, ShortDateFormat } from '../types/api'
 
@@ -159,7 +160,7 @@ export function toDayJsDateFormat(pattern: ShortDateFormat): string {
 export function AppSettingsProvider({ children }: { children: ReactNode }) {
     const { isAuthenticated } = useAuth()
     const settingsQuery = useQuery({
-        queryKey: ['app-settings'],
+        queryKey: queryKeys.auth.appSettings(),
         queryFn: fetchAppSettings,
         enabled: isAuthenticated,
     })

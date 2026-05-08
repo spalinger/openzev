@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchZevs } from './api'
+import { fetchZevs } from './api/zev'
+import { queryKeys } from './api/queryKeys'
 import { useAuth } from './auth'
 import type { Zev } from '../types/api'
 
@@ -22,7 +23,7 @@ export function ManagedZevProvider({ children }: { children: ReactNode }) {
     const canManageZev = isAdmin || isOwner
 
     const zevsQuery = useQuery({
-        queryKey: ['zevs'],
+        queryKey: queryKeys.zev.list(),
         queryFn: fetchZevs,
         enabled: canManageZev,
     })
