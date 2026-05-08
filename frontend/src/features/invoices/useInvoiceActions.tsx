@@ -46,12 +46,12 @@ export interface InvoiceActionStats {
     pdfMissingCount: number
 }
 
-function getLatestEmailLog(invoice: { email_logs?: Array<{ created_at: string; recipient: string; status: string; id: string }> } | null) {
+export function getLatestEmailLog(invoice: { email_logs?: Array<{ created_at: string; recipient: string; status: string; id: string }> } | null) {
     if (!invoice?.email_logs?.length) return null
     return [...invoice.email_logs].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
 }
 
-function hasDeletePermission(invoice: Invoice, role: string | undefined): boolean {
+export function hasDeletePermission(invoice: Invoice, role: string | undefined): boolean {
     return invoice.status === 'draft' || invoice.status === 'cancelled' || role === 'admin'
 }
 
@@ -93,48 +93,48 @@ export function useInvoiceActions({
     const generateMutation = useMutation({
         mutationFn: generateInvoice,
         onSuccess: () => {
-            pushToast('Invoice generated.', 'success')
+            pushToast(t('pages.invoices.messages.generated'), 'success')
             void queryClient.invalidateQueries({ queryKey: periodOverviewInvalidationKey })
         },
-        onError: (error) => pushToast(formatApiError(error, 'Failed to generate invoice.'), 'error'),
+        onError: (error) => pushToast(formatApiError(error, t('pages.invoices.messages.generateFailed')), 'error'),
     })
 
     const pdfMutation = useMutation({
         mutationFn: generateInvoicePdf,
         onSuccess: () => {
-            pushToast('PDF generated.', 'success')
+            pushToast(t('pages.invoices.messages.pdfGenerated'), 'success')
             void queryClient.invalidateQueries({ queryKey: periodOverviewInvalidationKey })
         },
-        onError: (error) => pushToast(formatApiError(error, 'Failed to generate PDF.'), 'error'),
+        onError: (error) => pushToast(formatApiError(error, t('pages.invoices.messages.generatePdfFailed')), 'error'),
     })
 
     const approveMutation = useMutation({
         mutationFn: approveInvoice,
         onSuccess: () => {
-            pushToast('Invoice approved.', 'success')
+            pushToast(t('pages.invoices.messages.approved'), 'success')
             void queryClient.invalidateQueries({ queryKey: periodOverviewInvalidationKey })
         },
-        onError: (error) => pushToast(formatApiError(error, 'Failed to approve invoice.'), 'error'),
+        onError: (error) => pushToast(formatApiError(error, t('pages.invoices.messages.approveFailed')), 'error'),
     })
 
     const deleteMutation = useMutation({
         mutationFn: deleteInvoice,
         onSuccess: () => {
-            pushToast('Invoice deleted.', 'success')
+            pushToast(t('pages.invoices.messages.deleted'), 'success')
             void queryClient.invalidateQueries({ queryKey: periodOverviewInvalidationKey })
         },
-        onError: (error) => pushToast(formatApiError(error, 'Failed to delete invoice.'), 'error'),
+        onError: (error) => pushToast(formatApiError(error, t('pages.invoices.messages.deleteFailed')), 'error'),
     })
 
     const emailMutation = useMutation({
         mutationFn: (invoiceId: string) => sendInvoiceEmail(invoiceId),
         onSuccess: (_result, invoiceId) => {
-            pushToast('Email queued for sending.', 'success')
+            pushToast(t('pages.invoices.messages.emailQueued'), 'success')
             setPollingInvoiceId(invoiceId)
             setEmailPollingStartedAt(Date.now())
             void queryClient.invalidateQueries({ queryKey: periodOverviewInvalidationKey })
         },
-        onError: (error) => pushToast(formatApiError(error, 'Failed to send email.'), 'error'),
+        onError: (error) => pushToast(formatApiError(error, t('pages.invoices.messages.sendEmailFailed')), 'error'),
     })
 
     const markSentMutation = useMutation({
@@ -143,28 +143,28 @@ export function useInvoiceActions({
             pushToast(t('pages.invoices.markedSent'), 'success')
             void queryClient.invalidateQueries({ queryKey: periodOverviewInvalidationKey })
         },
-        onError: (error) => pushToast(formatApiError(error, 'Failed to mark invoice as sent.'), 'error'),
+        onError: (error) => pushToast(formatApiError(error, t('pages.invoices.messages.markSentFailed')), 'error'),
     })
 
     const markPaidMutation = useMutation({
         mutationFn: markInvoicePaid,
         onSuccess: () => {
-            pushToast('Invoice marked as paid.', 'success')
+            pushToast(t('pages.invoices.messages.markedPaid'), 'success')
             void queryClient.invalidateQueries({ queryKey: periodOverviewInvalidationKey })
         },
-        onError: (error) => pushToast(formatApiError(error, 'Failed to mark invoice as paid.'), 'error'),
+        onError: (error) => pushToast(formatApiError(error, t('pages.invoices.messages.markPaidFailed')), 'error'),
     })
 
     const retryEmailMutation = useMutation({
         mutationFn: (params: { invoiceId: string; emailLogId: string }) =>
             retryFailedEmail(params.invoiceId, params.emailLogId),
         onSuccess: (_result, variables) => {
-            pushToast('Email retry queued.', 'success')
+            pushToast(t('pages.invoices.messages.retryQueued'), 'success')
             setPollingInvoiceId(variables.invoiceId)
             setEmailPollingStartedAt(Date.now())
             void queryClient.invalidateQueries({ queryKey: periodOverviewInvalidationKey })
         },
-        onError: (error) => pushToast(formatApiError(error, 'Failed to retry email.'), 'error'),
+        onError: (error) => pushToast(formatApiError(error, t('pages.invoices.messages.retryEmailFailed')), 'error'),
     })
 
     // ── Batch mutations ──────────────────────────────────────────────
@@ -250,7 +250,7 @@ export function useInvoiceActions({
                     setEmailPollingStartedAt(null)
                     void queryClient.invalidateQueries({ queryKey: periodOverviewInvalidationKey })
                     if (lastEmailLog.status === 'sent') {
-                        pushToast('Email sent successfully!', 'success')
+                        pushToast(t('pages.invoices.messages.emailSentSuccess'), 'success')
                     }
                     clearInterval(pollInterval)
                     return
@@ -260,7 +260,7 @@ export function useInvoiceActions({
                 if (pollCount >= maxPolls) {
                     setPollingInvoiceId(null)
                     setEmailPollingStartedAt(null)
-                    pushToast('Email was queued, but status update is taking longer than expected.', 'error')
+                    pushToast(t('pages.invoices.messages.emailPollingTimeout'), 'error')
                     clearInterval(pollInterval)
                     return
                 }
@@ -273,20 +273,20 @@ export function useInvoiceActions({
         }, 2000) // Poll every 2 seconds
 
         return () => clearInterval(pollInterval)
-    }, [pollingInvoiceId, emailPollingStartedAt, periodOverviewInvalidationKey, queryClient, pushToast])
+    }, [pollingInvoiceId, emailPollingStartedAt, periodOverviewInvalidationKey, queryClient, pushToast, t])
 
     useEffect(() => {
         if (!pollingInvoiceId || !emailPollingStartedAt) return
         const timeoutId = window.setTimeout(() => {
             setPollingInvoiceId(null)
             setEmailPollingStartedAt(null)
-            pushToast('Email was queued, but status update is taking longer than expected.', 'error')
+            pushToast(t('pages.invoices.messages.emailPollingTimeout'), 'error')
         }, EMAIL_STATUS_POLL_TIMEOUT_MS)
 
         return () => {
             window.clearTimeout(timeoutId)
         }
-    }, [pollingInvoiceId, emailPollingStartedAt, pushToast])
+    }, [pollingInvoiceId, emailPollingStartedAt, pushToast, t])
 
     // ── Helper callbacks ──────────────────────────────────────────────
 
