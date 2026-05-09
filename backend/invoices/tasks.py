@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from celery import shared_task
 from django.core.mail import EmailMessage
 from django.utils import timezone as djtimezone
+from audit.models import AuditActionCategory, AuditEventSource, AuditEventStatus
+from audit.services import record_audit_event
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +21,16 @@ def send_invoice_email_task(self, invoice_id: str, recipient_email: str = None):
         invoice = Invoice.objects.select_related("participant", "zev").get(pk=invoice_id)
     except Invoice.DoesNotExist:
         logger.error("Invoice %s not found for email task", invoice_id)
+        record_audit_event(
+            action_category=AuditActionCategory.INVOICE,
+            action_type="invoice.email_task",
+            target_type="invoices.Invoice",
+            target_id=str(invoice_id),
+            target_display=str(invoice_id),
+            summary=f"Invoice email task failed: invoice {invoice_id} not found.",
+            status=AuditEventStatus.FAILED,
+            source=AuditEventSource.CELERY,
+        )
         return
 
     # Ensure PDF exists
@@ -28,6 +40,17 @@ def send_invoice_email_task(self, invoice_id: str, recipient_email: str = None):
     recipient = recipient_email or invoice.participant.email
     if not recipient:
         logger.warning("No email for participant %s — skipping", invoice.participant)
+        record_audit_event(
+            action_category=AuditActionCategory.INVOICE,
+            action_type="invoice.email_task",
+            target_type="invoices.Invoice",
+            target=invoice,
+            target_id=str(invoice.pk),
+            target_display=invoice.invoice_number,
+            summary=f"Invoice email task failed for {invoice.invoice_number}: no recipient email.",
+            status=AuditEventStatus.FAILED,
+            source=AuditEventSource.CELERY,
+        )
         return
 
     app_settings = AppSettings.load()
@@ -73,6 +96,7 @@ def send_invoice_email_task(self, invoice_id: str, recipient_email: str = None):
     )
 
     try:
+        previous_status = invoice.status
         email = EmailMessage(subject=subject, body=body, to=[recipient])
         email.attach(
             f"invoice_{invoice.invoice_number}.pdf",
@@ -92,9 +116,39 @@ def send_invoice_email_task(self, invoice_id: str, recipient_email: str = None):
         invoice.sent_at = log.sent_at
         invoice.save(update_fields=invoice_update_fields)
         logger.info("Sent invoice %s to %s", invoice.invoice_number, recipient)
+        record_audit_event(
+            action_category=AuditActionCategory.INVOICE,
+            action_type="invoice.email_sent",
+            target_type="invoices.Invoice",
+            target=invoice,
+            target_id=str(invoice.pk),
+            target_display=invoice.invoice_number,
+            summary=f"Sent invoice email for {invoice.invoice_number} to {recipient}.",
+            status=AuditEventStatus.SUCCESS,
+            source=AuditEventSource.CELERY,
+            changes={
+                "status": {
+                    "before": previous_status,
+                    "after": invoice.status,
+                }
+            },
+            metadata={"recipient": recipient, "email_log_id": str(log.id)},
+        )
     except Exception as exc:
         log.status = EmailLog.Status.FAILED
         log.error_message = str(exc)
         log.save()
         logger.error("Failed to send invoice %s: %s", invoice.invoice_number, exc)
+        record_audit_event(
+            action_category=AuditActionCategory.INVOICE,
+            action_type="invoice.email_sent",
+            target_type="invoices.Invoice",
+            target=invoice,
+            target_id=str(invoice.pk),
+            target_display=invoice.invoice_number,
+            summary=f"Invoice email send failed for {invoice.invoice_number}.",
+            status=AuditEventStatus.FAILED,
+            source=AuditEventSource.CELERY,
+            metadata={"recipient": recipient, "email_log_id": str(log.id), "error": str(exc)},
+        )
         raise self.retry(exc=exc, countdown=60)

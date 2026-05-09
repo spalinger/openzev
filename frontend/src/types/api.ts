@@ -453,6 +453,57 @@ export interface EmailLog {
     created_at: string
 }
 
+export type AuditActionCategory =
+    | 'auth'
+    | 'governance'
+    | 'participant'
+    | 'metering'
+    | 'tariff'
+    | 'invoice'
+    | 'import'
+    | 'template'
+    | 'system'
+
+export type AuditEventStatus = 'started' | 'queued' | 'success' | 'failed' | 'denied'
+
+export interface AuditEvent {
+    id: string
+    created_at: string
+    actor_user: number | null
+    actor_role_snapshot: string
+    actor_display: string
+    zev: string | null
+    action_category: AuditActionCategory
+    action_type: string
+    target_type: string
+    target_id: string
+    target_display: string
+    status: AuditEventStatus
+    request_id: string | null
+    correlation_id: string | null
+    source: 'api' | 'celery' | 'system' | 'management_command'
+    ip_address: string | null
+    user_agent: string
+    summary: string
+    reason: string
+    changes_json: Record<string, unknown>
+    metadata_json: Record<string, unknown>
+}
+
+export interface AuditEventFilters {
+    page?: number
+    actor_user?: number
+    zev?: string
+    action_category?: AuditActionCategory
+    action_type?: string
+    target_type?: string
+    target_id?: string
+    status?: AuditEventStatus
+    date_from?: string
+    date_to?: string
+    q?: string
+}
+
 export interface PaginatedResponse<T> {
     count: number
     next: string | null

@@ -23,6 +23,8 @@ from .contract_pdf import CONTRACT_TEMPLATE_NAME, CONTRACT_TRANSLATIONS
 from .annual_statement import generate_annual_statement_pdf, ANNUAL_STATEMENT_TEMPLATE, ANNUAL_TRANSLATIONS
 from .financial_summary import generate_financial_summary_pdf
 from .tasks import send_invoice_email_task
+from audit.models import AuditActionCategory, AuditEventStatus
+from audit.services import build_diff, record_audit_event
 
 
 def _read_default_template(template_name: str) -> str:
@@ -280,6 +282,42 @@ def _build_sample_annual_statement_context() -> dict:
     }
 
 
+def _invoice_target_display(invoice: Invoice) -> str:
+    return invoice.invoice_number or str(invoice.pk)
+
+
+def _record_invoice_event(
+    *,
+    request,
+    action_type: str,
+    summary: str,
+    status: str = AuditEventStatus.SUCCESS,
+    invoice: Invoice | None = None,
+    target_type: str = "invoices.Invoice",
+    target_id: str = "",
+    target_display: str = "",
+    changes: dict | None = None,
+    metadata: dict | None = None,
+    reason: str = "",
+):
+    resolved_target_id = target_id or (str(invoice.pk) if invoice else "")
+    resolved_target_display = target_display or (_invoice_target_display(invoice) if invoice else "")
+    record_audit_event(
+        request=request,
+        action_category=AuditActionCategory.INVOICE,
+        action_type=action_type,
+        target_type=target_type,
+        target=invoice,
+        target_id=resolved_target_id,
+        target_display=resolved_target_display,
+        summary=summary,
+        status=status,
+        changes=changes,
+        metadata=metadata,
+        reason=reason,
+    )
+
+
 class InvoiceViewSet(viewsets.ModelViewSet):
     serializer_class = InvoiceSerializer
     permission_classes = [IsAuthenticated]
@@ -297,12 +335,48 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         invoice = self.get_object()
         if not request.user.is_zev_owner:
+            _record_invoice_event(
+                request=request,
+                action_type="invoice.delete",
+                summary=f"Denied invoice deletion for {_invoice_target_display(invoice)}.",
+                status=AuditEventStatus.DENIED,
+                invoice=invoice,
+            )
             return Response({"error": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
         if not request.user.is_admin and invoice.zev.owner != request.user:
+            _record_invoice_event(
+                request=request,
+                action_type="invoice.delete",
+                summary=f"Denied invoice deletion for {_invoice_target_display(invoice)} due to tenant scope.",
+                status=AuditEventStatus.DENIED,
+                invoice=invoice,
+            )
             return Response({"error": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
         if not request.user.is_admin and invoice.status not in [InvoiceStatus.DRAFT, InvoiceStatus.CANCELLED]:
+            _record_invoice_event(
+                request=request,
+                action_type="invoice.delete",
+                summary=f"Denied invoice deletion for {_invoice_target_display(invoice)} due to status guard.",
+                status=AuditEventStatus.DENIED,
+                invoice=invoice,
+                changes={"status": {"before": invoice.status, "after": invoice.status}},
+            )
             return Response({"error": "Only draft or cancelled invoices can be deleted."}, status=status.HTTP_400_BAD_REQUEST)
-        return super().destroy(request, *args, **kwargs)
+        invoice_number = _invoice_target_display(invoice)
+        invoice_id = str(invoice.pk)
+        participant_id = str(invoice.participant_id)
+        zev_id = str(invoice.zev_id)
+        response = super().destroy(request, *args, **kwargs)
+        _record_invoice_event(
+            request=request,
+            action_type="invoice.delete",
+            summary=f"Deleted invoice {invoice_number}.",
+            target_id=invoice_id,
+            target_display=invoice_number,
+            changes={"status": {"before": invoice.status, "after": "deleted"}},
+            metadata={"participant_id": participant_id, "zev_id": zev_id},
+        )
+        return response
 
     @action(detail=False, methods=["post"], url_path="generate",
             permission_classes=[IsAuthenticated, IsZevOwnerOrAdmin])
@@ -325,7 +399,33 @@ class InvoiceViewSet(viewsets.ModelViewSet):
                 s.validated_data["period_end"],
             )
         except ValueError as exc:
+            _record_invoice_event(
+                request=request,
+                action_type="invoice.generate",
+                summary=f"Failed to generate invoice for participant {participant.id}.",
+                status=AuditEventStatus.FAILED,
+                target_type="zev.Participant",
+                target_id=str(participant.id),
+                target_display=participant.full_name,
+                metadata={
+                    "period_start": s.validated_data["period_start"],
+                    "period_end": s.validated_data["period_end"],
+                    "error": str(exc),
+                },
+            )
             return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
+        _record_invoice_event(
+            request=request,
+            action_type="invoice.generate",
+            summary=f"Generated invoice {_invoice_target_display(invoice)}.",
+            invoice=invoice,
+            changes=build_diff({}, {"status": invoice.status}, ["status"]),
+            metadata={
+                "participant_id": str(participant.id),
+                "period_start": s.validated_data["period_start"],
+                "period_end": s.validated_data["period_end"],
+            },
+        )
         return Response(InvoiceSerializer(invoice, context={"request": request}).data,
                         status=status.HTTP_201_CREATED)
 
@@ -348,7 +448,34 @@ class InvoiceViewSet(viewsets.ModelViewSet):
                 zev, s.validated_data["period_start"], s.validated_data["period_end"]
             )
         except ValueError as exc:
+            _record_invoice_event(
+                request=request,
+                action_type="invoice.generate_all",
+                summary=f"Failed to generate all invoices for ZEV {zev.id}.",
+                status=AuditEventStatus.FAILED,
+                target_type="zev.Zev",
+                target_id=str(zev.id),
+                target_display=zev.name,
+                metadata={
+                    "period_start": s.validated_data["period_start"],
+                    "period_end": s.validated_data["period_end"],
+                    "error": str(exc),
+                },
+            )
             return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
+        _record_invoice_event(
+            request=request,
+            action_type="invoice.generate_all",
+            summary=f"Generated {len(invoices)} invoices for ZEV {zev.name}.",
+            target_type="zev.Zev",
+            target_id=str(zev.id),
+            target_display=zev.name,
+            metadata={
+                "period_start": s.validated_data["period_start"],
+                "period_end": s.validated_data["period_end"],
+                "invoice_count": len(invoices),
+            },
+        )
         return Response(
             InvoiceSerializer(invoices, many=True, context={"request": request}).data,
             status=status.HTTP_201_CREATED,
@@ -499,6 +626,12 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         """Generate / regenerate the PDF for an invoice."""
         invoice = self.get_object()
         save_invoice_pdf(invoice)
+        _record_invoice_event(
+            request=request,
+            action_type="invoice.generate_pdf",
+            summary=f"Generated PDF for invoice {_invoice_target_display(invoice)}.",
+            invoice=invoice,
+        )
         return Response({"pdf_url": request.build_absolute_uri(invoice.pdf_file.url)})
 
     @action(detail=True, methods=["post"], url_path="send-email",
@@ -508,8 +641,23 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         invoice = self.get_object()
         recipient = request.data.get("email") or invoice.participant.email
         if not recipient:
+            _record_invoice_event(
+                request=request,
+                action_type="invoice.send_email",
+                summary=f"Failed to queue email for invoice {_invoice_target_display(invoice)}: no recipient.",
+                status=AuditEventStatus.FAILED,
+                invoice=invoice,
+            )
             return Response({"error": "No email address available."}, status=status.HTTP_400_BAD_REQUEST)
         send_invoice_email_task.delay(str(invoice.pk), recipient)
+        _record_invoice_event(
+            request=request,
+            action_type="invoice.send_email",
+            summary=f"Queued invoice email for {_invoice_target_display(invoice)} to {recipient}.",
+            status=AuditEventStatus.QUEUED,
+            invoice=invoice,
+            metadata={"recipient": recipient},
+        )
         return Response({"detail": f"Email queued for {recipient}."})
 
     @action(detail=True, methods=["post"], url_path="approve",
@@ -517,9 +665,24 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     def approve(self, request, pk=None):
         invoice = self.get_object()
         if invoice.status != InvoiceStatus.DRAFT:
+            _record_invoice_event(
+                request=request,
+                action_type="invoice.approve",
+                summary=f"Denied approval for {_invoice_target_display(invoice)} due to status guard.",
+                status=AuditEventStatus.DENIED,
+                invoice=invoice,
+            )
             return Response({"error": "Only draft invoices can be approved."}, status=status.HTTP_400_BAD_REQUEST)
+        before = {"status": invoice.status}
         invoice.status = InvoiceStatus.APPROVED
         invoice.save(update_fields=["status", "updated_at"])
+        _record_invoice_event(
+            request=request,
+            action_type="invoice.approve",
+            summary=f"Approved invoice {_invoice_target_display(invoice)}.",
+            invoice=invoice,
+            changes=build_diff(before, {"status": invoice.status}, ["status"]),
+        )
         return Response(InvoiceSerializer(invoice, context={"request": request}).data)
 
     @action(detail=True, methods=["post"], url_path="mark-sent",
@@ -528,11 +691,26 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         """Transition an approved invoice to sent/locked state."""
         invoice = self.get_object()
         if invoice.status != InvoiceStatus.APPROVED:
+            _record_invoice_event(
+                request=request,
+                action_type="invoice.mark_sent",
+                summary=f"Denied mark-sent for {_invoice_target_display(invoice)} due to status guard.",
+                status=AuditEventStatus.DENIED,
+                invoice=invoice,
+            )
             return Response({"error": "Only approved invoices can be marked as sent."}, status=status.HTTP_400_BAD_REQUEST)
+        before = {"status": invoice.status}
         invoice.status = InvoiceStatus.SENT
         from django.utils import timezone as tz
         invoice.sent_at = tz.now()
         invoice.save(update_fields=["status", "sent_at", "updated_at"])
+        _record_invoice_event(
+            request=request,
+            action_type="invoice.mark_sent",
+            summary=f"Marked invoice {_invoice_target_display(invoice)} as sent.",
+            invoice=invoice,
+            changes=build_diff(before, {"status": invoice.status}, ["status"]),
+        )
         return Response(InvoiceSerializer(invoice, context={"request": request}).data)
 
     @action(detail=True, methods=["post"], url_path="mark-paid",
@@ -541,9 +719,24 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         """Record that a sent invoice has been paid."""
         invoice = self.get_object()
         if invoice.status != InvoiceStatus.SENT:
+            _record_invoice_event(
+                request=request,
+                action_type="invoice.mark_paid",
+                summary=f"Denied mark-paid for {_invoice_target_display(invoice)} due to status guard.",
+                status=AuditEventStatus.DENIED,
+                invoice=invoice,
+            )
             return Response({"error": "Only sent invoices can be marked as paid."}, status=status.HTTP_400_BAD_REQUEST)
+        before = {"status": invoice.status}
         invoice.status = InvoiceStatus.PAID
         invoice.save(update_fields=["status", "updated_at"])
+        _record_invoice_event(
+            request=request,
+            action_type="invoice.mark_paid",
+            summary=f"Marked invoice {_invoice_target_display(invoice)} as paid.",
+            invoice=invoice,
+            changes=build_diff(before, {"status": invoice.status}, ["status"]),
+        )
         return Response(InvoiceSerializer(invoice, context={"request": request}).data)
 
     @action(detail=True, methods=["post"], url_path="cancel",
@@ -552,11 +745,33 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         """Cancel an invoice that has not yet been paid."""
         invoice = self.get_object()
         if invoice.status == InvoiceStatus.PAID:
+            _record_invoice_event(
+                request=request,
+                action_type="invoice.cancel",
+                summary=f"Denied cancellation for {_invoice_target_display(invoice)} because invoice is paid.",
+                status=AuditEventStatus.DENIED,
+                invoice=invoice,
+            )
             return Response({"error": "Paid invoices cannot be cancelled."}, status=status.HTTP_400_BAD_REQUEST)
         if invoice.status == InvoiceStatus.CANCELLED:
+            _record_invoice_event(
+                request=request,
+                action_type="invoice.cancel",
+                summary=f"Denied cancellation for {_invoice_target_display(invoice)} because it is already cancelled.",
+                status=AuditEventStatus.DENIED,
+                invoice=invoice,
+            )
             return Response({"error": "Invoice is already cancelled."}, status=status.HTTP_400_BAD_REQUEST)
+        before = {"status": invoice.status}
         invoice.status = InvoiceStatus.CANCELLED
         invoice.save(update_fields=["status", "updated_at"])
+        _record_invoice_event(
+            request=request,
+            action_type="invoice.cancel",
+            summary=f"Cancelled invoice {_invoice_target_display(invoice)}.",
+            invoice=invoice,
+            changes=build_diff(before, {"status": invoice.status}, ["status"]),
+        )
         return Response(InvoiceSerializer(invoice, context={"request": request}).data)
 
     @action(detail=True, methods=["post"], url_path="retry-email/<str:email_log_id>/",
@@ -567,13 +782,37 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         try:
             email_log = EmailLog.objects.get(pk=email_log_id, invoice=invoice)
         except EmailLog.DoesNotExist:
+            _record_invoice_event(
+                request=request,
+                action_type="invoice.retry_email",
+                summary=f"Failed email retry for {_invoice_target_display(invoice)}: email log not found.",
+                status=AuditEventStatus.FAILED,
+                invoice=invoice,
+                metadata={"email_log_id": email_log_id},
+            )
             return Response({"error": "Email log not found."}, status=status.HTTP_404_NOT_FOUND)
 
         if email_log.status == "sent":
+            _record_invoice_event(
+                request=request,
+                action_type="invoice.retry_email",
+                summary=f"Denied email retry for {_invoice_target_display(invoice)}: email already sent.",
+                status=AuditEventStatus.DENIED,
+                invoice=invoice,
+                metadata={"email_log_id": str(email_log.id), "recipient": email_log.recipient},
+            )
             return Response({"error": "Email already sent."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Queue retry
         send_invoice_email_task.delay(str(invoice.pk), email_log.recipient)
+        _record_invoice_event(
+            request=request,
+            action_type="invoice.retry_email",
+            summary=f"Queued email retry for {_invoice_target_display(invoice)} to {email_log.recipient}.",
+            status=AuditEventStatus.QUEUED,
+            invoice=invoice,
+            metadata={"email_log_id": str(email_log.id), "recipient": email_log.recipient},
+        )
         return Response({"detail": f"Email retry queued for {email_log.recipient}."})
 
     # ── Batch operations ────────────────────────────────────────────────
@@ -607,6 +846,15 @@ class InvoiceViewSet(viewsets.ModelViewSet):
 
         drafts = invoices.filter(status=InvoiceStatus.DRAFT)
         count = drafts.update(status=InvoiceStatus.APPROVED)
+        _record_invoice_event(
+            request=request,
+            action_type="invoice.approve_all",
+            summary=f"Approved {count} invoices in batch.",
+            target_type="zev.Zev",
+            target_id=str(_zev.id),
+            target_display=_zev.name,
+            metadata={"approved": count},
+        )
         return Response({"approved": count})
 
     @action(detail=False, methods=["post"], url_path="send-all",
@@ -627,6 +875,16 @@ class InvoiceViewSet(viewsets.ModelViewSet):
                 continue
             send_invoice_email_task.delay(str(invoice.pk), recipient)
             queued += 1
+        _record_invoice_event(
+            request=request,
+            action_type="invoice.send_all",
+            summary=f"Queued {queued} invoice emails in batch; skipped {skipped}.",
+            status=AuditEventStatus.QUEUED,
+            target_type="zev.Zev",
+            target_id=str(_zev.id),
+            target_display=_zev.name,
+            metadata={"queued": queued, "skipped": skipped},
+        )
         return Response({"queued": queued, "skipped": skipped})
 
     @action(detail=False, methods=["post"], url_path="generate-pdfs-all",
@@ -642,6 +900,15 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         for invoice in invoice_list:
             save_invoice_pdf(invoice)
             count += 1
+        _record_invoice_event(
+            request=request,
+            action_type="invoice.generate_pdfs_all",
+            summary=f"Generated {count} invoice PDFs in batch.",
+            target_type="zev.Zev",
+            target_id=str(_zev.id),
+            target_display=_zev.name,
+            metadata={"generated": count},
+        )
         return Response({"generated": count})
 
     @action(detail=False, methods=["post"], url_path="download-pdfs",
@@ -915,6 +1182,16 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         DELETE — removes the DB override, reverting to the on-disk default.
         """
         if not request.user.is_admin:
+            record_audit_event(
+                request=request,
+                action_category=AuditActionCategory.GOVERNANCE,
+                action_type="template.invoice_pdf.update",
+                target_type="invoices.PdfTemplate",
+                target_id=TEMPLATE_NAME,
+                target_display=TEMPLATE_NAME,
+                summary="Denied invoice PDF template mutation by non-admin.",
+                status=AuditEventStatus.DENIED,
+            )
             return Response({"error": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
 
         if request.method == "GET":
@@ -936,6 +1213,15 @@ class InvoiceViewSet(viewsets.ModelViewSet):
                 template_name=TEMPLATE_NAME,
                 defaults={"content": content},
             )
+            record_audit_event(
+                request=request,
+                action_category=AuditActionCategory.GOVERNANCE,
+                action_type="template.invoice_pdf.update",
+                target_type="invoices.PdfTemplate",
+                target_id=TEMPLATE_NAME,
+                target_display=TEMPLATE_NAME,
+                summary="Updated invoice PDF template.",
+            )
             return Response(
                 {
                     "template_name": TEMPLATE_NAME,
@@ -947,6 +1233,15 @@ class InvoiceViewSet(viewsets.ModelViewSet):
 
         # DELETE — revert to default
         PdfTemplate.objects.filter(template_name=TEMPLATE_NAME).delete()
+        record_audit_event(
+            request=request,
+            action_category=AuditActionCategory.GOVERNANCE,
+            action_type="template.invoice_pdf.reset",
+            target_type="invoices.PdfTemplate",
+            target_id=TEMPLATE_NAME,
+            target_display=TEMPLATE_NAME,
+            summary="Reset invoice PDF template to default.",
+        )
         return Response(
             {
                 "template_name": TEMPLATE_NAME,
@@ -966,6 +1261,16 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         DELETE — removes the DB override, reverting to the on-disk default.
         """
         if not request.user.is_admin:
+            record_audit_event(
+                request=request,
+                action_category=AuditActionCategory.GOVERNANCE,
+                action_type="template.contract_pdf.update",
+                target_type="invoices.PdfTemplate",
+                target_id=CONTRACT_TEMPLATE_NAME,
+                target_display=CONTRACT_TEMPLATE_NAME,
+                summary="Denied contract PDF template mutation by non-admin.",
+                status=AuditEventStatus.DENIED,
+            )
             return Response({"error": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
 
         if request.method == "GET":
@@ -987,6 +1292,15 @@ class InvoiceViewSet(viewsets.ModelViewSet):
                 template_name=CONTRACT_TEMPLATE_NAME,
                 defaults={"content": content},
             )
+            record_audit_event(
+                request=request,
+                action_category=AuditActionCategory.GOVERNANCE,
+                action_type="template.contract_pdf.update",
+                target_type="invoices.PdfTemplate",
+                target_id=CONTRACT_TEMPLATE_NAME,
+                target_display=CONTRACT_TEMPLATE_NAME,
+                summary="Updated contract PDF template.",
+            )
             return Response(
                 {
                     "template_name": CONTRACT_TEMPLATE_NAME,
@@ -998,6 +1312,15 @@ class InvoiceViewSet(viewsets.ModelViewSet):
 
         # DELETE — revert to default
         PdfTemplate.objects.filter(template_name=CONTRACT_TEMPLATE_NAME).delete()
+        record_audit_event(
+            request=request,
+            action_category=AuditActionCategory.GOVERNANCE,
+            action_type="template.contract_pdf.reset",
+            target_type="invoices.PdfTemplate",
+            target_id=CONTRACT_TEMPLATE_NAME,
+            target_display=CONTRACT_TEMPLATE_NAME,
+            summary="Reset contract PDF template to default.",
+        )
         return Response(
             {
                 "template_name": CONTRACT_TEMPLATE_NAME,
@@ -1017,6 +1340,16 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         DELETE — removes the DB override, reverting to the on-disk default.
         """
         if not request.user.is_admin:
+            record_audit_event(
+                request=request,
+                action_category=AuditActionCategory.GOVERNANCE,
+                action_type="template.annual_statement_pdf.update",
+                target_type="invoices.PdfTemplate",
+                target_id=ANNUAL_STATEMENT_TEMPLATE,
+                target_display=ANNUAL_STATEMENT_TEMPLATE,
+                summary="Denied annual statement PDF template mutation by non-admin.",
+                status=AuditEventStatus.DENIED,
+            )
             return Response({"error": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
 
         if request.method == "GET":
@@ -1038,6 +1371,15 @@ class InvoiceViewSet(viewsets.ModelViewSet):
                 template_name=ANNUAL_STATEMENT_TEMPLATE,
                 defaults={"content": content},
             )
+            record_audit_event(
+                request=request,
+                action_category=AuditActionCategory.GOVERNANCE,
+                action_type="template.annual_statement_pdf.update",
+                target_type="invoices.PdfTemplate",
+                target_id=ANNUAL_STATEMENT_TEMPLATE,
+                target_display=ANNUAL_STATEMENT_TEMPLATE,
+                summary="Updated annual statement PDF template.",
+            )
             return Response(
                 {
                     "template_name": ANNUAL_STATEMENT_TEMPLATE,
@@ -1049,6 +1391,15 @@ class InvoiceViewSet(viewsets.ModelViewSet):
 
         # DELETE — revert to default
         PdfTemplate.objects.filter(template_name=ANNUAL_STATEMENT_TEMPLATE).delete()
+        record_audit_event(
+            request=request,
+            action_category=AuditActionCategory.GOVERNANCE,
+            action_type="template.annual_statement_pdf.reset",
+            target_type="invoices.PdfTemplate",
+            target_id=ANNUAL_STATEMENT_TEMPLATE,
+            target_display=ANNUAL_STATEMENT_TEMPLATE,
+            summary="Reset annual statement PDF template to default.",
+        )
         return Response(
             {
                 "template_name": ANNUAL_STATEMENT_TEMPLATE,
@@ -1118,6 +1469,16 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         DELETE — removes the DB override, reverting to the hardcoded default.
         """
         if not request.user.is_admin:
+            record_audit_event(
+                request=request,
+                action_category=AuditActionCategory.GOVERNANCE,
+                action_type="template.email.update",
+                target_type="invoices.EmailTemplate",
+                target_id=str(template_key or ""),
+                target_display=str(template_key or ""),
+                summary="Denied email template mutation by non-admin.",
+                status=AuditEventStatus.DENIED,
+            )
             return Response({"error": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
 
         defaults = EMAIL_TEMPLATE_DEFAULTS.get(template_key)
@@ -1144,6 +1505,15 @@ class InvoiceViewSet(viewsets.ModelViewSet):
                 template_key=template_key,
                 defaults={"subject": subject, "body": body},
             )
+            record_audit_event(
+                request=request,
+                action_category=AuditActionCategory.GOVERNANCE,
+                action_type="template.email.update",
+                target_type="invoices.EmailTemplate",
+                target_id=template_key,
+                target_display=template_key,
+                summary=f"Updated email template {template_key}.",
+            )
             return Response({
                 "template_key": template_key,
                 "subject": subject,
@@ -1154,6 +1524,15 @@ class InvoiceViewSet(viewsets.ModelViewSet):
 
         # DELETE — revert to default
         EmailTemplate.objects.filter(template_key=template_key).delete()
+        record_audit_event(
+            request=request,
+            action_category=AuditActionCategory.GOVERNANCE,
+            action_type="template.email.reset",
+            target_type="invoices.EmailTemplate",
+            target_id=template_key,
+            target_display=template_key,
+            summary=f"Reset email template {template_key} to default.",
+        )
         return Response({
             "template_key": template_key,
             "subject": defaults["subject"],

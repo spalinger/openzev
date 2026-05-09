@@ -28,6 +28,7 @@ export function Layout() {
         location.pathname.startsWith('/zev-settings') ||
         location.pathname.startsWith('/metering-points') ||
         location.pathname.startsWith('/metering-data') ||
+        location.pathname.startsWith('/audit-logs') ||
         location.pathname.startsWith('/admin/zevs'),
     )
     const [isAdminNavOpen, setIsAdminNavOpen] = useState(location.pathname.startsWith('/admin'))
@@ -50,6 +51,7 @@ export function Layout() {
             location.pathname.startsWith('/zev-settings') ||
             location.pathname.startsWith('/metering-points') ||
             location.pathname.startsWith('/metering-data') ||
+            location.pathname.startsWith('/audit-logs') ||
             location.pathname.startsWith('/admin/zevs')
         ) {
             setIsManageNavOpen(true)
@@ -97,6 +99,7 @@ export function Layout() {
         location.pathname.startsWith('/zev-settings') ||
         location.pathname.startsWith('/metering-points') ||
         location.pathname.startsWith('/metering-data') ||
+        location.pathname.startsWith('/audit-logs') ||
         location.pathname.startsWith('/admin/zevs')
 
     const ownerById = new Map((usersQuery.data?.results ?? []).map((candidate) => [candidate.id, candidate]))
@@ -228,6 +231,17 @@ export function Layout() {
                             </NavLink>
                         )}
 
+                        {canManage && (
+                            <NavLink
+                                to="/audit-logs"
+                                className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+                                title={t('nav.auditLogs')}
+                            >
+                                <span className="nav-icon"><AuditIcon /></span>
+                                <span className="nav-label">{t('nav.auditLogs')}</span>
+                            </NavLink>
+                        )}
+
                         {user?.role === 'admin' && (
                             <div className="nav-section nav-section-end">
                                 {isSidebarCollapsed ? (
@@ -270,6 +284,10 @@ export function Layout() {
                                                 <NavLink to="/admin/invoices" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`} title={t('nav.adminInvoices')}>
                                                     <span className="nav-icon"><InvoiceIcon /></span>
                                                     <span className="nav-label">{t('nav.adminInvoices')}</span>
+                                                </NavLink>
+                                                <NavLink to="/admin/audit-logs" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`} title={t('nav.adminAuditLogs')}>
+                                                    <span className="nav-icon"><AuditIcon /></span>
+                                                    <span className="nav-label">{t('nav.adminAuditLogs')}</span>
                                                 </NavLink>
                                                 <NavLink to="/admin/system-settings" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`} title={t('nav.adminSystemSettings')}>
                                                     <span className="nav-icon"><SettingsIcon /></span>
@@ -471,6 +489,10 @@ function TagIcon() {
 
 function InvoiceIcon() {
     return <IconSvg path="M7 3h8l4 4v14l-2-1-2 1-2-1-2 1-2-1-2 1V4a1 1 0 0 1 1-1Zm1 6h8m-8 4h8m-8 4h5" />
+}
+
+function AuditIcon() {
+    return <IconSvg path="M8 6h8m-8 5h8m-8 5h8M4 6h.01M4 11h.01M4 16h.01" />
 }
 
 function ImportIcon() {

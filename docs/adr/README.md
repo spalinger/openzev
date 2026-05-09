@@ -13,6 +13,7 @@ This directory captures key architectural decisions for OpenZEV.
 - [0007: Timezone policy for storage, queries, and display](0007-timezone-policy.md)
 - [0008: Security model and audit logging scope](0008-security-and-audit-logging.md)
 - [0009: Remove direct MeteringPoint participant FK](0009-remove-direct-meteringpoint-participant-fk.md)
+- [0010: Centralized audit event stream for high-risk operational workflows](0010-centralized-audit-event-stream.md)
 
 ## Conventions
 

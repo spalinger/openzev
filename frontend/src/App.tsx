@@ -10,6 +10,7 @@ const AdminAccountsPage = lazy(async () => ({ default: (await import('./pages/Ad
 const AdminPdfTemplatesPage = lazy(async () => ({ default: (await import('./pages/AdminPdfTemplatesPage')).AdminPdfTemplatesPage }))
 const AdminEmailTemplatesPage = lazy(async () => ({ default: (await import('./pages/AdminEmailTemplatesPage')).AdminEmailTemplatesPage }))
 const AdminInvoicesPage = lazy(async () => ({ default: (await import('./pages/AdminInvoicesPage')).AdminInvoicesPage }))
+const AuditLogsPage = lazy(async () => ({ default: (await import('./pages/AdminAuditLogsPage')).AuditLogsPage }))
 const AdminSystemSettingsPage = lazy(async () => ({ default: (await import('./pages/AdminSystemSettingsPage')).AdminSystemSettingsPage }))
 const AdminVatSettingsPage = lazy(async () => ({ default: (await import('./pages/AdminVatSettingsPage')).AdminVatSettingsPage }))
 const DashboardPage = lazy(async () => ({ default: (await import('./pages/DashboardPage')).DashboardPage }))
@@ -99,6 +100,22 @@ function App() {
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <AdminInvoicesPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="admin/audit-logs"
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <AuditLogsPage scope="admin" />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="audit-logs"
+              element={
+                <ProtectedRoute allowedRoles={['admin', 'zev_owner']}>
+                  <AuditLogsPage scope="owner" />
                 </ProtectedRoute>
               }
             />

@@ -30,6 +30,8 @@ export const queryKeys = {
     invoicePdfTemplate: () => ['admin', 'pdf-template', 'invoice'] as const,
     contractPdfTemplate: () => ['admin', 'pdf-template', 'contract'] as const,
     annualStatementPdfTemplate: () => ['admin', 'pdf-template', 'annual-statement'] as const,
+    auditEvents: (filters?: unknown) => ['admin', 'audit-events', filters ?? {}] as const,
+    auditEvent: (eventId: string) => ['admin', 'audit-event', eventId] as const,
   },
   metering: {
     points: (zevId?: string) => ['metering', 'points', zevId ?? 'all'] as const,
