@@ -27,6 +27,37 @@ from .permissions import (
     ZevManagementPermission,
 )
 from .services import send_participant_invitation, create_zev_for_existing_owner
+from audit.models import AuditActionCategory, AuditEventStatus
+from audit.services import build_diff, record_audit_event
+
+
+def _record_zev_event(
+    *,
+    request,
+    action_category: str,
+    action_type: str,
+    target_type: str,
+    summary: str,
+    target=None,
+    target_id: str = "",
+    target_display: str = "",
+    status: str = AuditEventStatus.SUCCESS,
+    changes: dict | None = None,
+    metadata: dict | None = None,
+):
+    record_audit_event(
+        request=request,
+        action_category=action_category,
+        action_type=action_type,
+        target_type=target_type,
+        target=target,
+        target_id=target_id,
+        target_display=target_display,
+        summary=summary,
+        status=status,
+        changes=changes,
+        metadata=metadata,
+    )
 
 
 class ZevViewSet(viewsets.ModelViewSet):
@@ -96,6 +127,71 @@ class ParticipantViewSet(viewsets.ModelViewSet):
             return Participant.objects.filter(zev__owner=user).prefetch_related("metering_point_assignments")
         return Participant.objects.filter(user=user).prefetch_related("metering_point_assignments")
 
+    def perform_create(self, serializer):
+        participant = serializer.save()
+        _record_zev_event(
+            request=self.request,
+            action_category=AuditActionCategory.PARTICIPANT,
+            action_type="participant.create",
+            target_type="zev.Participant",
+            target=participant,
+            target_id=str(participant.pk),
+            target_display=participant.full_name,
+            summary=f"Created participant {participant.full_name}.",
+            metadata={"zev_id": str(participant.zev_id)},
+        )
+
+    def perform_update(self, serializer):
+        participant = self.get_object()
+        before = {
+            "first_name": participant.first_name,
+            "last_name": participant.last_name,
+            "email": participant.email,
+            "valid_from": participant.valid_from,
+            "valid_to": participant.valid_to,
+            "user": str(participant.user_id) if participant.user_id else None,
+        }
+        participant = serializer.save()
+        after = {
+            "first_name": participant.first_name,
+            "last_name": participant.last_name,
+            "email": participant.email,
+            "valid_from": participant.valid_from,
+            "valid_to": participant.valid_to,
+            "user": str(participant.user_id) if participant.user_id else None,
+        }
+        _record_zev_event(
+            request=self.request,
+            action_category=AuditActionCategory.PARTICIPANT,
+            action_type="participant.update",
+            target_type="zev.Participant",
+            target=participant,
+            target_id=str(participant.pk),
+            target_display=participant.full_name,
+            summary=f"Updated participant {participant.full_name}.",
+            changes=build_diff(
+                before,
+                after,
+                ["first_name", "last_name", "email", "valid_from", "valid_to", "user"],
+            ),
+        )
+
+    def perform_destroy(self, instance):
+        participant_id = str(instance.pk)
+        participant_display = instance.full_name
+        zev_id = str(instance.zev_id)
+        instance.delete()
+        _record_zev_event(
+            request=self.request,
+            action_category=AuditActionCategory.PARTICIPANT,
+            action_type="participant.delete",
+            target_type="zev.Participant",
+            target_id=participant_id,
+            target_display=participant_display,
+            summary=f"Deleted participant {participant_display}.",
+            metadata={"zev_id": zev_id},
+        )
+
     @action(detail=True, methods=["get"], url_path="contract-pdf",
             permission_classes=[IsAuthenticated])
     def contract_pdf(self, request, pk=None):
@@ -114,6 +210,16 @@ class ParticipantViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="link-account")
     def link_account(self, request, pk=None):
         if not request.user.is_admin:
+            _record_zev_event(
+                request=request,
+                action_category=AuditActionCategory.PARTICIPANT,
+                action_type="participant.link_account",
+                target_type="zev.Participant",
+                target_id=str(pk or ""),
+                target_display=str(pk or ""),
+                summary="Denied participant account link by non-admin.",
+                status=AuditEventStatus.DENIED,
+            )
             return Response({"detail": "Only admins can link accounts."}, status=status.HTTP_403_FORBIDDEN)
 
         participant = self.get_object()
@@ -135,12 +241,33 @@ class ParticipantViewSet(viewsets.ModelViewSet):
 
         participant.user = account
         participant.save(update_fields=["user", "updated_at"])
+        _record_zev_event(
+            request=request,
+            action_category=AuditActionCategory.PARTICIPANT,
+            action_type="participant.link_account",
+            target_type="zev.Participant",
+            target=participant,
+            target_id=str(participant.pk),
+            target_display=participant.full_name,
+            summary=f"Linked account {account.username} to participant {participant.full_name}.",
+            changes={"user": {"before": None, "after": str(account.id)}},
+        )
         serializer = self.get_serializer(participant)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="unlink-account")
     def unlink_account(self, request, pk=None):
         if not request.user.is_admin:
+            _record_zev_event(
+                request=request,
+                action_category=AuditActionCategory.PARTICIPANT,
+                action_type="participant.unlink_account",
+                target_type="zev.Participant",
+                target_id=str(pk or ""),
+                target_display=str(pk or ""),
+                summary="Denied participant account unlink by non-admin.",
+                status=AuditEventStatus.DENIED,
+            )
             return Response({"detail": "Only admins can unlink accounts."}, status=status.HTTP_403_FORBIDDEN)
 
         participant = self.get_object()
@@ -156,12 +283,33 @@ class ParticipantViewSet(viewsets.ModelViewSet):
 
         participant.user = None
         participant.save(update_fields=["user", "updated_at"])
+        _record_zev_event(
+            request=request,
+            action_category=AuditActionCategory.PARTICIPANT,
+            action_type="participant.unlink_account",
+            target_type="zev.Participant",
+            target=participant,
+            target_id=str(participant.pk),
+            target_display=participant.full_name,
+            summary=f"Unlinked account {unlinked_account.username} from participant {participant.full_name}.",
+            changes={"user": {"before": str(unlinked_account.id), "after": None}},
+        )
         serializer = self.get_serializer(participant)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="create-account")
     def create_account(self, request, pk=None):
         if not request.user.is_admin:
+            _record_zev_event(
+                request=request,
+                action_category=AuditActionCategory.PARTICIPANT,
+                action_type="participant.create_account",
+                target_type="zev.Participant",
+                target_id=str(pk or ""),
+                target_display=str(pk or ""),
+                summary="Denied participant account creation by non-admin.",
+                status=AuditEventStatus.DENIED,
+            )
             return Response({"detail": "Only admins can create participant accounts."}, status=status.HTTP_403_FORBIDDEN)
 
         participant = self.get_object()
@@ -193,6 +341,17 @@ class ParticipantViewSet(viewsets.ModelViewSet):
 
         participant.user = account
         participant.save(update_fields=["user", "updated_at"])
+        _record_zev_event(
+            request=request,
+            action_category=AuditActionCategory.PARTICIPANT,
+            action_type="participant.create_account",
+            target_type="zev.Participant",
+            target=participant,
+            target_id=str(participant.pk),
+            target_display=participant.full_name,
+            summary=f"Created and linked account {account.username} for participant {participant.full_name}.",
+            changes={"user": {"before": None, "after": str(account.id)}},
+        )
 
         serializer = self.get_serializer(participant)
         return Response(
@@ -229,7 +388,30 @@ class ParticipantViewSet(viewsets.ModelViewSet):
         try:
             username, temporary_password = send_participant_invitation(participant, request.user)
         except ValueError as exc:
+            _record_zev_event(
+                request=request,
+                action_category=AuditActionCategory.PARTICIPANT,
+                action_type="participant.send_invitation",
+                target_type="zev.Participant",
+                target=participant,
+                target_id=str(participant.pk),
+                target_display=participant.full_name,
+                summary=f"Failed invitation email for participant {participant.full_name}.",
+                status=AuditEventStatus.FAILED,
+                metadata={"error": str(exc)},
+            )
             return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        _record_zev_event(
+            request=request,
+            action_category=AuditActionCategory.PARTICIPANT,
+            action_type="participant.send_invitation",
+            target_type="zev.Participant",
+            target=participant,
+            target_id=str(participant.pk),
+            target_display=participant.full_name,
+            summary=f"Sent participant invitation to {participant.email}.",
+            metadata={"username": username},
+        )
         return Response(
             {
                 "detail": f"Invitation email sent to {participant.email}.",
@@ -252,6 +434,61 @@ class MeteringPointViewSet(viewsets.ModelViewSet):
         if user.is_zev_owner:
             return qs.filter(zev__owner=user)
         return qs.filter(assignments__participant__user=user).distinct()
+
+    def perform_create(self, serializer):
+        metering_point = serializer.save()
+        _record_zev_event(
+            request=self.request,
+            action_category=AuditActionCategory.METERING,
+            action_type="metering_point.create",
+            target_type="zev.MeteringPoint",
+            target=metering_point,
+            target_id=str(metering_point.pk),
+            target_display=metering_point.meter_id,
+            summary=f"Created metering point {metering_point.meter_id}.",
+            metadata={"zev_id": str(metering_point.zev_id), "meter_type": metering_point.meter_type},
+        )
+
+    def perform_update(self, serializer):
+        metering_point = self.get_object()
+        before = {
+            "meter_type": metering_point.meter_type,
+            "is_active": metering_point.is_active,
+            "location_description": metering_point.location_description,
+        }
+        metering_point = serializer.save()
+        after = {
+            "meter_type": metering_point.meter_type,
+            "is_active": metering_point.is_active,
+            "location_description": metering_point.location_description,
+        }
+        _record_zev_event(
+            request=self.request,
+            action_category=AuditActionCategory.METERING,
+            action_type="metering_point.update",
+            target_type="zev.MeteringPoint",
+            target=metering_point,
+            target_id=str(metering_point.pk),
+            target_display=metering_point.meter_id,
+            summary=f"Updated metering point {metering_point.meter_id}.",
+            changes=build_diff(before, after, ["meter_type", "is_active", "location_description"]),
+        )
+
+    def perform_destroy(self, instance):
+        meter_id = instance.meter_id
+        metering_point_id = str(instance.pk)
+        zev_id = str(instance.zev_id)
+        instance.delete()
+        _record_zev_event(
+            request=self.request,
+            action_category=AuditActionCategory.METERING,
+            action_type="metering_point.delete",
+            target_type="zev.MeteringPoint",
+            target_id=metering_point_id,
+            target_display=meter_id,
+            summary=f"Deleted metering point {meter_id}.",
+            metadata={"zev_id": zev_id},
+        )
 
     @action(
         detail=True,
@@ -295,6 +532,18 @@ class MeteringPointViewSet(viewsets.ModelViewSet):
         deleted_count = readings_qs.count()
         readings_qs.delete()
 
+        _record_zev_event(
+            request=request,
+            action_category=AuditActionCategory.METERING,
+            action_type="metering_point.delete_readings",
+            target_type="zev.MeteringPoint",
+            target=metering_point,
+            target_id=str(metering_point.pk),
+            target_display=metering_point.meter_id,
+            summary=f"Deleted {deleted_count} meter readings for {metering_point.meter_id}.",
+            metadata={"delete_all": delete_all, "date_from": date_from, "date_to": date_to},
+        )
+
         return Response({"deleted_count": deleted_count}, status=status.HTTP_200_OK)
 
 
@@ -322,3 +571,61 @@ class MeteringPointAssignmentViewSet(viewsets.ModelViewSet):
             qs = qs.filter(metering_point_id=mp_id)
 
         return qs
+
+    def perform_create(self, serializer):
+        assignment = serializer.save()
+        _record_zev_event(
+            request=self.request,
+            action_category=AuditActionCategory.METERING,
+            action_type="metering_assignment.create",
+            target_type="zev.MeteringPointAssignment",
+            target=assignment,
+            target_id=str(assignment.pk),
+            target_display=str(assignment.pk),
+            summary=f"Created metering point assignment for {assignment.metering_point.meter_id}.",
+            metadata={
+                "metering_point_id": str(assignment.metering_point_id),
+                "participant_id": str(assignment.participant_id),
+            },
+        )
+
+    def perform_update(self, serializer):
+        assignment = self.get_object()
+        before = {
+            "participant": str(assignment.participant_id),
+            "valid_from": assignment.valid_from,
+            "valid_to": assignment.valid_to,
+        }
+        assignment = serializer.save()
+        after = {
+            "participant": str(assignment.participant_id),
+            "valid_from": assignment.valid_from,
+            "valid_to": assignment.valid_to,
+        }
+        _record_zev_event(
+            request=self.request,
+            action_category=AuditActionCategory.METERING,
+            action_type="metering_assignment.update",
+            target_type="zev.MeteringPointAssignment",
+            target=assignment,
+            target_id=str(assignment.pk),
+            target_display=str(assignment.pk),
+            summary=f"Updated metering point assignment for {assignment.metering_point.meter_id}.",
+            changes=build_diff(before, after, ["participant", "valid_from", "valid_to"]),
+        )
+
+    def perform_destroy(self, instance):
+        assignment_id = str(instance.pk)
+        meter_id = instance.metering_point.meter_id
+        participant_id = str(instance.participant_id)
+        instance.delete()
+        _record_zev_event(
+            request=self.request,
+            action_category=AuditActionCategory.METERING,
+            action_type="metering_assignment.delete",
+            target_type="zev.MeteringPointAssignment",
+            target_id=assignment_id,
+            target_display=assignment_id,
+            summary=f"Deleted metering point assignment for {meter_id}.",
+            metadata={"participant_id": participant_id},
+        )

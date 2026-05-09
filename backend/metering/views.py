@@ -16,6 +16,35 @@ from .models import MeterReading, ImportLog
 from .serializers import MeterReadingSerializer, ImportLogSerializer
 from .importers.csv_importer import import_csv, preview_csv
 from .importers.sdatch_importer import import_sdatch
+from audit.models import AuditActionCategory, AuditEventStatus
+from audit.services import record_audit_event
+
+
+def _record_metering_event(
+    *,
+    request,
+    action_category: str,
+    action_type: str,
+    target_type: str,
+    summary: str,
+    target=None,
+    target_id: str = "",
+    target_display: str = "",
+    status: str = AuditEventStatus.SUCCESS,
+    metadata: dict | None = None,
+):
+    record_audit_event(
+        request=request,
+        action_category=action_category,
+        action_type=action_type,
+        target_type=target_type,
+        target=target,
+        target_id=target_id,
+        target_display=target_display,
+        summary=summary,
+        status=status,
+        metadata=metadata,
+    )
 
 
 class MeterReadingViewSet(viewsets.ModelViewSet):
@@ -921,6 +950,16 @@ class ImportLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         result = self._delete_import_logs(self.get_queryset().filter(pk=instance.pk))
+        _record_metering_event(
+            request=request,
+            action_category=AuditActionCategory.METERING,
+            action_type="import_log.delete",
+            target_type="metering.ImportLog",
+            target_id=str(instance.pk),
+            target_display=str(instance.batch_id),
+            summary=f"Deleted import log {instance.pk} and related readings.",
+            metadata=result,
+        )
         return Response(result, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["post"], url_path="bulk-delete")
@@ -945,6 +984,20 @@ class ImportLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.
 
         result = self._delete_import_logs(queryset)
         result["mode"] = mode
+        _record_metering_event(
+            request=request,
+            action_category=AuditActionCategory.METERING,
+            action_type="import_log.bulk_delete",
+            target_type="metering.ImportLog",
+            summary="Bulk deleted import logs and related readings.",
+            metadata={
+                "mode": mode,
+                "zev_id": zev_id,
+                "date_from": str(request.data.get("date_from") or ""),
+                "date_to": str(request.data.get("date_to") or ""),
+                **result,
+            },
+        )
         return Response(result, status=status.HTTP_200_OK)
 
 
@@ -965,6 +1018,14 @@ class ImportView(viewsets.ViewSet):
     def preview_csv_import(self, request):
         file = request.FILES.get("file")
         if not file:
+            _record_metering_event(
+                request=request,
+                action_category=AuditActionCategory.IMPORT,
+                action_type="import.preview_csv",
+                target_type="metering.ImportLog",
+                summary="CSV import preview failed: no file provided.",
+                status=AuditEventStatus.FAILED,
+            )
             return Response({"error": "No file provided."}, status=status.HTTP_400_BAD_REQUEST)
 
         column_map_raw = {k: v for k, v in request.data.items() if k.startswith("col_")}
@@ -977,22 +1038,57 @@ class ImportView(viewsets.ViewSet):
         interval_minutes = int(request.data.get("interval_minutes", 15))
         values_count = int(request.data.get("values_count", 96))
 
-        payload = preview_csv(
-            file,
-            request.user,
-            column_map=column_map,
-            timestamp_format=timestamp_format,
-            has_header=has_header,
-            delimiter=delimiter,
-            format_profile=format_profile,
-            interval_minutes=interval_minutes,
-            values_count=values_count,
+        try:
+            payload = preview_csv(
+                file,
+                request.user,
+                column_map=column_map,
+                timestamp_format=timestamp_format,
+                has_header=has_header,
+                delimiter=delimiter,
+                format_profile=format_profile,
+                interval_minutes=interval_minutes,
+                values_count=values_count,
+            )
+        except Exception as exc:
+            _record_metering_event(
+                request=request,
+                action_category=AuditActionCategory.IMPORT,
+                action_type="import.preview_csv",
+                target_type="metering.ImportLog",
+                summary="CSV import preview failed.",
+                status=AuditEventStatus.FAILED,
+                metadata={"error": str(exc), "filename": file.name},
+            )
+            raise
+
+        _record_metering_event(
+            request=request,
+            action_category=AuditActionCategory.IMPORT,
+            action_type="import.preview_csv",
+            target_type="metering.ImportLog",
+            summary="Generated CSV import preview.",
+            metadata={
+                "filename": file.name,
+                "format_profile": format_profile,
+                "interval_minutes": interval_minutes,
+                "values_count": values_count,
+            },
         )
         return Response(payload)
 
     def _do_import(self, request, source):
         file = request.FILES.get("file")
         if not file:
+            _record_metering_event(
+                request=request,
+                action_category=AuditActionCategory.IMPORT,
+                action_type="import.upload",
+                target_type="metering.ImportLog",
+                summary=f"{source.upper()} import failed: no file provided.",
+                status=AuditEventStatus.FAILED,
+                metadata={"source": source},
+            )
             return Response({"error": "No file provided."}, status=status.HTTP_400_BAD_REQUEST)
 
         if source == "csv":
@@ -1026,11 +1122,52 @@ class ImportView(viewsets.ViewSet):
             try:
                 zev = Zev.objects.get(pk=zev_id)
             except Zev.DoesNotExist:
+                _record_metering_event(
+                    request=request,
+                    action_category=AuditActionCategory.IMPORT,
+                    action_type="import.upload",
+                    target_type="zev.Zev",
+                    target_id=str(zev_id or ""),
+                    target_display=str(zev_id or ""),
+                    summary="SDAT-CH import failed: ZEV not found.",
+                    status=AuditEventStatus.FAILED,
+                    metadata={"source": source, "filename": file.name},
+                )
                 return Response({"error": "ZEV not found."}, status=status.HTTP_404_NOT_FOUND)
 
             if not request.user.is_admin and zev.owner != request.user:
+                _record_metering_event(
+                    request=request,
+                    action_category=AuditActionCategory.IMPORT,
+                    action_type="import.upload",
+                    target_type="zev.Zev",
+                    target=zev,
+                    target_id=str(zev.id),
+                    target_display=zev.name,
+                    summary="Denied SDAT-CH import due to tenant scope.",
+                    status=AuditEventStatus.DENIED,
+                    metadata={"source": source, "filename": file.name},
+                )
                 return Response({"error": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
 
             log = import_sdatch(file, zev, request.user)
+
+        _record_metering_event(
+            request=request,
+            action_category=AuditActionCategory.IMPORT,
+            action_type="import.upload",
+            target_type="metering.ImportLog",
+            target=log,
+            target_id=str(log.id),
+            target_display=str(log.batch_id),
+            summary=f"Completed {source.upper()} import for {log.rows_imported} rows.",
+            metadata={
+                "source": source,
+                "filename": log.filename,
+                "rows_total": log.rows_total,
+                "rows_imported": log.rows_imported,
+                "rows_skipped": log.rows_skipped,
+            },
+        )
 
         return Response(ImportLogSerializer(log).data, status=status.HTTP_201_CREATED)

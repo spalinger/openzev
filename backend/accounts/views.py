@@ -31,8 +31,43 @@ from .serializers import (
 )
 from .models import AppSettings, FeatureFlag, VatRate
 from .permissions import IsAdmin
+from audit.models import AuditActionCategory, AuditEventStatus
+from audit.services import build_diff, record_audit_event
 
 logger = logging.getLogger(__name__)
+
+
+def _record_accounts_event(
+    *,
+    request=None,
+    action_category: str,
+    action_type: str,
+    target_type: str,
+    summary: str,
+    target=None,
+    target_id: str = "",
+    target_display: str = "",
+    status: str = AuditEventStatus.SUCCESS,
+    changes: dict | None = None,
+    metadata: dict | None = None,
+    reason: str = "",
+    user=None,
+):
+    record_audit_event(
+        request=request,
+        user=user,
+        action_category=action_category,
+        action_type=action_type,
+        target_type=target_type,
+        target=target,
+        target_id=target_id,
+        target_display=target_display,
+        summary=summary,
+        status=status,
+        changes=changes,
+        metadata=metadata,
+        reason=reason,
+    )
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
@@ -57,8 +92,30 @@ class UserListCreateView(generics.ListCreateAPIView):
 
     def create(self, request, *args, **kwargs):
         if not request.user.is_admin:
+            _record_accounts_event(
+                request=request,
+                action_category=AuditActionCategory.AUTH,
+                action_type="user.create",
+                target_type="accounts.User",
+                summary="Denied user creation attempt by non-admin.",
+                status=AuditEventStatus.DENIED,
+            )
             raise PermissionDenied("Only admins can create users.")
         return super().create(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        user = serializer.save()
+        _record_accounts_event(
+            request=self.request,
+            action_category=AuditActionCategory.AUTH,
+            action_type="user.create",
+            target_type="accounts.User",
+            target=user,
+            target_id=str(user.pk),
+            target_display=user.email or user.username,
+            summary=f"Created user {user.email or user.username}.",
+            metadata={"role": user.role, "is_active": user.is_active},
+        )
 
 
 class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -68,12 +125,56 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [IsAdmin]
 
     def perform_update(self, serializer):
-        serializer.save()
+        instance = self.get_object()
+        before = {
+            "role": instance.role,
+            "is_active": instance.is_active,
+            "email": instance.email,
+        }
+        user = serializer.save()
+        after = {
+            "role": user.role,
+            "is_active": user.is_active,
+            "email": user.email,
+        }
+        _record_accounts_event(
+            request=self.request,
+            action_category=AuditActionCategory.AUTH,
+            action_type="user.update",
+            target_type="accounts.User",
+            target=user,
+            target_id=str(user.pk),
+            target_display=user.email or user.username,
+            summary=f"Updated user {user.email or user.username}.",
+            changes=build_diff(before, after, ["role", "is_active", "email"]),
+        )
 
     def perform_destroy(self, instance):
         if instance.participations.exists():
+            _record_accounts_event(
+                request=self.request,
+                action_category=AuditActionCategory.AUTH,
+                action_type="user.delete",
+                target_type="accounts.User",
+                target=instance,
+                target_id=str(instance.pk),
+                target_display=instance.email or instance.username,
+                summary=f"Denied deletion of linked user {instance.email or instance.username}.",
+                status=AuditEventStatus.DENIED,
+            )
             raise PermissionDenied("Linked participant accounts cannot be deleted.")
+        user_display = instance.email or instance.username
+        user_id = str(instance.pk)
         instance.delete()
+        _record_accounts_event(
+            request=self.request,
+            action_category=AuditActionCategory.AUTH,
+            action_type="user.delete",
+            target_type="accounts.User",
+            target_id=user_id,
+            target_display=user_display,
+            summary=f"Deleted user {user_display}.",
+        )
 
 
 class VatRateListCreateView(generics.ListCreateAPIView):
@@ -84,7 +185,18 @@ class VatRateListCreateView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         try:
-            serializer.save()
+            vat_rate = serializer.save()
+            _record_accounts_event(
+                request=self.request,
+                action_category=AuditActionCategory.GOVERNANCE,
+                action_type="vat_rate.create",
+                target_type="accounts.VatRate",
+                target=vat_rate,
+                target_id=str(vat_rate.pk),
+                target_display=f"VAT {vat_rate.rate}%",
+                summary=f"Created VAT rate {vat_rate.rate}%.",
+                metadata={"valid_from": vat_rate.valid_from, "valid_to": vat_rate.valid_to},
+            )
         except DjangoValidationError as exc:
             raise ValidationError(getattr(exc, "message_dict", {"non_field_errors": exc.messages}))
 
@@ -95,10 +207,46 @@ class VatRateDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = VatRateSerializer
 
     def perform_update(self, serializer):
+        instance = self.get_object()
+        before = {
+            "rate": str(instance.rate),
+            "valid_from": instance.valid_from,
+            "valid_to": instance.valid_to,
+        }
         try:
-            serializer.save()
+            vat_rate = serializer.save()
+            after = {
+                "rate": str(vat_rate.rate),
+                "valid_from": vat_rate.valid_from,
+                "valid_to": vat_rate.valid_to,
+            }
+            _record_accounts_event(
+                request=self.request,
+                action_category=AuditActionCategory.GOVERNANCE,
+                action_type="vat_rate.update",
+                target_type="accounts.VatRate",
+                target=vat_rate,
+                target_id=str(vat_rate.pk),
+                target_display=f"VAT {vat_rate.rate}%",
+                summary=f"Updated VAT rate {vat_rate.rate}%.",
+                changes=build_diff(before, after, ["rate", "valid_from", "valid_to"]),
+            )
         except DjangoValidationError as exc:
             raise ValidationError(getattr(exc, "message_dict", {"non_field_errors": exc.messages}))
+
+    def perform_destroy(self, instance):
+        vat_id = str(instance.pk)
+        vat_display = f"VAT {instance.rate}%"
+        instance.delete()
+        _record_accounts_event(
+            request=self.request,
+            action_category=AuditActionCategory.GOVERNANCE,
+            action_type="vat_rate.delete",
+            target_type="accounts.VatRate",
+            target_id=vat_id,
+            target_display=vat_display,
+            summary=f"Deleted VAT rate {vat_display}.",
+        )
 
 
 @api_view(["GET", "PATCH"])
@@ -119,6 +267,16 @@ def change_password(request):
     serializer = ChangePasswordSerializer(data=request.data, context={"request": request})
     serializer.is_valid(raise_exception=True)
     serializer.save()
+    _record_accounts_event(
+        request=request,
+        action_category=AuditActionCategory.AUTH,
+        action_type="password.change",
+        target_type="accounts.User",
+        target=request.user,
+        target_id=str(request.user.pk),
+        target_display=request.user.email or request.user.username,
+        summary="Changed account password.",
+    )
     return Response({"detail": "Password updated successfully."})
 
 
@@ -131,11 +289,44 @@ def app_settings(request):
         return Response(AppSettingsSerializer(settings_instance).data)
 
     if not request.user.is_admin:
+        _record_accounts_event(
+            request=request,
+            action_category=AuditActionCategory.GOVERNANCE,
+            action_type="app_settings.update",
+            target_type="accounts.AppSettings",
+            summary="Denied app settings update by non-admin.",
+            status=AuditEventStatus.DENIED,
+        )
         raise PermissionDenied("Only admins can update application settings.")
 
+    before = {
+        "date_format_short": settings_instance.date_format_short,
+        "date_format_long": settings_instance.date_format_long,
+        "date_time_format": settings_instance.date_time_format,
+    }
     serializer = AppSettingsSerializer(settings_instance, data=request.data, partial=True)
     serializer.is_valid(raise_exception=True)
-    serializer.save()
+    updated = serializer.save()
+    after = {
+        "date_format_short": updated.date_format_short,
+        "date_format_long": updated.date_format_long,
+        "date_time_format": updated.date_time_format,
+    }
+    _record_accounts_event(
+        request=request,
+        action_category=AuditActionCategory.GOVERNANCE,
+        action_type="app_settings.update",
+        target_type="accounts.AppSettings",
+        target=updated,
+        target_id="singleton",
+        target_display="AppSettings",
+        summary="Updated application settings.",
+        changes=build_diff(
+            before,
+            after,
+            ["date_format_short", "date_format_long", "date_time_format"],
+        ),
+    )
     return Response(serializer.data)
 
 
@@ -153,6 +344,16 @@ def feature_flags_list(request):
 def feature_flag_update(request, pk: int):
     """Toggle a feature flag. Admin-only."""
     if not request.user.is_admin:
+        _record_accounts_event(
+            request=request,
+            action_category=AuditActionCategory.GOVERNANCE,
+            action_type="feature_flag.update",
+            target_type="accounts.FeatureFlag",
+            target_id=str(pk),
+            target_display=str(pk),
+            summary="Denied feature flag update by non-admin.",
+            status=AuditEventStatus.DENIED,
+        )
         raise PermissionDenied("Only admins can update feature flags.")
 
     try:
@@ -162,7 +363,19 @@ def feature_flag_update(request, pk: int):
 
     serializer = FeatureFlagSerializer(flag, data=request.data, partial=True)
     serializer.is_valid(raise_exception=True)
-    serializer.save()
+    before = {"enabled": flag.enabled}
+    updated = serializer.save()
+    _record_accounts_event(
+        request=request,
+        action_category=AuditActionCategory.GOVERNANCE,
+        action_type="feature_flag.update",
+        target_type="accounts.FeatureFlag",
+        target=updated,
+        target_id=str(updated.pk),
+        target_display=updated.name,
+        summary=f"Updated feature flag {updated.name}.",
+        changes=build_diff(before, {"enabled": updated.enabled}, ["enabled"]),
+    )
     return Response(serializer.data)
 
 
@@ -170,14 +383,46 @@ def feature_flag_update(request, pk: int):
 @permission_classes([IsAuthenticated])
 def impersonate_participant(request, user_id: int):
     if not request.user.is_admin:
+        _record_accounts_event(
+            request=request,
+            action_category=AuditActionCategory.AUTH,
+            action_type="impersonation.issue_token",
+            target_type="accounts.User",
+            target_id=str(user_id),
+            target_display=str(user_id),
+            summary="Denied impersonation token issuance by non-admin.",
+            status=AuditEventStatus.DENIED,
+        )
         raise PermissionDenied("Only admins can impersonate participants.")
 
     try:
         target_user = User.objects.get(pk=user_id)
     except User.DoesNotExist:
+        _record_accounts_event(
+            request=request,
+            action_category=AuditActionCategory.AUTH,
+            action_type="impersonation.issue_token",
+            target_type="accounts.User",
+            target_id=str(user_id),
+            target_display=str(user_id),
+            summary=f"Impersonation target user {user_id} not found.",
+            status=AuditEventStatus.FAILED,
+        )
         return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
     if target_user.role not in (UserRole.PARTICIPANT, UserRole.ZEV_OWNER):
+        _record_accounts_event(
+            request=request,
+            action_category=AuditActionCategory.AUTH,
+            action_type="impersonation.issue_token",
+            target_type="accounts.User",
+            target=target_user,
+            target_id=str(target_user.pk),
+            target_display=target_user.email or target_user.username,
+            summary=f"Denied impersonation for {target_user.email or target_user.username} due to role guard.",
+            status=AuditEventStatus.DENIED,
+            metadata={"role": target_user.role},
+        )
         return Response({"detail": "Only participant or ZEV owner users can be impersonated."}, status=status.HTTP_400_BAD_REQUEST)
 
     refresh = RefreshToken.for_user(target_user)
@@ -186,6 +431,18 @@ def impersonate_participant(request, user_id: int):
     refresh["full_name"] = target_user.get_full_name()
     refresh["must_change_password"] = target_user.must_change_password
     refresh["impersonated_by"] = request.user.id
+
+    _record_accounts_event(
+        request=request,
+        action_category=AuditActionCategory.AUTH,
+        action_type="impersonation.issue_token",
+        target_type="accounts.User",
+        target=target_user,
+        target_id=str(target_user.pk),
+        target_display=target_user.email or target_user.username,
+        summary=f"Issued impersonation token for {target_user.email or target_user.username}.",
+        metadata={"impersonated_by": request.user.id},
+    )
 
     return Response(
         {
@@ -297,6 +554,18 @@ def verify_email(request):
     user.is_active = True
     user.save(update_fields=["is_active"])
 
+    _record_accounts_event(
+        action_category=AuditActionCategory.AUTH,
+        action_type="email.verify",
+        target_type="accounts.User",
+        target=user,
+        target_id=str(user.pk),
+        target_display=user.email or user.username,
+        summary=f"Verified email for {user.email or user.username}.",
+        user=user,
+        changes=build_diff({"is_active": False}, {"is_active": user.is_active}, ["is_active"]),
+    )
+
     refresh = RefreshToken.for_user(user)
     return Response({
         "access": str(refresh.access_token),
@@ -314,6 +583,17 @@ def set_initial_password(request):
 
     user = request.user
     if not (user.must_change_password or not user.has_usable_password()):
+        _record_accounts_event(
+            request=request,
+            action_category=AuditActionCategory.AUTH,
+            action_type="password.set_initial",
+            target_type="accounts.User",
+            target=user,
+            target_id=str(user.pk),
+            target_display=user.email or user.username,
+            summary="Denied initial password set because account is already initialized.",
+            status=AuditEventStatus.DENIED,
+        )
         return Response(
             {"detail": "Use the change-password endpoint instead."},
             status=status.HTTP_400_BAD_REQUEST,
@@ -327,6 +607,18 @@ def set_initial_password(request):
     user.set_password(new_password)
     user.must_change_password = False
     user.save(update_fields=["password", "must_change_password"])
+
+    _record_accounts_event(
+        request=request,
+        action_category=AuditActionCategory.AUTH,
+        action_type="password.set_initial",
+        target_type="accounts.User",
+        target=user,
+        target_id=str(user.pk),
+        target_display=user.email or user.username,
+        summary="Set initial password and completed first-login requirement.",
+        changes=build_diff({"must_change_password": True}, {"must_change_password": False}, ["must_change_password"]),
+    )
 
     # Return fresh tokens so the frontend can stay logged in
     refresh = RefreshToken.for_user(user)
