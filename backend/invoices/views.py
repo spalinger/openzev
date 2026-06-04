@@ -829,242 +829,69 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             "recent_invoices": recent_data,
         })
 
-    @action(detail=False, methods=["get", "patch", "delete"], url_path="pdf-template", permission_classes=[IsAuthenticated])
-    def pdf_template(self, request):
-        """Admin-only read/write/reset access to the invoice PDF HTML template.
-
-        GET    — returns current content (DB override if present, else on-disk default)
-                 and is_customized flag.
-        PATCH  — saves content to the database (never touches the filesystem).
-        DELETE — removes the DB override, reverting to the on-disk default.
-        """
+    def _handle_pdf_template(self, request, template_name: str, audit_action_prefix: str):
+        """Shared GET/PATCH/DELETE handler for all three PDF template endpoints."""
         if not request.user.is_admin:
             record_audit_event(
                 request=request,
                 action_category=AuditActionCategory.GOVERNANCE,
-                action_type="template.invoice_pdf.update",
+                action_type=f"{audit_action_prefix}.update",
                 target_type="invoices.PdfTemplate",
-                target_id=TEMPLATE_NAME,
-                target_display=TEMPLATE_NAME,
-                summary="Denied invoice PDF template mutation by non-admin.",
+                target_id=template_name,
+                target_display=template_name,
+                summary=f"Denied PDF template mutation by non-admin ({template_name}).",
                 status=AuditEventStatus.DENIED,
             )
             return Response({"error": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
 
         if request.method == "GET":
-            record = PdfTemplate.objects.filter(template_name=TEMPLATE_NAME).first()
-            content = record.content if record else _read_default_template(TEMPLATE_NAME)
-            return Response(
-                {
-                    "template_name": TEMPLATE_NAME,
-                    "content": content,
-                    "is_customized": record is not None,
-                }
-            )
+            record = PdfTemplate.objects.filter(template_name=template_name).first()
+            content = record.content if record else _read_default_template(template_name)
+            return Response({"template_name": template_name, "content": content, "is_customized": record is not None})
 
         if request.method == "PATCH":
             content = request.data.get("content")
             if not isinstance(content, str) or not content.strip():
                 return Response({"error": "Template content is required."}, status=status.HTTP_400_BAD_REQUEST)
-            PdfTemplate.objects.update_or_create(
-                template_name=TEMPLATE_NAME,
-                defaults={"content": content},
-            )
+            PdfTemplate.objects.update_or_create(template_name=template_name, defaults={"content": content})
             record_audit_event(
                 request=request,
                 action_category=AuditActionCategory.GOVERNANCE,
-                action_type="template.invoice_pdf.update",
+                action_type=f"{audit_action_prefix}.update",
                 target_type="invoices.PdfTemplate",
-                target_id=TEMPLATE_NAME,
-                target_display=TEMPLATE_NAME,
-                summary="Updated invoice PDF template.",
+                target_id=template_name,
+                target_display=template_name,
+                summary=f"Updated PDF template {template_name}.",
             )
-            return Response(
-                {
-                    "template_name": TEMPLATE_NAME,
-                    "content": content,
-                    "is_customized": True,
-                    "detail": "PDF template updated successfully.",
-                }
-            )
+            return Response({"template_name": template_name, "content": content, "is_customized": True, "detail": "PDF template updated successfully."})
 
         # DELETE — revert to default
-        PdfTemplate.objects.filter(template_name=TEMPLATE_NAME).delete()
+        PdfTemplate.objects.filter(template_name=template_name).delete()
         record_audit_event(
             request=request,
             action_category=AuditActionCategory.GOVERNANCE,
-            action_type="template.invoice_pdf.reset",
+            action_type=f"{audit_action_prefix}.reset",
             target_type="invoices.PdfTemplate",
-            target_id=TEMPLATE_NAME,
-            target_display=TEMPLATE_NAME,
-            summary="Reset invoice PDF template to default.",
+            target_id=template_name,
+            target_display=template_name,
+            summary=f"Reset PDF template {template_name} to default.",
         )
-        return Response(
-            {
-                "template_name": TEMPLATE_NAME,
-                "content": _read_default_template(TEMPLATE_NAME),
-                "is_customized": False,
-                "detail": "PDF template reset to default.",
-            }
-        )
+        return Response({"template_name": template_name, "content": _read_default_template(template_name), "is_customized": False, "detail": "PDF template reset to default."})
+
+    @action(detail=False, methods=["get", "patch", "delete"], url_path="pdf-template", permission_classes=[IsAuthenticated])
+    def pdf_template(self, request):
+        """Admin-only read/write/reset for the invoice PDF HTML template."""
+        return self._handle_pdf_template(request, TEMPLATE_NAME, "template.invoice_pdf")
 
     @action(detail=False, methods=["get", "patch", "delete"], url_path="contract-pdf-template", permission_classes=[IsAuthenticated])
     def contract_pdf_template(self, request):
-        """Admin-only read/write/reset access to the contract PDF HTML template.
-
-        GET    — returns current content (DB override if present, else on-disk default)
-                 and is_customized flag.
-        PATCH  — saves content to the database (never touches the filesystem).
-        DELETE — removes the DB override, reverting to the on-disk default.
-        """
-        if not request.user.is_admin:
-            record_audit_event(
-                request=request,
-                action_category=AuditActionCategory.GOVERNANCE,
-                action_type="template.contract_pdf.update",
-                target_type="invoices.PdfTemplate",
-                target_id=CONTRACT_TEMPLATE_NAME,
-                target_display=CONTRACT_TEMPLATE_NAME,
-                summary="Denied contract PDF template mutation by non-admin.",
-                status=AuditEventStatus.DENIED,
-            )
-            return Response({"error": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
-
-        if request.method == "GET":
-            record = PdfTemplate.objects.filter(template_name=CONTRACT_TEMPLATE_NAME).first()
-            content = record.content if record else _read_default_template(CONTRACT_TEMPLATE_NAME)
-            return Response(
-                {
-                    "template_name": CONTRACT_TEMPLATE_NAME,
-                    "content": content,
-                    "is_customized": record is not None,
-                }
-            )
-
-        if request.method == "PATCH":
-            content = request.data.get("content")
-            if not isinstance(content, str) or not content.strip():
-                return Response({"error": "Template content is required."}, status=status.HTTP_400_BAD_REQUEST)
-            PdfTemplate.objects.update_or_create(
-                template_name=CONTRACT_TEMPLATE_NAME,
-                defaults={"content": content},
-            )
-            record_audit_event(
-                request=request,
-                action_category=AuditActionCategory.GOVERNANCE,
-                action_type="template.contract_pdf.update",
-                target_type="invoices.PdfTemplate",
-                target_id=CONTRACT_TEMPLATE_NAME,
-                target_display=CONTRACT_TEMPLATE_NAME,
-                summary="Updated contract PDF template.",
-            )
-            return Response(
-                {
-                    "template_name": CONTRACT_TEMPLATE_NAME,
-                    "content": content,
-                    "is_customized": True,
-                    "detail": "Contract PDF template updated successfully.",
-                }
-            )
-
-        # DELETE — revert to default
-        PdfTemplate.objects.filter(template_name=CONTRACT_TEMPLATE_NAME).delete()
-        record_audit_event(
-            request=request,
-            action_category=AuditActionCategory.GOVERNANCE,
-            action_type="template.contract_pdf.reset",
-            target_type="invoices.PdfTemplate",
-            target_id=CONTRACT_TEMPLATE_NAME,
-            target_display=CONTRACT_TEMPLATE_NAME,
-            summary="Reset contract PDF template to default.",
-        )
-        return Response(
-            {
-                "template_name": CONTRACT_TEMPLATE_NAME,
-                "content": _read_default_template(CONTRACT_TEMPLATE_NAME),
-                "is_customized": False,
-                "detail": "Contract PDF template reset to default.",
-            }
-        )
+        """Admin-only read/write/reset for the contract PDF HTML template."""
+        return self._handle_pdf_template(request, CONTRACT_TEMPLATE_NAME, "template.contract_pdf")
 
     @action(detail=False, methods=["get", "patch", "delete"], url_path="annual-statement-pdf-template", permission_classes=[IsAuthenticated])
     def annual_statement_pdf_template(self, request):
-        """Admin-only read/write/reset access to the annual statement PDF HTML template.
-
-        GET    — returns current content (DB override if present, else on-disk default)
-                 and is_customized flag.
-        PATCH  — saves content to the database (never touches the filesystem).
-        DELETE — removes the DB override, reverting to the on-disk default.
-        """
-        if not request.user.is_admin:
-            record_audit_event(
-                request=request,
-                action_category=AuditActionCategory.GOVERNANCE,
-                action_type="template.annual_statement_pdf.update",
-                target_type="invoices.PdfTemplate",
-                target_id=ANNUAL_STATEMENT_TEMPLATE,
-                target_display=ANNUAL_STATEMENT_TEMPLATE,
-                summary="Denied annual statement PDF template mutation by non-admin.",
-                status=AuditEventStatus.DENIED,
-            )
-            return Response({"error": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
-
-        if request.method == "GET":
-            record = PdfTemplate.objects.filter(template_name=ANNUAL_STATEMENT_TEMPLATE).first()
-            content = record.content if record else _read_default_template(ANNUAL_STATEMENT_TEMPLATE)
-            return Response(
-                {
-                    "template_name": ANNUAL_STATEMENT_TEMPLATE,
-                    "content": content,
-                    "is_customized": record is not None,
-                }
-            )
-
-        if request.method == "PATCH":
-            content = request.data.get("content")
-            if not isinstance(content, str) or not content.strip():
-                return Response({"error": "Template content is required."}, status=status.HTTP_400_BAD_REQUEST)
-            PdfTemplate.objects.update_or_create(
-                template_name=ANNUAL_STATEMENT_TEMPLATE,
-                defaults={"content": content},
-            )
-            record_audit_event(
-                request=request,
-                action_category=AuditActionCategory.GOVERNANCE,
-                action_type="template.annual_statement_pdf.update",
-                target_type="invoices.PdfTemplate",
-                target_id=ANNUAL_STATEMENT_TEMPLATE,
-                target_display=ANNUAL_STATEMENT_TEMPLATE,
-                summary="Updated annual statement PDF template.",
-            )
-            return Response(
-                {
-                    "template_name": ANNUAL_STATEMENT_TEMPLATE,
-                    "content": content,
-                    "is_customized": True,
-                    "detail": "Annual statement PDF template updated successfully.",
-                }
-            )
-
-        # DELETE — revert to default
-        PdfTemplate.objects.filter(template_name=ANNUAL_STATEMENT_TEMPLATE).delete()
-        record_audit_event(
-            request=request,
-            action_category=AuditActionCategory.GOVERNANCE,
-            action_type="template.annual_statement_pdf.reset",
-            target_type="invoices.PdfTemplate",
-            target_id=ANNUAL_STATEMENT_TEMPLATE,
-            target_display=ANNUAL_STATEMENT_TEMPLATE,
-            summary="Reset annual statement PDF template to default.",
-        )
-        return Response(
-            {
-                "template_name": ANNUAL_STATEMENT_TEMPLATE,
-                "content": _read_default_template(ANNUAL_STATEMENT_TEMPLATE),
-                "is_customized": False,
-                "detail": "Annual statement PDF template reset to default.",
-            }
-        )
+        """Admin-only read/write/reset for the annual statement PDF HTML template."""
+        return self._handle_pdf_template(request, ANNUAL_STATEMENT_TEMPLATE, "template.annual_statement_pdf")
 
     @action(detail=False, methods=["post"], url_path="preview-pdf-template", permission_classes=[IsAuthenticated])
     def preview_pdf_template(self, request):
