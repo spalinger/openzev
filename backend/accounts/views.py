@@ -6,8 +6,8 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.views import APIView
 import json
 import logging
+import re
 import secrets
-import urllib.parse
 import urllib.request
 from urllib.parse import urlencode
 from django.conf import settings
@@ -895,9 +895,15 @@ def oauth_callback(request, provider_slug: str):
     frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:5173").rstrip("/")
     error = request.GET.get("error")
     if error:
-        return HttpResponseRedirect(
-            f"{frontend_url}/login?oauth_error={urllib.parse.quote(error)}"
-        )
+        # Do not reflect the raw provider error into the redirect — use a
+        # fixed slug so user-supplied content never appears in the URL.
+        _KNOWN_OAUTH_ERRORS = {
+            "access_denied", "temporarily_unavailable", "server_error",
+            "invalid_request", "unauthorized_client", "unsupported_response_type",
+            "invalid_scope",
+        }
+        safe_error = error if error in _KNOWN_OAUTH_ERRORS else "provider_error"
+        return HttpResponseRedirect(f"{frontend_url}/login?oauth_error={safe_error}")
 
     code = request.GET.get("code")
     state_value = request.GET.get("state")
@@ -1004,6 +1010,11 @@ def oauth_token_exchange(request):
     code = request.data.get("code", "").strip()
     if not code:
         return Response({"detail": "code is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Validate format before touching the DB: exchange codes are
+    # URL-safe base64 tokens (alphanumeric + - and _), max 64 chars.
+    if not re.fullmatch(r'[A-Za-z0-9_\-]{10,64}', code):
+        return Response({"detail": "Invalid or expired code."}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
         exchange = OAuthExchangeCode.objects.select_related("user").get(code=code)
