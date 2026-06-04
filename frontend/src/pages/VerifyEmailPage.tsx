@@ -13,7 +13,7 @@ export function VerifyEmailPage() {
     const { t } = useTranslation()
     const navigate = useNavigate()
     const [searchParams] = useSearchParams()
-    const { refreshUser, storeTokens } = useAuth()
+    const { refreshUser } = useAuth()
 
     const [step, setStep] = useState<Step>('verifying')
     const [errorMsg, setErrorMsg] = useState<string | null>(null)
@@ -45,8 +45,7 @@ export function VerifyEmailPage() {
         }
 
         verifyEmail(token)
-            .then((tokens) => {
-                storeTokens(tokens)
+            .then(() => {
                 return refreshUser()
             })
             .then(() => {
@@ -70,8 +69,7 @@ export function VerifyEmailPage() {
         setPwLoading(true)
         setPwError(null)
         try {
-            const tokens = await setInitialPassword(password)
-            storeTokens(tokens)
+            await setInitialPassword(password)
             await refreshUser()
             setStep('create-zev')
         } catch (err) {

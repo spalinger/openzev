@@ -774,7 +774,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         )
         return Response(InvoiceSerializer(invoice, context={"request": request}).data)
 
-    @action(detail=True, methods=["post"], url_path="retry-email/<str:email_log_id>/",
+    @action(detail=True, methods=["post"], url_path=r"retry-email/(?P<email_log_id>[^/.]+)",
             permission_classes=[IsAuthenticated, IsZevOwnerOrAdmin])
     def retry_email(self, request, pk=None, email_log_id=None):
         """Retry sending a failed invoice email."""

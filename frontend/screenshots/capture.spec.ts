@@ -29,21 +29,20 @@ const SCREENSHOT_DIR = path.resolve(__dirname, '../../docs/user-guide/screenshot
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Authenticate via the API and inject tokens into localStorage. */
+/** Authenticate via the API. The server sets httpOnly cookies; the browser context carries them automatically. */
 async function loginViaAPI(page: Page) {
   const resp = await page.request.post(`${API_BASE}/auth/token/`, {
     data: { username: USER, password: PASS },
   })
   expect(resp.ok(), `Login failed (${resp.status()})`).toBeTruthy()
-  const tokens = await resp.json() as { access: string; refresh: string }
 
-  // Inject tokens into localStorage before any navigation.
-  await page.addInitScript((t) => {
-    localStorage.setItem('openzev.access', t.access)
-    localStorage.setItem('openzev.refresh', t.refresh)
+  // The server sets openzev_access / openzev_refresh httpOnly cookies on the response.
+  // page.request shares the browser context's cookie jar, so subsequent navigations
+  // will include those cookies automatically — no localStorage injection needed.
+  await page.addInitScript(() => {
     // Ensure sidebar is expanded for screenshots
     localStorage.setItem('openzev.sidebarCollapsed', 'false')
-  }, tokens)
+  })
 }
 
 /** Navigate and wait until the page is fully loaded and idle. */
@@ -53,14 +52,30 @@ async function navigateTo(page: Page, urlPath: string) {
   await page.waitForTimeout(1500)
 }
 
-/** Get a fresh admin access token. */
+/** Log in as admin and return the bearer access token (used for subsequent direct API calls). */
 async function getAdminToken(page: Page): Promise<string> {
+  // We use a separate direct axios-style POST via page.request. simplejwt still
+  // returns the token in the body for the obtain-pair view; the CookieJWTAuthentication
+  // layer also falls back to the Authorization header, so this is valid for
+  // server-to-server calls within the Playwright helper.
   const resp = await page.request.post(`${API_BASE}/auth/token/`, {
     data: { username: USER, password: PASS },
   })
   expect(resp.ok(), `Admin login failed (${resp.status()})`).toBeTruthy()
-  const tokens = await resp.json() as { access: string; refresh: string }
-  return tokens.access
+  // The body contains no tokens (cookie-based login), so read the cookie instead.
+  // For direct API calls from Playwright helpers we need a bearer token; re-use
+  // the page context's cookie jar which was populated by loginViaAPI.
+  // The access cookie value can be read via the context's storage state.
+  const cookies = await page.context().cookies()
+  const accessCookie = cookies.find(c => c.name === 'openzev_access')
+  // If the cookie is missing (first call before loginViaAPI), perform a login now.
+  if (accessCookie) return accessCookie.value
+  // Fallback: perform login to populate the cookie jar and return the token.
+  await loginViaAPI(page)
+  const cookies2 = await page.context().cookies()
+  const ac = cookies2.find(c => c.name === 'openzev_access')
+  expect(ac, 'openzev_access cookie missing after login').toBeTruthy()
+  return ac!.value
 }
 
 /**
@@ -99,9 +114,10 @@ async function prepareUnassignedMeteringPoint(page: Page): Promise<{ meterId: st
 }
 
 /**
- * Impersonate a participant by calling the API, then inject the resulting
- * tokens and impersonation metadata into localStorage so the app picks
- * up the impersonated session on the next navigation.
+ * Impersonate a participant by calling the impersonate endpoint.
+ * The server backs up the admin cookies to openzev_admin_access/openzev_admin_refresh
+ * and sets new openzev_access/openzev_refresh cookies for the participant — all
+ * handled transparently by the browser context's cookie jar.
  */
 async function impersonateFirstParticipant(page: Page): Promise<boolean> {
   const adminToken = await getAdminToken(page)
@@ -114,26 +130,15 @@ async function impersonateFirstParticipant(page: Page): Promise<boolean> {
   const participant = usersBody.results.find(u => u.role === 'participant')
   if (!participant) return false
 
-  // Call the impersonate endpoint
+  // Call the impersonate endpoint — the server rotates the cookies automatically.
   const impResp = await page.request.post(`${API_BASE}/auth/users/${participant.id}/impersonate/`, { headers })
   expect(impResp.ok(), `Impersonation failed (${impResp.status()})`).toBeTruthy()
-  const impTokens = await impResp.json() as {
-    access: string
-    refresh: string
-    impersonator: unknown
-  }
 
-  // Inject impersonation state into localStorage
-  await page.addInitScript((data) => {
-    // Store original admin tokens so the app knows we're impersonating
-    localStorage.setItem('openzev.impersonation.original_access', data.adminToken)
-    localStorage.setItem('openzev.impersonation.original_refresh', 'placeholder')
-    localStorage.setItem('openzev.impersonation.impersonator', JSON.stringify(data.impersonator))
-    // Replace active tokens with the impersonated participant's tokens
-    localStorage.setItem('openzev.access', data.access)
-    localStorage.setItem('openzev.refresh', data.refresh)
+  // The app detects impersonation from the JWT claim (impersonated_by) returned by
+  // /auth/me/, so no localStorage injection is needed.
+  await page.addInitScript(() => {
     localStorage.setItem('openzev.sidebarCollapsed', 'false')
-  }, { adminToken, access: impTokens.access, refresh: impTokens.refresh, impersonator: impTokens.impersonator })
+  })
 
   return true
 }

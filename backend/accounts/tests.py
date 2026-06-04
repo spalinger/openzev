@@ -55,6 +55,13 @@ class UserModelTests(TestCase):
 			)
 
 
+def _cookie_auth(client, username, password="pass1234"):
+	"""Authenticate the test client as ``username`` via a Bearer token."""
+	from .models import User as _User
+	from testing.helpers import authenticate
+	authenticate(client, _User.objects.get(username=username))
+
+
 class PasswordChangeFlagTests(TestCase):
 	def test_change_password_clears_must_change_password_flag(self):
 		client = APIClient()
@@ -66,7 +73,8 @@ class PasswordChangeFlagTests(TestCase):
 		)
 
 		resp = client.post("/api/v1/auth/token/", {"username": user.username, "password": "old-pass-123"})
-		client.credentials(HTTP_AUTHORIZATION=f"Bearer {resp.data['access']}")
+		self.assertEqual(resp.status_code, 200)
+		_cookie_auth(client, user.username, "old-pass-123")
 
 		change_resp = client.post(
 			"/api/v1/auth/me/change-password/",
@@ -94,8 +102,11 @@ class TokenLoginCredentialTests(TestCase):
 		)
 
 		self.assertEqual(resp.status_code, 200)
-		self.assertIn("access", resp.data)
-		self.assertIn("refresh", resp.data)
+		# Tokens are now delivered as httpOnly cookies, not in the response body
+		self.assertIn("openzev_access", resp.cookies)
+		self.assertIn("openzev_refresh", resp.cookies)
+		self.assertNotIn("access", resp.data)
+		self.assertNotIn("refresh", resp.data)
 
 
 class RegistrationTests(TestCase):
@@ -149,8 +160,10 @@ class RegistrationTests(TestCase):
 		)
 
 		self.assertEqual(resp.status_code, 200)
-		self.assertIn("access", resp.data)
-		self.assertIn("refresh", resp.data)
+		self.assertIn("openzev_access", resp.cookies)
+		self.assertIn("openzev_refresh", resp.cookies)
+		self.assertNotIn("access", resp.data)
+		self.assertNotIn("refresh", resp.data)
 
 	def test_register_blocked_when_self_registration_feature_disabled(self):
 		FeatureFlag.sync_defaults()
@@ -182,8 +195,7 @@ class FeatureFlagsApiTests(TestCase):
 
 class ImpersonationTests(TestCase):
 	def _auth(self, client, user, password="pass1234"):
-		resp = client.post("/api/v1/auth/token/", {"username": user.username, "password": password})
-		client.credentials(HTTP_AUTHORIZATION=f"Bearer {resp.data['access']}")
+		_cookie_auth(client, user.username, password)
 
 	def test_admin_can_impersonate_participant(self):
 		client = APIClient()
@@ -194,8 +206,9 @@ class ImpersonationTests(TestCase):
 		resp = client.post(f"/api/v1/auth/users/{participant.id}/impersonate/")
 
 		self.assertEqual(resp.status_code, 200)
-		self.assertIn("access", resp.data)
-		self.assertIn("refresh", resp.data)
+		# Tokens delivered as cookies, not in body
+		self.assertIn("openzev_access", resp.cookies)
+		self.assertNotIn("access", resp.data)
 		self.assertEqual(resp.data["impersonated_user"]["id"], participant.id)
 
 	def test_non_admin_cannot_impersonate(self):
@@ -217,6 +230,7 @@ class ImpersonationTests(TestCase):
 		resp = client.post(f"/api/v1/auth/users/{owner.id}/impersonate/")
 
 		self.assertEqual(resp.status_code, 200)
+		self.assertIn("openzev_access", resp.cookies)
 		self.assertEqual(resp.data["impersonated_user"]["id"], owner.id)
 
 	def test_admin_cannot_impersonate_admin(self):
@@ -232,8 +246,7 @@ class ImpersonationTests(TestCase):
 
 class LinkedAccountSafetyTests(TestCase):
 	def _auth(self, client, user, password="pass1234"):
-		resp = client.post("/api/v1/auth/token/", {"username": user.username, "password": password})
-		client.credentials(HTTP_AUTHORIZATION=f"Bearer {resp.data['access']}")
+		_cookie_auth(client, user.username, password)
 
 	def setUp(self):
 		self.client = APIClient()
@@ -299,8 +312,7 @@ class LinkedAccountSafetyTests(TestCase):
 
 class AppSettingsTests(TestCase):
 	def _auth(self, client, user, password="pass1234"):
-		resp = client.post("/api/v1/auth/token/", {"username": user.username, "password": password})
-		client.credentials(HTTP_AUTHORIZATION=f"Bearer {resp.data['access']}")
+		_cookie_auth(client, user.username, password)
 
 	def setUp(self):
 		self.client = APIClient()
@@ -350,8 +362,7 @@ class AppSettingsTests(TestCase):
 
 class VatRateSettingsTests(TestCase):
 	def _auth(self, client, user, password="pass1234"):
-		resp = client.post("/api/v1/auth/token/", {"username": user.username, "password": password})
-		client.credentials(HTTP_AUTHORIZATION=f"Bearer {resp.data['access']}")
+		_cookie_auth(client, user.username, password)
 
 	def setUp(self):
 		self.client = APIClient()
@@ -426,8 +437,7 @@ class VatRateSettingsTests(TestCase):
 
 class OAuthProviderConfigTests(TestCase):
 	def _auth(self, client, user, password="pass1234"):
-		resp = client.post("/api/v1/auth/token/", {"username": user.username, "password": password})
-		client.credentials(HTTP_AUTHORIZATION=f"Bearer {resp.data['access']}")
+		_cookie_auth(client, user.username, password)
 
 	def setUp(self):
 		self.client = APIClient()
@@ -557,8 +567,7 @@ class OAuthProviderConfigTests(TestCase):
 
 class RbacEndpointMatrixTests(TestCase):
 	def _auth(self, client, user, password="pass1234"):
-		resp = client.post("/api/v1/auth/token/", {"username": user.username, "password": password})
-		client.credentials(HTTP_AUTHORIZATION=f"Bearer {resp.data['access']}")
+		_cookie_auth(client, user.username, password)
 
 	def setUp(self):
 		self.clients = {}

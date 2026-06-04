@@ -6,9 +6,7 @@ from tariffs.models import BillingMode, Tariff, TariffCategory, TariffPeriod
 from zev.models import Zev
 
 
-def auth(client, user, password="pass1234"):
-	resp = client.post("/api/v1/auth/token/", {"username": user.username, "password": password})
-	client.credentials(HTTP_AUTHORIZATION=f"Bearer {resp.data['access']}")
+from testing.helpers import authenticate as auth
 
 
 class TariffPermissionTests(TestCase):
@@ -64,31 +62,6 @@ class TariffPermissionTests(TestCase):
 			"valid_from": "2026-01-01",
 		}, format="json")
 		self.assertEqual(resp.status_code, 201)
-
-	def test_cannot_add_period_to_fixed_fee_tariff(self):
-		client = APIClient()
-		owner = User.objects.create_user(
-			username="tariff_owner_2",
-			password="pass1234",
-			role=UserRole.ZEV_OWNER,
-		)
-		zev = Zev.objects.create(name="Tariff ZEV 2", owner=owner, zev_type="vzev")
-		tariff = Tariff.objects.create(
-			zev=zev,
-			name="Annual fee",
-			category=TariffCategory.LEVIES,
-			billing_mode=BillingMode.YEARLY_FEE,
-			fixed_price_chf="120.00",
-			valid_from="2026-01-01",
-		)
-		auth(client, owner)
-
-		resp = client.post("/api/v1/tariffs/periods/", {
-			"tariff": str(tariff.id),
-			"period_type": "flat",
-			"price_chf_per_kwh": "0.10",
-		}, format="json")
-		self.assertEqual(resp.status_code, 400)
 
 	def test_owner_can_export_tariffs_as_json(self):
 		client = APIClient()

@@ -1,11 +1,6 @@
 export type UserRole = 'admin' | 'zev_owner' | 'participant' | 'guest'
 
-export interface AuthTokens {
-    access: string
-    refresh: string
-}
-
-export interface ImpersonationTokens extends AuthTokens {
+export interface ImpersonationResult {
     impersonated_user: User
     impersonator: User
 }
@@ -18,6 +13,8 @@ export interface User {
     last_name: string
     role: UserRole
     must_change_password: boolean
+    /** Present when this session is an impersonation session. */
+    impersonated_by?: User
 }
 
 export interface UserInput {

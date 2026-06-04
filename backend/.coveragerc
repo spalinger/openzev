@@ -1,0 +1,28 @@
+[run]
+source = .
+branch = True
+omit =
+    */migrations/*
+    */tests.py
+    */test_*.py
+    */factories.py
+    */__init__.py
+    config/asgi.py
+    config/wsgi.py
+    config/settings.py
+    manage.py
+    conftest.py
+
+[report]
+show_missing = True
+skip_covered = False
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    def __str__
+    raise NotImplementedError
+    if TYPE_CHECKING:
+    if __name__ == .__main__.:
+
+[html]
+directory = htmlcov

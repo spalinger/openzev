@@ -1,21 +1,13 @@
 import axios from 'axios'
 import MockAdapter from 'axios-mock-adapter'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import {
-  ACCESS_KEY,
-  REFRESH_KEY,
-  IMPERSONATION_ACCESS_KEY,
-  IMPERSONATION_REFRESH_KEY,
-  IMPERSONATOR_KEY,
-  api,
-} from '../src/lib/api/client'
+import { api } from '../src/lib/api/client'
 
 describe('api refresh interceptor', () => {
   let apiMock: MockAdapter
   let axiosMock: MockAdapter
 
   beforeEach(() => {
-    localStorage.clear()
     apiMock = new MockAdapter(api)
     axiosMock = new MockAdapter(axios)
   })
@@ -23,60 +15,50 @@ describe('api refresh interceptor', () => {
   afterEach(() => {
     apiMock.restore()
     axiosMock.restore()
-    localStorage.clear()
   })
 
-  it('refreshes token on 401 and retries original request', async () => {
-    localStorage.setItem(ACCESS_KEY, 'expired-token')
-    localStorage.setItem(REFRESH_KEY, 'refresh-token')
-
+  it('refreshes the session on 401 and retries the original request', async () => {
     apiMock
       .onGet('/protected')
       .replyOnce(401)
       .onGet('/protected')
-      .reply((config) => [200, { ok: true, authorization: config.headers?.Authorization }])
+      .reply(200, { ok: true })
 
-    axiosMock.onPost('/api/v1/auth/token/refresh/').reply(200, { access: 'new-token' })
+    axiosMock.onPost('/api/v1/auth/token/refresh/').reply(200)
 
     const response = await api.get('/protected')
 
     expect(response.data.ok).toBe(true)
-    expect(response.data.authorization).toBe('Bearer new-token')
-    expect(localStorage.getItem(ACCESS_KEY)).toBe('new-token')
+    // The refresh endpoint is called exactly once, with no body (the httpOnly cookie carries the token).
+    expect(axiosMock.history.post).toHaveLength(1)
+    expect(axiosMock.history.post[0].url).toBe('/api/v1/auth/token/refresh/')
   })
 
-  it('clears auth storage when refresh fails', async () => {
-    localStorage.setItem(ACCESS_KEY, 'expired-token')
-    localStorage.setItem(REFRESH_KEY, 'invalid-refresh-token')
-    localStorage.setItem(IMPERSONATION_ACCESS_KEY, 'old-admin-access')
-    localStorage.setItem(IMPERSONATION_REFRESH_KEY, 'old-admin-refresh')
-    localStorage.setItem(IMPERSONATOR_KEY, JSON.stringify({ id: 1 }))
-
+  it('propagates the error when the refresh request fails', async () => {
     apiMock.onGet('/protected').replyOnce(401)
     axiosMock.onPost('/api/v1/auth/token/refresh/').reply(401)
 
     await expect(api.get('/protected')).rejects.toBeDefined()
+  })
 
-    expect(localStorage.getItem(ACCESS_KEY)).toBeNull()
-    expect(localStorage.getItem(REFRESH_KEY)).toBeNull()
-    expect(localStorage.getItem(IMPERSONATION_ACCESS_KEY)).toBeNull()
-    expect(localStorage.getItem(IMPERSONATION_REFRESH_KEY)).toBeNull()
-    expect(localStorage.getItem(IMPERSONATOR_KEY)).toBeNull()
+  it('does not attempt to refresh when the failing request targets an auth/token endpoint', async () => {
+    apiMock.onPost('/auth/token/refresh/').reply(401)
+
+    await expect(api.post('/auth/token/refresh/', null)).rejects.toBeDefined()
+    // No recursive refresh call should be made.
+    expect(axiosMock.history.post).toHaveLength(0)
   })
 
   it('reuses one refresh request for concurrent 401 responses', async () => {
-    localStorage.setItem(ACCESS_KEY, 'expired-token')
-    localStorage.setItem(REFRESH_KEY, 'refresh-token')
-
     apiMock.onGet('/protected-a').replyOnce(401).onGet('/protected-a').reply(200, { ok: 'a' })
     apiMock.onGet('/protected-b').replyOnce(401).onGet('/protected-b').reply(200, { ok: 'b' })
-    axiosMock.onPost('/api/v1/auth/token/refresh/').reply(200, { access: 'new-token' })
+    axiosMock.onPost('/api/v1/auth/token/refresh/').reply(200)
 
     const [responseA, responseB] = await Promise.all([api.get('/protected-a'), api.get('/protected-b')])
 
     expect(responseA.data.ok).toBe('a')
     expect(responseB.data.ok).toBe('b')
-    expect(localStorage.getItem(ACCESS_KEY)).toBe('new-token')
+    // A single shared refresh request should serve both concurrent failures.
     expect(axiosMock.history.post).toHaveLength(1)
   })
 })
