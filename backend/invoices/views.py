@@ -1,6 +1,6 @@
 import io
 import zipfile
-from datetime import date as date_type, datetime, timedelta, timezone as dt_timezone
+from datetime import date as date_type
 
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -8,21 +8,22 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.http import HttpResponse
 from accounts.permissions import IsZevOwnerOrAdmin
-from django.db.models import Count, Q, Sum, F, DecimalField
+from django.db.models import Count, Q, Sum
 from django.conf import settings
 from django.template import Template, Context
-from zev.models import Zev, Participant, MeteringPoint, MeteringPointAssignment
-from metering.models import MeterReading
+from zev.models import Zev, Participant
 from .models import Invoice, InvoiceStatus, EmailLog, PdfTemplate, EmailTemplate, EMAIL_TEMPLATE_DEFAULTS
 from .serializers import (
     InvoiceSerializer, GenerateInvoiceSerializer, GenerateZevInvoicesSerializer
 )
 from .engine import generate_invoice, generate_invoices_for_zev
-from .pdf import TEMPLATE_NAME, save_invoice_pdf, INVOICE_TRANSLATIONS
-from .contract_pdf import CONTRACT_TEMPLATE_NAME, CONTRACT_TRANSLATIONS
-from .annual_statement import generate_annual_statement_pdf, ANNUAL_STATEMENT_TEMPLATE, ANNUAL_TRANSLATIONS
+from .pdf import TEMPLATE_NAME, save_invoice_pdf
+from .contract_pdf import CONTRACT_TEMPLATE_NAME
+from .annual_statement import generate_annual_statement_pdf, ANNUAL_STATEMENT_TEMPLATE
 from .financial_summary import generate_financial_summary_pdf
 from .tasks import send_invoice_email_task
+from .template_context import build_sample_invoice_context, build_sample_contract_context, build_sample_annual_statement_context
+from .period_overview import compute_period_overview
 from audit.models import AuditActionCategory, AuditEventStatus
 from audit.services import build_diff, record_audit_event
 
@@ -32,254 +33,6 @@ def _read_default_template(template_name: str) -> str:
     path = settings.BASE_DIR / "templates" / template_name
     return path.read_text(encoding="utf-8")
 
-
-class _Obj:
-    """Simple namespace that allows attribute access on a dict."""
-    def __init__(self, **kwargs):
-        self.__dict__.update(kwargs)
-
-    def __str__(self):
-        return self.__dict__.get("_str", "")
-
-    def get_status_display(self):
-        return self.__dict__.get("_status_display", "Draft")
-
-    def get_zev_type_display(self):
-        return self.__dict__.get("_zev_type_display", "vZEV")
-
-    def get_full_name(self):
-        return self.__dict__.get("_full_name", "")
-
-
-def _build_sample_invoice_context() -> dict:
-    tr = INVOICE_TRANSLATIONS.get("en", INVOICE_TRANSLATIONS["de"])
-    return {
-        "invoice": _Obj(
-            invoice_number="INV-2026-001",
-            _status_display="Draft",
-            subtotal_chf="450.00",
-            vat_rate="8.1",
-            vat_chf="36.45",
-            total_chf="486.45",
-            notes="Sample invoice for template preview.",
-        ),
-        "items": [],
-        "grouped_items": [
-            {
-                "key": "energy",
-                "label": tr["cat_energy"],
-                "items": [
-                    _Obj(description="Local ZEV energy Jan 2026", quantity_kwh="320.50", unit="kWh", unit_price_chf="0.18", total_chf="57.69"),
-                    _Obj(description="Grid energy Jan 2026", quantity_kwh="180.00", unit="kWh", unit_price_chf="0.22", total_chf="39.60"),
-                ],
-                "subtotal": "97.29",
-            },
-            {
-                "key": "grid_fees",
-                "label": tr["cat_grid_fees"],
-                "items": [
-                    _Obj(description="Grid usage fee Jan 2026", quantity_kwh="500.50", unit="kWh", unit_price_chf="0.08", total_chf="40.04"),
-                ],
-                "subtotal": "40.04",
-            },
-        ],
-        "zev": _Obj(
-            name="Solar Community Example",
-            vat_number="CHE-123.456.789",
-            bank_iban="CH93 0076 2011 6238 5295 7",
-        ),
-        "owner_participant": _Obj(
-            full_name="Maria Muster",
-            address_line1="Solarweg 1",
-            address_line2="",
-            postal_code="8000",
-            city="Zürich",
-        ),
-        "creditor_city": "Zürich",
-        "participant": _Obj(
-            full_name="Hans Beispiel",
-            address_line1="Musterstrasse 42",
-            postal_code="3000",
-            city="Bern",
-            email="hans@example.com",
-        ),
-        "qr_svg": None,
-        "energy_chart_svg": None,
-        "hourly_profile_chart_svg": None,
-        "savings_data": {
-            "local_kwh": "320.50",
-            "local_chf": "57.69",
-            "local_rp": "18.00",
-            "grid_rp": "22.00",
-            "saved_rp": "4.00",
-            "hypothetical_chf": "70.51",
-            "saved_chf": "12.82",
-        },
-        "tr": tr,
-        "formatted_dates": {
-            "invoice_date": "15.01.2026",
-            "period_start": "01.01.2026",
-            "period_end": "31.01.2026",
-            "due_date": "14.02.2026",
-        },
-    }
-
-
-def _build_sample_contract_context() -> dict:
-    tr = CONTRACT_TRANSLATIONS.get("en", CONTRACT_TRANSLATIONS["de"])
-    return {
-        "participant": _Obj(
-            full_name="Hans Beispiel",
-            address_line1="Musterstrasse 42",
-            address_line2="",
-            postal_code="3000",
-            city="Bern",
-            phone="+41 31 123 45 67",
-            email="hans@example.com",
-        ),
-        "owner_participant": _Obj(
-            full_name="Maria Muster",
-            address_line1="Solarweg 1",
-            address_line2="",
-            postal_code="8000",
-            city="Zürich",
-            phone="+41 44 987 65 43",
-            email="maria@example.com",
-        ),
-        "zev": _Obj(
-            name="Solar Community Example",
-            _zev_type_display="vZEV",
-            grid_operator="Stadtwerk Zürich",
-            vat_number="CHE-123.456.789",
-            bank_iban="CH93 0076 2011 6238 5295 7",
-            owner=_Obj(
-                _full_name="Maria Muster",
-                username="maria",
-                email="maria@example.com",
-            ),
-        ),
-        "consumption_mps": [
-            _Obj(meter_id="CH1008845123456000000000000012345", location_description="Apartment 3B"),
-        ],
-        "production_mps": [
-            _Obj(meter_id="CH1008845123456000000000000054321", location_description="Rooftop PV system"),
-        ],
-        "local_tariff_rows": [
-            {"name": "Local solar tariff", "rate_rp": "18.00", "rate_description": "Flat rate"},
-        ],
-        "billing_interval_display": "Quarterly",
-        "contract_date": "01.01.2026",
-        "tr": tr,
-        "lang": "en",
-        "local_tariff_notes": "The tariff may be adjusted annually based on production costs.",
-        "additional_contract_notes": "Participant agrees to the general terms and conditions of the ZEV.",
-    }
-
-
-def _build_sample_annual_statement_context() -> dict:
-    tr = ANNUAL_TRANSLATIONS.get("en", ANNUAL_TRANSLATIONS["de"])
-    monthly_data = []
-    for i, month in enumerate(tr["months"]):
-        consumed = 320.0 + i * 15
-        from_zev = consumed * 0.62
-        from_grid = consumed - from_zev
-        produced = 80.0 + i * 10 if i < 6 else 80.0 + (11 - i) * 10
-        self_suf = round(from_zev / consumed * 100) if consumed > 0 else 0
-        monthly_data.append({
-            "month_label": month,
-            "consumed_kwh": f"{consumed:.2f}",
-            "from_zev_kwh": f"{from_zev:.2f}",
-            "from_grid_kwh": f"{from_grid:.2f}",
-            "produced_kwh": f"{produced:.2f}",
-            "self_sufficiency_pct": self_suf,
-        })
-    total_consumed = sum(float(m["consumed_kwh"]) for m in monthly_data)
-    total_from_zev = sum(float(m["from_zev_kwh"]) for m in monthly_data)
-    total_from_grid = sum(float(m["from_grid_kwh"]) for m in monthly_data)
-    total_produced = sum(float(m["produced_kwh"]) for m in monthly_data)
-    from .annual_statement import _build_monthly_chart_svg
-    return {
-        "lang": "en",
-        "tr": tr,
-        "year": 2025,
-        "zev": _Obj(
-            name="Solar Community Example",
-            vat_number="CHE-123.456.789",
-        ),
-        "participant": _Obj(
-            full_name="Hans Beispiel",
-            address_line1="Musterstrasse 42",
-            address_line2="",
-            postal_code="3000",
-            city="Bern",
-        ),
-        "owner_participant": _Obj(
-            full_name="Maria Muster",
-            address_line1="Solarweg 1",
-            address_line2="",
-            postal_code="8000",
-            city="Zürich",
-        ),
-        "monthly_data": monthly_data,
-        "totals": {
-            "total_consumed_kwh": f"{total_consumed:.2f}",
-            "from_zev_kwh": f"{total_from_zev:.2f}",
-            "from_grid_kwh": f"{total_from_grid:.2f}",
-            "total_produced_kwh": f"{total_produced:.2f}",
-            "self_sufficiency_pct": round(total_from_zev / total_consumed * 100) if total_consumed > 0 else 0,
-        },
-        "monthly_chart_svg": _build_monthly_chart_svg(monthly_data, tr),
-        "invoices": [
-            {
-                "invoice_number": "INV-2025-001",
-                "period_start_formatted": "01.01.2025",
-                "period_end_formatted": "31.03.2025",
-                "subtotal_chf": "450.00",
-                "vat_chf": "36.45",
-                "total_chf": "486.45",
-            },
-            {
-                "invoice_number": "INV-2025-002",
-                "period_start_formatted": "01.04.2025",
-                "period_end_formatted": "30.06.2025",
-                "subtotal_chf": "520.00",
-                "vat_chf": "42.12",
-                "total_chf": "562.12",
-            },
-            {
-                "invoice_number": "INV-2025-003",
-                "period_start_formatted": "01.07.2025",
-                "period_end_formatted": "30.09.2025",
-                "subtotal_chf": "380.00",
-                "vat_chf": "30.78",
-                "total_chf": "410.78",
-            },
-            {
-                "invoice_number": "INV-2025-004",
-                "period_start_formatted": "01.10.2025",
-                "period_end_formatted": "31.12.2025",
-                "subtotal_chf": "490.00",
-                "vat_chf": "39.69",
-                "total_chf": "529.69",
-            },
-        ],
-        "invoice_totals": {
-            "subtotal_chf": "1840.00",
-            "vat_chf": "149.04",
-            "total_chf": "1989.04",
-        },
-        "savings": {
-            "local_kwh": "2976.00",
-            "local_chf": "535.68",
-            "local_rp": "18.00",
-            "grid_rp": "22.00",
-            "hypothetical_chf": "654.72",
-            "saved_chf": "119.04",
-        },
-        "formatted_dates": {
-            "statement_date": "01.01.2026",
-        },
-    }
 
 
 def _invoice_target_display(invoice: Invoice) -> str:
@@ -511,103 +264,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         if not request.user.is_admin and zev.owner_id != request.user.id:
             return Response({"error": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
 
-        participants = list(
-            Participant.objects.filter(
-                zev=zev,
-                valid_from__lte=period_end,
-            ).filter(
-                Q(valid_to__isnull=True) | Q(valid_to__gte=period_start)
-            ).order_by("last_name", "first_name")
-        )
-
-        period_start_dt = datetime.combine(period_start, datetime.min.time(), tzinfo=dt_timezone.utc)
-        period_end_exclusive_dt = datetime.combine(period_end, datetime.min.time(), tzinfo=dt_timezone.utc) + timedelta(days=1)
-
-        invoice_map = {
-            invoice.participant_id: invoice
-            for invoice in Invoice.objects.filter(
-                zev=zev,
-                period_start=period_start,
-                period_end=period_end,
-            ).select_related("participant", "zev").order_by("-created_at")
-        }
-
-        rows = []
-        for participant in participants:
-            # Find all metering point assignments for this participant that overlap the period.
-            # Each assignment's valid_from/valid_to defines the exact days where readings are required.
-            assignments = list(
-                MeteringPointAssignment.objects.filter(
-                    participant=participant,
-                    valid_from__lte=period_end,
-                ).filter(
-                    Q(valid_to__isnull=True) | Q(valid_to__gte=period_start)
-                ).select_related("metering_point")
-            )
-
-            # Skip participants with no active assignment in this period.
-            if not assignments:
-                continue
-
-            # Fetch all readings for the involved metering points within the period, grouped by MP.
-            assignment_mp_ids = [a.metering_point_id for a in assignments]
-            readings_by_metering_point = {}
-            for metering_point_id, timestamp in MeterReading.objects.filter(
-                metering_point_id__in=assignment_mp_ids,
-                timestamp__gte=period_start_dt,
-                timestamp__lt=period_end_exclusive_dt,
-            ).values_list("metering_point_id", "timestamp"):
-                readings_by_metering_point.setdefault(metering_point_id, set()).add(timestamp.date())
-
-            missing_meter_ids = []
-            missing_meter_details = []
-            for assignment in assignments:
-                mp = assignment.metering_point
-                # Effective required window: intersection of billing period and assignment validity.
-                effective_start = max(period_start, assignment.valid_from)
-                effective_end = min(
-                    period_end,
-                    assignment.valid_to if assignment.valid_to is not None else period_end,
-                )
-
-                if effective_start > effective_end:
-                    continue
-
-                reading_days = readings_by_metering_point.get(mp.id, set())
-                cursor = effective_start
-                missing_days = 0
-                while cursor <= effective_end:
-                    if cursor not in reading_days:
-                        missing_days += 1
-                    cursor = cursor + timedelta(days=1)
-
-                if missing_days > 0:
-                    missing_meter_ids.append(mp.meter_id)
-                    missing_meter_details.append(
-                        {
-                            "meter_id": mp.meter_id,
-                            "missing_days": missing_days,
-                        }
-                    )
-
-            total_metering_points = len(assignments)
-            metering_points_with_data = total_metering_points - len(missing_meter_ids)
-            metering_data_complete = total_metering_points > 0 and metering_points_with_data == total_metering_points
-
-            invoice = invoice_map.get(participant.id)
-            rows.append(
-                {
-                    "participant_id": str(participant.id),
-                    "participant_name": participant.full_name,
-                    "participant_email": participant.email,
-                    "invoice": InvoiceSerializer(invoice, context={"request": request}).data if invoice else None,
-                    "metering_data_complete": metering_data_complete,
-                    "metering_points_total": total_metering_points,
-                    "metering_points_with_data": metering_points_with_data,
-                    "missing_meter_ids": missing_meter_ids,
-                    "missing_meter_details": missing_meter_details,
-                }
-            )
+        rows = compute_period_overview(zev=zev, period_start=period_start, period_end=period_end, request=request)
 
         return Response(
             {
@@ -1426,11 +1083,11 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             return Response({"error": "Template content is required."}, status=status.HTTP_400_BAD_REQUEST)
 
         if template_type == "contract":
-            context = _build_sample_contract_context()
+            context = build_sample_contract_context()
         elif template_type == "annual_statement":
-            context = _build_sample_annual_statement_context()
+            context = build_sample_annual_statement_context()
         else:
-            context = _build_sample_invoice_context()
+            context = build_sample_invoice_context()
 
         try:
             rendered = Template(content).render(Context(context))
