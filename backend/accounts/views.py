@@ -895,15 +895,10 @@ def oauth_callback(request, provider_slug: str):
     frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:5173").rstrip("/")
     error = request.GET.get("error")
     if error:
-        # Do not reflect the raw provider error into the redirect — use a
-        # fixed slug so user-supplied content never appears in the URL.
-        _KNOWN_OAUTH_ERRORS = {
-            "access_denied", "temporarily_unavailable", "server_error",
-            "invalid_request", "unauthorized_client", "unsupported_response_type",
-            "invalid_scope",
-        }
-        safe_error = error if error in _KNOWN_OAUTH_ERRORS else "provider_error"
-        return HttpResponseRedirect(f"{frontend_url}/login?oauth_error={safe_error}")
+        # Never embed the provider-supplied error value in the redirect URL.
+        # Any error from the provider results in a fixed slug so there is no
+        # user-controlled content in the redirect target (CWE-601).
+        return HttpResponseRedirect(f"{frontend_url}/login?oauth_error=provider_error")
 
     code = request.GET.get("code")
     state_value = request.GET.get("state")
