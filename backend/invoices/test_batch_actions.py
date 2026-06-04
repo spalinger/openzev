@@ -1,0 +1,185 @@
+"""Coverage for invoice batch and email-retry API actions.
+
+The legacy ``invoices/tests.py`` covers single-invoice lifecycle transitions well.
+This module focuses on the period-wide actions that can otherwise regress in
+production workflows: approve-all, send-all, download-pdfs, and retry-email.
+"""
+
+from datetime import date
+from unittest import mock
+
+import pytest
+from django.core.files.base import ContentFile
+from rest_framework.test import APIClient
+
+from invoices.models import EmailLog, InvoiceStatus
+from testing.factories import InvoiceFactory, OwnerFactory, ParticipantFactory, ZevFactory
+from testing.helpers import authenticate
+
+pytestmark = pytest.mark.django_db
+
+PERIOD_PAYLOAD = {
+    "period_start": "2026-01-01",
+    "period_end": "2026-01-31",
+}
+
+
+def _owner_client(owner):
+    client = APIClient()
+    authenticate(client, owner)
+    return client
+
+
+def _period_payload(zev):
+    return {"zev_id": str(zev.id), **PERIOD_PAYLOAD}
+
+
+def _invoice(participant, *, status=InvoiceStatus.DRAFT, period_start=date(2026, 1, 1), period_end=date(2026, 1, 31)):
+    return InvoiceFactory(
+        zev=participant.zev,
+        participant=participant,
+        status=status,
+        period_start=period_start,
+        period_end=period_end,
+    )
+
+
+class TestInvoiceBatchActions:
+    def test_approve_all_approves_only_drafts_in_requested_period(self):
+        owner = OwnerFactory()
+        zev = ZevFactory(owner=owner)
+        participant = ParticipantFactory(zev=zev)
+        draft = _invoice(participant, status=InvoiceStatus.DRAFT)
+        approved = _invoice(participant, status=InvoiceStatus.APPROVED)
+        other_period = _invoice(
+            participant,
+            status=InvoiceStatus.DRAFT,
+            period_start=date(2026, 2, 1),
+            period_end=date(2026, 2, 28),
+        )
+        client = _owner_client(owner)
+
+        response = client.post("/api/v1/invoices/invoices/approve-all/", _period_payload(zev), format="json")
+
+        assert response.status_code == 200
+        assert response.data == {"approved": 1}
+        draft.refresh_from_db()
+        approved.refresh_from_db()
+        other_period.refresh_from_db()
+        assert draft.status == InvoiceStatus.APPROVED
+        assert approved.status == InvoiceStatus.APPROVED
+        assert other_period.status == InvoiceStatus.DRAFT
+
+    def test_send_all_queues_only_approved_invoices_with_recipient(self):
+        owner = OwnerFactory()
+        zev = ZevFactory(owner=owner)
+        with_email = ParticipantFactory(zev=zev, email="with-email@example.com")
+        without_email = ParticipantFactory(zev=zev, email="")
+        draft_participant = ParticipantFactory(zev=zev, email="draft@example.com")
+        approved_with_email = _invoice(with_email, status=InvoiceStatus.APPROVED)
+        _invoice(without_email, status=InvoiceStatus.APPROVED)
+        _invoice(draft_participant, status=InvoiceStatus.DRAFT)
+        client = _owner_client(owner)
+
+        with mock.patch("invoices.views.send_invoice_email_task.delay") as delay:
+            response = client.post("/api/v1/invoices/invoices/send-all/", _period_payload(zev), format="json")
+
+        assert response.status_code == 200
+        assert response.data == {"queued": 1, "skipped": 1}
+        delay.assert_called_once_with(str(approved_with_email.pk), "with-email@example.com")
+
+    def test_batch_actions_reject_other_owners_zev(self):
+        owner = OwnerFactory()
+        other_owner = OwnerFactory()
+        zev = ZevFactory(owner=owner)
+        client = _owner_client(other_owner)
+
+        response = client.post("/api/v1/invoices/invoices/approve-all/", _period_payload(zev), format="json")
+
+        assert response.status_code == 403
+
+    def test_download_pdfs_returns_404_when_period_has_no_pdfs(self):
+        owner = OwnerFactory()
+        zev = ZevFactory(owner=owner)
+        participant = ParticipantFactory(zev=zev)
+        _invoice(participant, status=InvoiceStatus.APPROVED)
+        client = _owner_client(owner)
+
+        response = client.post("/api/v1/invoices/invoices/download-pdfs/", _period_payload(zev), format="json")
+
+        assert response.status_code == 404
+        assert "No PDFs" in response.data["error"]
+
+    def test_download_pdfs_returns_zip_for_available_pdfs(self):
+        owner = OwnerFactory()
+        zev = ZevFactory(owner=owner)
+        participant = ParticipantFactory(zev=zev)
+        invoice = _invoice(participant, status=InvoiceStatus.APPROVED)
+        invoice.pdf_file.save("batch-invoice.pdf", ContentFile(b"PDF bytes"), save=True)
+        client = _owner_client(owner)
+
+        response = client.post("/api/v1/invoices/invoices/download-pdfs/", _period_payload(zev), format="json")
+
+        assert response.status_code == 200
+        assert response["Content-Type"] == "application/zip"
+        assert "invoices-2026-01-01.zip" in response["Content-Disposition"]
+        assert response.content
+
+
+class TestInvoiceRetryEmailAction:
+    def test_retry_email_rejects_already_sent_log(self):
+        owner = OwnerFactory()
+        zev = ZevFactory(owner=owner)
+        participant = ParticipantFactory(zev=zev)
+        invoice = _invoice(participant, status=InvoiceStatus.SENT)
+        email_log = EmailLog.objects.create(
+            invoice=invoice,
+            recipient="sent@example.com",
+            subject="Invoice",
+            status=EmailLog.Status.SENT,
+        )
+        client = _owner_client(owner)
+
+        response = client.post(f"/api/v1/invoices/invoices/{invoice.pk}/retry-email/{email_log.pk}/")
+
+        assert response.status_code == 400
+        assert response.data["error"] == "Email already sent."
+
+    def test_retry_email_queues_failed_log_recipient(self):
+        owner = OwnerFactory()
+        zev = ZevFactory(owner=owner)
+        participant = ParticipantFactory(zev=zev)
+        invoice = _invoice(participant, status=InvoiceStatus.APPROVED)
+        email_log = EmailLog.objects.create(
+            invoice=invoice,
+            recipient="failed@example.com",
+            subject="Invoice",
+            status=EmailLog.Status.FAILED,
+            error_message="smtp down",
+        )
+        client = _owner_client(owner)
+
+        with mock.patch("invoices.views.send_invoice_email_task.delay") as delay:
+            response = client.post(f"/api/v1/invoices/invoices/{invoice.pk}/retry-email/{email_log.pk}/")
+
+        assert response.status_code == 200
+        assert response.data["detail"] == "Email retry queued for failed@example.com."
+        delay.assert_called_once_with(str(invoice.pk), "failed@example.com")
+
+    def test_retry_email_rejects_log_from_different_invoice(self):
+        owner = OwnerFactory()
+        zev = ZevFactory(owner=owner)
+        participant = ParticipantFactory(zev=zev)
+        invoice = _invoice(participant, status=InvoiceStatus.APPROVED)
+        other_invoice = _invoice(participant, status=InvoiceStatus.APPROVED)
+        other_log = EmailLog.objects.create(
+            invoice=other_invoice,
+            recipient="other@example.com",
+            subject="Invoice",
+            status=EmailLog.Status.FAILED,
+        )
+        client = _owner_client(owner)
+
+        response = client.post(f"/api/v1/invoices/invoices/{invoice.pk}/retry-email/{other_log.pk}/")
+
+        assert response.status_code == 404

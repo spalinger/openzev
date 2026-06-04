@@ -14,13 +14,11 @@ from audit.models import AuditActionCategory, AuditEvent, AuditEventStatus
 from audit.services import build_diff, infer_zev, record_audit_event, redact_metadata
 
 
+from testing.helpers import authenticate as auth
+
+
 def make_user(username: str, role: str) -> User:
     return User.objects.create_user(username=username, email=f"{username}@example.com", password="pass1234", role=role)
-
-
-def auth(client: APIClient, user: User):
-    response = client.post("/api/v1/auth/token/", {"username": user.username, "password": "pass1234"})
-    client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['access']}")
 
 
 class AuditEventModelTests(TestCase):

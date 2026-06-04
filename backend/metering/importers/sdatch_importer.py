@@ -71,7 +71,9 @@ def import_sdatch(file, zev, user):
 
     # Each MeteringData document may contain multiple MeteringPoint sections
     for mp_elem in root.iter("{*}MeteringPoint"):
-        meter_id_elem = mp_elem.find("{*}MeteringPointID") or mp_elem.find("{*}ID")
+        meter_id_elem = mp_elem.find("{*}MeteringPointID")
+        if meter_id_elem is None:
+            meter_id_elem = mp_elem.find("{*}ID")
         if meter_id_elem is None:
             continue
         meter_id = (meter_id_elem.text or "").strip()
@@ -82,8 +84,12 @@ def import_sdatch(file, zev, user):
 
         for interval in mp_elem.iter("{*}Interval"):
             # Determine start timestamp and resolution
-            start_elem = interval.find("{*}Start") or interval.find("{*}StartDateTime")
-            resolution_elem = interval.find("{*}Resolution") or interval.find("{*}Duration")
+            start_elem = interval.find("{*}Start")
+            if start_elem is None:
+                start_elem = interval.find("{*}StartDateTime")
+            resolution_elem = interval.find("{*}Resolution")
+            if resolution_elem is None:
+                resolution_elem = interval.find("{*}Duration")
             if start_elem is None:
                 continue
 
@@ -106,8 +112,12 @@ def import_sdatch(file, zev, user):
 
             for i, obs in enumerate(interval.iter("{*}Observation")):
                 rows_total += 1
-                qty_elem = obs.find("{*}Volume") or obs.find("{*}Quantity")
-                dir_elem = obs.find("{*}Direction") or obs.find("{*}EnergyFlowDirection")
+                qty_elem = obs.find("{*}Volume")
+                if qty_elem is None:
+                    qty_elem = obs.find("{*}Quantity")
+                dir_elem = obs.find("{*}Direction")
+                if dir_elem is None:
+                    dir_elem = obs.find("{*}EnergyFlowDirection")
                 if qty_elem is None:
                     skipped += 1
                     continue

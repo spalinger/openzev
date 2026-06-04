@@ -10,13 +10,11 @@ from metering.models import MeterReading
 from zev.models import MeteringPoint, MeteringPointAssignment, MeteringPointType, Participant, Zev
 
 
+from testing.helpers import authenticate as auth
+
+
 def make_user(username, role, password="pass1234"):
 	return User.objects.create_user(username=username, password=password, role=role)
-
-
-def auth(client, user, password="pass1234"):
-	resp = client.post("/api/v1/auth/token/", {"username": user.username, "password": password})
-	client.credentials(HTTP_AUTHORIZATION=f"Bearer {resp.data['access']}")
 
 
 class ParticipantEndpointRestrictionTests(TestCase):
@@ -640,3 +638,38 @@ class MeteringPointReadingsDeletionTests(TestCase):
 		)
 
 		self.assertEqual(resp.status_code, 403)
+
+
+class NextInvoiceNumberTests(TestCase):
+	"""Guards the F()-expression counter increment used during invoice generation."""
+
+	def setUp(self):
+		self.owner = make_user("inv_num_owner", UserRole.ZEV_OWNER)
+		self.zev = Zev.objects.create(
+			name="Counter ZEV",
+			owner=self.owner,
+			zev_type="vzev",
+			invoice_prefix="C",
+			invoice_counter=1,
+		)
+
+	def test_format_uses_prefix_and_zero_padded_counter(self):
+		self.assertEqual(self.zev.next_invoice_number(), "C-00001")
+
+	def test_counter_increments_without_gaps_or_repeats(self):
+		numbers = [self.zev.next_invoice_number() for _ in range(5)]
+
+		self.assertEqual(numbers, ["C-00001", "C-00002", "C-00003", "C-00004", "C-00005"])
+		# All numbers are unique (no repeats) and strictly monotonic.
+		self.assertEqual(len(set(numbers)), len(numbers))
+		self.zev.refresh_from_db()
+		self.assertEqual(self.zev.invoice_counter, 6)
+
+	def test_counter_persists_across_instances(self):
+		first = self.zev.next_invoice_number()
+		# A freshly-loaded instance must continue from the persisted counter.
+		reloaded = Zev.objects.get(pk=self.zev.pk)
+		second = reloaded.next_invoice_number()
+
+		self.assertEqual(first, "C-00001")
+		self.assertEqual(second, "C-00002")

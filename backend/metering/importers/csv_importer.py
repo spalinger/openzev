@@ -113,7 +113,13 @@ def _build_day_start(raw_day, timestamp_format):
     if timestamp_format:
         day_dt = datetime.strptime(str(raw_day).strip(), timestamp_format)
     else:
-        day_dt = pd.to_datetime(raw_day, dayfirst=True).to_pydatetime()
+        raw_day_str = str(raw_day).strip()
+        # Preserve unambiguous ISO dates; fall back to day-first parsing for
+        # European CSV exports such as 07.01.2026 or 07/01/2026.
+        if raw_day_str[:10].count("-") == 2 and raw_day_str[:4].isdigit():
+            day_dt = pd.to_datetime(raw_day_str, dayfirst=False).to_pydatetime()
+        else:
+            day_dt = pd.to_datetime(raw_day_str, dayfirst=True).to_pydatetime()
     return datetime(day_dt.year, day_dt.month, day_dt.day, tzinfo=timezone.utc)
 
 

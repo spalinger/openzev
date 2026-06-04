@@ -17,7 +17,7 @@ export function OAuthCallbackPage() {
     const { t } = useTranslation()
     const navigate = useNavigate()
     const [searchParams] = useSearchParams()
-    const { storeTokens, refreshUser } = useAuth()
+    const { refreshUser } = useAuth()
     const [error, setError] = useState<string | null>(null)
     const didRun = useRef(false)
 
@@ -38,8 +38,7 @@ export function OAuthCallbackPage() {
         }
 
         oauthTokenExchange(code)
-            .then((tokens) => {
-                storeTokens(tokens)
+            .then(() => {
                 return refreshUser()
             })
             .then(() => {

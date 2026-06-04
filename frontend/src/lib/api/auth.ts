@@ -1,10 +1,9 @@
 import type {
   AppSettings,
   AppSettingsInput,
-  AuthTokens,
   FeatureFlag,
   FeatureFlagInput,
-  ImpersonationTokens,
+  ImpersonationResult,
   OAuthLoginInitiateResponse,
   OAuthProvider,
   OAuthProviderConfig,
@@ -19,9 +18,12 @@ import type {
 } from '../../types/api'
 import { api } from './client'
 
-export async function login(email: string, password: string): Promise<AuthTokens> {
-  const { data } = await api.post<AuthTokens>('/auth/token/', { email, password })
-  return data
+export async function login(email: string, password: string): Promise<void> {
+  await api.post('/auth/token/', { email, password })
+}
+
+export async function logout(): Promise<void> {
+  await api.post('/auth/logout/')
 }
 
 export async function fetchMe(): Promise<User> {
@@ -73,9 +75,13 @@ export async function fetchUsers(): Promise<PaginatedResponse<User>> {
   return data
 }
 
-export async function impersonateParticipant(userId: number): Promise<ImpersonationTokens> {
-  const { data } = await api.post<ImpersonationTokens>(`/auth/users/${userId}/impersonate/`)
+export async function impersonateParticipant(userId: number): Promise<ImpersonationResult> {
+  const { data } = await api.post<ImpersonationResult>(`/auth/users/${userId}/impersonate/`)
   return data
+}
+
+export async function stopImpersonation(): Promise<void> {
+  await api.post('/auth/users/stop-impersonation/')
 }
 
 export async function updateUser(userId: number, payload: Partial<UserInput>): Promise<User> {
@@ -105,14 +111,12 @@ export async function register(payload: RegisterInput): Promise<{ detail: string
   return data
 }
 
-export async function verifyEmail(token: string): Promise<AuthTokens> {
-  const { data } = await api.post<AuthTokens>('/auth/verify-email/', { token })
-  return data
+export async function verifyEmail(token: string): Promise<void> {
+  await api.post('/auth/verify-email/', { token })
 }
 
-export async function setInitialPassword(newPassword: string): Promise<AuthTokens> {
-  const { data } = await api.post<AuthTokens>('/auth/me/set-initial-password/', { new_password: newPassword })
-  return data
+export async function setInitialPassword(newPassword: string): Promise<void> {
+  await api.post('/auth/me/set-initial-password/', { new_password: newPassword })
 }
 
 export async function fetchOAuthProviders(): Promise<OAuthProvider[]> {
@@ -130,9 +134,8 @@ export async function oauthLinkInitiate(providerSlug: string): Promise<OAuthLogi
   return data
 }
 
-export async function oauthTokenExchange(code: string): Promise<AuthTokens> {
-  const { data } = await api.post<AuthTokens>('/auth/oauth/token-exchange/', { code })
-  return data
+export async function oauthTokenExchange(code: string): Promise<void> {
+  await api.post('/auth/oauth/token-exchange/', { code })
 }
 
 export async function fetchSocialAccounts(): Promise<SocialAccount[]> {
