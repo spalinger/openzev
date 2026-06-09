@@ -118,7 +118,7 @@ PVshare Cockpit is a closed, subscription-based SaaS (CHF ~30/participant/year) 
 | Send invoice email from custom SMTP sender per ZEV | `idea` | `low` | Currently uses system-wide SMTP settings |
 | Invoice run reject + auto-recalculate workflow | `idea` | `medium` | PVshare: reject a run, fix config, confirm → system auto-rebuilds run in 1–2 days; smoother than manual regenerate |
 | Vacant unit auto-billing to ZEV responsible | `idea` | `medium` | When no participant assignment exists for a unit in a period, bill the ZEV owner automatically (PVshare parity) |
-| LEG (Lokale Elektrizitätsgemeinschaft) billing model | `idea` | `high` | New Swiss law since 2026; LEG bills only internally-exchanged energy; grid operator settles remainder directly — fundamentally different from vZEV model |
+| LEG (Lokale Elektrizitätsgemeinschaft) billing model | `idea` | `high` | New Swiss law since 2026; LEG bills only internally-exchanged energy; grid operator settles remainder directly — fundamentally different from vZEV model — [spec](specs/2026-06-leg-billing-model.md) |
 
 ---
 
