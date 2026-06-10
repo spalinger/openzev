@@ -125,6 +125,87 @@ class TestInvoiceBatchActions:
         assert "invoices-2026-01-01.zip" in response["Content-Disposition"]
         assert response.content
 
+    def test_generate_all_queues_background_task(self):
+        owner = OwnerFactory()
+        zev = ZevFactory(owner=owner)
+        ParticipantFactory(zev=zev)
+        ParticipantFactory(zev=zev)
+        client = _owner_client(owner)
+
+        with mock.patch("invoices.views.generate_zev_invoices_task.delay") as delay:
+            response = client.post("/api/v1/invoices/invoices/generate-all/", _period_payload(zev), format="json")
+
+        assert response.status_code == 202
+        assert response.data == {
+            "detail": "Invoice generation queued.",
+            "queued": True,
+            "participant_count": 2,
+        }
+        delay.assert_called_once_with(str(zev.id), "2026-01-01", "2026-01-31")
+
+    def test_generate_all_rejects_other_owners_zev(self):
+        owner = OwnerFactory()
+        other_owner = OwnerFactory()
+        zev = ZevFactory(owner=owner)
+        client = _owner_client(other_owner)
+
+        with mock.patch("invoices.views.generate_zev_invoices_task.delay") as delay:
+            response = client.post("/api/v1/invoices/invoices/generate-all/", _period_payload(zev), format="json")
+
+        assert response.status_code == 403
+        delay.assert_not_called()
+
+    def test_generate_pdfs_all_queues_background_task(self):
+        owner = OwnerFactory()
+        zev = ZevFactory(owner=owner)
+        participant = ParticipantFactory(zev=zev)
+        _invoice(participant, status=InvoiceStatus.APPROVED)
+        client = _owner_client(owner)
+
+        with mock.patch("invoices.views.generate_zev_pdfs_task.delay") as delay:
+            response = client.post("/api/v1/invoices/invoices/generate-pdfs-all/", _period_payload(zev), format="json")
+
+        assert response.status_code == 202
+        assert response.data == {
+            "detail": "PDF generation queued.",
+            "queued": True,
+            "invoice_count": 1,
+        }
+        delay.assert_called_once_with(str(zev.id), "2026-01-01", "2026-01-31")
+
+
+class TestBulkGenerationTasks:
+    def test_generate_zev_invoices_task_calls_engine_for_period(self):
+        from invoices.tasks import generate_zev_invoices_task
+
+        owner = OwnerFactory()
+        zev = ZevFactory(owner=owner)
+
+        with mock.patch("invoices.engine.generate_invoices_for_zev", return_value=[]) as engine:
+            generate_zev_invoices_task(str(zev.id), "2026-01-01", "2026-01-31")
+
+        engine.assert_called_once_with(zev, date(2026, 1, 1), date(2026, 1, 31))
+
+    def test_generate_zev_pdfs_task_renders_period_invoices(self):
+        from invoices.tasks import generate_zev_pdfs_task
+
+        owner = OwnerFactory()
+        zev = ZevFactory(owner=owner)
+        participant = ParticipantFactory(zev=zev)
+        invoice = _invoice(participant, status=InvoiceStatus.APPROVED)
+        _invoice(
+            participant,
+            status=InvoiceStatus.DRAFT,
+            period_start=date(2026, 2, 1),
+            period_end=date(2026, 2, 28),
+        )
+
+        with mock.patch("invoices.pdf.save_invoice_pdf") as save_pdf:
+            generate_zev_pdfs_task(str(zev.id), "2026-01-01", "2026-01-31")
+
+        save_pdf.assert_called_once()
+        assert save_pdf.call_args[0][0].pk == invoice.pk
+
 
 class TestInvoiceRetryEmailAction:
     def test_retry_email_rejects_already_sent_log(self):

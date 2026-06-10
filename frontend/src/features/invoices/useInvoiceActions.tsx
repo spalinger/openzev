@@ -171,11 +171,22 @@ export function useInvoiceActions({
 
     const batchPayload = { zev_id: selectedZevId, period_start: period.period_start, period_end: period.period_end }
 
+    // Bulk generation runs asynchronously on the backend; refresh the period
+    // overview a few times so results appear without a manual reload.
+    const scheduleOverviewRefresh = () => {
+        for (const delay of [3000, 8000, 15000, 30000]) {
+            window.setTimeout(() => {
+                void queryClient.invalidateQueries({ queryKey: periodOverviewInvalidationKey })
+            }, delay)
+        }
+    }
+
     const generateAllMutation = useMutation({
         mutationFn: () => generateInvoicesForZev(batchPayload),
-        onSuccess: (invoices) => {
-            pushToast(t('pages.invoices.batch.generatedAll', { n: invoices.length }), 'success')
+        onSuccess: (result) => {
+            pushToast(t('pages.invoices.batch.generateAllQueued', { n: result.participant_count }), 'success')
             void queryClient.invalidateQueries({ queryKey: periodOverviewInvalidationKey })
+            scheduleOverviewRefresh()
         },
         onError: (error) => pushToast(formatApiError(error, t('pages.invoices.batch.generateAllFailed')), 'error'),
     })
@@ -204,8 +215,9 @@ export function useInvoiceActions({
     const generateAllPdfsMutation = useMutation({
         mutationFn: () => generateAllPdfs(batchPayload),
         onSuccess: (result) => {
-            pushToast(t('pages.invoices.batch.generatedAllPdfs', { n: result.generated }), 'success')
+            pushToast(t('pages.invoices.batch.generateAllPdfsQueued', { n: result.invoice_count }), 'success')
             void queryClient.invalidateQueries({ queryKey: periodOverviewInvalidationKey })
+            scheduleOverviewRefresh()
         },
         onError: (error) => pushToast(formatApiError(error, t('pages.invoices.batch.generateAllPdfsFailed')), 'error'),
     })

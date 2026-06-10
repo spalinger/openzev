@@ -92,7 +92,7 @@ PVshare Cockpit is a closed, subscription-based SaaS (CHF ~30/participant/year) 
 |---|---|---|---|
 | Invoice lifecycle state machine (draft → approved → sent → paid → cancelled) | `shipped` | — | [spec](specs/2026-03-invoice-lifecycle-and-communication.md) |
 | Per-participant invoice generation for a billing period | `shipped` | — | [spec](specs/2026-03-invoice-lifecycle-and-communication.md) |
-| Bulk `generate-all` invoices for an entire ZEV | `shipped` | — | [spec](specs/2026-03-invoice-lifecycle-and-communication.md) |
+| Bulk `generate-all` invoices for an entire ZEV (async via Celery) | `shipped` | — | [spec](specs/2026-03-invoice-lifecycle-and-communication.md), [ADR 0011](adr/0011-async-bulk-invoice-generation.md) |
 | Batch approve / cancel / delete invoices | `shipped` | — | — |
 | Invoice PDF generation with Swiss QR-Rechnung, savings chart, and hourly profile | `shipped` | — | [spec](specs/2026-03-invoice-lifecycle-and-communication.md) |
 | DB-stored PDF template with admin editor and revert-to-default | `shipped` | — | [spec](specs/2026-03-invoice-lifecycle-and-communication.md) |

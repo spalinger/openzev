@@ -12,18 +12,27 @@ from django.db.models import Count, Q, Sum
 from django.conf import settings
 from django.template import Template, Context
 from zev.models import Zev, Participant
+from zev.scoping import ZevScopedQuerySetMixin
 from .models import Invoice, InvoiceStatus, EmailLog, PdfTemplate, EmailTemplate, EMAIL_TEMPLATE_DEFAULTS
 from .serializers import (
     InvoiceSerializer, GenerateInvoiceSerializer, GenerateZevInvoicesSerializer
 )
-from .engine import generate_invoice, generate_invoices_for_zev
+from .engine import generate_invoice
 from .pdf import TEMPLATE_NAME, save_invoice_pdf
 from .contract_pdf import CONTRACT_TEMPLATE_NAME
 from .annual_statement import generate_annual_statement_pdf, ANNUAL_STATEMENT_TEMPLATE
 from .financial_summary import generate_financial_summary_pdf
-from .tasks import send_invoice_email_task
+from .tasks import send_invoice_email_task, generate_zev_invoices_task, generate_zev_pdfs_task
 from .template_context import build_sample_invoice_context, build_sample_contract_context, build_sample_annual_statement_context
 from .period_overview import compute_period_overview
+from .workflow import (
+    InvoiceWorkflowError,
+    approve_invoice,
+    cancel_invoice,
+    can_delete_invoice,
+    mark_invoice_paid,
+    mark_invoice_sent,
+)
 from audit.models import AuditActionCategory, AuditEventStatus
 from audit.services import build_diff, record_audit_event
 
@@ -71,19 +80,17 @@ def _record_invoice_event(
     )
 
 
-class InvoiceViewSet(viewsets.ModelViewSet):
+class InvoiceViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
     serializer_class = InvoiceSerializer
     permission_classes = [IsAuthenticated]
+    zev_owner_filter = "zev__owner"
+    participant_filter = "participant__user"
 
     def get_queryset(self):
-        user = self.request.user
-        qs = Invoice.objects.select_related("participant", "zev").prefetch_related("items", "email_logs")
-        if user.is_admin:
-            return qs
-        if user.is_zev_owner:
-            return qs.filter(zev__owner=user)
         # Participants see only their own invoices
-        return qs.filter(participant__user=user)
+        return self.scope_queryset(
+            Invoice.objects.select_related("participant", "zev").prefetch_related("items", "email_logs")
+        )
 
     def destroy(self, request, *args, **kwargs):
         invoice = self.get_object()
@@ -105,7 +112,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
                 invoice=invoice,
             )
             return Response({"error": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
-        if not request.user.is_admin and invoice.status not in [InvoiceStatus.DRAFT, InvoiceStatus.CANCELLED]:
+        if not request.user.is_admin and not can_delete_invoice(invoice):
             _record_invoice_event(
                 request=request,
                 action_type="invoice.delete",
@@ -185,7 +192,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["post"], url_path="generate-all",
             permission_classes=[IsAuthenticated, IsZevOwnerOrAdmin])
     def generate_all(self, request):
-        """Generate invoices for all participants of a ZEV."""
+        """Queue background generation of invoices for all participants of a ZEV."""
         s = GenerateZevInvoicesSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         try:
@@ -196,42 +203,32 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         if not request.user.is_admin and zev.owner != request.user:
             return Response({"error": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
 
-        try:
-            invoices = generate_invoices_for_zev(
-                zev, s.validated_data["period_start"], s.validated_data["period_end"]
-            )
-        except ValueError as exc:
-            _record_invoice_event(
-                request=request,
-                action_type="invoice.generate_all",
-                summary=f"Failed to generate all invoices for ZEV {zev.id}.",
-                status=AuditEventStatus.FAILED,
-                target_type="zev.Zev",
-                target_id=str(zev.id),
-                target_display=zev.name,
-                metadata={
-                    "period_start": s.validated_data["period_start"],
-                    "period_end": s.validated_data["period_end"],
-                    "error": str(exc),
-                },
-            )
-            return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
+        period_start = s.validated_data["period_start"]
+        period_end = s.validated_data["period_end"]
+        participant_count = Participant.objects.filter(zev=zev).count()
+
+        generate_zev_invoices_task.delay(str(zev.id), str(period_start), str(period_end))
         _record_invoice_event(
             request=request,
             action_type="invoice.generate_all",
-            summary=f"Generated {len(invoices)} invoices for ZEV {zev.name}.",
+            summary=f"Queued invoice generation for ZEV {zev.name}.",
+            status=AuditEventStatus.QUEUED,
             target_type="zev.Zev",
             target_id=str(zev.id),
             target_display=zev.name,
             metadata={
-                "period_start": s.validated_data["period_start"],
-                "period_end": s.validated_data["period_end"],
-                "invoice_count": len(invoices),
+                "period_start": str(period_start),
+                "period_end": str(period_end),
+                "participant_count": participant_count,
             },
         )
         return Response(
-            InvoiceSerializer(invoices, many=True, context={"request": request}).data,
-            status=status.HTTP_201_CREATED,
+            {
+                "detail": "Invoice generation queued.",
+                "queued": True,
+                "participant_count": participant_count,
+            },
+            status=status.HTTP_202_ACCEPTED,
         )
 
     @action(detail=False, methods=["get"], url_path="period-overview", permission_classes=[IsAuthenticated, IsZevOwnerOrAdmin])
@@ -321,7 +318,9 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             permission_classes=[IsAuthenticated, IsZevOwnerOrAdmin])
     def approve(self, request, pk=None):
         invoice = self.get_object()
-        if invoice.status != InvoiceStatus.DRAFT:
+        try:
+            before = approve_invoice(invoice)
+        except InvoiceWorkflowError as exc:
             _record_invoice_event(
                 request=request,
                 action_type="invoice.approve",
@@ -329,10 +328,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
                 status=AuditEventStatus.DENIED,
                 invoice=invoice,
             )
-            return Response({"error": "Only draft invoices can be approved."}, status=status.HTTP_400_BAD_REQUEST)
-        before = {"status": invoice.status}
-        invoice.status = InvoiceStatus.APPROVED
-        invoice.save(update_fields=["status", "updated_at"])
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         _record_invoice_event(
             request=request,
             action_type="invoice.approve",
@@ -347,7 +343,9 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     def mark_sent(self, request, pk=None):
         """Transition an approved invoice to sent/locked state."""
         invoice = self.get_object()
-        if invoice.status != InvoiceStatus.APPROVED:
+        try:
+            before = mark_invoice_sent(invoice)
+        except InvoiceWorkflowError as exc:
             _record_invoice_event(
                 request=request,
                 action_type="invoice.mark_sent",
@@ -355,12 +353,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
                 status=AuditEventStatus.DENIED,
                 invoice=invoice,
             )
-            return Response({"error": "Only approved invoices can be marked as sent."}, status=status.HTTP_400_BAD_REQUEST)
-        before = {"status": invoice.status}
-        invoice.status = InvoiceStatus.SENT
-        from django.utils import timezone as tz
-        invoice.sent_at = tz.now()
-        invoice.save(update_fields=["status", "sent_at", "updated_at"])
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         _record_invoice_event(
             request=request,
             action_type="invoice.mark_sent",
@@ -375,7 +368,9 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     def mark_paid(self, request, pk=None):
         """Record that a sent invoice has been paid."""
         invoice = self.get_object()
-        if invoice.status != InvoiceStatus.SENT:
+        try:
+            before = mark_invoice_paid(invoice)
+        except InvoiceWorkflowError as exc:
             _record_invoice_event(
                 request=request,
                 action_type="invoice.mark_paid",
@@ -383,10 +378,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
                 status=AuditEventStatus.DENIED,
                 invoice=invoice,
             )
-            return Response({"error": "Only sent invoices can be marked as paid."}, status=status.HTTP_400_BAD_REQUEST)
-        before = {"status": invoice.status}
-        invoice.status = InvoiceStatus.PAID
-        invoice.save(update_fields=["status", "updated_at"])
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         _record_invoice_event(
             request=request,
             action_type="invoice.mark_paid",
@@ -401,27 +393,17 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     def cancel(self, request, pk=None):
         """Cancel an invoice that has not yet been paid."""
         invoice = self.get_object()
-        if invoice.status == InvoiceStatus.PAID:
+        try:
+            before = cancel_invoice(invoice)
+        except InvoiceWorkflowError as exc:
             _record_invoice_event(
                 request=request,
                 action_type="invoice.cancel",
-                summary=f"Denied cancellation for {_invoice_target_display(invoice)} because invoice is paid.",
+                summary=f"Denied cancellation for {_invoice_target_display(invoice)}: {exc}",
                 status=AuditEventStatus.DENIED,
                 invoice=invoice,
             )
-            return Response({"error": "Paid invoices cannot be cancelled."}, status=status.HTTP_400_BAD_REQUEST)
-        if invoice.status == InvoiceStatus.CANCELLED:
-            _record_invoice_event(
-                request=request,
-                action_type="invoice.cancel",
-                summary=f"Denied cancellation for {_invoice_target_display(invoice)} because it is already cancelled.",
-                status=AuditEventStatus.DENIED,
-                invoice=invoice,
-            )
-            return Response({"error": "Invoice is already cancelled."}, status=status.HTTP_400_BAD_REQUEST)
-        before = {"status": invoice.status}
-        invoice.status = InvoiceStatus.CANCELLED
-        invoice.save(update_fields=["status", "updated_at"])
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         _record_invoice_event(
             request=request,
             action_type="invoice.cancel",
@@ -547,26 +529,35 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["post"], url_path="generate-pdfs-all",
             permission_classes=[IsAuthenticated, IsZevOwnerOrAdmin])
     def generate_pdfs_all(self, request):
-        """Generate PDFs for all invoices in a ZEV period."""
+        """Queue background PDF generation for all invoices in a ZEV period."""
         _zev, invoices, error = self._get_period_invoices(request)
         if error:
             return error
 
-        invoice_list = list(invoices)
-        count = 0
-        for invoice in invoice_list:
-            save_invoice_pdf(invoice)
-            count += 1
+        invoice_count = invoices.count()
+        generate_zev_pdfs_task.delay(
+            str(_zev.id),
+            str(request.data["period_start"]),
+            str(request.data["period_end"]),
+        )
         _record_invoice_event(
             request=request,
             action_type="invoice.generate_pdfs_all",
-            summary=f"Generated {count} invoice PDFs in batch.",
+            summary=f"Queued PDF generation for {invoice_count} invoices.",
+            status=AuditEventStatus.QUEUED,
             target_type="zev.Zev",
             target_id=str(_zev.id),
             target_display=_zev.name,
-            metadata={"generated": count},
+            metadata={"invoice_count": invoice_count},
         )
-        return Response({"generated": count})
+        return Response(
+            {
+                "detail": "PDF generation queued.",
+                "queued": True,
+                "invoice_count": invoice_count,
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
 
     @action(detail=False, methods=["post"], url_path="download-pdfs",
             permission_classes=[IsAuthenticated, IsZevOwnerOrAdmin])
