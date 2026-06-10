@@ -106,21 +106,20 @@ def _count_billable_months(tariff: Tariff, period_start: date, period_end: date)
     return _count_intersecting_months(overlap_start, overlap_end)
 
 
-def _month_has_active_participant_metering_points(participant: Participant, month_first_day: date, month_last_day: date) -> bool:
-    return MeteringPointAssignment.objects.filter(
-        participant=participant,
-        valid_from__lte=month_last_day,
-    ).filter(
-        models.Q(valid_to__isnull=True) | models.Q(valid_to__gte=month_first_day),
-        metering_point__is_active=True,
-    ).exists()
-
-
 def _count_billable_metering_points_by_month(participant: Participant, tariff: Tariff, period_start: date, period_end: date) -> int:
     overlap_start = max(period_start, tariff.valid_from)
     overlap_end = min(period_end, tariff.valid_to or period_end)
     if overlap_start > overlap_end:
         return 0
+
+    # Single fetch: month-by-month activity is computed in Python instead of
+    # issuing two queries per month.
+    assignments = list(
+        MeteringPointAssignment.objects.filter(
+            participant=participant,
+            metering_point__is_active=True,
+        ).values_list("metering_point_id", "valid_from", "valid_to")
+    )
 
     total_metering_points = 0
     cursor = _month_start(overlap_start)
@@ -132,15 +131,16 @@ def _count_billable_metering_points_by_month(participant: Participant, tariff: T
 
         month_start = max(month_first_day, overlap_start)
         month_end = min(month_last_day, overlap_end)
-        if month_start <= month_end and _month_has_active_participant_metering_points(participant, month_first_day, month_last_day):
-            month_points = MeteringPointAssignment.objects.filter(
-                participant=participant,
-                valid_from__lte=month_end,
-            ).filter(
-                models.Q(valid_to__isnull=True) | models.Q(valid_to__gte=month_start),
-                metering_point__is_active=True,
-            ).values("metering_point_id").distinct().count()
-            total_metering_points += month_points
+        month_has_active = any(
+            vf <= month_last_day and (vt is None or vt >= month_first_day)
+            for _mp_id, vf, vt in assignments
+        )
+        if month_start <= month_end and month_has_active:
+            total_metering_points += len({
+                mp_id
+                for mp_id, vf, vt in assignments
+                if vf <= month_end and (vt is None or vt >= month_start)
+            })
 
         cursor = next_month
 
@@ -309,7 +309,6 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
         timestamp__lt=end_dt,
         direction=ReadingDirection.IN,
     )
-    total_participant_kwh = sum(r.energy_kwh for r in participant_readings) or Decimal("0")
 
     # ─── 2. Collect participant production (OUT) readings ──────────────────
     production_mps = MeteringPoint.objects.filter(
@@ -369,7 +368,33 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
     tariffs_list = list(
         Tariff.objects.filter(zev=zev).prefetch_related("periods")
     )
+    # Pre-bucket tariffs by billing mode + energy type so the per-reading
+    # loops below don't re-filter the full tariff list for every timestamp.
+    energy_tariffs_by_type: dict[str, list[Tariff]] = {}
+    pct_tariffs_by_type: dict[str, list[Tariff]] = {}
+    for t in tariffs_list:
+        if t.billing_mode == BillingMode.ENERGY:
+            energy_tariffs_by_type.setdefault(t.energy_type, []).append(t)
+        elif t.billing_mode == BillingMode.PERCENTAGE_OF_ENERGY and t.percentage:
+            pct_tariffs_by_type.setdefault(t.energy_type, []).append(t)
 
+    _active_cache: dict[tuple[str, str, date], list[Tariff]] = {}
+
+    def active_energy_tariffs_for(energy_type: str, day: date) -> list[Tariff]:
+        key = ("energy", energy_type, day)
+        if key not in _active_cache:
+            _active_cache[key] = [
+                t for t in energy_tariffs_by_type.get(energy_type, []) if _tariff_is_active(t, day)
+            ]
+        return _active_cache[key]
+
+    def active_pct_tariffs_for(energy_type: str, day: date) -> list[Tariff]:
+        key = ("pct", energy_type, day)
+        if key not in _active_cache:
+            _active_cache[key] = [
+                t for t in pct_tariffs_by_type.get(energy_type, []) if _tariff_is_active(t, day)
+            ]
+        return _active_cache[key]
     # ─── 7. Per-reading HT/NT-aware pricing with timestamp allocation ─────
     local_kwh_acc = Decimal("0")
     grid_kwh_acc = Decimal("0")
@@ -421,26 +446,15 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
         # Compute GRID energy base sum once per timestamp.
         # Percentage-of-energy tariffs price any energy type as a fraction of
         # what a participant would normally pay for grid energy.
-        active_grid_energy_tariffs = [
-            t for t in tariffs_list
-            if t.billing_mode == BillingMode.ENERGY
-            and t.energy_type == EnergyType.GRID
-            and _tariff_is_active(t, ts.date())
-        ]
         grid_base_price_sum = sum(
-            (_get_tariff_price(t, ts) or Decimal("0")) for t in active_grid_energy_tariffs
+            (_get_tariff_price(t, ts) or Decimal("0"))
+            for t in active_energy_tariffs_for(EnergyType.GRID, ts.date())
         )
 
         for energy_type, quantity in ((EnergyType.LOCAL, r_local), (EnergyType.GRID, r_grid)):
             if quantity <= 0:
                 continue
-            active_energy_tariffs = [
-                tariff for tariff in tariffs_list
-                if tariff.billing_mode == BillingMode.ENERGY
-                and tariff.energy_type == energy_type
-                and _tariff_is_active(tariff, ts.date())
-            ]
-            for tariff in active_energy_tariffs:
+            for tariff in active_energy_tariffs_for(energy_type, ts.date()):
                 price = _get_tariff_price(tariff, ts) or Decimal("0")
                 accumulate_item(
                     tariff=tariff,
@@ -451,21 +465,15 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
 
             # Percentage-of-energy tariffs: base is always the GRID rate sum,
             # applied to whichever energy_type the tariff is configured for.
-            for tariff in tariffs_list:
-                if (
-                    tariff.billing_mode == BillingMode.PERCENTAGE_OF_ENERGY
-                    and tariff.energy_type == energy_type
-                    and tariff.percentage
-                    and _tariff_is_active(tariff, ts.date())
-                ):
-                    effective_price = grid_base_price_sum * (tariff.percentage / Decimal("100"))
-                    accumulate_item(
-                        tariff=tariff,
-                        quantity=quantity,
-                        total=quantity * effective_price,
-                        unit="kWh",
-                        base_total=quantity * grid_base_price_sum,
-                    )
+            for tariff in active_pct_tariffs_for(energy_type, ts.date()):
+                effective_price = grid_base_price_sum * (tariff.percentage / Decimal("100"))
+                accumulate_item(
+                    tariff=tariff,
+                    quantity=quantity,
+                    total=quantity * effective_price,
+                    unit="kWh",
+                    base_total=quantity * grid_base_price_sum,
+                )
 
     exported_kwh_acc = Decimal("0")
 
@@ -488,24 +496,13 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
 
         exported_kwh_acc += exported_kwh
 
-        active_grid_energy_tariffs = [
-            t for t in tariffs_list
-            if t.billing_mode == BillingMode.ENERGY
-            and t.energy_type == EnergyType.GRID
-            and _tariff_is_active(t, ts.date())
-        ]
         grid_base_price_sum = sum(
-            (_get_tariff_price(t, ts) or Decimal("0")) for t in active_grid_energy_tariffs
+            (_get_tariff_price(t, ts) or Decimal("0"))
+            for t in active_energy_tariffs_for(EnergyType.GRID, ts.date())
         )
 
         if local_sold_kwh > 0:
-            active_local_energy_tariffs = [
-                tariff for tariff in tariffs_list
-                if tariff.billing_mode == BillingMode.ENERGY
-                and tariff.energy_type == EnergyType.LOCAL
-                and _tariff_is_active(tariff, ts.date())
-            ]
-            for tariff in active_local_energy_tariffs:
+            for tariff in active_energy_tariffs_for(EnergyType.LOCAL, ts.date()):
                 price = _get_tariff_price(tariff, ts) or Decimal("0")
                 accumulate_item(
                     tariff=tariff,
@@ -515,31 +512,19 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
                     bucket="producer_credit",
                 )
 
-            for tariff in tariffs_list:
-                if (
-                    tariff.billing_mode == BillingMode.PERCENTAGE_OF_ENERGY
-                    and tariff.energy_type == EnergyType.LOCAL
-                    and tariff.percentage
-                    and _tariff_is_active(tariff, ts.date())
-                ):
-                    effective_price = grid_base_price_sum * (tariff.percentage / Decimal("100"))
-                    accumulate_item(
-                        tariff=tariff,
-                        quantity=local_sold_kwh,
-                        total=-(local_sold_kwh * effective_price),
-                        unit="kWh",
-                        base_total=(local_sold_kwh * grid_base_price_sum),
-                        bucket="producer_credit",
-                    )
+            for tariff in active_pct_tariffs_for(EnergyType.LOCAL, ts.date()):
+                effective_price = grid_base_price_sum * (tariff.percentage / Decimal("100"))
+                accumulate_item(
+                    tariff=tariff,
+                    quantity=local_sold_kwh,
+                    total=-(local_sold_kwh * effective_price),
+                    unit="kWh",
+                    base_total=(local_sold_kwh * grid_base_price_sum),
+                    bucket="producer_credit",
+                )
 
         if exported_kwh > 0:
-            active_feed_in_tariffs = [
-                tariff for tariff in tariffs_list
-                if tariff.billing_mode == BillingMode.ENERGY
-                and tariff.energy_type == EnergyType.FEED_IN
-                and _tariff_is_active(tariff, ts.date())
-            ]
-            for tariff in active_feed_in_tariffs:
+            for tariff in active_energy_tariffs_for(EnergyType.FEED_IN, ts.date()):
                 price = _get_tariff_price(tariff, ts) or Decimal("0")
                 accumulate_item(
                     tariff=tariff,
