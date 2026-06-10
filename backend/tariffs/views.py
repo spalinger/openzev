@@ -6,6 +6,7 @@ from django.db import transaction
 from accounts.permissions import IsZevOwnerOrAdmin
 from zev.models import Zev
 from .models import Tariff, TariffPeriod
+from zev.scoping import ZevScopedQuerySetMixin
 from .serializers import TariffSerializer, TariffPeriodSerializer
 from audit.models import AuditActionCategory, AuditEventStatus
 from audit.services import build_diff, record_audit_event
@@ -39,15 +40,14 @@ def _record_tariff_event(
     )
 
 
-class TariffViewSet(viewsets.ModelViewSet):
+class TariffViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
     serializer_class = TariffSerializer
     permission_classes = [IsAuthenticated, IsZevOwnerOrAdmin]
+    zev_owner_filter = "zev__owner"
+    participant_filter = None
 
     def get_queryset(self):
-        user = self.request.user
-        if user.is_admin:
-            return Tariff.objects.all()
-        return Tariff.objects.filter(zev__owner=user)
+        return self.scope_queryset(Tariff.objects.all())
 
     def perform_create(self, serializer):
         tariff = serializer.save()
@@ -288,15 +288,14 @@ class TariffViewSet(viewsets.ModelViewSet):
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class TariffPeriodViewSet(viewsets.ModelViewSet):
+class TariffPeriodViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
     serializer_class = TariffPeriodSerializer
     permission_classes = [IsAuthenticated, IsZevOwnerOrAdmin]
+    zev_owner_filter = "tariff__zev__owner"
+    participant_filter = None
 
     def get_queryset(self):
-        user = self.request.user
-        if user.is_admin:
-            return TariffPeriod.objects.all()
-        return TariffPeriod.objects.filter(tariff__zev__owner=user)
+        return self.scope_queryset(TariffPeriod.objects.all())
 
     def perform_create(self, serializer):
         period = serializer.save()

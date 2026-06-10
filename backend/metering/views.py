@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from accounts.permissions import IsZevOwnerOrAdmin
 from zev.models import Zev, Participant, MeteringPoint, MeteringPointAssignment
 from .models import MeterReading, ImportLog
+from zev.scoping import ZevScopedQuerySetMixin
 from .serializers import MeterReadingSerializer, ImportLogSerializer
 from .importers.csv_importer import import_csv, preview_csv
 from .importers.sdatch_importer import import_sdatch
@@ -52,18 +53,15 @@ def _record_metering_event(
     )
 
 
-class MeterReadingViewSet(viewsets.ModelViewSet):
+class MeterReadingViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
     serializer_class = MeterReadingSerializer
     permission_classes = [IsAuthenticated, IsZevOwnerOrAdmin]
+    zev_owner_filter = "metering_point__zev__owner"
+    participant_filter = "metering_point__assignments__participant__user"
+    participant_distinct = True
 
     def get_queryset(self):
-        user = self.request.user
-        qs = MeterReading.objects.select_related("metering_point__zev")
-        if user.is_admin:
-            return qs
-        if user.is_zev_owner:
-            return qs.filter(metering_point__zev__owner=user)
-        return qs.filter(metering_point__assignments__participant__user=user).distinct()
+        return self.scope_queryset(MeterReading.objects.select_related("metering_point__zev"))
 
     @action(detail=False, methods=["get"], url_path="chart-data",
             permission_classes=[IsAuthenticated])

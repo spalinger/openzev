@@ -12,6 +12,7 @@ from accounts.models import User, UserRole
 from accounts.serializers import UserSerializer
 from metering.models import MeterReading
 from .models import Zev, Participant, MeteringPoint, MeteringPointAssignment
+from .scoping import ZevScopedQuerySetMixin
 from .serializers import (
     ZevSerializer,
     ZevDetailSerializer,
@@ -60,8 +61,11 @@ def _record_zev_event(
     )
 
 
-class ZevViewSet(viewsets.ModelViewSet):
+class ZevViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, ZevManagementPermission]
+    zev_owner_filter = "owner"
+    participant_filter = "participants__user"
+    participant_distinct = True
 
     def get_permissions(self):
         # self_setup is a POST by non-admins — skip ZevManagementPermission
@@ -70,12 +74,7 @@ class ZevViewSet(viewsets.ModelViewSet):
         return super().get_permissions()
 
     def get_queryset(self):
-        user = self.request.user
-        if user.is_admin:
-            return Zev.objects.all()
-        if user.is_zev_owner:
-            return Zev.objects.filter(owner=user)
-        return Zev.objects.filter(participants__user=user).distinct()
+        return self.scope_queryset(Zev.objects.all())
 
     def get_serializer_class(self):
         if self.action == "create_with_owner":
@@ -115,17 +114,14 @@ class ZevViewSet(viewsets.ModelViewSet):
         return Response(result, status=status.HTTP_201_CREATED)
 
 
-class ParticipantViewSet(viewsets.ModelViewSet):
+class ParticipantViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
     serializer_class = ParticipantSerializer
     permission_classes = [IsAuthenticated, ParticipantManagementPermission]
+    zev_owner_filter = "zev__owner"
+    participant_filter = "user"
 
     def get_queryset(self):
-        user = self.request.user
-        if user.is_admin:
-            return Participant.objects.prefetch_related("metering_point_assignments")
-        if user.is_zev_owner:
-            return Participant.objects.filter(zev__owner=user).prefetch_related("metering_point_assignments")
-        return Participant.objects.filter(user=user).prefetch_related("metering_point_assignments")
+        return self.scope_queryset(Participant.objects.prefetch_related("metering_point_assignments"))
 
     def perform_create(self, serializer):
         participant = serializer.save()
@@ -422,18 +418,15 @@ class ParticipantViewSet(viewsets.ModelViewSet):
         )
 
 
-class MeteringPointViewSet(viewsets.ModelViewSet):
+class MeteringPointViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
     serializer_class = MeteringPointSerializer
     permission_classes = [IsAuthenticated, MeteringPointPermission]
+    zev_owner_filter = "zev__owner"
+    participant_filter = "assignments__participant__user"
+    participant_distinct = True
 
     def get_queryset(self):
-        user = self.request.user
-        qs = MeteringPoint.objects.select_related("zev")
-        if user.is_admin:
-            return qs
-        if user.is_zev_owner:
-            return qs.filter(zev__owner=user)
-        return qs.filter(assignments__participant__user=user).distinct()
+        return self.scope_queryset(MeteringPoint.objects.select_related("zev"))
 
     def perform_create(self, serializer):
         metering_point = serializer.save()
@@ -547,23 +540,20 @@ class MeteringPointViewSet(viewsets.ModelViewSet):
         return Response({"deleted_count": deleted_count}, status=status.HTTP_200_OK)
 
 
-class MeteringPointAssignmentViewSet(viewsets.ModelViewSet):
+class MeteringPointAssignmentViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
     serializer_class = MeteringPointAssignmentSerializer
     permission_classes = [IsAuthenticated, MeteringPointAssignmentPermission]
+    zev_owner_filter = "metering_point__zev__owner"
+    participant_filter = "participant__user"
 
     def get_queryset(self):
-        user = self.request.user
-        qs = MeteringPointAssignment.objects.select_related(
-            "metering_point",
-            "metering_point__zev",
-            "participant",
+        qs = self.scope_queryset(
+            MeteringPointAssignment.objects.select_related(
+                "metering_point",
+                "metering_point__zev",
+                "participant",
+            )
         )
-        if user.is_admin:
-            pass
-        elif user.is_zev_owner:
-            qs = qs.filter(metering_point__zev__owner=user)
-        else:
-            qs = qs.filter(participant__user=user)
 
         # Optional filter: ?metering_point=<uuid>
         mp_id = self.request.query_params.get("metering_point")
