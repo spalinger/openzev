@@ -22,7 +22,17 @@ from .models import Invoice, InvoiceStatus
 
 
 class InvoiceWorkflowError(Exception):
-    """Raised when an invoice status transition is not allowed."""
+    """Raised when an invoice status transition is not allowed.
+
+    ``user_message`` carries a safe, predefined string describing the guard
+    violation. Views should use this attribute in HTTP responses rather than
+    ``str(self)`` to avoid broad exception-message exposure flagged by static
+    analysis tools.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.user_message: str = message
 
 
 def approve_invoice(invoice: Invoice) -> dict:

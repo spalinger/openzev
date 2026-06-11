@@ -173,7 +173,10 @@ class InvoiceViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
                     "error": str(exc),
                 },
             )
-            return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
+            return Response(
+                {"error": "Invoice generation failed. The invoice may already exist in a non-regenerable state."},
+                status=status.HTTP_409_CONFLICT,
+            )
         _record_invoice_event(
             request=request,
             action_type="invoice.generate",
@@ -328,7 +331,7 @@ class InvoiceViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
                 status=AuditEventStatus.DENIED,
                 invoice=invoice,
             )
-            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": exc.user_message}, status=status.HTTP_400_BAD_REQUEST)
         _record_invoice_event(
             request=request,
             action_type="invoice.approve",
@@ -353,7 +356,7 @@ class InvoiceViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
                 status=AuditEventStatus.DENIED,
                 invoice=invoice,
             )
-            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": exc.user_message}, status=status.HTTP_400_BAD_REQUEST)
         _record_invoice_event(
             request=request,
             action_type="invoice.mark_sent",
@@ -378,7 +381,7 @@ class InvoiceViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
                 status=AuditEventStatus.DENIED,
                 invoice=invoice,
             )
-            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": exc.user_message}, status=status.HTTP_400_BAD_REQUEST)
         _record_invoice_event(
             request=request,
             action_type="invoice.mark_paid",
@@ -399,11 +402,11 @@ class InvoiceViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
             _record_invoice_event(
                 request=request,
                 action_type="invoice.cancel",
-                summary=f"Denied cancellation for {_invoice_target_display(invoice)}: {exc}",
+                summary=f"Denied cancellation for {_invoice_target_display(invoice)}: {exc.user_message}",
                 status=AuditEventStatus.DENIED,
                 invoice=invoice,
             )
-            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": exc.user_message}, status=status.HTTP_400_BAD_REQUEST)
         _record_invoice_event(
             request=request,
             action_type="invoice.cancel",
