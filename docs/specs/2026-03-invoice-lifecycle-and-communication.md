@@ -195,7 +195,8 @@ All invoice endpoints are routed under `/api/v1/invoices/invoices/` via a DRF `M
 | Method | URL | Permission | Payload | Response |
 |---|---|---|---|---|
 | `POST` | `/invoices/generate/` | `IsZevOwnerOrAdmin` | `{participant_id, period_start, period_end}` | `201` with invoice JSON, or `409` if locked |
-| `POST` | `/invoices/generate-all/` | `IsZevOwnerOrAdmin` | `{zev_id, period_start, period_end}` | `201` with array of invoice JSON |
+| `POST` | `/invoices/generate-all/` | `IsZevOwnerOrAdmin` | `{zev_id, period_start, period_end}` | `202` with `{detail, queued: true, participant_count}` — generation runs asynchronously via Celery (`generate_zev_invoices_task`); failures (e.g. locked invoices) are recorded as audit events with `source = celery` |
+| `POST` | `/invoices/generate-pdfs-all/` | `IsZevOwnerOrAdmin` | `{zev_id, period_start, period_end}` | `202` with `{detail, queued: true, invoice_count}` — PDF rendering runs asynchronously via Celery (`generate_zev_pdfs_task`) |
 
 Validation: `period_start` must be before `period_end`.
 
@@ -207,6 +208,13 @@ Validation: `period_start` must be before `period_end`.
 | `POST` | `/invoices/{id}/mark-sent/` | `IsZevOwnerOrAdmin` | `status == approved` | → `sent`, `sent_at = now()` |
 | `POST` | `/invoices/{id}/mark-paid/` | `IsZevOwnerOrAdmin` | `status == sent` | → `paid` |
 | `POST` | `/invoices/{id}/cancel/` | `IsZevOwnerOrAdmin` | `status ∉ {paid, cancelled}` | → `cancelled` |
+
+Transition rules are implemented centrally in `invoices/workflow.py`
+(`approve_invoice`, `mark_invoice_sent`, `mark_invoice_paid`, `cancel_invoice`).
+Guard violations raise `InvoiceWorkflowError`; views translate this into a
+`400` response with `{"error": <message>}` and a `denied` audit event. The
+email task's approved→sent auto-transition uses `record_email_delivery` from
+the same module.
 
 ### 5.4 PDF and email
 

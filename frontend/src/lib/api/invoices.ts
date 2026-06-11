@@ -32,8 +32,11 @@ export async function generateInvoicesForZev(payload: {
   zev_id: string
   period_start: string
   period_end: string
-}): Promise<Invoice[]> {
-  const { data } = await api.post<Invoice[]>('/invoices/invoices/generate-all/', payload)
+}): Promise<{ detail: string; queued: boolean; participant_count: number }> {
+  const { data } = await api.post<{ detail: string; queued: boolean; participant_count: number }>(
+    '/invoices/invoices/generate-all/',
+    payload,
+  )
   return data
 }
 
@@ -59,8 +62,11 @@ export async function generateAllPdfs(payload: {
   zev_id: string
   period_start: string
   period_end: string
-}): Promise<{ generated: number }> {
-  const { data } = await api.post<{ generated: number }>('/invoices/invoices/generate-pdfs-all/', payload)
+}): Promise<{ detail: string; queued: boolean; invoice_count: number }> {
+  const { data } = await api.post<{ detail: string; queued: boolean; invoice_count: number }>(
+    '/invoices/invoices/generate-pdfs-all/',
+    payload,
+  )
   return data
 }
 

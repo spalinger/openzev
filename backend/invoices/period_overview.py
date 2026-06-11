@@ -49,27 +49,33 @@ def compute_period_overview(*, zev, period_start: date_type, period_end: date_ty
     }
 
     rows = []
+    assignments_by_participant: dict = {p.id: [] for p in participants}
+    for assignment in MeteringPointAssignment.objects.filter(
+        participant_id__in=assignments_by_participant.keys(),
+        valid_from__lte=period_end,
+    ).filter(
+        Q(valid_to__isnull=True) | Q(valid_to__gte=period_start)
+    ).select_related("metering_point"):
+        assignments_by_participant[assignment.participant_id].append(assignment)
+
+    all_mp_ids = {
+        a.metering_point_id
+        for assignments in assignments_by_participant.values()
+        for a in assignments
+    }
+    readings_by_metering_point: dict[int, set] = {}
+    for metering_point_id, timestamp in MeterReading.objects.filter(
+        metering_point_id__in=all_mp_ids,
+        timestamp__gte=period_start_dt,
+        timestamp__lt=period_end_exclusive_dt,
+    ).values_list("metering_point_id", "timestamp"):
+        readings_by_metering_point.setdefault(metering_point_id, set()).add(timestamp.date())
+
     for participant in participants:
-        assignments = list(
-            MeteringPointAssignment.objects.filter(
-                participant=participant,
-                valid_from__lte=period_end,
-            ).filter(
-                Q(valid_to__isnull=True) | Q(valid_to__gte=period_start)
-            ).select_related("metering_point")
-        )
+        assignments = assignments_by_participant[participant.id]
 
         if not assignments:
             continue
-
-        assignment_mp_ids = [a.metering_point_id for a in assignments]
-        readings_by_metering_point: dict[int, set] = {}
-        for metering_point_id, timestamp in MeterReading.objects.filter(
-            metering_point_id__in=assignment_mp_ids,
-            timestamp__gte=period_start_dt,
-            timestamp__lt=period_end_exclusive_dt,
-        ).values_list("metering_point_id", "timestamp"):
-            readings_by_metering_point.setdefault(metering_point_id, set()).add(timestamp.date())
 
         missing_meter_ids = []
         missing_meter_details = []
@@ -85,12 +91,9 @@ def compute_period_overview(*, zev, period_start: date_type, period_end: date_ty
                 continue
 
             reading_days = readings_by_metering_point.get(mp.id, set())
-            cursor = effective_start
-            missing_days = 0
-            while cursor <= effective_end:
-                if cursor not in reading_days:
-                    missing_days += 1
-                cursor = cursor + timedelta(days=1)
+            expected_days = (effective_end - effective_start).days + 1
+            covered_days = sum(1 for d in reading_days if effective_start <= d <= effective_end)
+            missing_days = expected_days - covered_days
 
             if missing_days > 0:
                 missing_meter_ids.append(mp.meter_id)
