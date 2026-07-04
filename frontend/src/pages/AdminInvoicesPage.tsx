@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { DataGrid, type GridColDef, type GridRenderCellParams } from '@mui/x-data-grid'
 import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
 import { formatShortDate, useAppSettings } from '../lib/appSettings'
+import { getDataGridLocaleText } from '../lib/dataGridLocale'
 import { deleteInvoice, fetchInvoices } from '../lib/api/invoices'
 import { formatApiError } from '../lib/api/errors'
 import { queryKeys } from '../lib/api/queryKeys'
@@ -17,12 +18,8 @@ function invoiceStatusBadgeClass(status: string): string {
     return 'badge badge-neutral'
 }
 
-function humanizeStatus(status: string): string {
-    return status.replace('_', ' ').replace(/^./, (char) => char.toUpperCase())
-}
-
 export function AdminInvoicesPage() {
-    const { t } = useTranslation()
+    const { t, i18n } = useTranslation()
     const queryClient = useQueryClient()
     const { pushToast } = useToast()
     const { settings } = useAppSettings()
@@ -117,10 +114,14 @@ export function AdminInvoicesPage() {
             minWidth: 130,
             filterable: true,
             type: 'singleSelect',
-            valueOptions: ['draft', 'approved', 'sent', 'paid', 'cancelled'],
-            renderCell: (params: GridRenderCellParams<Invoice>) => (
-                <span className={invoiceStatusBadgeClass(String(params.value ?? ''))}>{humanizeStatus(String(params.value ?? ''))}</span>
-            ),
+            valueOptions: (['draft', 'approved', 'sent', 'paid', 'cancelled'] as const).map((value) => ({
+                value,
+                label: t(`invoice.status.${value}`),
+            })),
+            renderCell: (params: GridRenderCellParams<Invoice>) => {
+                const status = String(params.value ?? '')
+                return <span className={invoiceStatusBadgeClass(status)}>{status ? t(`invoice.status.${status}`) : ''}</span>
+            },
         },
         {
             field: 'actions',
@@ -188,6 +189,7 @@ export function AdminInvoicesPage() {
                                 },
                             }}
                             localeText={{
+                                ...getDataGridLocaleText(i18n.language),
                                 toolbarQuickFilterPlaceholder: t('adminInvoices.quickFilterPlaceholder'),
                                 noRowsLabel: t('adminInvoices.noFilteredResults'),
                             }}

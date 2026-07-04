@@ -1193,6 +1193,7 @@ export const it = {
             resetToGlobalDefault: 'Ripristina al modello predefinito globale',
         },
         invoiceDetail: {
+            title: 'Fattura {{number}}',
             backToInvoices: 'Torna alle fatture',
             status: 'Stato',
             total: 'Totale',

@@ -1193,6 +1193,7 @@ export const fr = {
             resetToGlobalDefault: 'Réinitialiser au modèle par défaut global',
         },
         invoiceDetail: {
+            title: 'Facture {{number}}',
             backToInvoices: 'Retour aux factures',
             status: 'Statut',
             total: 'Total',

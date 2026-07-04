@@ -27,6 +27,7 @@ import {
 import { queryKeys } from '../lib/api/queryKeys'
 import { formatDateTime, useAppSettings } from '../lib/appSettings'
 import { useAuth } from '../lib/auth'
+import { getDataGridLocaleText } from '../lib/dataGridLocale'
 import { useManagedZev } from '../lib/managedZev'
 import { useTranslation } from 'react-i18next'
 import { useToast } from '../lib/toast'
@@ -63,7 +64,7 @@ export function ImportsPage() {
     const { user } = useAuth()
     const { settings } = useAppSettings()
     const { selectedZevId, selectedZev } = useManagedZev()
-    const { t } = useTranslation()
+    const { t, i18n } = useTranslation()
     const isManagedScope = user?.role === 'admin' || user?.role === 'zev_owner'
 
     const { data, isLoading, isError } = useQuery({ queryKey: queryKeys.metering.importLogs(), queryFn: fetchImportLogs })
@@ -715,6 +716,7 @@ export function ImportsPage() {
                         },
                     }}
                     localeText={{
+                        ...getDataGridLocaleText(i18n.language),
                         noRowsLabel: t('pages.imports.noRows'),
                     }}
                     sx={{
