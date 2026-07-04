@@ -1167,6 +1167,7 @@ export const en = {
             resetToGlobalDefault: 'Revert to global default',
         },
         invoiceDetail: {
+            title: 'Invoice {{number}}',
             backToInvoices: 'Back to Invoices',
             status: 'Status',
             total: 'Total',

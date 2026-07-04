@@ -18,10 +18,6 @@ function emailStatusBadgeClass(status: string): string {
   return 'badge badge-neutral'
 }
 
-function humanizeStatus(status: string): string {
-  return status.replace('_', ' ').replace(/^./, (char) => char.toUpperCase())
-}
-
 function getLatestEmailLog(invoice: {
   email_logs?: Array<{ created_at: string; recipient: string; status: string; id: string }>
 } | null) {
@@ -101,7 +97,7 @@ export function InvoicePeriodRowsTable({
                   {invoice ? (
                     <div className="invoice-cell-stack">
                       <span>{invoice.invoice_number}</span>
-                      <span className={invoiceStatusBadgeClass(invoice.status)}>{humanizeStatus(invoice.status)}</span>
+                      <span className={invoiceStatusBadgeClass(invoice.status)}>{t(`invoice.status.${invoice.status}`)}</span>
                     </div>
                   ) : (
                     <div className="invoice-cell-stack">
@@ -113,7 +109,7 @@ export function InvoicePeriodRowsTable({
                 <td>
                   {invoice && latestEmailLog ? (
                     <div className="invoice-cell-stack">
-                      <span className={emailStatusBadgeClass(latestEmailLog.status)}>{humanizeStatus(latestEmailLog.status)}</span>
+                      <span className={emailStatusBadgeClass(latestEmailLog.status)}>{t(`email.${latestEmailLog.status}`)}</span>
                       <div>
                         <button
                           className="table-inline-action"

@@ -45,7 +45,7 @@ export function InvoiceDetailPage() {
         <div className="page-stack">
             <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
                 <div>
-                    <h2 style={{ marginBottom: '0.2rem' }}>Invoice {inv.invoice_number}</h2>
+                    <h2 style={{ marginBottom: '0.2rem' }}>{t('pages.invoiceDetail.title', { number: inv.invoice_number })}</h2>
                     <p className="muted" style={{ margin: 0 }}>
                         {inv.participant_name} · {formatShortDate(inv.period_start, settings)} → {formatShortDate(inv.period_end, settings)}
                     </p>
@@ -56,7 +56,7 @@ export function InvoiceDetailPage() {
             </header>
 
             <section className="grid grid-4">
-                <div className="card"><strong>{t('pages.invoiceDetail.status')}</strong><div>{inv.status}</div></div>
+                <div className="card"><strong>{t('pages.invoiceDetail.status')}</strong><div>{t(`invoice.status.${inv.status}`)}</div></div>
                 <div className="card"><strong>{t('pages.invoiceDetail.total')}</strong><div>CHF {inv.total_chf}</div></div>
                 <div className="card"><strong>{t('pages.invoiceDetail.subtotal')}</strong><div>CHF {inv.subtotal_chf ?? '-'}</div></div>
                 <div className="card"><strong>{t('pages.invoiceDetail.vat')}</strong><div>CHF {inv.vat_chf ?? '-'}</div></div>
