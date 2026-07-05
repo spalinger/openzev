@@ -6,11 +6,15 @@ import {
 } from '@fortawesome/free-solid-svg-icons'
 import { useTranslation } from 'react-i18next'
 
+export type TariffValidityFilter = 'valid' | 'all'
+
 type TariffToolbarProps = {
   tariffCount: number
   energyTariffCount: number
   tariffsWithPeriodsCount: number
   periodCount: number
+  validityFilter: TariffValidityFilter
+  onValidityFilterChange: (value: TariffValidityFilter) => void
   onOpenCreateTariffModal: () => void
   onOpenExportModal: () => void
   onOpenImportModal: () => void
@@ -21,6 +25,8 @@ export function TariffToolbar({
   energyTariffCount,
   tariffsWithPeriodsCount,
   periodCount,
+  validityFilter,
+  onValidityFilterChange,
   onOpenCreateTariffModal,
   onOpenExportModal,
   onOpenImportModal,
@@ -63,6 +69,19 @@ export function TariffToolbar({
             {t('pages.tariffs.importJson')}
           </button>
         </div>
+      </div>
+
+      <div className="tariff-filter-grid">
+        <label>
+          <span>{t('pages.tariffs.filters.validity')}</span>
+          <select
+            value={validityFilter}
+            onChange={(event) => onValidityFilterChange(event.target.value as TariffValidityFilter)}
+          >
+            <option value="valid">{t('pages.tariffs.filters.validOnly')}</option>
+            <option value="all">{t('pages.tariffs.filters.all')}</option>
+          </select>
+        </label>
       </div>
     </section>
   )
