@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
 import { TariffCategorySections } from '../features/tariffs/TariffCategorySections'
 import { useTariffCrud } from '../features/tariffs/useTariffCrud'
@@ -8,7 +8,7 @@ import { TariffExportModal } from '../features/tariffs/TariffExportModal'
 import { TariffFormModal } from '../features/tariffs/TariffFormModal'
 import { TariffImportModal } from '../features/tariffs/TariffImportModal'
 import { TariffPeriodFormModal } from '../features/tariffs/TariffPeriodFormModal'
-import { TariffToolbar } from '../features/tariffs/TariffToolbar'
+import { TariffToolbar, type TariffValidityFilter } from '../features/tariffs/TariffToolbar'
 import { useTariffTransfer } from '../features/tariffs/useTariffTransfer'
 import {
     fetchTariffPeriods,
@@ -24,6 +24,12 @@ import type { Tariff, TariffPeriod } from '../types/api'
 
 const tariffCategoryOrder: Tariff['category'][] = ['energy', 'grid_fees', 'levies', 'metering']
 
+function isTariffCurrentlyValid(tariff: Tariff, todayIso: string): boolean {
+    if (tariff.valid_from > todayIso) return false
+    if (tariff.valid_to && tariff.valid_to < todayIso) return false
+    return true
+}
+
 export function TariffsPage() {
     const queryClient = useQueryClient()
     const { pushToast } = useToast()
@@ -33,6 +39,8 @@ export function TariffsPage() {
     const { selectedZevId } = useManagedZev()
     const { t } = useTranslation()
     const isManagedScope = user?.role === 'admin' || user?.role === 'zev_owner'
+    const [validityFilter, setValidityFilter] = useState<TariffValidityFilter>('valid')
+    const todayIso = useMemo(() => new Date().toISOString().slice(0, 10), [])
 
     const tariffsQuery = useQuery({
         queryKey: queryKeys.tariffs.list(selectedZevId || undefined),
@@ -90,15 +98,20 @@ export function TariffsPage() {
         [tariffs, periodsByTariff],
     )
 
+    const visibleTariffs = useMemo(
+        () => (validityFilter === 'all' ? tariffs : tariffs.filter((tariff) => isTariffCurrentlyValid(tariff, todayIso))),
+        [tariffs, validityFilter, todayIso],
+    )
+
     const tariffSections = useMemo(
         () =>
             tariffCategoryOrder
                 .map((category) => ({
                     category,
-                    tariffs: tariffs.filter((tariff) => tariff.category === category),
+                    tariffs: visibleTariffs.filter((tariff) => tariff.category === category),
                 }))
                 .filter((section) => section.tariffs.length > 0),
-        [tariffs],
+        [visibleTariffs],
     )
 
     const {
@@ -172,6 +185,8 @@ export function TariffsPage() {
                 energyTariffCount={energyTariffs.length}
                 tariffsWithPeriodsCount={tariffsWithPeriodsCount}
                 periodCount={periods.length}
+                validityFilter={validityFilter}
+                onValidityFilterChange={setValidityFilter}
                 onOpenCreateTariffModal={openCreateTariffModal}
                 onOpenExportModal={openExportModal}
                 onOpenImportModal={openImportModal}
@@ -217,6 +232,16 @@ export function TariffsPage() {
                     onOpenCreateTariffModal={openCreateTariffModal}
                     onOpenImportModal={openImportModal}
                 />
+            ) : visibleTariffs.length === 0 ? (
+                <section className="card" style={{ display: 'grid', gap: '0.75rem' }}>
+                    <h3 style={{ margin: 0 }}>{t('pages.tariffs.noResults.title')}</h3>
+                    <p className="muted" style={{ margin: 0 }}>{t('pages.tariffs.noResults.description')}</p>
+                    <div>
+                        <button className="button button-secondary" type="button" onClick={() => setValidityFilter('all')}>
+                            {t('pages.tariffs.filters.clear')}
+                        </button>
+                    </div>
+                </section>
             ) : (
                 <TariffCategorySections
                     tariffSections={tariffSections}

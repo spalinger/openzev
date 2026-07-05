@@ -1,9 +1,12 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
+    faChevronDown,
+    faChevronUp,
     faPen,
     faPlus,
     faTrash,
 } from '@fortawesome/free-solid-svg-icons'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { formatShortDate } from '../../lib/appSettings'
 import type { AppSettings, Tariff, TariffPeriod } from '../../types/api'
@@ -39,6 +42,19 @@ export function TariffCategorySections({
     onDeletePeriod,
 }: TariffCategorySectionsProps) {
     const { t } = useTranslation()
+    const [expandedTariffIds, setExpandedTariffIds] = useState<Set<string>>(new Set())
+
+    const toggleExpanded = (tariffId: string) => {
+        setExpandedTariffIds((current) => {
+            const next = new Set(current)
+            if (next.has(tariffId)) {
+                next.delete(tariffId)
+            } else {
+                next.add(tariffId)
+            }
+            return next
+        })
+    }
 
     return (
         <div className="tariff-category-sections">
@@ -63,6 +79,8 @@ export function TariffCategorySections({
                                 : tariff.billing_mode === 'percentage_of_energy'
                                     ? `${tariff.percentage ?? '0'}% · ${t(`pages.tariffs.energyTypes.${tariff.energy_type || 'local'}` as Parameters<typeof t>[0])}`
                                     : `CHF ${tariff.fixed_price_chf || '0.00'}`
+                            const notes = tariff.notes?.trim()
+                            const isExpanded = expandedTariffIds.has(tariff.id)
 
                             return (
                                 <article key={tariff.id} className="tariff-card">
@@ -97,88 +115,111 @@ export function TariffCategorySections({
                                                 <FontAwesomeIcon icon={faTrash} fixedWidth />
                                                 {t('common.delete')}
                                             </button>
+                                            <button
+                                                className="button button-secondary button-compact"
+                                                type="button"
+                                                aria-expanded={isExpanded}
+                                                onClick={() => toggleExpanded(tariff.id)}
+                                            >
+                                                <FontAwesomeIcon icon={isExpanded ? faChevronUp : faChevronDown} fixedWidth />
+                                                {isExpanded ? t('common.hideDetails') : t('common.showDetails')}
+                                            </button>
                                         </div>
                                     </div>
 
-                                    <div className="tariff-card-details">
-                                        <div className="tariff-detail-card">
-                                            <span className="tariff-detail-label">{t('pages.tariffs.col.pricing')}</span>
-                                            <span className="tariff-detail-value">{pricingLabel}</span>
-                                        </div>
-                                        <div className="tariff-detail-card">
-                                            <span className="tariff-detail-label">{t('pages.tariffs.col.validity')}</span>
-                                            <span className="tariff-detail-value">
-                                                {formatShortDate(tariff.valid_from, settings)} - {tariff.valid_to ? formatShortDate(tariff.valid_to, settings) : '-'}
-                                            </span>
-                                        </div>
-                                        <div className="tariff-detail-card tariff-detail-card-wide">
-                                            <span className="tariff-detail-label">{t('pages.tariffs.form.notes')}</span>
-                                            <span className="tariff-detail-value">{tariff.notes?.trim() || t('pages.tariffs.noNotes')}</span>
-                                        </div>
-                                    </div>
-
-                                    <div className="tariff-period-section">
-                                        <div className="tariff-period-section-header">
-                                            <div className="tariff-period-section-title-row">
-                                                <h4>{t('pages.tariffs.tariffPeriods')}</h4>
-                                                {usesPeriods && tariffPeriods.length > 0 && (
-                                                    <span className="badge badge-neutral">{tariffPeriods.length}</span>
-                                                )}
-                                            </div>
-                                            {usesPeriods && (
-                                                <button
-                                                    className="button button-secondary button-compact"
-                                                    type="button"
-                                                    onClick={() => onOpenCreatePeriodModal(tariff.id)}
-                                                >
-                                                    <FontAwesomeIcon icon={faPlus} fixedWidth />
-                                                    {t('pages.tariffs.addPeriod')}
-                                                </button>
-                                            )}
-                                        </div>
-
-                                        {!usesPeriods ? (
-                                            <p className="muted tariff-period-empty">{t('pages.tariffs.fixedFeeHint')}</p>
-                                        ) : tariffPeriods.length === 0 ? (
-                                            <p className="muted tariff-period-empty">{t('pages.tariffs.noPeriods')}</p>
-                                        ) : (
-                                            <div className="tariff-period-list">
-                                                {tariffPeriods.map((period) => (
-                                                    <div key={period.id} className="tariff-period-row">
-                                                        <div className="tariff-period-main">
-                                                            <div className="tariff-period-line">
-                                                                <span className="badge badge-neutral">
-                                                                    {t(`pages.tariffs.periodTypes.${period.period_type}` as Parameters<typeof t>[0], { defaultValue: period.period_type })}
-                                                                </span>
-                                                                <strong>CHF {period.price_chf_per_kwh}/kWh</strong>
-                                                            </div>
-                                                            <div className="muted tariff-period-meta">
-                                                                {period.period_type === 'flat'
-                                                                    ? `${t('pages.tariffs.allDay')} · ${t('pages.tariffs.allWeekdays')}`
-                                                                    : `${period.time_from || '--'} - ${period.time_to || '--'} · ${period.weekdays || t('pages.tariffs.allWeekdays')}`}
-                                                            </div>
-                                                        </div>
-
-                                                        <div className="tariff-period-actions">
-                                                            <button className="button button-secondary button-compact" type="button" onClick={() => onEditPeriod(period)}>
-                                                                <FontAwesomeIcon icon={faPen} fixedWidth />
-                                                                {t('common.edit')}
-                                                            </button>
-                                                            <button
-                                                                className="button button-danger button-compact"
-                                                                type="button"
-                                                                disabled={deletePeriodDisabled}
-                                                                onClick={() => onDeletePeriod(period)}
-                                                            >
-                                                                <FontAwesomeIcon icon={faTrash} fixedWidth />
-                                                                {t('common.delete')}
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                ))}
+                                    <div className="tariff-card-summary-row">
+                                        {!usesPeriods && (
+                                            <div className="tariff-detail-card">
+                                                <span className="tariff-detail-label">{t('pages.tariffs.col.pricing')}</span>
+                                                <span className="tariff-detail-value">{pricingLabel}</span>
                                             </div>
                                         )}
+                                        {usesPeriods && (
+                                            <span className="badge badge-neutral">
+                                                {t('pages.tariffs.periodCountSummary', { count: tariffPeriods.length })}
+                                            </span>
+                                        )}
                                     </div>
+
+                                    {isExpanded && (
+                                        <>
+                                            <div className="tariff-card-details">
+                                                <div className="tariff-detail-card">
+                                                    <span className="tariff-detail-label">{t('pages.tariffs.col.validity')}</span>
+                                                    <span className="tariff-detail-value">
+                                                        {formatShortDate(tariff.valid_from, settings)} - {tariff.valid_to ? formatShortDate(tariff.valid_to, settings) : '-'}
+                                                    </span>
+                                                </div>
+                                                {notes && (
+                                                    <div className="tariff-detail-card tariff-detail-card-wide">
+                                                        <span className="tariff-detail-label">{t('pages.tariffs.form.notes')}</span>
+                                                        <span className="tariff-detail-value">{notes}</span>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {usesPeriods && (
+                                                <div className="tariff-period-section">
+                                                    <div className="tariff-period-section-header">
+                                                        <div className="tariff-period-section-title-row">
+                                                            <h4>{t('pages.tariffs.tariffPeriods')}</h4>
+                                                            {tariffPeriods.length > 0 && (
+                                                                <span className="badge badge-neutral">{tariffPeriods.length}</span>
+                                                            )}
+                                                        </div>
+                                                        <button
+                                                            className="button button-secondary button-compact"
+                                                            type="button"
+                                                            onClick={() => onOpenCreatePeriodModal(tariff.id)}
+                                                        >
+                                                            <FontAwesomeIcon icon={faPlus} fixedWidth />
+                                                            {t('pages.tariffs.addPeriod')}
+                                                        </button>
+                                                    </div>
+
+                                                    {tariffPeriods.length === 0 ? (
+                                                        <p className="muted tariff-period-empty">{t('pages.tariffs.noPeriods')}</p>
+                                                    ) : (
+                                                        <div className="tariff-period-list">
+                                                            {tariffPeriods.map((period) => (
+                                                                <div key={period.id} className="tariff-period-row">
+                                                                    <div className="tariff-period-main">
+                                                                        <div className="tariff-period-line">
+                                                                            <span className="badge badge-neutral">
+                                                                                {t(`pages.tariffs.periodTypes.${period.period_type}` as Parameters<typeof t>[0], { defaultValue: period.period_type })}
+                                                                            </span>
+                                                                            <strong>CHF {period.price_chf_per_kwh}/kWh</strong>
+                                                                        </div>
+                                                                        <div className="muted tariff-period-meta">
+                                                                            {period.period_type === 'flat'
+                                                                                ? `${t('pages.tariffs.allDay')} · ${t('pages.tariffs.allWeekdays')}`
+                                                                                : `${period.time_from || '--'} - ${period.time_to || '--'} · ${period.weekdays || t('pages.tariffs.allWeekdays')}`}
+                                                                        </div>
+                                                                    </div>
+
+                                                                    <div className="tariff-period-actions">
+                                                                        <button className="button button-secondary button-compact" type="button" onClick={() => onEditPeriod(period)}>
+                                                                            <FontAwesomeIcon icon={faPen} fixedWidth />
+                                                                            {t('common.edit')}
+                                                                        </button>
+                                                                        <button
+                                                                            className="button button-danger button-compact"
+                                                                            type="button"
+                                                                            disabled={deletePeriodDisabled}
+                                                                            onClick={() => onDeletePeriod(period)}
+                                                                        >
+                                                                            <FontAwesomeIcon icon={faTrash} fixedWidth />
+                                                                            {t('common.delete')}
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </>
+                                    )}
                                 </article>
                             )
                         })}
