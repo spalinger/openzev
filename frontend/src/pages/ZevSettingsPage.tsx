@@ -33,10 +33,11 @@ export function ZevSettingsPage() {
         mutationFn: (payload: ZevInput) => updateZev(selectedZevId, payload),
         onSuccess: () => {
             setError(null)
-            pushToast('ZEV settings updated.', 'success')
+            pushToast(t('pages.zevSettings.updateSuccess'), 'success')
             void queryClient.invalidateQueries({ queryKey: queryKeys.zev.list() })
         },
-        onError: (mutationError) => setError(formatApiError(mutationError, 'Failed to update ZEV settings.')),
+        onError: (mutationError) =>
+            setError(formatApiError(mutationError, t('pages.zevSettings.updateFailed'))),
     })
 
     function submit(event: FormEvent<HTMLFormElement>) {

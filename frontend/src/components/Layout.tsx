@@ -153,10 +153,10 @@ export function Layout() {
                                     <NavLink
                                         to="/participants"
                                         className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
-                                        title="Manage (v)Zev"
+                                        title={t('nav.manageZev')}
                                     >
                                         <span className="nav-icon"><BuildingIcon /></span>
-                                        <span className="nav-label">Manage (v)Zev</span>
+                                        <span className="nav-label">{t('nav.manageZev')}</span>
                                     </NavLink>
                                 ) : (
                                     <>
@@ -164,11 +164,11 @@ export function Layout() {
                                             type="button"
                                             className={`nav-toggle${manageIsActive ? ' active' : ''}`}
                                             onClick={() => setIsManageNavOpen((prev) => !prev)}
-                                            title="Manage (v)Zev"
+                                            title={t('nav.manageZev')}
                                         >
                                             <span className="nav-toggle-main">
                                                 <span className="nav-icon"><BuildingIcon /></span>
-                                                <span className="nav-label">Manage (v)Zev</span>
+                                                <span className="nav-label">{t('nav.manageZev')}</span>
                                             </span>
                                             <span className="nav-caret" aria-hidden="true">{isManageNavOpen ? '−' : '+'}</span>
                                         </button>
@@ -187,9 +187,9 @@ export function Layout() {
                                                     <span className="nav-icon"><ChartIcon /></span>
                                                     <span className="nav-label">{t('nav.meteringData')}</span>
                                                 </NavLink>
-                                                <NavLink to="/zev-settings" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`} title="Settings">
+                                                <NavLink to="/zev-settings" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`} title={t('nav.zevSettings')}>
                                                     <span className="nav-icon"><SettingsIcon /></span>
-                                                    <span className="nav-label">Settings</span>
+                                                    <span className="nav-label">{t('nav.zevSettings')}</span>
                                                 </NavLink>
                                             </div>
                                         )}
