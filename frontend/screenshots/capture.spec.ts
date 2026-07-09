@@ -162,12 +162,14 @@ const GLOBAL_PII_CSS = `
 /**
  * Per-page blur configuration.
  * - `selectors`: CSS selectors whose matched elements get `filter: blur(6px)`.
- * - `blurLabels`: Label `<span>` text identifying form inputs to blur by value.
  * - `blurInputs`: CSS selector for `<input>` elements to blur by inline style.
+ *
+ * Never match on visible text: this suite runs in de-CH, so any English string
+ * stops matching the moment a page is translated, and PII silently un-blurs.
+ * Target `name` attributes or structural selectors instead.
  */
 interface BlurConfig {
   selectors?: string
-  blurLabels?: string[]
   blurInputs?: string
 }
 
@@ -220,7 +222,9 @@ const PAGE_BLUR: Record<string, BlurConfig> = {
     ].join(', '),
   },
   'zev-settings': {
-    blurLabels: ['Name', 'Bank name', 'Bank IBAN'],  // sensitive form fields only
+    // Match by name attribute, not label text: labels are translated and the
+    // suite runs in de-CH, so English label text silently stops matching.
+    blurInputs: 'input[name="name"], input[name="bank_name"], input[name="bank_iban"]',
   },
   'admin-accounts': {
     selectors: [
@@ -269,20 +273,7 @@ async function blurPII(page: Page, pageKey?: string) {
     })
   }
 
-  // 3. Blur form inputs identified by their associated label text
-  if (config?.blurLabels?.length) {
-    await page.evaluate((labels: string[]) => {
-      for (const label of document.querySelectorAll('label')) {
-        const span = label.querySelector('span')
-        if (span && labels.includes(span.textContent?.trim() ?? '')) {
-          const input = label.querySelector('input, textarea, select') as HTMLElement | null
-          if (input) input.style.filter = 'blur(6px)'
-        }
-      }
-    }, config.blurLabels)
-  }
-
-  // 4. Blur specific input elements by CSS selector
+  // 3. Blur specific input elements by CSS selector
   if (config?.blurInputs) {
     await page.evaluate((selector: string) => {
       for (const el of document.querySelectorAll<HTMLInputElement>(selector)) {
@@ -406,7 +397,19 @@ test.describe('User Guide Screenshots', () => {
       const value = await options.nth(1).getAttribute('value')
       if (value) {
         await mpSelect.selectOption(value)
-        // Wait for chart to render
+        await page.waitForTimeout(1000)
+
+        // The page opens on the *current* billing period, which is usually outside
+        // the seeded demo range. Step back until a period with readings is shown,
+        // so the capture does not depend on today's date. The icon is matched
+        // rather than the label, which is translated.
+        const prevPeriod = page.locator('button:has(svg[data-icon="arrow-left"])').first()
+        for (let attempt = 0; attempt < 6; attempt++) {
+          if (await page.locator('.recharts-wrapper').count()) break
+          await prevPeriod.click()
+          await page.waitForTimeout(1500)
+        }
+
         await page.waitForSelector('.recharts-wrapper', { timeout: 15_000 })
         await page.waitForTimeout(1000)
       }

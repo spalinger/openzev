@@ -24,6 +24,7 @@ export function ZevGeneralSettingsFields({ form, onChange }: ZevGeneralSettingsF
                     <label>
                         <span>{t('pages.zevSettings.fields.name')}</span>
                         <input
+                            name="name"
                             value={form.name}
                             onChange={(event) => onChange({ name: event.target.value })}
                             required
@@ -125,6 +126,7 @@ export function ZevGeneralSettingsFields({ form, onChange }: ZevGeneralSettingsF
                     <label>
                         <span>{t('pages.zevSettings.fields.bankName')}</span>
                         <input
+                            name="bank_name"
                             value={form.bank_name ?? ''}
                             onChange={(event) => onChange({ bank_name: event.target.value })}
                         />
@@ -132,6 +134,7 @@ export function ZevGeneralSettingsFields({ form, onChange }: ZevGeneralSettingsF
                     <label className="grid-span-full">
                         <span>{t('pages.zevSettings.fields.bankIban')}</span>
                         <input
+                            name="bank_iban"
                             value={form.bank_iban ?? ''}
                             onChange={(event) => onChange({ bank_iban: event.target.value })}
                         />

@@ -147,7 +147,7 @@ export function TariffCategorySections({
                                                 <div className="tariff-detail-card">
                                                     <span className="tariff-detail-label">{t('pages.tariffs.col.validity')}</span>
                                                     <span className="tariff-detail-value">
-                                                        {formatShortDate(tariff.valid_from, settings)} - {tariff.valid_to ? formatShortDate(tariff.valid_to, settings) : '-'}
+                                                        {formatShortDate(tariff.valid_from, settings)} - {tariff.valid_to ? formatShortDate(tariff.valid_to, settings) : t('pages.tariffs.openEnded')}
                                                     </span>
                                                 </div>
                                                 {notes && (
