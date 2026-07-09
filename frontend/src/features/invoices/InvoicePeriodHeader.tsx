@@ -38,11 +38,11 @@ export function InvoicePeriodHeader({
         <div style={{ fontWeight: 700 }}>{zevName}</div>
         <div className="muted" style={{ fontSize: '0.95rem' }}>
           {periodStart && periodEnd
-            ? `${formatShortDate(periodStart, settings)} -> ${formatShortDate(periodEnd, settings)}`
+            ? `${formatShortDate(periodStart, settings)} → ${formatShortDate(periodEnd, settings)}`
             : '-'}
         </div>
         <div className="muted" style={{ fontSize: '0.85rem' }}>
-          {t('pages.invoices.billingInterval')} {interval.replace('_', ' ')}
+          {t('pages.invoices.billingInterval')} {t(`pages.zevs.billingIntervals.${interval}`)}
         </div>
       </div>
       <button className="button button-secondary" type="button" onClick={onNext} disabled={!canNavigate}>

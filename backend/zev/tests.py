@@ -6,6 +6,7 @@ from django.test import override_settings
 from rest_framework.test import APIClient
 
 from accounts.models import User, UserRole
+from zev.management.commands.seed_demo import previous_quarter, quarter_start
 from metering.models import MeterReading
 from zev.models import MeteringPoint, MeteringPointAssignment, MeteringPointType, Participant, Zev
 
@@ -673,3 +674,25 @@ class NextInvoiceNumberTests(TestCase):
 
 		self.assertEqual(first, "C-00001")
 		self.assertEqual(second, "C-00002")
+
+
+class SeedDemoPeriodHelpersTests(TestCase):
+	"""``seed_demo`` derives its window from today, so the quarter maths must
+	hold across year boundaries — a fixed window silently goes stale and leaves
+	the dashboard, charts and invoice pages empty."""
+
+	def test_quarter_start_snaps_to_the_containing_quarter(self):
+		self.assertEqual(quarter_start(date(2026, 7, 9)), date(2026, 7, 1))
+		self.assertEqual(quarter_start(date(2026, 4, 1)), date(2026, 4, 1))
+		self.assertEqual(quarter_start(date(2026, 3, 31)), date(2026, 1, 1))
+		self.assertEqual(quarter_start(date(2026, 12, 31)), date(2026, 10, 1))
+
+	def test_previous_quarter_is_the_last_complete_quarter(self):
+		self.assertEqual(previous_quarter(date(2026, 7, 9)), (date(2026, 4, 1), date(2026, 6, 30)))
+		self.assertEqual(previous_quarter(date(2026, 4, 1)), (date(2026, 1, 1), date(2026, 3, 31)))
+
+	def test_previous_quarter_crosses_the_year_boundary(self):
+		self.assertEqual(previous_quarter(date(2026, 1, 5)), (date(2025, 10, 1), date(2025, 12, 31)))
+
+	def test_previous_quarter_handles_a_leap_day(self):
+		self.assertEqual(previous_quarter(date(2024, 2, 29)), (date(2023, 10, 1), date(2023, 12, 31)))

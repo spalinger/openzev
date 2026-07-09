@@ -52,6 +52,19 @@ async function navigateTo(page: Page, urlPath: string) {
   await page.waitForTimeout(1500)
 }
 
+/**
+ * Step back one billing period.
+ *
+ * Pages open on the *current* period, which is still in progress and carries no
+ * invoices. `seed_demo` bills the previous complete quarter, so the captures
+ * that should show real data step back once. Matches the arrow icon rather than
+ * the button label, which is translated.
+ */
+async function goToPreviousPeriod(page: Page) {
+  await page.locator('button:has(svg[data-icon="arrow-left"])').first().click()
+  await page.waitForTimeout(2000)
+}
+
 /** Log in as admin and return the bearer access token (used for subsequent direct API calls). */
 async function getAdminToken(page: Page): Promise<string> {
   // We use a separate direct axios-style POST via page.request. simplejwt still
@@ -330,6 +343,9 @@ test.describe('User Guide Screenshots', () => {
     await navigateTo(page, '/')
     // Wait for dashboard content (stat cards or similar)
     await page.waitForSelector('.card', { timeout: 10_000 })
+    await goToPreviousPeriod(page)
+    // The energy-flow Sankey only renders once the period has readings.
+    await page.waitForSelector('.sankey-participant-label', { timeout: 15_000 })
     await screenshotViewport(page, '02-dashboard', 'dashboard')
   })
 
@@ -342,6 +358,8 @@ test.describe('User Guide Screenshots', () => {
     }
     await navigateTo(page, '/')
     await page.waitForSelector('.card, .stat-card', { timeout: 10_000 })
+    await goToPreviousPeriod(page)
+    await page.waitForSelector('.sankey-participant-label', { timeout: 15_000 })
     await screenshotViewport(page, '02b-participant-dashboard', 'participant-dashboard')
   })
 
@@ -399,12 +417,14 @@ test.describe('User Guide Screenshots', () => {
         await mpSelect.selectOption(value)
         await page.waitForTimeout(1000)
 
-        // The page opens on the *current* billing period, which is usually outside
-        // the seeded demo range. Step back until a period with readings is shown,
-        // so the capture does not depend on today's date. The icon is matched
-        // rather than the label, which is translated.
+        // Step back to the last complete period: the current one holds only the
+        // days elapsed so far, which makes for a sparse chart.
+        await goToPreviousPeriod(page)
+
+        // Safety net if the seeded window ever moves: keep stepping back until a
+        // period with readings is found, so the capture never depends on today.
         const prevPeriod = page.locator('button:has(svg[data-icon="arrow-left"])').first()
-        for (let attempt = 0; attempt < 6; attempt++) {
+        for (let attempt = 0; attempt < 5; attempt++) {
           if (await page.locator('.recharts-wrapper').count()) break
           await prevPeriod.click()
           await page.waitForTimeout(1500)
@@ -435,33 +455,33 @@ test.describe('User Guide Screenshots', () => {
   test('08-invoices', async ({ page }) => {
     await navigateTo(page, '/invoices')
     await page.waitForSelector('table, .card', { timeout: 10_000 })
+    // Invoices are seeded for the last complete period, not the current one.
+    await goToPreviousPeriod(page)
     await screenshot(page, '08-invoices', 'invoices')
   })
 
   // 08b — Invoice Detail page
   test('08b-invoice-detail', async ({ page }) => {
-    // Fetch the first existing invoice ID via the API
+    // Fetch the first existing invoice ID via the API. The login endpoint is
+    // cookie-based and returns no token in its body, so read the access cookie
+    // via getAdminToken rather than reaching for a `.access` field that has
+    // never existed — a bogus header here overrides the valid cookie and 401s.
     const resp = await page.request.get(`${API_BASE}/invoices/invoices/`, {
-      headers: {
-        Authorization: `Bearer ${(await page.request.post(`${API_BASE}/auth/token/`, {
-          data: { username: USER, password: PASS },
-        }).then((r) => r.json()) as { access: string }).access}`,
-      },
+      headers: { Authorization: `Bearer ${await getAdminToken(page)}` },
     })
+    expect(resp.ok(), `Invoice list request failed (${resp.status()})`).toBeTruthy()
+
     const body = await resp.json() as { results?: Array<{ id: string }> }
     const invoiceId = body.results?.[0]?.id
 
-    if (invoiceId) {
-      await navigateTo(page, `/invoices/${invoiceId}`)
-      await page.waitForSelector('.grid-4', { timeout: 10_000 })
-      await page.waitForTimeout(500)
-      await screenshot(page, '08b-invoice-detail', 'invoice-detail')
-    } else {
-      // No invoices exist — take the invoices overview as fallback
-      await navigateTo(page, '/invoices')
-      await page.waitForSelector('table, .card', { timeout: 10_000 })
-      await screenshot(page, '08b-invoice-detail', 'invoices')
-    }
+    // Fail loudly rather than silently capturing the invoices overview under the
+    // invoice-detail name, which is how this file came to hold a duplicate.
+    expect(invoiceId, 'No invoice found — run `manage.py seed_demo` first').toBeTruthy()
+
+    await navigateTo(page, `/invoices/${invoiceId}`)
+    await page.waitForSelector('.grid-4', { timeout: 10_000 })
+    await page.waitForTimeout(500)
+    await screenshot(page, '08b-invoice-detail', 'invoice-detail')
   })
 
   // 09 — Imports
