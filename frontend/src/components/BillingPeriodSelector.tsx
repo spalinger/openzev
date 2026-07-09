@@ -89,9 +89,9 @@ export function BillingPeriodSelector({ interval, from, to, onChange }: BillingP
         <Stack
             direction="row"
             spacing={1}
-            alignItems="center"
-            justifyContent="center"
             sx={{
+                alignItems: 'center',
+                justifyContent: 'center',
                 flexWrap: 'wrap',
                 p: 1,
                 border: '1px solid',
