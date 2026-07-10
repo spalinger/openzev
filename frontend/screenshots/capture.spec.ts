@@ -52,6 +52,19 @@ async function navigateTo(page: Page, urlPath: string) {
   await page.waitForTimeout(1500)
 }
 
+/**
+ * Step back one billing period.
+ *
+ * Pages open on the *current* period, which is still in progress and carries no
+ * invoices. `seed_demo` bills the previous complete quarter, so the captures
+ * that should show real data step back once. Matches the arrow icon rather than
+ * the button label, which is translated.
+ */
+async function goToPreviousPeriod(page: Page) {
+  await page.locator('button:has(svg[data-icon="arrow-left"])').first().click()
+  await page.waitForTimeout(2000)
+}
+
 /** Log in as admin and return the bearer access token (used for subsequent direct API calls). */
 async function getAdminToken(page: Page): Promise<string> {
   // We use a separate direct axios-style POST via page.request. simplejwt still
@@ -162,12 +175,14 @@ const GLOBAL_PII_CSS = `
 /**
  * Per-page blur configuration.
  * - `selectors`: CSS selectors whose matched elements get `filter: blur(6px)`.
- * - `blurLabels`: Label `<span>` text identifying form inputs to blur by value.
  * - `blurInputs`: CSS selector for `<input>` elements to blur by inline style.
+ *
+ * Never match on visible text: this suite runs in de-CH, so any English string
+ * stops matching the moment a page is translated, and PII silently un-blurs.
+ * Target `name` attributes or structural selectors instead.
  */
 interface BlurConfig {
   selectors?: string
-  blurLabels?: string[]
   blurInputs?: string
 }
 
@@ -220,7 +235,9 @@ const PAGE_BLUR: Record<string, BlurConfig> = {
     ].join(', '),
   },
   'zev-settings': {
-    blurLabels: ['Name', 'Bank name', 'Bank IBAN'],  // sensitive form fields only
+    // Match by name attribute, not label text: labels are translated and the
+    // suite runs in de-CH, so English label text silently stops matching.
+    blurInputs: 'input[name="name"], input[name="bank_name"], input[name="bank_iban"]',
   },
   'admin-accounts': {
     selectors: [
@@ -269,20 +286,7 @@ async function blurPII(page: Page, pageKey?: string) {
     })
   }
 
-  // 3. Blur form inputs identified by their associated label text
-  if (config?.blurLabels?.length) {
-    await page.evaluate((labels: string[]) => {
-      for (const label of document.querySelectorAll('label')) {
-        const span = label.querySelector('span')
-        if (span && labels.includes(span.textContent?.trim() ?? '')) {
-          const input = label.querySelector('input, textarea, select') as HTMLElement | null
-          if (input) input.style.filter = 'blur(6px)'
-        }
-      }
-    }, config.blurLabels)
-  }
-
-  // 4. Blur specific input elements by CSS selector
+  // 3. Blur specific input elements by CSS selector
   if (config?.blurInputs) {
     await page.evaluate((selector: string) => {
       for (const el of document.querySelectorAll<HTMLInputElement>(selector)) {
@@ -339,6 +343,9 @@ test.describe('User Guide Screenshots', () => {
     await navigateTo(page, '/')
     // Wait for dashboard content (stat cards or similar)
     await page.waitForSelector('.card', { timeout: 10_000 })
+    await goToPreviousPeriod(page)
+    // The energy-flow Sankey only renders once the period has readings.
+    await page.waitForSelector('.sankey-participant-label', { timeout: 15_000 })
     await screenshotViewport(page, '02-dashboard', 'dashboard')
   })
 
@@ -351,6 +358,8 @@ test.describe('User Guide Screenshots', () => {
     }
     await navigateTo(page, '/')
     await page.waitForSelector('.card, .stat-card', { timeout: 10_000 })
+    await goToPreviousPeriod(page)
+    await page.waitForSelector('.sankey-participant-label', { timeout: 15_000 })
     await screenshotViewport(page, '02b-participant-dashboard', 'participant-dashboard')
   })
 
@@ -406,7 +415,21 @@ test.describe('User Guide Screenshots', () => {
       const value = await options.nth(1).getAttribute('value')
       if (value) {
         await mpSelect.selectOption(value)
-        // Wait for chart to render
+        await page.waitForTimeout(1000)
+
+        // Step back to the last complete period: the current one holds only the
+        // days elapsed so far, which makes for a sparse chart.
+        await goToPreviousPeriod(page)
+
+        // Safety net if the seeded window ever moves: keep stepping back until a
+        // period with readings is found, so the capture never depends on today.
+        const prevPeriod = page.locator('button:has(svg[data-icon="arrow-left"])').first()
+        for (let attempt = 0; attempt < 5; attempt++) {
+          if (await page.locator('.recharts-wrapper').count()) break
+          await prevPeriod.click()
+          await page.waitForTimeout(1500)
+        }
+
         await page.waitForSelector('.recharts-wrapper', { timeout: 15_000 })
         await page.waitForTimeout(1000)
       }
@@ -432,33 +455,33 @@ test.describe('User Guide Screenshots', () => {
   test('08-invoices', async ({ page }) => {
     await navigateTo(page, '/invoices')
     await page.waitForSelector('table, .card', { timeout: 10_000 })
+    // Invoices are seeded for the last complete period, not the current one.
+    await goToPreviousPeriod(page)
     await screenshot(page, '08-invoices', 'invoices')
   })
 
   // 08b — Invoice Detail page
   test('08b-invoice-detail', async ({ page }) => {
-    // Fetch the first existing invoice ID via the API
+    // Fetch the first existing invoice ID via the API. The login endpoint is
+    // cookie-based and returns no token in its body, so read the access cookie
+    // via getAdminToken rather than reaching for a `.access` field that has
+    // never existed — a bogus header here overrides the valid cookie and 401s.
     const resp = await page.request.get(`${API_BASE}/invoices/invoices/`, {
-      headers: {
-        Authorization: `Bearer ${(await page.request.post(`${API_BASE}/auth/token/`, {
-          data: { username: USER, password: PASS },
-        }).then((r) => r.json()) as { access: string }).access}`,
-      },
+      headers: { Authorization: `Bearer ${await getAdminToken(page)}` },
     })
+    expect(resp.ok(), `Invoice list request failed (${resp.status()})`).toBeTruthy()
+
     const body = await resp.json() as { results?: Array<{ id: string }> }
     const invoiceId = body.results?.[0]?.id
 
-    if (invoiceId) {
-      await navigateTo(page, `/invoices/${invoiceId}`)
-      await page.waitForSelector('.grid-4', { timeout: 10_000 })
-      await page.waitForTimeout(500)
-      await screenshot(page, '08b-invoice-detail', 'invoice-detail')
-    } else {
-      // No invoices exist — take the invoices overview as fallback
-      await navigateTo(page, '/invoices')
-      await page.waitForSelector('table, .card', { timeout: 10_000 })
-      await screenshot(page, '08b-invoice-detail', 'invoices')
-    }
+    // Fail loudly rather than silently capturing the invoices overview under the
+    // invoice-detail name, which is how this file came to hold a duplicate.
+    expect(invoiceId, 'No invoice found — run `manage.py seed_demo` first').toBeTruthy()
+
+    await navigateTo(page, `/invoices/${invoiceId}`)
+    await page.waitForSelector('.grid-4', { timeout: 10_000 })
+    await page.waitForTimeout(500)
+    await screenshot(page, '08b-invoice-detail', 'invoice-detail')
   })
 
   // 09 — Imports

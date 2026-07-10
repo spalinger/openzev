@@ -741,6 +741,7 @@ export const it = {
             createTariff: 'Crea tariffa',
             tariffList: 'Elenco tariffe',
             noTariffs: 'Nessuna tariffa ancora.',
+            openEnded: 'Senza fine',
             tariffPeriods: 'Periodi tariffari',
             periodCountSummary_one: '{{count}} periodo tariffario',
             periodCountSummary_other: '{{count}} periodi tariffari',

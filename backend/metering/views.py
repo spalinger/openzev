@@ -1,7 +1,7 @@
 from datetime import date as date_type, datetime, timedelta, timezone as dt_timezone
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, Sum
 from django.db.models.functions import TruncDay, TruncHour, TruncMonth
 from django.utils.dateparse import parse_date
 from rest_framework import mixins, viewsets, status

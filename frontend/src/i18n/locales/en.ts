@@ -705,6 +705,7 @@ export const en = {
             createTariff: 'Create Tariff',
             tariffList: 'Tariff List',
             noTariffs: 'No tariffs yet.',
+            openEnded: 'Open-ended',
             tariffPeriods: 'Tariff Periods',
             periodCountSummary_one: '{{count}} Tariff Period',
             periodCountSummary_other: '{{count}} Tariff Periods',

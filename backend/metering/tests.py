@@ -378,3 +378,50 @@ class DataQualityStatusTests(TestCase):
 		self.assertEqual(resp.status_code, 200)
 		self.assertIn("date_from", resp.data)
 		self.assertIn("date_to", resp.data)
+
+class ChartDataEndpointTests(TestCase):
+	"""Regression cover for /metering/readings/chart-data/.
+
+	The endpoint 500'd for a month because ``Sum`` was dropped from the
+	django.db.models import while still being used to aggregate buckets.
+	No test exercised it, so nothing caught the NameError.
+	"""
+
+	def setUp(self):
+		self.client = APIClient()
+		self.owner = make_user("chart_owner", UserRole.ZEV_OWNER)
+		self.zev = Zev.objects.create(name="Chart ZEV", owner=self.owner, zev_type="vzev", invoice_prefix="C")
+		self.mp = MeteringPoint.objects.create(
+			zev=self.zev,
+			meter_id="CH-CHART-1",
+			meter_type=MeteringPointType.CONSUMPTION,
+		)
+		for hour, kwh in ((0, "1.5"), (1, "2.5")):
+			MeterReading.objects.create(
+				metering_point=self.mp,
+				timestamp=datetime(2026, 4, 1, hour, 0, tzinfo=timezone.utc),
+				energy_kwh=Decimal(kwh),
+				direction=ReadingDirection.IN,
+				resolution=ReadingResolution.FIFTEEN_MIN,
+			)
+
+	def test_chart_data_aggregates_readings_into_buckets(self):
+		auth(self.client, self.owner)
+
+		resp = self.client.get(
+			"/api/v1/metering/readings/chart-data/",
+			{"metering_point": str(self.mp.id), "date_from": "2026-04-01", "date_to": "2026-04-01"},
+		)
+
+		self.assertEqual(resp.status_code, 200)
+		self.assertEqual(len(resp.data), 1)
+		# Both readings fall in the same day bucket and must be summed.
+		self.assertAlmostEqual(resp.data[0]["in_kwh"], 4.0)
+		self.assertAlmostEqual(resp.data[0]["out_kwh"], 0.0)
+
+	def test_chart_data_requires_metering_point(self):
+		auth(self.client, self.owner)
+
+		resp = self.client.get("/api/v1/metering/readings/chart-data/")
+
+		self.assertEqual(resp.status_code, 400)

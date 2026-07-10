@@ -22,6 +22,8 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.db.models import Sum
 
+from invoices.engine import generate_invoices_for_zev
+from invoices.models import Invoice, InvoiceStatus
 from metering.models import ImportSource, MeterReading, ReadingDirection, ReadingResolution
 from tariffs.models import BillingMode, EnergyType, PeriodType, Tariff, TariffCategory, TariffPeriod
 from zev.models import (
@@ -39,8 +41,22 @@ from zev.models import (
 UTC = dt_timezone.utc
 
 DEMO_ZEV_NAME = "OpenZEV Demo Community"
-DEMO_START = date(2026, 1, 1)
-DEMO_END = date(2026, 6, 30)
+
+
+def quarter_start(day: date) -> date:
+    """First day of the calendar quarter containing ``day``.
+
+    Mirrors ``startOfBillingPeriod`` in the frontend for the quarterly interval
+    the demo ZEV uses, so seeded data lines up with the period the UI opens on.
+    """
+    return date(day.year, ((day.month - 1) // 3) * 3 + 1, 1)
+
+
+def previous_quarter(day: date) -> tuple[date, date]:
+    """Inclusive ``(start, end)`` of the complete quarter before ``day``'s quarter."""
+    current_start = quarter_start(day)
+    previous_end = current_start - timedelta(days=1)
+    return quarter_start(previous_end), previous_end
 
 
 class Command(BaseCommand):
@@ -50,20 +66,26 @@ class Command(BaseCommand):
         parser.add_argument(
             "--start-date",
             type=str,
-            default=str(DEMO_START),
-            help="Metering data start date in YYYY-MM-DD format (default: 2026-01-01).",
+            default=None,
+            help="Metering data start date (YYYY-MM-DD). Default: start of the previous quarter.",
         )
         parser.add_argument(
             "--end-date",
             type=str,
-            default=str(DEMO_END),
-            help="Metering data end date in YYYY-MM-DD format (default: 2026-06-30).",
+            default=None,
+            help="Metering data end date (YYYY-MM-DD). Default: today.",
         )
 
     @transaction.atomic
     def handle(self, *args, **options):
-        start_date = date.fromisoformat(options["start_date"])
-        end_date = date.fromisoformat(options["end_date"])
+        # Seed relative to today so the period the UI opens on always has data.
+        # A fixed window silently goes stale: once today moves past it, the
+        # dashboard, charts and invoice pages all render empty.
+        today = date.today()
+        default_start, _ = previous_quarter(today)
+
+        start_date = date.fromisoformat(options["start_date"]) if options["start_date"] else default_start
+        end_date = date.fromisoformat(options["end_date"]) if options["end_date"] else today
         if end_date < start_date:
             raise ValueError("end-date must be on or after start-date.")
 
@@ -209,6 +231,9 @@ class Command(BaseCommand):
             consumer_two_meter=participant_two_cons,
         )
 
+        invoice_period_start, invoice_period_end = previous_quarter(end_date)
+        seeded_invoices = self._seed_invoices(zev, invoice_period_start, invoice_period_end)
+
         production_total = MeterReading.objects.filter(metering_point=owner_prod).aggregate(total=Sum("energy_kwh"))["total"]
         consumption_total = MeterReading.objects.filter(
             metering_point__in=[participant_one_cons, participant_two_cons]
@@ -232,6 +257,8 @@ class Command(BaseCommand):
                         "",
                         f"ZEV: {zev.name}",
                         f"Metering period: {start_date} -> {end_date}",
+                        f"Invoice period: {invoice_period_start} -> {invoice_period_end}",
+                        f"Invoices created: {len(seeded_invoices)}",
                         f"Deleted existing demo readings: {deleted_readings}",
                         f"Production total: {production_total} kWh",
                         f"Consumption total: {consumption_total} kWh",
@@ -441,10 +468,12 @@ class Command(BaseCommand):
         ]
 
         for spec in tariff_specs:
+            # Look up by name only. Keying on valid_from as well would create a
+            # second tariff whenever the seed window moves, and the two would be
+            # rejected as overlapping windows.
             tariff, _ = Tariff.objects.get_or_create(
                 zev=zev,
                 name=spec["name"],
-                valid_from=valid_from,
                 defaults={
                     "category": spec["category"],
                     "billing_mode": spec["billing_mode"],
@@ -452,6 +481,7 @@ class Command(BaseCommand):
                     "fixed_price_chf": spec["fixed_price_chf"],
                     "percentage": spec["percentage"],
                     "notes": spec["notes"],
+                    "valid_from": valid_from,
                 },
             )
             tariff.category = spec["category"]
@@ -459,6 +489,7 @@ class Command(BaseCommand):
             tariff.energy_type = spec["energy_type"]
             tariff.fixed_price_chf = spec["fixed_price_chf"]
             tariff.percentage = spec["percentage"]
+            tariff.valid_from = valid_from
             tariff.valid_to = None
             tariff.notes = spec["notes"]
             tariff.save()
@@ -473,6 +504,31 @@ class Command(BaseCommand):
                     time_to=period["time_to"],
                     weekdays=period["weekdays"],
                 )
+
+    def _seed_invoices(self, zev: Zev, period_start: date, period_end: date) -> list[Invoice]:
+        """Generate invoices for the last complete billing period.
+
+        Existing demo invoices are removed first: ``generate_invoice`` refuses to
+        overwrite anything past draft, so leaving approved/sent invoices behind
+        would make a second ``seed_demo`` run fail.
+
+        Statuses are varied so the invoice list exercises each badge.
+        """
+        Invoice.objects.filter(zev=zev).delete()
+
+        invoices = generate_invoices_for_zev(zev, period_start, period_end)
+        invoices.sort(key=lambda invoice: invoice.invoice_number)
+
+        # First stays DRAFT; the rest advance so the list shows a realistic mix.
+        if len(invoices) > 1:
+            invoices[1].status = InvoiceStatus.APPROVED
+            invoices[1].save(update_fields=["status"])
+        if len(invoices) > 2:
+            invoices[2].status = InvoiceStatus.SENT
+            invoices[2].sent_at = datetime.combine(period_end, time.min, tzinfo=UTC)
+            invoices[2].save(update_fields=["status", "sent_at"])
+
+        return invoices
 
     def _seed_meter_readings(
         self,

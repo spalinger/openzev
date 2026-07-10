@@ -741,6 +741,7 @@ export const fr = {
             createTariff: 'Créer le tarif',
             tariffList: 'Liste des tarifs',
             noTariffs: 'Aucun tarif pour le moment.',
+            openEnded: 'Ouverte',
             tariffPeriods: 'Périodes tarifaires',
             periodCountSummary_one: '{{count}} période tarifaire',
             periodCountSummary_other: '{{count}} périodes tarifaires',
