@@ -4,16 +4,10 @@ import { useTranslation } from 'react-i18next'
 import { InvoicePeriodRowsTable } from '../features/invoices/InvoicePeriodRowsTable'
 import { InvoiceBatchToolbar } from '../features/invoices/InvoiceBatchToolbar'
 import { InvoiceDeleteModal } from '../features/invoices/InvoiceDeleteModal'
-import { InvoicePeriodHeader } from '../features/invoices/InvoicePeriodHeader'
 import { InvoicesEmptyState } from '../features/invoices/InvoicesEmptyState'
 import { useInvoiceActions } from '../features/invoices/useInvoiceActions'
-import {
-    endOfBillingPeriod,
-    shiftBillingPeriod,
-    startOfBillingPeriod,
-    toIsoDate,
-    type BillingInterval,
-} from '../features/invoices/invoicePeriodUtils'
+import { PeriodSelector } from '../components/PeriodSelector'
+import { getCurrentBillingPeriod, type BillingInterval } from '../lib/billingPeriod'
 import {
     fetchEmailLogs,
     fetchInvoicePeriodOverview,
@@ -22,12 +16,10 @@ import { queryKeys } from '../lib/api/queryKeys'
 import { EmailLogsModal } from '../components/EmailLogsModal'
 import { useAuth } from '../lib/auth'
 import { useManagedZev } from '../lib/managedZev'
-import { useAppSettings } from '../lib/appSettings'
 import type { EmailLog } from '../types/api'
 
 export function InvoicesPage() {
     const { t } = useTranslation()
-    const { settings } = useAppSettings()
     const { selectedZevId, selectedZev } = useManagedZev()
     const { user } = useAuth()
 
@@ -48,11 +40,8 @@ export function InvoicesPage() {
             setPeriod({ period_start: '', period_end: '' })
             return
         }
-        const start = startOfBillingPeriod(new Date(), interval)
-        setPeriod({
-            period_start: toIsoDate(start),
-            period_end: toIsoDate(endOfBillingPeriod(start, interval)),
-        })
+        const current = getCurrentBillingPeriod(interval)
+        setPeriod({ period_start: current.from, period_end: current.to })
     }, [selectedZevId, interval])
 
     const periodOverviewQuery = useQuery({
@@ -128,15 +117,16 @@ export function InvoicesPage() {
                 <p className="muted">{t('pages.invoices.description')}</p>
             </header>
 
-            <InvoicePeriodHeader
-                zevName={selectedZev?.name}
-                periodStart={period.period_start}
-                periodEnd={period.period_end}
-                interval={interval}
-                settings={settings}
-                onPrevious={() => setPeriod((prev) => shiftBillingPeriod(prev.period_start, interval, -1))}
-                onNext={() => setPeriod((prev) => shiftBillingPeriod(prev.period_start, interval, 1))}
-            />
+            <section className="card">
+                <PeriodSelector
+                    interval={interval}
+                    from={period.period_start}
+                    to={period.period_end}
+                    title={selectedZev?.name}
+                    allowCustomRange={false}
+                    onChange={({ from, to }) => setPeriod({ period_start: from, period_end: to })}
+                />
+            </section>
 
             {periodOverviewQuery.isLoading ? (
                 <div className="card">{t('pages.invoices.loading')}</div>

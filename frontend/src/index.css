@@ -549,6 +549,112 @@ label {
   color: #475569;
 }
 
+.period-selector {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.period-selector-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 0.9rem;
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+}
+
+.period-selector-trigger:hover:not(:disabled) {
+  background: #f8fafc;
+}
+
+.period-selector-trigger:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.period-selector-text {
+  display: grid;
+  gap: 0.15rem;
+  justify-items: center;
+}
+
+.period-selector-title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: #0f172a;
+}
+
+.period-selector-range {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: #0f172a;
+}
+
+.period-selector-interval {
+  font-size: 0.85rem;
+}
+
+.period-selector-caret {
+  color: #64748b;
+  transition: transform 0.15s ease;
+}
+
+.period-selector-caret[data-open] {
+  transform: rotate(180deg);
+}
+
+.period-selector-dropdown {
+  display: flex;
+  gap: 1rem;
+  padding: 0.9rem;
+}
+
+.period-selector-presets {
+  display: grid;
+  gap: 0.25rem;
+  align-content: start;
+  min-width: 12rem;
+}
+
+.period-selector-preset {
+  display: grid;
+  border: 0;
+  background: transparent;
+  border-radius: 0.6rem;
+  padding: 0.45rem 0.65rem;
+  text-align: left;
+  font-size: 0.88rem;
+  color: #0f172a;
+  cursor: pointer;
+}
+
+.period-selector-preset:hover {
+  background: #f1f5f9;
+}
+
+.period-selector-preset.active {
+  background: #e0f2fe;
+  color: #0c4a6e;
+  font-weight: 700;
+}
+
+.period-selector-preset small {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: #64748b;
+}
+
+@media (max-width: 640px) {
+  .period-selector-dropdown {
+    flex-direction: column;
+  }
+}
+
 .user-menu-item-icon svg {
   width: 1rem;
   height: 1rem;

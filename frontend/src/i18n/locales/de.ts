@@ -123,10 +123,8 @@ export const de = {
         showDetails: 'Details anzeigen',
         hideDetails: 'Details ausblenden',
         periodSelector: {
-            period: 'Zeitraum',
             currentPeriod: 'Aktueller Zeitraum',
-            customPeriod: 'Benutzerdefinierter Zeitraum',
-            backToBillingPeriod: 'Zurück zum Abrechnungszeitraum',
+            custom: 'Benutzerdefiniert',
             thisMonth: 'Dieser Monat',
             lastMonth: 'Letzter Monat',
             thisQuarter: 'Dieses Quartal',

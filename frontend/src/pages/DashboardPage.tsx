@@ -24,7 +24,7 @@ import { formatShortDate, formatDateTime, formatMonthYear, useAppSettings } from
 import { useAuth } from '../lib/auth'
 import { useManagedZev } from '../lib/managedZev'
 import { StatCard } from '../components/StatCard'
-import { BillingPeriodSelector } from '../components/BillingPeriodSelector'
+import { PeriodSelector } from '../components/PeriodSelector'
 import { EnergyFlowChart } from '../components/EnergyFlowChart'
 import {
     type BillingInterval,
@@ -192,7 +192,7 @@ export function DashboardPage() {
             {(user?.role === 'admin' || user?.role === 'zev_owner') && (
                 <section className="card">
                     <div className="grid">
-                        <BillingPeriodSelector
+                        <PeriodSelector
                             interval={interval}
                             from={period.from}
                             to={period.to}
@@ -229,7 +229,7 @@ export function DashboardPage() {
             {user?.role === 'participant' && (
                 <section className="card">
                     <div className="grid">
-                        <BillingPeriodSelector
+                        <PeriodSelector
                             interval={interval}
                             from={period.from}
                             to={period.to}

@@ -4,7 +4,7 @@ import {
   shiftBillingPeriod,
   startOfBillingPeriod,
   toIsoDate,
-} from '../src/features/invoices/invoicePeriodUtils'
+} from '../src/lib/billingPeriod'
 
 describe('invoice period utilities', () => {
   it('formats date as iso', () => {
@@ -29,13 +29,13 @@ describe('invoice period utilities', () => {
 
   it('shifts period backward and forward', () => {
     expect(shiftBillingPeriod('2026-05-01', 'monthly', -1)).toEqual({
-      period_start: '2026-04-01',
-      period_end: '2026-04-30',
+      from: '2026-04-01',
+      to: '2026-04-30',
     })
 
     expect(shiftBillingPeriod('2026-04-01', 'quarterly', 1)).toEqual({
-      period_start: '2026-07-01',
-      period_end: '2026-09-30',
+      from: '2026-07-01',
+      to: '2026-09-30',
     })
   })
 })

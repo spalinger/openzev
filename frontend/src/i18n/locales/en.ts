@@ -124,10 +124,8 @@ export const en = {
         showDetails: 'Show details',
         hideDetails: 'Hide details',
         periodSelector: {
-            period: 'Period',
             currentPeriod: 'Current period',
-            customPeriod: 'Custom period',
-            backToBillingPeriod: 'Back to billing period',
+            custom: 'Custom',
             thisMonth: 'This month',
             lastMonth: 'Last month',
             thisQuarter: 'This quarter',
