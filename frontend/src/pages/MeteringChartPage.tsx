@@ -16,7 +16,7 @@ import { fetchZevs, fetchMeteringPoints } from '../lib/api/zev'
 import { fetchChartData, fetchMeteringDataQualityStatus, fetchRawMeteringData } from '../lib/api/metering'
 import { formatApiError } from '../lib/api/errors'
 import { queryKeys } from '../lib/api/queryKeys'
-import { BillingPeriodSelector } from '../components/BillingPeriodSelector'
+import { PeriodSelector } from '../components/PeriodSelector'
 import { useAuth } from '../lib/auth'
 import { useManagedZev } from '../lib/managedZev'
 import {
@@ -279,7 +279,7 @@ export function MeteringChartPage() {
                     gap: '1rem',
                 }}
             >
-                <BillingPeriodSelector
+                <PeriodSelector
                     interval={interval}
                     from={period.from}
                     to={period.to}

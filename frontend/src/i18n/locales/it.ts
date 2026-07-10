@@ -131,10 +131,8 @@ export const it = {
         showDetails: 'Mostra dettagli',
         hideDetails: 'Nascondi dettagli',
         periodSelector: {
-            period: 'Periodo',
             currentPeriod: 'Periodo corrente',
-            customPeriod: 'Periodo personalizzato',
-            backToBillingPeriod: 'Torna al periodo di fatturazione',
+            custom: 'Personalizzato',
             thisMonth: 'Questo mese',
             lastMonth: 'Mese scorso',
             thisQuarter: 'Questo trimestre',
