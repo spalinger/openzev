@@ -233,8 +233,8 @@ export function MeteringChartPage() {
     return (
         <div className="page-stack">
             <header>
-                <h2>Metering Data</h2>
-                <p className="muted">Visualize energy readings and monitor data quality per metering point.</p>
+                <h2>{t('pages.meteringData.title')}</h2>
+                <p className="muted">{t('pages.meteringData.description')}</p>
             </header>
 
             {/* ── Tabs ──────────────────────────────────────────────────────────── */}
@@ -297,12 +297,12 @@ export function MeteringChartPage() {
                         }}
                     >
                         <label>
-                            <span>Metering Point *</span>
+                            <span>{t('pages.meteringData.meteringPoint')}</span>
                             <select
                                 value={selectedMpId}
                                 onChange={(e) => handleMpChange(e.target.value)}
                             >
-                                <option value="">Select metering point…</option>
+                                <option value="">{t('pages.meteringData.selectMeteringPoint')}</option>
                                 {meteringPoints.map((mp) => (
                                     <option key={mp.id} value={mp.id}>
                                         {mp.meter_id}
@@ -313,14 +313,14 @@ export function MeteringChartPage() {
                         </label>
 
                         <label>
-                            <span>Resolution</span>
+                            <span>{t('pages.meteringData.resolution')}</span>
                             <select
                                 value={bucket}
                                 onChange={(e) => setBucket(e.target.value as 'day' | 'hour' | 'month')}
                             >
-                                <option value="hour">Hourly</option>
-                                <option value="day">Daily</option>
-                                <option value="month">Monthly</option>
+                                <option value="hour">{t('pages.meteringData.resolutions.hour')}</option>
+                                <option value="day">{t('pages.meteringData.resolutions.day')}</option>
+                                <option value="month">{t('pages.meteringData.resolutions.month')}</option>
                             </select>
                         </label>
                     </div>
@@ -337,12 +337,12 @@ export function MeteringChartPage() {
                         }}
                     >
                         <label>
-                            <span>{t('meteringDataQuality.meterId')} (optional)</span>
+                            <span>{t('pages.meteringData.meterIdOptional')}</span>
                             <select
                                 value={selectedMpId}
                                 onChange={(e) => handleMpChange(e.target.value)}
                             >
-                                <option value="">All metering points…</option>
+                                <option value="">{t('pages.meteringData.allMeteringPoints')}</option>
                                 {meteringPoints.map((mp) => (
                                     <option key={mp.id} value={mp.id}>
                                         {mp.meter_id}
@@ -368,14 +368,14 @@ export function MeteringChartPage() {
                     {/* ── Loading / error ───────────────────────────────────────────────── */}
                     {selectedMpId && chartQuery.isLoading && (
                         <div className="card" style={{ textAlign: 'center', padding: '2rem' }}>
-                            Loading chart data…
+                            {t('pages.meteringData.loadingChart')}
                         </div>
                     )}
                     {selectedMpId && chartQuery.isError && (
-                        <div className="card error-banner">Failed to load chart data.</div>
+                        <div className="card error-banner">{t('pages.meteringData.chartError')}</div>
                     )}
                     {selectedMpId && rawDataQuery.isError && (
-                        <div className="card error-banner">Failed to load raw metering data table.</div>
+                        <div className="card error-banner">{t('pages.meteringData.rawTableError')}</div>
                     )}
 
                     {/* ── Results ───────────────────────────────────────────────────────── */}
@@ -385,25 +385,25 @@ export function MeteringChartPage() {
                             <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
                                 {selectedMp && (
                                     <StatBadge
-                                        label="Meter ID"
+                                        label={t('pages.meteringData.stats.meterId')}
                                         value={selectedMp.meter_id}
                                         color="var(--color-text, #222)"
                                     />
                                 )}
                                 <StatBadge
-                                    label="Total Consumption (IN)"
+                                    label={t('pages.meteringData.stats.totalConsumption')}
                                     value={`${totalIn.toFixed(2)} kWh`}
                                     color="#059669"
                                 />
                                 {hasOut && (
                                     <StatBadge
-                                        label="Total Feed-in (OUT)"
+                                        label={t('pages.meteringData.stats.totalFeedIn')}
                                         value={`${totalOut.toFixed(2)} kWh`}
                                         color="#0284c7"
                                     />
                                 )}
                                 <StatBadge
-                                    label="Data points"
+                                    label={t('pages.meteringData.stats.dataPoints')}
                                     value={String(data.length)}
                                     color="var(--color-text-muted, #888)"
                                 />
@@ -411,7 +411,7 @@ export function MeteringChartPage() {
 
                             {data.length === 0 ? (
                                 <div className="card" style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted, #888)' }}>
-                                    No readings found for the selected period and metering point.
+                                    {t('pages.meteringData.noReadings')}
                                 </div>
                             ) : (
                                 <div className="card" style={{ padding: '1.5rem' }}>
@@ -442,7 +442,7 @@ export function MeteringChartPage() {
                                             <Legend />
                                             <Bar
                                                 dataKey="in_kwh"
-                                                name="Consumption (IN)"
+                                                name={t('pages.meteringData.series.consumption')}
                                                 fill="#059669"
                                                 radius={[3, 3, 0, 0]}
                                                 maxBarSize={48}
@@ -450,7 +450,7 @@ export function MeteringChartPage() {
                                             {hasOut && (
                                                 <Bar
                                                     dataKey="out_kwh"
-                                                    name="Feed-in (OUT)"
+                                                    name={t('pages.meteringData.series.feedIn')}
                                                     fill="#0284c7"
                                                     radius={[3, 3, 0, 0]}
                                                     maxBarSize={48}
@@ -462,25 +462,25 @@ export function MeteringChartPage() {
                             )}
 
                             <div className="table-card">
-                                <h3>Raw Data by Day</h3>
+                                <h3>{t('pages.meteringData.rawTable.title')}</h3>
                                 <p className="muted" style={{ marginTop: 0 }}>
-                                    One row per day in the selected period. Each row contains all raw readings for that day.
+                                    {t('pages.meteringData.rawTable.description')}
                                 </p>
 
                                 {rawDataQuery.isLoading ? (
-                                    <div style={{ padding: '1rem 0' }}>Loading raw data table…</div>
+                                    <div style={{ padding: '1rem 0' }}>{t('pages.meteringData.loadingRawTable')}</div>
                                 ) : rawDailyRows.length === 0 ? (
                                     <div style={{ padding: '1rem 0' }} className="muted">
-                                        No raw metering readings found for the selected period.
+                                        {t('pages.meteringData.noRawReadings')}
                                     </div>
                                 ) : (
                                     <table>
                                         <thead>
                                             <tr>
-                                                <th>Day</th>
-                                                <th>IN total (kWh)</th>
-                                                <th>OUT total (kWh)</th>
-                                                <th>Raw readings</th>
+                                                <th>{t('pages.meteringData.rawTable.day')}</th>
+                                                <th>{t('pages.meteringData.rawTable.inTotal')}</th>
+                                                <th>{t('pages.meteringData.rawTable.outTotal')}</th>
+                                                <th>{t('pages.meteringData.rawTable.rawReadings')}</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -493,8 +493,8 @@ export function MeteringChartPage() {
                                                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85em' }}>
                                                             <thead>
                                                                 <tr>
-                                                                    <th style={{ textAlign: 'left', padding: '0.2rem 0.5rem', color: 'var(--color-muted)' }}>Time</th>
-                                                                    <th style={{ textAlign: 'left', padding: '0.2rem 0.5rem', color: 'var(--color-muted)' }}>Dir</th>
+                                                                    <th style={{ textAlign: 'left', padding: '0.2rem 0.5rem', color: 'var(--color-muted)' }}>{t('pages.meteringData.rawTable.time')}</th>
+                                                                    <th style={{ textAlign: 'left', padding: '0.2rem 0.5rem', color: 'var(--color-muted)' }}>{t('pages.meteringData.rawTable.direction')}</th>
                                                                     <th style={{ textAlign: 'right', padding: '0.2rem 0.5rem', color: 'var(--color-muted)' }}>kWh</th>
                                                                 </tr>
                                                             </thead>
