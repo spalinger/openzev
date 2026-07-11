@@ -264,13 +264,32 @@ class MeteringRawDataEndpointTests(TestCase):
 		self.assertEqual(first_day["readings_count"], 2)
 		self.assertAlmostEqual(float(first_day["in_kwh"]), 1.25, places=6)
 		self.assertAlmostEqual(float(first_day["out_kwh"]), 0.75, places=6)
-		self.assertEqual(len(first_day["readings"]), 2)
+		# Summary mode omits the per-reading payload to keep it small.
+		self.assertNotIn("readings", first_day)
 
 		second_day = resp.data[1]
 		self.assertEqual(second_day["date"], "2026-01-02")
 		self.assertEqual(second_day["readings_count"], 1)
 		self.assertAlmostEqual(float(second_day["in_kwh"]), 2.0, places=6)
 		self.assertAlmostEqual(float(second_day["out_kwh"]), 0.0, places=6)
+
+	def test_detail_mode_returns_single_day_readings(self):
+		auth(self.client, self.owner)
+		resp = self.client.get(
+			"/api/v1/metering/readings/raw-data/",
+			{
+				"metering_point": str(self.metering_point.id),
+				"date": "2026-01-01",
+			},
+		)
+
+		self.assertEqual(resp.status_code, 200)
+		# Only 2026-01-01's readings, ordered by timestamp — the 2026-01-02 reading is excluded.
+		self.assertEqual(len(resp.data), 2)
+		self.assertEqual(resp.data[0]["direction"], "in")
+		self.assertAlmostEqual(float(resp.data[0]["energy_kwh"]), 1.25, places=6)
+		self.assertEqual(resp.data[1]["direction"], "out")
+		self.assertAlmostEqual(float(resp.data[1]["energy_kwh"]), 0.75, places=6)
 
 	def test_participant_can_read_own_metering_point_raw_rows(self):
 		auth(self.client, self.participant_user)

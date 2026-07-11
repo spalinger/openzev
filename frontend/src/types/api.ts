@@ -570,7 +570,6 @@ export interface RawMeteringDailyRow {
     in_kwh: number
     out_kwh: number
     readings_count: number
-    readings: RawMeteringReading[]
 }
 
 export interface DashboardStats {

@@ -1234,13 +1234,14 @@ export const fr = {
             noRawReadings: 'Aucun relevé brut trouvé pour la période sélectionnée.',
             rawTable: {
                 title: 'Données brutes par jour',
-                description: 'Une ligne par jour de la période sélectionnée. Chaque ligne contient tous les relevés bruts du jour.',
+                description: 'Une ligne par jour de la période sélectionnée. Ouvrez un jour pour voir ses relevés individuels de 15 minutes.',
                 day: 'Jour',
                 inTotal: 'Soutirage total (kWh)',
                 outTotal: 'Injection totale (kWh)',
-                rawReadings: 'Relevés bruts',
+                rawReadings: 'Relevés',
                 time: 'Heure',
-                direction: 'Sens',
+                inKwh: 'Soutirage (kWh)',
+                outKwh: 'Injection (kWh)',
             },
         },
         zevSettings: {

@@ -8,6 +8,7 @@ import type {
   MeteringDashboardSummary,
   PaginatedResponse,
   RawMeteringDailyRow,
+  RawMeteringReading,
 } from '../../types/api'
 import { api } from './client'
 
@@ -138,6 +139,7 @@ export async function fetchChartData(params: {
   return data
 }
 
+/** Compact per-day summary (no individual readings) for the raw-data overview table. */
 export async function fetchRawMeteringData(params: {
   meteringPoint: string
   dateFrom?: string
@@ -148,6 +150,20 @@ export async function fetchRawMeteringData(params: {
       metering_point: params.meteringPoint,
       date_from: params.dateFrom,
       date_to: params.dateTo,
+    },
+  })
+  return data
+}
+
+/** Individual readings for a single day, fetched lazily when a day row is expanded. */
+export async function fetchRawMeteringDay(params: {
+  meteringPoint: string
+  date: string
+}): Promise<RawMeteringReading[]> {
+  const { data } = await api.get<RawMeteringReading[]>('/metering/readings/raw-data/', {
+    params: {
+      metering_point: params.meteringPoint,
+      date: params.date,
     },
   })
   return data

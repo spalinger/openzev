@@ -13,10 +13,11 @@ import {
     YAxis,
 } from 'recharts'
 import { fetchZevs, fetchMeteringPoints } from '../lib/api/zev'
-import { fetchChartData, fetchMeteringDataQualityStatus, fetchRawMeteringData } from '../lib/api/metering'
+import { fetchChartData, fetchMeteringDataQualityStatus } from '../lib/api/metering'
 import { formatApiError } from '../lib/api/errors'
 import { queryKeys } from '../lib/api/queryKeys'
 import { PeriodSelector } from '../components/PeriodSelector'
+import { RawMeteringTable } from '../components/RawMeteringTable'
 import { useAuth } from '../lib/auth'
 import { useManagedZev } from '../lib/managedZev'
 import {
@@ -24,31 +25,9 @@ import {
     getCurrentBillingPeriod,
 } from '../lib/billingPeriod'
 import { formatDateTime, formatMonthYear, formatShortDate, useAppSettings } from '../lib/appSettings'
-import type { ChartDataPoint, RawMeteringDailyRow, RawMeteringReading } from '../types/api'
+import type { ChartDataPoint } from '../types/api'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function formatTimeOnly(ts: string): string {
-    const d = new Date(ts)
-    if (isNaN(d.getTime())) return ts
-    // Use UTC so display matches the imported CSV (importer stamps naive timestamps as UTC)
-    return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
-}
-
-function groupReadingsByHour(readings: RawMeteringReading[]): { hour: string; items: RawMeteringReading[] }[] {
-    const map = new Map<string, RawMeteringReading[]>()
-    for (const r of readings) {
-        const d = new Date(r.timestamp)
-        // Use UTC hours to stay consistent with how the importer stored the data
-        const hour = `${String(d.getUTCHours()).padStart(2, '0')}:00`
-        const bucket = map.get(hour) ?? []
-        bucket.push(r)
-        map.set(hour, bucket)
-    }
-    return Array.from(map.entries())
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([hour, items]) => ({ hour, items }))
-}
 
 function formatBucketLabel(
     bucket: string,
@@ -166,13 +145,6 @@ export function MeteringChartPage() {
         enabled: !!selectedMpId,
     })
 
-    const rawDataQuery = useQuery({
-        queryKey: queryKeys.metering.rawData(selectedMpId, period.from, period.to),
-        queryFn: () =>
-            fetchRawMeteringData({ meteringPoint: selectedMpId, dateFrom: period.from, dateTo: period.to }),
-        enabled: !!selectedMpId,
-    })
-
     const qualityQuery = useQuery({
         queryKey: queryKeys.metering.qualityStatus(period.from, period.to, isManagedScope ? selectedZevId || undefined : undefined, selectedMpId || undefined),
         queryFn: () =>
@@ -191,7 +163,6 @@ export function MeteringChartPage() {
     const zevNameById = new Map((zevsQuery.data?.results ?? []).map((z) => [z.id, z.name]))
 
     const data: ChartDataPoint[] = chartQuery.data ?? []
-    const rawDailyRows: RawMeteringDailyRow[] = rawDataQuery.data ?? []
 
     const totalIn = data.reduce((sum, d) => sum + d.in_kwh, 0)
     const totalOut = data.reduce((sum, d) => sum + d.out_kwh, 0)
@@ -374,9 +345,6 @@ export function MeteringChartPage() {
                     {selectedMpId && chartQuery.isError && (
                         <div className="card error-banner">{t('pages.meteringData.chartError')}</div>
                     )}
-                    {selectedMpId && rawDataQuery.isError && (
-                        <div className="card error-banner">{t('pages.meteringData.rawTableError')}</div>
-                    )}
 
                     {/* ── Results ───────────────────────────────────────────────────────── */}
                     {selectedMpId && chartQuery.isSuccess && (
@@ -461,77 +429,12 @@ export function MeteringChartPage() {
                                 </div>
                             )}
 
-                            <div className="table-card">
-                                <h3>{t('pages.meteringData.rawTable.title')}</h3>
-                                <p className="muted" style={{ marginTop: 0 }}>
-                                    {t('pages.meteringData.rawTable.description')}
-                                </p>
-
-                                {rawDataQuery.isLoading ? (
-                                    <div style={{ padding: '1rem 0' }}>{t('pages.meteringData.loadingRawTable')}</div>
-                                ) : rawDailyRows.length === 0 ? (
-                                    <div style={{ padding: '1rem 0' }} className="muted">
-                                        {t('pages.meteringData.noRawReadings')}
-                                    </div>
-                                ) : (
-                                    <table>
-                                        <thead>
-                                            <tr>
-                                                <th>{t('pages.meteringData.rawTable.day')}</th>
-                                                <th>{t('pages.meteringData.rawTable.inTotal')}</th>
-                                                <th>{t('pages.meteringData.rawTable.outTotal')}</th>
-                                                <th>{t('pages.meteringData.rawTable.rawReadings')}</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {rawDailyRows.map((dayRow) => (
-                                                <tr key={dayRow.date}>
-                                                    <td>{formatShortDate(dayRow.date, settings)}</td>
-                                                    <td>{dayRow.in_kwh.toFixed(4)}</td>
-                                                    <td>{dayRow.out_kwh.toFixed(4)}</td>
-                                                    <td style={{ padding: 0 }}>
-                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85em' }}>
-                                                            <thead>
-                                                                <tr>
-                                                                    <th style={{ textAlign: 'left', padding: '0.2rem 0.5rem', color: 'var(--color-muted)' }}>{t('pages.meteringData.rawTable.time')}</th>
-                                                                    <th style={{ textAlign: 'left', padding: '0.2rem 0.5rem', color: 'var(--color-muted)' }}>{t('pages.meteringData.rawTable.direction')}</th>
-                                                                    <th style={{ textAlign: 'right', padding: '0.2rem 0.5rem', color: 'var(--color-muted)' }}>kWh</th>
-                                                                </tr>
-                                                            </thead>
-                                                            {groupReadingsByHour(dayRow.readings).map(({ hour, items }) => (
-                                                                <tbody key={hour}>
-                                                                    <tr>
-                                                                        <td
-                                                                            colSpan={3}
-                                                                            style={{
-                                                                                padding: '0.2rem 0.5rem',
-                                                                                fontWeight: 600,
-                                                                                fontSize: '0.8em',
-                                                                                color: 'var(--color-muted)',
-                                                                                borderTop: '1px solid var(--color-border, #e5e7eb)',
-                                                                                background: 'var(--color-surface-subtle, #f9fafb)',
-                                                                            }}
-                                                                        >
-                                                                            {hour}&nbsp;–&nbsp;{String(Number(hour.split(':')[0]) + 1).padStart(2, '0')}:00
-                                                                        </td>
-                                                                    </tr>
-                                                                    {items.map((r, i) => (
-                                                                        <tr key={`${r.timestamp}-${r.direction}-${i}`}>
-                                                                            <td style={{ padding: '0.15rem 0.5rem', fontVariantNumeric: 'tabular-nums' }}>{formatTimeOnly(r.timestamp)}</td>
-                                                                            <td style={{ padding: '0.15rem 0.5rem' }}>{r.direction.toUpperCase()}</td>
-                                                                            <td style={{ padding: '0.15rem 0.5rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.energy_kwh.toFixed(4)}</td>
-                                                                        </tr>
-                                                                    ))}
-                                                                </tbody>
-                                                            ))}
-                                                        </table>
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                )}
-                            </div>
+                            <RawMeteringTable
+                                meteringPointId={selectedMpId}
+                                dateFrom={period.from}
+                                dateTo={period.to}
+                                hasOut={hasOut}
+                            />
                         </>
                     )}
                 </>
