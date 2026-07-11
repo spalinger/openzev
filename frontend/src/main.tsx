@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import 'dayjs/locale/de'
 import 'dayjs/locale/fr'
 import 'dayjs/locale/it'
+import '@fontsource-variable/inter/index.css'
 import '@mantine/core/styles.css'
 import '@mantine/dates/styles.css'
 import './index.css'
@@ -21,9 +22,11 @@ const queryClient = new QueryClient()
 // Aligns Mantine's surfaces (date pickers) with the hand-rolled CSS in index.css:
 // Tailwind's sky ramp, whose shade 6 is the brand blue used by .button's gradient.
 //
-// Deliberately no `fontFamily`: Mantine's stylesheet sets `body { font-family }`,
-// so overriding it here would restyle the whole app, not just Mantine's surfaces.
+// `fontFamily` must be set here too: Mantine's stylesheet sets `body { font-family }`,
+// which otherwise overrides index.css and reverts the app to the system font. Keep this
+// stack in sync with index.css's `:root`.
 const mantineTheme = createTheme({
+    fontFamily: "'Inter Variable', Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     defaultRadius: 'md',
     primaryColor: 'brand',
     primaryShade: 6,
