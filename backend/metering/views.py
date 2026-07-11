@@ -1,7 +1,7 @@
 from datetime import date as date_type, datetime, timedelta, timezone as dt_timezone
 
 from django.db import transaction
-from django.db.models import Q, Sum
+from django.db.models import Count, Q, Sum
 from django.db.models.functions import TruncDay, TruncHour, TruncMonth
 from django.utils.dateparse import parse_date
 from rest_framework import mixins, viewsets, status
@@ -114,49 +114,73 @@ class MeterReadingViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="raw-data", permission_classes=[IsAuthenticated])
     def raw_data(self, request):
-        """Return raw metering readings grouped by day for one metering point."""
+        """
+        Raw metering readings for one metering point, in one of two modes:
+
+          - summary (default): one aggregated row per UTC day
+            ({date, in_kwh, out_kwh, readings_count}), for a compact overview
+            table. The individual readings are deliberately omitted so the
+            payload stays small even over long periods.
+          - detail (``date=YYYY-MM-DD``): the individual readings for that single
+            day, fetched lazily when a day row is expanded.
+
+        Days are bucketed in UTC to match how the importer stores timestamps
+        (a naive CSV timestamp is stamped as UTC), so day boundaries here line up
+        with the times shown in the UI.
+        """
         mp_id = request.query_params.get("metering_point")
         if not mp_id:
             return Response({"error": "metering_point query parameter is required."}, status=400)
 
+        qs = self.get_queryset().filter(metering_point_id=mp_id)
+
+        # ── Detail mode: one day's individual readings ─────────────────────────
+        detail_date = request.query_params.get("date")
+        if detail_date:
+            day_start = datetime.combine(
+                date_type.fromisoformat(detail_date), datetime.min.time(), tzinfo=dt_timezone.utc
+            )
+            readings = qs.filter(
+                timestamp__gte=day_start, timestamp__lt=day_start + timedelta(days=1)
+            ).order_by("timestamp")
+            return Response([
+                {
+                    "timestamp": reading.timestamp.isoformat(),
+                    "direction": reading.direction,
+                    "energy_kwh": float(reading.energy_kwh),
+                    "resolution": reading.resolution,
+                    "import_source": reading.import_source,
+                }
+                for reading in readings
+            ])
+
+        # ── Summary mode: one aggregated row per UTC day ───────────────────────
         date_from = request.query_params.get("date_from")
         date_to = request.query_params.get("date_to")
-
-        qs = self.get_queryset().filter(metering_point_id=mp_id).order_by("timestamp")
         if date_from:
-            # Use explicit UTC bounds — timestamp__date__ applies Europe/Zurich and would drop 23:xx UTC readings.
+            # Explicit UTC bounds — timestamp__date__ applies Europe/Zurich and would drop 23:xx UTC readings.
             qs = qs.filter(timestamp__gte=datetime.combine(date_type.fromisoformat(date_from), datetime.min.time(), tzinfo=dt_timezone.utc))
         if date_to:
             qs = qs.filter(timestamp__lt=datetime.combine(date_type.fromisoformat(date_to), datetime.min.time(), tzinfo=dt_timezone.utc) + timedelta(days=1))
 
-        day_map = {}
-        for reading in qs:
-            day_key = reading.timestamp.date().isoformat()
-            if day_key not in day_map:
-                day_map[day_key] = {
-                    "date": day_key,
-                    "in_kwh": 0.0,
-                    "out_kwh": 0.0,
-                    "readings_count": 0,
-                    "readings": [],
-                }
+        rows = (
+            qs.annotate(day=TruncDay("timestamp", tzinfo=dt_timezone.utc))
+            .values("day", "direction")
+            .annotate(total_kwh=Sum("energy_kwh"), reading_count=Count("id"))
+            .order_by("day")
+        )
 
-            energy = float(reading.energy_kwh)
-            day_map[day_key]["readings_count"] += 1
-            if reading.direction == "in":
-                day_map[day_key]["in_kwh"] += energy
-            elif reading.direction == "out":
-                day_map[day_key]["out_kwh"] += energy
-
-            day_map[day_key]["readings"].append(
-                {
-                    "timestamp": reading.timestamp.isoformat(),
-                    "direction": reading.direction,
-                    "energy_kwh": energy,
-                    "resolution": reading.resolution,
-                    "import_source": reading.import_source,
-                }
+        day_map: dict = {}
+        for row in rows:
+            key = row["day"].date().isoformat()
+            day = day_map.setdefault(
+                key, {"date": key, "in_kwh": 0.0, "out_kwh": 0.0, "readings_count": 0}
             )
+            day["readings_count"] += row["reading_count"]
+            if row["direction"] == "in":
+                day["in_kwh"] = float(row["total_kwh"])
+            elif row["direction"] == "out":
+                day["out_kwh"] = float(row["total_kwh"])
 
         return Response(sorted(day_map.values(), key=lambda row: row["date"]))
 

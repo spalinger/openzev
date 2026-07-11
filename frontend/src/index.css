@@ -655,6 +655,156 @@ label {
   }
 }
 
+/* ── Raw metering data (drill-down day → hour × 15-minute grid) ──────────────── */
+/* Shrink to content (out-specifying `.page-stack table { width: 100% }`) so the
+   few numeric columns stay grouped instead of being stretched across the page. */
+.raw-metering .raw-metering-days {
+  width: auto;
+  min-width: min(100%, 34rem);
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Numeric columns: right-align (out-specifying `.page-stack td { text-align: left }`)
+   with room to breathe now that the table hugs its content. */
+.raw-metering-days .raw-metering-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  padding-left: 3rem;
+}
+
+/* Day summary rows — compact and clickable */
+.raw-metering-days th {
+  font-size: 0.8rem;
+  color: #475569;
+  background: #f8fafc;
+  padding: 0.5rem 0.75rem;
+}
+
+.raw-metering-day {
+  cursor: pointer;
+}
+
+.raw-metering-day > td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #e2e8f0;
+  vertical-align: middle;
+}
+
+.raw-metering-day:hover > td {
+  background: #f8fafc;
+}
+
+.raw-metering-day:focus-visible {
+  outline: 2px solid #0284c7;
+  outline-offset: -2px;
+}
+
+.raw-metering-day[aria-expanded='true'] > td {
+  background: #f0f9ff;
+  font-weight: 600;
+}
+
+.raw-metering-day-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.raw-metering-caret {
+  display: inline-block;
+  color: #94a3b8;
+  font-size: 0.8rem;
+  transition: transform 0.15s ease;
+}
+
+.raw-metering-caret[data-open] {
+  transform: rotate(90deg);
+}
+
+/* Expanded interval detail */
+.raw-metering-detail-cell {
+  padding: 0 !important;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.raw-metering-detail-status {
+  padding: 0.9rem 1rem;
+}
+
+/* Intraday sparkline above the value table */
+.raw-metering-sparkline {
+  padding: 0.5rem 1rem 0.7rem;
+}
+
+.raw-metering-spark-tooltip {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
+}
+
+/* Hour × 15-minute grid — one column per hour, one row per slot */
+.raw-metering-grid-wrap {
+  padding: 0 1rem 0.4rem;
+}
+
+.raw-metering-grid-caption {
+  margin: 0.3rem 0 0.2rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.raw-metering-grid-scroll {
+  overflow-x: auto;
+}
+
+.raw-metering .raw-metering-grid {
+  width: auto;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.raw-metering-grid th,
+.raw-metering-grid td {
+  padding: 0.2rem 0.45rem;
+  border: 1px solid #eef2f7;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Hour headers (top) and slot labels (left) */
+.raw-metering-grid thead th {
+  color: #64748b;
+  background: #f8fafc;
+  font-weight: 600;
+  text-align: center;
+}
+
+.raw-metering-grid tbody th {
+  color: #64748b;
+  background: #f8fafc;
+  font-weight: 600;
+  text-align: left;
+  position: sticky;
+  left: 0;
+}
+
+.raw-metering-grid-corner {
+  background: #f8fafc;
+}
+
+.raw-metering-grid tbody tr:nth-child(even) td {
+  background: rgba(148, 163, 184, 0.06);
+}
+
 .user-menu-item-icon svg {
   width: 1rem;
   height: 1rem;

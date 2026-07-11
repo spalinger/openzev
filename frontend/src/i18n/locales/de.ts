@@ -1227,13 +1227,14 @@ export const de = {
             noRawReadings: 'Keine Rohmesswerte für den gewählten Zeitraum gefunden.',
             rawTable: {
                 title: 'Rohdaten nach Tag',
-                description: 'Eine Zeile pro Tag im gewählten Zeitraum. Jede Zeile enthält alle Rohmesswerte dieses Tages.',
+                description: 'Eine Zeile pro Tag im gewählten Zeitraum. Öffnen Sie einen Tag, um die einzelnen 15-Minuten-Messwerte zu sehen.',
                 day: 'Tag',
                 inTotal: 'Bezug gesamt (kWh)',
                 outTotal: 'Einspeisung gesamt (kWh)',
-                rawReadings: 'Rohmesswerte',
+                rawReadings: 'Messwerte',
                 time: 'Zeit',
-                direction: 'Ri.',
+                inKwh: 'Bezug (kWh)',
+                outKwh: 'Einspeisung (kWh)',
             },
         },
         zevSettings: {

@@ -1234,13 +1234,14 @@ export const it = {
             noRawReadings: 'Nessuna lettura grezza trovata per il periodo selezionato.',
             rawTable: {
                 title: 'Dati grezzi per giorno',
-                description: 'Una riga per ogni giorno del periodo selezionato. Ogni riga contiene tutte le letture grezze del giorno.',
+                description: 'Una riga per ogni giorno del periodo selezionato. Apri un giorno per vedere le singole letture a 15 minuti.',
                 day: 'Giorno',
                 inTotal: 'Prelievo totale (kWh)',
                 outTotal: 'Immissione totale (kWh)',
-                rawReadings: 'Letture grezze',
+                rawReadings: 'Letture',
                 time: 'Ora',
-                direction: 'Dir.',
+                inKwh: 'Prelievo (kWh)',
+                outKwh: 'Immissione (kWh)',
             },
         },
         zevSettings: {
