@@ -10,6 +10,7 @@ import {
     defaultFeasibilityFormValues,
     feasibilityFormSchema,
     mapFormValuesToPayload,
+    resolveInternalEnergyPriceChf,
     type FeasibilityFormValues,
 } from '../features/feasibility/useFeasibilityForm'
 import { calculateFeasibility } from '../lib/api/feasibility'
@@ -82,8 +83,28 @@ export function FeasibilityCalculatorPage() {
                         <input type="number" step="any" min="0" {...form.register('feed_in_price_chf_per_kwh')} />
                     </label>
                     <label>
-                        <span>{t('pages.feasibility.form.internalEnergyPrice')}</span>
-                        <input type="number" step="any" min="0" {...form.register('internal_energy_price_chf_per_kwh')} />
+                        <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                            {t('pages.feasibility.form.internalEnergyPrice')}
+                            <select
+                                {...form.register('internal_energy_price_mode')}
+                                style={{ width: 'auto', fontSize: '0.78rem', padding: '0.1rem 0.3rem' }}
+                            >
+                                <option value="absolute">{t('pages.feasibility.form.internalEnergyPriceModeAbsolute')}</option>
+                                <option value="percentage_of_retail">{t('pages.feasibility.form.internalEnergyPriceModePercentage')}</option>
+                            </select>
+                        </span>
+                        {watchedValues.internal_energy_price_mode === 'percentage_of_retail' ? (
+                            <>
+                                <input type="number" step="any" min="0" {...form.register('internal_energy_price_pct_of_retail')} />
+                                <span className="muted" style={{ fontSize: '0.78rem' }}>
+                                    {t('pages.feasibility.form.internalEnergyPriceComputed', {
+                                        value: resolveInternalEnergyPriceChf(watchedValues).toFixed(3),
+                                    })}
+                                </span>
+                            </>
+                        ) : (
+                            <input type="number" step="any" min="0" {...form.register('internal_energy_price_chf_per_kwh')} />
+                        )}
                         <span className="muted" style={{ fontSize: '0.78rem' }}>{t('pages.feasibility.form.internalEnergyPriceHint')}</span>
                     </label>
                     <label>

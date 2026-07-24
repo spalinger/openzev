@@ -1,13 +1,17 @@
 import { z } from 'zod'
 import type { FeasibilityInput } from '../../types/api'
 
+export type InternalEnergyPriceMode = 'absolute' | 'percentage_of_retail'
+
 export type FeasibilityFormValues = {
   annual_production_kwh: string
   annual_consumption_kwh: string
   self_consumption_rate_pct: string
   retail_price_chf_per_kwh: string
   feed_in_price_chf_per_kwh: string
+  internal_energy_price_mode: InternalEnergyPriceMode
   internal_energy_price_chf_per_kwh: string
+  internal_energy_price_pct_of_retail: string
   internal_grid_fee_chf_per_kwh: string
   annual_opex_chf: string
   capex_chf: string
@@ -33,7 +37,9 @@ export const feasibilityFormSchema = z.object({
   self_consumption_rate_pct: z.string().refine(isPercentage),
   retail_price_chf_per_kwh: z.string().refine(isNonNegativeNumber),
   feed_in_price_chf_per_kwh: z.string().refine(isNonNegativeNumber),
+  internal_energy_price_mode: z.enum(['absolute', 'percentage_of_retail']),
   internal_energy_price_chf_per_kwh: z.string().refine(isNonNegativeNumber),
+  internal_energy_price_pct_of_retail: z.string().refine(isNonNegativeNumber),
   internal_grid_fee_chf_per_kwh: z.string().refine(isNonNegativeNumber),
   annual_opex_chf: z.string().refine(isNonNegativeNumber),
   capex_chf: z.string().refine(isNonNegativeNumber),
@@ -54,12 +60,24 @@ export const defaultFeasibilityFormValues: FeasibilityFormValues = {
   self_consumption_rate_pct: '50',
   retail_price_chf_per_kwh: '0.32',
   feed_in_price_chf_per_kwh: '0.09',
+  internal_energy_price_mode: 'absolute',
   internal_energy_price_chf_per_kwh: '0.20',
+  internal_energy_price_pct_of_retail: '62.5',
   internal_grid_fee_chf_per_kwh: '0.03',
   annual_opex_chf: '300',
   capex_chf: '2000',
   horizon_years: '20',
   discount_rate_pct: '3',
+}
+
+// The internal energy price can be set directly (CHF/kWh) or as a percentage
+// of the retail price — e.g. "60% of Netzstrom". Resolves to the CHF/kWh
+// value the backend actually expects, regardless of which mode is active.
+export function resolveInternalEnergyPriceChf(values: FeasibilityFormValues): number {
+  if (values.internal_energy_price_mode === 'percentage_of_retail') {
+    return (Number(values.retail_price_chf_per_kwh) * Number(values.internal_energy_price_pct_of_retail)) / 100
+  }
+  return Number(values.internal_energy_price_chf_per_kwh)
 }
 
 export function mapFormValuesToPayload(values: FeasibilityFormValues): FeasibilityInput {
@@ -69,7 +87,7 @@ export function mapFormValuesToPayload(values: FeasibilityFormValues): Feasibili
     self_consumption_rate: (Number(values.self_consumption_rate_pct) / 100).toString(),
     retail_price_chf_per_kwh: values.retail_price_chf_per_kwh,
     feed_in_price_chf_per_kwh: values.feed_in_price_chf_per_kwh,
-    internal_energy_price_chf_per_kwh: values.internal_energy_price_chf_per_kwh,
+    internal_energy_price_chf_per_kwh: resolveInternalEnergyPriceChf(values).toString(),
     internal_grid_fee_chf_per_kwh: values.internal_grid_fee_chf_per_kwh,
     annual_opex_chf: values.annual_opex_chf,
     capex_chf: values.capex_chf,
