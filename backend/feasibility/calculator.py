@@ -40,12 +40,38 @@ def _price(value: Decimal) -> Decimal:
 
 
 @dataclass(frozen=True)
+class ParticipantInput:
+    """One named participant, for the optional per-participant breakdown.
+
+    A participant can be a pure producer, a pure consumer, or a prosumer
+    (both fields non-zero) — a household with its own PV system that also
+    draws from the grid is one row, not two.
+    """
+
+    name: str
+    annual_production_kwh: Decimal = Decimal("0")
+    annual_consumption_kwh: Decimal = Decimal("0")
+
+
+@dataclass(frozen=True)
 class FeasibilityInput:
     """Inputs for a single vZEV feasibility scenario.
 
     All prices are "all-in" CHF/kWh (energy + grid fees + levies) unless
     noted otherwise, matching how a participant actually reads their grid
     bill today.
+
+    ``annual_production_kwh``/``annual_consumption_kwh`` are always the
+    source of truth for the aggregate scenario math (payback, ROI, NPV,
+    sensitivity curves, ...) — nothing about the core model changes whether
+    or not ``participants`` is supplied. ``participants`` is purely additive:
+    when given, it drives a per-participant breakdown of who gains what,
+    proportional to each participant's share of the group's total production
+    and consumption. The caller (the API layer) is responsible for keeping
+    the participant list's sums consistent with the aggregate totals, the
+    same way it already resolves kWp-derived production or percentage-of-
+    retail pricing before this dataclass is built — this function does not
+    cross-validate the two.
     """
 
     annual_production_kwh: Decimal
@@ -59,6 +85,7 @@ class FeasibilityInput:
     capex_chf: Decimal = Decimal("0")
     horizon_years: int = 20
     discount_rate: Decimal = Decimal("0.03")
+    participants: tuple[ParticipantInput, ...] = ()
 
     def __post_init__(self) -> None:
         _validate(self)
@@ -67,6 +94,12 @@ class FeasibilityInput:
 def _validate(inputs: FeasibilityInput) -> None:
     if not (Decimal("0") <= inputs.self_consumption_rate <= Decimal("1")):
         raise ValueError("self_consumption_rate must be between 0 and 1")
+
+    for participant in inputs.participants:
+        if participant.annual_production_kwh < 0:
+            raise ValueError(f"participant {participant.name!r}: annual_production_kwh must not be negative")
+        if participant.annual_consumption_kwh < 0:
+            raise ValueError(f"participant {participant.name!r}: annual_consumption_kwh must not be negative")
 
     non_negative_fields = (
         "annual_production_kwh",
@@ -118,6 +151,30 @@ class FairPriceRange:
 
 
 @dataclass(frozen=True)
+class ParticipantResult:
+    """One participant's share of the group's energy flows and money.
+
+    Each participant's own production/consumption is allocated a share of
+    the group's aggregate self-consumed pool proportional to their share of
+    total production (for what they contribute) and total consumption (for
+    what they draw), exactly mirroring the per-timestamp local-pool
+    allocation used for real invoices (``invoices.pdf``), just collapsed to
+    one annual split since there's no metering data yet.
+    """
+
+    name: str
+    annual_production_kwh: Decimal
+    annual_consumption_kwh: Decimal
+    self_consumed_from_own_production_kwh: Decimal
+    exported_kwh: Decimal
+    from_local_pool_kwh: Decimal
+    from_grid_kwh: Decimal
+    producer_gain_chf: Decimal
+    consumer_savings_chf: Decimal
+    net_benefit_chf: Decimal
+
+
+@dataclass(frozen=True)
 class FeasibilityResult:
     self_consumed_kwh: Decimal
     grid_import_kwh: Decimal
@@ -144,6 +201,8 @@ class FeasibilityResult:
     price_sensitivity: list[PriceSensitivityPoint]
     equal_split_price_chf_per_kwh: Decimal | None
     fair_price_range: FairPriceRange | None
+
+    participants: list[ParticipantResult]
 
 
 def _self_consumed_kwh(rate: Decimal, production_kwh: Decimal, consumption_kwh: Decimal) -> Decimal:
@@ -250,6 +309,66 @@ def _fair_price_range(inputs: FeasibilityInput, self_consumed: Decimal) -> FairP
     return FairPriceRange(low_chf_per_kwh=_price(lower), high_chf_per_kwh=_price(upper))
 
 
+def _build_participant_results(inputs: FeasibilityInput, self_consumed_total: Decimal) -> list[ParticipantResult]:
+    """Allocate the aggregate self-consumed pool across participants.
+
+    Shares are computed against the *participant list's own* totals (not
+    ``inputs.annual_production_kwh``/``annual_consumption_kwh`` directly) so
+    that, by construction, the per-participant producer_gain/consumer_savings
+    always sum exactly back to the aggregate figures — see the invariant
+    test in ``test_calculator.py``.
+    """
+    if not inputs.participants:
+        return []
+
+    total_production = sum((p.annual_production_kwh for p in inputs.participants), Decimal("0"))
+    total_consumption = sum((p.annual_consumption_kwh for p in inputs.participants), Decimal("0"))
+    internal_all_in = inputs.internal_energy_price_chf_per_kwh + inputs.internal_grid_fee_chf_per_kwh
+
+    results = []
+    for participant in inputs.participants:
+        self_consumed_from_own = (
+            self_consumed_total * (participant.annual_production_kwh / total_production)
+            if total_production > 0
+            else Decimal("0")
+        )
+        exported = participant.annual_production_kwh - self_consumed_from_own
+
+        from_local_pool = (
+            self_consumed_total * (participant.annual_consumption_kwh / total_consumption)
+            if total_consumption > 0
+            else Decimal("0")
+        )
+        from_grid = participant.annual_consumption_kwh - from_local_pool
+
+        baseline_producer_revenue = participant.annual_production_kwh * inputs.feed_in_price_chf_per_kwh
+        vzev_producer_revenue = (
+            exported * inputs.feed_in_price_chf_per_kwh
+            + self_consumed_from_own * inputs.internal_energy_price_chf_per_kwh
+        )
+        producer_gain = vzev_producer_revenue - baseline_producer_revenue
+
+        baseline_consumer_cost = participant.annual_consumption_kwh * inputs.retail_price_chf_per_kwh
+        vzev_consumer_cost = from_grid * inputs.retail_price_chf_per_kwh + from_local_pool * internal_all_in
+        consumer_savings = baseline_consumer_cost - vzev_consumer_cost
+
+        results.append(
+            ParticipantResult(
+                name=participant.name,
+                annual_production_kwh=_money(participant.annual_production_kwh),
+                annual_consumption_kwh=_money(participant.annual_consumption_kwh),
+                self_consumed_from_own_production_kwh=_money(self_consumed_from_own),
+                exported_kwh=_money(exported),
+                from_local_pool_kwh=_money(from_local_pool),
+                from_grid_kwh=_money(from_grid),
+                producer_gain_chf=_money(producer_gain),
+                consumer_savings_chf=_money(consumer_savings),
+                net_benefit_chf=_money(producer_gain + consumer_savings),
+            )
+        )
+    return results
+
+
 def _payback_years(annual_net_benefit: Decimal, capex: Decimal) -> Decimal | None:
     if annual_net_benefit <= 0:
         return None
@@ -329,6 +448,7 @@ def compute_feasibility(inputs: FeasibilityInput) -> FeasibilityResult:
         price_sensitivity=_build_price_sensitivity(inputs, self_consumed),
         equal_split_price_chf_per_kwh=_equal_split_price(inputs),
         fair_price_range=_fair_price_range(inputs, self_consumed),
+        participants=_build_participant_results(inputs, self_consumed),
     )
 
 

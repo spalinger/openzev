@@ -9,6 +9,7 @@ import pytest
 
 from .calculator import (
     FeasibilityInput,
+    ParticipantInput,
     compute_feasibility,
     estimate_annual_production_kwh,
 )
@@ -307,3 +308,131 @@ class TestEstimateAnnualProduction:
     def test_multiplies_kwp_by_specific_yield(self):
         result = estimate_annual_production_kwh(Decimal("10"), Decimal("950"))
         assert result == Decimal("9500")
+
+
+class TestMultiParticipant:
+    """Two producers + two consumers whose totals exactly match the
+    TestTypicalScenario aggregate (production=10'000, consumption=8'000),
+    so the per-participant breakdown can be cross-checked against those
+    already-verified aggregate numbers.
+
+    Shares: producer A=6000/10000=60%, B=4000/10000=40%.
+             consumer C=5000/8000=62.5%, D=3000/8000=37.5%.
+    self_consumed_total=5000 (unchanged from the typical scenario).
+    """
+
+    def _multi_participant_input(self, **overrides) -> FeasibilityInput:
+        return _typical_input(
+            participants=(
+                ParticipantInput(name="Producer A", annual_production_kwh=Decimal("6000")),
+                ParticipantInput(name="Producer B", annual_production_kwh=Decimal("4000")),
+                ParticipantInput(name="Consumer C", annual_consumption_kwh=Decimal("5000")),
+                ParticipantInput(name="Consumer D", annual_consumption_kwh=Decimal("3000")),
+            ),
+            **overrides,
+        )
+
+    def test_energy_allocation_per_participant(self):
+        result = compute_feasibility(self._multi_participant_input())
+        by_name = {p.name: p for p in result.participants}
+
+        assert by_name["Producer A"].self_consumed_from_own_production_kwh == Decimal("3000.00")  # 5000*0.6
+        assert by_name["Producer A"].exported_kwh == Decimal("3000.00")  # 6000-3000
+        assert by_name["Producer B"].self_consumed_from_own_production_kwh == Decimal("2000.00")  # 5000*0.4
+        assert by_name["Producer B"].exported_kwh == Decimal("2000.00")  # 4000-2000
+
+        assert by_name["Consumer C"].from_local_pool_kwh == Decimal("3125.00")  # 5000*0.625
+        assert by_name["Consumer C"].from_grid_kwh == Decimal("1875.00")  # 5000-3125
+        assert by_name["Consumer D"].from_local_pool_kwh == Decimal("1875.00")  # 5000*0.375
+        assert by_name["Consumer D"].from_grid_kwh == Decimal("1125.00")  # 3000-1875
+
+    def test_money_per_participant(self):
+        result = compute_feasibility(self._multi_participant_input())
+        by_name = {p.name: p for p in result.participants}
+
+        # Producer A: baseline 6000*0.09=540; vzev 3000*0.09+3000*0.20=870; gain=330
+        assert by_name["Producer A"].producer_gain_chf == Decimal("330.00")
+        # Producer B: baseline 4000*0.09=360; vzev 2000*0.09+2000*0.20=580; gain=220
+        assert by_name["Producer B"].producer_gain_chf == Decimal("220.00")
+        # Consumer C: baseline 5000*0.32=1600; vzev 1875*0.32+3125*0.23=1318.75; savings=281.25
+        assert by_name["Consumer C"].consumer_savings_chf == Decimal("281.25")
+        # Consumer D: baseline 3000*0.32=960; vzev 1125*0.32+1875*0.23=791.25; savings=168.75
+        assert by_name["Consumer D"].consumer_savings_chf == Decimal("168.75")
+
+        # Pure producers have zero consumer_savings; pure consumers have zero producer_gain.
+        assert by_name["Producer A"].consumer_savings_chf == Decimal("0.00")
+        assert by_name["Consumer C"].producer_gain_chf == Decimal("0.00")
+
+    def test_per_participant_sums_match_aggregate(self):
+        """The whole point of the allocation: it must be an exact decomposition
+        of the aggregate figures already verified in TestTypicalScenario, not
+        a separately-computed number that could silently drift."""
+        result = compute_feasibility(self._multi_participant_input())
+
+        total_producer_gain = sum(p.producer_gain_chf for p in result.participants)
+        total_consumer_savings = sum(p.consumer_savings_chf for p in result.participants)
+        total_net_benefit = sum(p.net_benefit_chf for p in result.participants)
+
+        assert total_producer_gain == result.producer_gain_chf == Decimal("550.00")
+        assert total_consumer_savings == result.consumer_savings_chf == Decimal("450.00")
+        assert total_net_benefit == result.annual_gross_benefit_chf == Decimal("1000.00")
+
+    def test_prosumer_gets_both_producer_gain_and_consumer_savings(self):
+        prosumer_input = _typical_input(
+            participants=(
+                ParticipantInput(
+                    name="Prosumer",
+                    annual_production_kwh=Decimal("10000"),
+                    annual_consumption_kwh=Decimal("8000"),
+                ),
+            ),
+        )
+        result = compute_feasibility(prosumer_input)
+        assert len(result.participants) == 1
+        prosumer = result.participants[0]
+
+        # Sole participant holds 100% of both production and consumption shares,
+        # so they receive the entire aggregate result.
+        assert prosumer.producer_gain_chf == result.producer_gain_chf == Decimal("550.00")
+        assert prosumer.consumer_savings_chf == result.consumer_savings_chf == Decimal("450.00")
+        assert prosumer.net_benefit_chf == Decimal("1000.00")
+
+    def test_empty_participants_list_by_default(self):
+        result = compute_feasibility(_typical_input())
+        assert result.participants == []
+
+    def test_no_producers_among_participants_does_not_divide_by_zero(self):
+        result = compute_feasibility(
+            _typical_input(
+                participants=(
+                    ParticipantInput(name="Consumer only", annual_consumption_kwh=Decimal("8000")),
+                ),
+            )
+        )
+        only = result.participants[0]
+        assert only.self_consumed_from_own_production_kwh == Decimal("0.00")
+        assert only.exported_kwh == Decimal("0.00")
+
+    def test_no_consumers_among_participants_does_not_divide_by_zero(self):
+        result = compute_feasibility(
+            _typical_input(
+                participants=(
+                    ParticipantInput(name="Producer only", annual_production_kwh=Decimal("10000")),
+                ),
+            )
+        )
+        only = result.participants[0]
+        assert only.from_local_pool_kwh == Decimal("0.00")
+        assert only.from_grid_kwh == Decimal("0.00")
+
+    def test_negative_participant_production_raises(self):
+        with pytest.raises(ValueError):
+            _typical_input(
+                participants=(ParticipantInput(name="Bad", annual_production_kwh=Decimal("-1")),),
+            )
+
+    def test_negative_participant_consumption_raises(self):
+        with pytest.raises(ValueError):
+            _typical_input(
+                participants=(ParticipantInput(name="Bad", annual_consumption_kwh=Decimal("-1")),),
+            )

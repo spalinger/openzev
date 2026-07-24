@@ -53,6 +53,42 @@ class TestFeasibilityCalculateHappyPath:
         assert body["equal_split_price_chf_per_kwh"] == "0.19000"
         assert body["fair_price_range"] == {"low_chf_per_kwh": "0.15000", "high_chf_per_kwh": "0.29000"}
 
+    def test_participants_breakdown_sums_to_aggregate(self, owner_client):
+        payload = dict(
+            TYPICAL_PAYLOAD,
+            participants=[
+                {"name": "Producer A", "annual_production_kwh": "6000"},
+                {"name": "Producer B", "annual_production_kwh": "4000"},
+                {"name": "Consumer C", "annual_consumption_kwh": "5000"},
+                {"name": "Consumer D", "annual_consumption_kwh": "3000"},
+            ],
+        )
+        response = owner_client.post(URL, payload, format="json")
+        assert response.status_code == 200
+
+        body = response.json()
+        assert len(body["participants"]) == 4
+        by_name = {p["name"]: p for p in body["participants"]}
+        assert by_name["Producer A"]["producer_gain_chf"] == "330.00"
+        assert by_name["Producer B"]["producer_gain_chf"] == "220.00"
+        assert by_name["Consumer C"]["consumer_savings_chf"] == "281.25"
+        assert by_name["Consumer D"]["consumer_savings_chf"] == "168.75"
+
+        total_gain = sum(float(p["producer_gain_chf"]) for p in body["participants"])
+        total_savings = sum(float(p["consumer_savings_chf"]) for p in body["participants"])
+        assert total_gain == float(body["producer_gain_chf"])
+        assert total_savings == float(body["consumer_savings_chf"])
+
+    def test_participants_omitted_defaults_to_empty_list(self, owner_client):
+        response = owner_client.post(URL, TYPICAL_PAYLOAD, format="json")
+        assert response.status_code == 200
+        assert response.json()["participants"] == []
+
+    def test_participant_missing_name_returns_400(self, owner_client):
+        payload = dict(TYPICAL_PAYLOAD, participants=[{"annual_production_kwh": "1000"}])
+        response = owner_client.post(URL, payload, format="json")
+        assert response.status_code == 400
+
     def test_optional_fields_fall_back_to_swiss_defaults(self, owner_client):
         minimal_payload = {
             "annual_production_kwh": "10000",
