@@ -80,6 +80,15 @@ export const defaultFeasibilityFormValues: FeasibilityFormValues = {
   discount_rate_pct: '3',
 }
 
+// JS float arithmetic on arbitrary decimals (e.g. 0.35 * 45 / 100) routinely
+// produces results like 0.15749999999999997 that need far more digits to
+// round-trip than the value actually has. Sent through .toString() as-is,
+// that blows past the backend DecimalField's max_digits and 400s. Round to
+// the same decimal_places the target field expects before stringifying.
+function toFixedString(value: number, decimalPlaces: number): string {
+  return value.toFixed(decimalPlaces)
+}
+
 // Annual PV production can be entered directly (kWh) or derived from an
 // installed capacity (kWp) times an assumed specific yield (kWh/kWp/year).
 // Mirrors backend/feasibility/calculator.py's estimate_annual_production_kwh.
@@ -102,16 +111,17 @@ export function resolveInternalEnergyPriceChf(values: FeasibilityFormValues): nu
 
 export function mapFormValuesToPayload(values: FeasibilityFormValues): FeasibilityInput {
   return {
-    annual_production_kwh: resolveAnnualProductionKwh(values).toString(),
+    // decimal_places below mirror each field's DecimalField in feasibility/serializers.py.
+    annual_production_kwh: toFixedString(resolveAnnualProductionKwh(values), 4),
     annual_consumption_kwh: values.annual_consumption_kwh,
-    self_consumption_rate: (Number(values.self_consumption_rate_pct) / 100).toString(),
+    self_consumption_rate: toFixedString(Number(values.self_consumption_rate_pct) / 100, 4),
     retail_price_chf_per_kwh: values.retail_price_chf_per_kwh,
     feed_in_price_chf_per_kwh: values.feed_in_price_chf_per_kwh,
-    internal_energy_price_chf_per_kwh: resolveInternalEnergyPriceChf(values).toString(),
+    internal_energy_price_chf_per_kwh: toFixedString(resolveInternalEnergyPriceChf(values), 5),
     internal_grid_fee_chf_per_kwh: values.internal_grid_fee_chf_per_kwh,
     annual_opex_chf: values.annual_opex_chf,
     capex_chf: values.capex_chf,
     horizon_years: Number(values.horizon_years),
-    discount_rate: (Number(values.discount_rate_pct) / 100).toString(),
+    discount_rate: toFixedString(Number(values.discount_rate_pct) / 100, 4),
   }
 }
