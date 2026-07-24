@@ -10,6 +10,7 @@ const AdminAccountsPage = lazy(async () => ({ default: (await import('./pages/Ad
 const AdminPdfTemplatesPage = lazy(async () => ({ default: (await import('./pages/AdminPdfTemplatesPage')).AdminPdfTemplatesPage }))
 const AdminEmailTemplatesPage = lazy(async () => ({ default: (await import('./pages/AdminEmailTemplatesPage')).AdminEmailTemplatesPage }))
 const AdminInvoicesPage = lazy(async () => ({ default: (await import('./pages/AdminInvoicesPage')).AdminInvoicesPage }))
+const FeasibilityCalculatorPage = lazy(async () => ({ default: (await import('./pages/FeasibilityCalculatorPage')).FeasibilityCalculatorPage }))
 const AuditLogsPage = lazy(async () => ({ default: (await import('./pages/AdminAuditLogsPage')).AuditLogsPage }))
 const AdminSystemSettingsPage = lazy(async () => ({ default: (await import('./pages/AdminSystemSettingsPage')).AdminSystemSettingsPage }))
 const AdminVatSettingsPage = lazy(async () => ({ default: (await import('./pages/AdminVatSettingsPage')).AdminVatSettingsPage }))
@@ -170,6 +171,14 @@ function App() {
               }
             />
             <Route path="invoices/:invoiceId" element={<InvoiceDetailPage />} />
+            <Route
+              path="feasibility"
+              element={
+                <ProtectedRoute allowedRoles={['admin', 'zev_owner']}>
+                  <FeasibilityCalculatorPage />
+                </ProtectedRoute>
+              }
+            />
             <Route
               path="imports"
               element={

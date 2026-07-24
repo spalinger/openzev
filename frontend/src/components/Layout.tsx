@@ -222,6 +222,17 @@ export function Layout() {
 
                         {canManage && (
                             <NavLink
+                                to="/feasibility"
+                                className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+                                title={t('nav.feasibility')}
+                            >
+                                <span className="nav-icon"><CalculatorIcon /></span>
+                                <span className="nav-label">{t('nav.feasibility')}</span>
+                            </NavLink>
+                        )}
+
+                        {canManage && (
+                            <NavLink
                                 to="/imports"
                                 className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
                                 title={t('nav.imports')}
@@ -489,6 +500,20 @@ function TagIcon() {
 
 function InvoiceIcon() {
     return <IconSvg path="M7 3h8l4 4v14l-2-1-2 1-2-1-2 1-2-1-2 1V4a1 1 0 0 1 1-1Zm1 6h8m-8 4h8m-8 4h5" />
+}
+
+function CalculatorIcon() {
+    return (
+        <IconSvg
+            path={
+                <>
+                    <rect x="4" y="2" width="16" height="20" rx="2" ry="2" />
+                    <line x1="8" y1="6" x2="16" y2="6" />
+                    <path d="M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01" />
+                </>
+            }
+        />
+    )
 }
 
 function AuditIcon() {

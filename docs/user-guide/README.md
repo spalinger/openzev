@@ -7,6 +7,10 @@ Welcome to the OpenZEV user documentation. This guide covers everything you need
 - **[Getting Started](01-getting-started.md)** — Installation, quick start with Docker, and demo accounts
 - **[Understanding Roles and Permissions](11-roles-and-permissions.md)** — Learn about admin, ZEV owner, and participant roles
 
+## Planning
+
+- **[vZEV Feasibility Calculator](13-feasibility-calculator.md)** — Estimate savings, payback, ROI, and the producer/consumer split before founding a ZEV
+
 ## Setting Up Your ZEV Community
 
 - **[ZEV Setup and Configuration](02-zev-setup.md)** — Create and configure your first ZEV
