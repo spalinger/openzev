@@ -714,6 +714,18 @@ export interface FeasibilitySensitivityPoint {
     annual_net_benefit_chf: string
 }
 
+export interface FeasibilityPriceSensitivityPoint {
+    internal_price_pct_of_retail: string
+    internal_price_chf_per_kwh: string
+    producer_gain_chf: string
+    consumer_savings_chf: string
+}
+
+export interface FeasibilityFairPriceRange {
+    low_chf_per_kwh: string
+    high_chf_per_kwh: string
+}
+
 export interface FeasibilityResult {
     self_consumed_kwh: string
     grid_import_kwh: string
@@ -733,4 +745,7 @@ export interface FeasibilityResult {
     cashflow_by_year: string[]
     sensitivity: FeasibilitySensitivityPoint[]
     break_even_self_consumption_rate: string | null
+    price_sensitivity: FeasibilityPriceSensitivityPoint[]
+    equal_split_price_chf_per_kwh: string | null
+    fair_price_range: FeasibilityFairPriceRange | null
 }

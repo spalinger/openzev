@@ -5,6 +5,7 @@ import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { StatCard } from '../components/StatCard'
 import { FeasibilityCashflowChart } from '../features/feasibility/FeasibilityCashflowChart'
+import { FeasibilityPriceSensitivityChart } from '../features/feasibility/FeasibilityPriceSensitivityChart'
 import { FeasibilitySensitivityChart } from '../features/feasibility/FeasibilitySensitivityChart'
 import {
     defaultFeasibilityFormValues,
@@ -222,6 +223,15 @@ export function FeasibilityCalculatorPage() {
                                     currentRatePct={currentRatePct}
                                     currentNetBenefitChf={Number(result.annual_net_benefit_chf)}
                                     breakEvenRatePct={result.break_even_self_consumption_rate !== null ? Number(result.break_even_self_consumption_rate) * 100 : null}
+                                />
+                            </section>
+
+                            <section className="card">
+                                <FeasibilityPriceSensitivityChart
+                                    priceSensitivity={result.price_sensitivity}
+                                    retailPriceChfPerKwh={Number(watchedValues.retail_price_chf_per_kwh)}
+                                    equalSplitPriceChfPerKwh={result.equal_split_price_chf_per_kwh !== null ? Number(result.equal_split_price_chf_per_kwh) : null}
+                                    fairPriceRange={result.fair_price_range}
                                 />
                             </section>
 
