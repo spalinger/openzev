@@ -199,6 +199,41 @@ class TestTariffPrefill:
         prefill = build_prefill(zev)
         assert prefill.internal_energy_price_chf_per_kwh == Decimal("0.18000")
 
+    def test_internal_price_resolved_from_a_percentage_of_grid_tariff(self):
+        # A very common vZEV setup: local energy priced as a percentage of the
+        # grid energy price ("local = 60% of Netzstrom"), not a flat rate.
+        zev = factories.ZevFactory()
+        grid_energy = factories.TariffFactory(
+            zev=zev, category=TariffCategory.ENERGY, energy_type=EnergyType.GRID
+        )
+        factories.TariffPeriodFactory(tariff=grid_energy, price_chf_per_kwh=Decimal("0.30000"))
+        factories.TariffFactory(
+            zev=zev,
+            category=TariffCategory.ENERGY,
+            energy_type=EnergyType.LOCAL,
+            billing_mode=BillingMode.PERCENTAGE_OF_ENERGY,
+            percentage=Decimal("60.00"),
+        )
+
+        prefill = build_prefill(zev)
+        # 60% of the 0.30 grid energy base = 0.18000
+        assert prefill.internal_energy_price_chf_per_kwh == Decimal("0.18000")
+
+    def test_internal_price_none_when_percentage_has_no_grid_base(self):
+        # A local percentage tariff with no grid energy tariff to anchor it
+        # can't be resolved, so the internal price stays None (default kept).
+        zev = factories.ZevFactory()
+        factories.TariffFactory(
+            zev=zev,
+            category=TariffCategory.ENERGY,
+            energy_type=EnergyType.LOCAL,
+            billing_mode=BillingMode.PERCENTAGE_OF_ENERGY,
+            percentage=Decimal("60.00"),
+        )
+
+        prefill = build_prefill(zev)
+        assert prefill.internal_energy_price_chf_per_kwh is None
+
     def test_retail_none_when_only_a_percentage_tariff_exists(self):
         # A percentage-of-energy tariff has nothing to anchor to without a flat
         # grid energy base, so retail can't be determined and stays None.

@@ -24,12 +24,14 @@ for entering real numbers. Three independent approximations:
      ``(1 + Σ percentage-of-energy GRID tariffs)``. Loading only the energy
      component would understate retail, and therefore understate the whole
      vZEV benefit (which is proportional to retail − feed_in).
-   - Feed-in and internal are energy-only: the flat ENERGY-category tariff of
-     the FEED_IN / LOCAL type. Internal has no grid fee or levy by the vZEV
-     rule that locally consumed energy is only ever priced as energy.
+   - Feed-in is energy-only: the flat ENERGY-category FEED_IN tariff.
+   - Internal (local) is energy-only too, but is commonly configured as a
+     percentage of the grid energy price ("local = 60% of Netzstrom") rather
+     than a flat rate, so a percentage-of-energy LOCAL tariff is resolved
+     against the grid energy base, and a flat LOCAL energy tariff added on top.
    HT/NT splits within a tariff are approximated with a representative period,
-   and percentage-of-energy / fixed-fee tariffs are otherwise ignored. Returns
-   None for a price it can't determine — the caller then falls back to the
+   and fixed-fee (per-month/-metering-point) tariffs are ignored. Returns None
+   for a price it can't determine — the caller then falls back to the
    calculator's own Swiss defaults, exactly as it does for any blank field.
 """
 from __future__ import annotations
@@ -105,6 +107,22 @@ def _flat_energy_price_sum(
     return total if found else None
 
 
+def _percentage_of_energy_sum(
+    zev: Zev, *, energy_type: str, today: dt.date, categories: list[str] | None = None
+) -> Decimal:
+    """Total of the percentages across currently-active percentage-of-energy
+    tariffs of the given energy type (0 when there are none)."""
+    qs = Tariff.objects.filter(
+        zev=zev,
+        energy_type=energy_type,
+        billing_mode=BillingMode.PERCENTAGE_OF_ENERGY,
+        valid_from__lte=today,
+    ).filter(Q(valid_to__isnull=True) | Q(valid_to__gte=today))
+    if categories is not None:
+        qs = qs.filter(category__in=categories)
+    return sum((tariff.percentage or Decimal("0") for tariff in qs), Decimal("0"))
+
+
 def _all_in_retail_price(zev: Zev, today: dt.date) -> Decimal | None:
     """Full per-kWh price a consumer pays for grid energy: the flat
     energy-based GRID tariffs (energy + grid fees + levies) plus every
@@ -114,20 +132,40 @@ def _all_in_retail_price(zev: Zev, today: dt.date) -> Decimal | None:
     base = _flat_energy_price_sum(zev, energy_type=EnergyType.GRID, today=today)
     if base is None:
         return None
-
-    total_pct = sum(
-        (
-            tariff.percentage or Decimal("0")
-            for tariff in Tariff.objects.filter(
-                zev=zev,
-                energy_type=EnergyType.GRID,
-                billing_mode=BillingMode.PERCENTAGE_OF_ENERGY,
-                valid_from__lte=today,
-            ).filter(Q(valid_to__isnull=True) | Q(valid_to__gte=today))
-        ),
-        Decimal("0"),
-    )
+    total_pct = _percentage_of_energy_sum(zev, energy_type=EnergyType.GRID, today=today)
     return (base * (1 + total_pct / Decimal("100"))).quantize(FIVE_PLACES)
+
+
+def _internal_energy_price(zev: Zev, today: dt.date) -> Decimal | None:
+    """Per-kWh price a participant pays for locally consumed (LOCAL) energy,
+    energy-only per the vZEV pricing rule.
+
+    Very often this is configured as a *percentage of the grid energy price*
+    ("local = 60% of Netzstrom") rather than a flat rate, so — mirroring the
+    invoice engine — a percentage-of-energy LOCAL tariff is resolved against
+    the grid energy base (percentage × grid_base), and a flat LOCAL energy
+    tariff is added on top. None when neither is configured.
+    """
+    total = Decimal("0")
+    found = False
+
+    flat = _flat_energy_price_sum(
+        zev, energy_type=EnergyType.LOCAL, today=today, categories=[TariffCategory.ENERGY]
+    )
+    if flat is not None:
+        total += flat
+        found = True
+
+    local_pct = _percentage_of_energy_sum(
+        zev, energy_type=EnergyType.LOCAL, today=today, categories=[TariffCategory.ENERGY]
+    )
+    if local_pct > 0:
+        grid_base = _flat_energy_price_sum(zev, energy_type=EnergyType.GRID, today=today)
+        if grid_base is not None:
+            total += grid_base * local_pct / Decimal("100")
+            found = True
+
+    return total.quantize(FIVE_PLACES) if found else None
 
 
 def _extrapolated_annual_kwh(
@@ -233,12 +271,10 @@ def build_prefill(zev: Zev) -> FeasibilityPrefill:
         participants=participants,
         self_consumption_rate=_measured_self_consumption_rate(zev),
         retail_price_chf_per_kwh=_all_in_retail_price(zev, today),
-        # Feed-in and internal are energy-only (ENERGY category); internal
-        # carries no grid fee or levy by the vZEV energy-only pricing rule.
+        # Feed-in is energy-only (ENERGY category). Internal, too, but it's
+        # often a percentage of the grid price rather than a flat rate.
         feed_in_price_chf_per_kwh=_flat_energy_price_sum(
             zev, energy_type=EnergyType.FEED_IN, today=today, categories=[TariffCategory.ENERGY]
         ),
-        internal_energy_price_chf_per_kwh=_flat_energy_price_sum(
-            zev, energy_type=EnergyType.LOCAL, today=today, categories=[TariffCategory.ENERGY]
-        ),
+        internal_energy_price_chf_per_kwh=_internal_energy_price(zev, today),
     )
