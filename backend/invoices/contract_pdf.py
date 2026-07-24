@@ -9,7 +9,7 @@ from decimal import Decimal
 
 from django.template.loader import render_to_string
 from django.template import Template, Context
-from weasyprint import HTML
+from .pdf_render import render_pdf
 
 from tariffs.models import BillingMode, EnergyType, PeriodType
 from zev.models import MeteringPointType
@@ -751,5 +751,4 @@ def generate_contract_pdf(participant) -> bytes:
         html_string = Template(record.content).render(Context(context))
     else:
         html_string = render_to_string(CONTRACT_TEMPLATE_NAME, context)
-    pdf_bytes = HTML(string=html_string, base_url=".").write_pdf()
-    return pdf_bytes
+    return render_pdf(html_string)

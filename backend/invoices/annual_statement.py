@@ -14,7 +14,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.template.loader import render_to_string
 from django.template import Template, Context
 from accounts.models import AppSettings
-from weasyprint import HTML
+from .pdf_render import render_pdf
 
 from metering.models import MeterReading, ReadingDirection
 from zev.models import MeteringPoint, MeteringPointType, MeteringPointAssignment
@@ -560,5 +560,4 @@ def generate_annual_statement_pdf(participant, zev, year: int) -> bytes:
     }
 
     html_string = _render_template(ANNUAL_STATEMENT_TEMPLATE, context)
-    pdf_bytes = HTML(string=html_string, base_url=".").write_pdf()
-    return pdf_bytes
+    return render_pdf(html_string)

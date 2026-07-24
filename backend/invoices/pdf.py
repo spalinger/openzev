@@ -13,9 +13,9 @@ from django.template import Template, Context
 from django.core.files.base import ContentFile
 from django.utils import timezone
 from accounts.models import AppSettings
-from weasyprint import HTML, CSS
 from tariffs.models import TariffCategory
 from .description_utils import strip_period_suffix
+from .pdf_render import render_pdf
 from .models import Invoice
 
 # ── Invoice translations ───────────────────────────────────────────────────────
@@ -1286,8 +1286,7 @@ def _render_template(template_name: str, context: dict) -> str:
 def generate_pdf(invoice) -> bytes:
     """Render the invoice to PDF bytes."""
     html_string = _render_template(TEMPLATE_NAME, _build_template_context(invoice))
-    pdf_bytes = HTML(string=html_string, base_url=".").write_pdf()
-    return pdf_bytes
+    return render_pdf(html_string)
 
 
 def save_invoice_pdf(invoice) -> None:
