@@ -1,0 +1,185 @@
+import { zodResolver } from '@hookform/resolvers/zod'
+import { useMutation } from '@tanstack/react-query'
+import { useEffect } from 'react'
+import { useForm } from 'react-hook-form'
+import { useTranslation } from 'react-i18next'
+import { StatCard } from '../components/StatCard'
+import { FeasibilityCashflowChart } from '../features/feasibility/FeasibilityCashflowChart'
+import { FeasibilitySensitivityChart } from '../features/feasibility/FeasibilitySensitivityChart'
+import {
+    defaultFeasibilityFormValues,
+    feasibilityFormSchema,
+    mapFormValuesToPayload,
+    type FeasibilityFormValues,
+} from '../features/feasibility/useFeasibilityForm'
+import { calculateFeasibility } from '../lib/api/feasibility'
+import { formatApiError } from '../lib/api/errors'
+
+const DEBOUNCE_MS = 400
+
+function chf(value: string): string {
+    return `CHF ${Number(value).toFixed(2)}`
+}
+
+export function FeasibilityCalculatorPage() {
+    const { t } = useTranslation()
+    const form = useForm<FeasibilityFormValues>({
+        resolver: zodResolver(feasibilityFormSchema),
+        defaultValues: defaultFeasibilityFormValues,
+        mode: 'onChange',
+    })
+
+    const mutation = useMutation({ mutationFn: calculateFeasibility })
+
+    const watchedValues = form.watch()
+
+    useEffect(() => {
+        const timer = window.setTimeout(async () => {
+            const isValid = await form.trigger()
+            if (isValid) {
+                mutation.mutate(mapFormValuesToPayload(form.getValues()))
+            }
+        }, DEBOUNCE_MS)
+        return () => window.clearTimeout(timer)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [JSON.stringify(watchedValues)])
+
+    const result = mutation.data
+    const currentRatePct = Number(watchedValues.self_consumption_rate_pct) || 0
+
+    return (
+        <div className="page-stack">
+            <header>
+                <p className="eyebrow">{t('pages.feasibility.eyebrow')}</p>
+                <h2>{t('pages.feasibility.title')}</h2>
+                <p className="muted">{t('pages.feasibility.description')}</p>
+            </header>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 420px) 1fr', gap: '1.5rem', alignItems: 'start' }}>
+                <form className="card page-stack" onSubmit={(event) => event.preventDefault()}>
+                    <h3 style={{ marginTop: 0 }}>{t('pages.feasibility.form.systemTitle')}</h3>
+                    <label>
+                        <span>{t('pages.feasibility.form.annualProduction')}</span>
+                        <input type="number" step="any" min="0" {...form.register('annual_production_kwh')} />
+                    </label>
+                    <label>
+                        <span>{t('pages.feasibility.form.annualConsumption')}</span>
+                        <input type="number" step="any" min="0" {...form.register('annual_consumption_kwh')} />
+                    </label>
+                    <label>
+                        <span>{t('pages.feasibility.form.selfConsumptionRate')}</span>
+                        <input type="number" step="any" min="0" max="100" {...form.register('self_consumption_rate_pct')} />
+                        <span className="muted" style={{ fontSize: '0.78rem' }}>{t('pages.feasibility.form.selfConsumptionHint')}</span>
+                    </label>
+
+                    <h3>{t('pages.feasibility.form.tariffsTitle')}</h3>
+                    <label>
+                        <span>{t('pages.feasibility.form.retailPrice')}</span>
+                        <input type="number" step="any" min="0" {...form.register('retail_price_chf_per_kwh')} />
+                    </label>
+                    <label>
+                        <span>{t('pages.feasibility.form.feedInPrice')}</span>
+                        <input type="number" step="any" min="0" {...form.register('feed_in_price_chf_per_kwh')} />
+                    </label>
+                    <label>
+                        <span>{t('pages.feasibility.form.internalEnergyPrice')}</span>
+                        <input type="number" step="any" min="0" {...form.register('internal_energy_price_chf_per_kwh')} />
+                        <span className="muted" style={{ fontSize: '0.78rem' }}>{t('pages.feasibility.form.internalEnergyPriceHint')}</span>
+                    </label>
+                    <label>
+                        <span>{t('pages.feasibility.form.internalGridFee')}</span>
+                        <input type="number" step="any" min="0" {...form.register('internal_grid_fee_chf_per_kwh')} />
+                    </label>
+
+                    <h3>{t('pages.feasibility.form.costsTitle')}</h3>
+                    <label>
+                        <span>{t('pages.feasibility.form.annualOpex')}</span>
+                        <input type="number" step="any" min="0" {...form.register('annual_opex_chf')} />
+                    </label>
+                    <label>
+                        <span>{t('pages.feasibility.form.capex')}</span>
+                        <input type="number" step="any" min="0" {...form.register('capex_chf')} />
+                    </label>
+                    <label>
+                        <span>{t('pages.feasibility.form.horizonYears')}</span>
+                        <input type="number" step="1" min="1" max="50" {...form.register('horizon_years')} />
+                    </label>
+                    <label>
+                        <span>{t('pages.feasibility.form.discountRate')}</span>
+                        <input type="number" step="any" min="0" max="100" {...form.register('discount_rate_pct')} />
+                    </label>
+                </form>
+
+                <div className="page-stack">
+                    {mutation.isError && (
+                        <div className="error-banner">{formatApiError(mutation.error, t('pages.feasibility.results.error'))}</div>
+                    )}
+
+                    {!result && !mutation.isError && (
+                        <p className="muted">{t('pages.feasibility.results.calculating')}</p>
+                    )}
+
+                    {result && (
+                        <>
+                            <section
+                                style={{
+                                    display: 'grid',
+                                    gap: '1rem',
+                                    gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                                    opacity: mutation.isPending ? 0.6 : 1,
+                                    transition: 'opacity 0.15s',
+                                }}
+                            >
+                                <StatCard label={t('pages.feasibility.results.annualNetBenefit')} value={chf(result.annual_net_benefit_chf)} />
+                                <StatCard
+                                    label={t('pages.feasibility.results.payback')}
+                                    value={result.payback_years !== null ? t('pages.feasibility.results.years', { count: Number(result.payback_years).toFixed(1) }) : t('pages.feasibility.results.never')}
+                                />
+                                <StatCard
+                                    label={t('pages.feasibility.results.roi')}
+                                    value={result.roi !== null ? `${(Number(result.roi) * 100).toFixed(1)}%` : '—'}
+                                />
+                                <StatCard label={t('pages.feasibility.results.npv')} value={chf(result.npv_chf)} hint={t('pages.feasibility.results.npvHint')} />
+                                <StatCard label={t('pages.feasibility.results.selfConsumed')} value={`${Number(result.self_consumed_kwh).toFixed(0)} kWh`} />
+                                <StatCard label={t('pages.feasibility.results.autarky')} value={`${(Number(result.autarky_rate) * 100).toFixed(0)}%`} />
+                            </section>
+
+                            <section className="card page-stack">
+                                <h3 style={{ marginTop: 0 }}>{t('pages.feasibility.results.splitTitle')}</h3>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                                    <div>
+                                        <p className="eyebrow">{t('pages.feasibility.results.consumers')}</p>
+                                        <p style={{ margin: 0 }}>{t('pages.feasibility.results.baselineCost')}: {chf(result.baseline_consumer_cost_chf)}</p>
+                                        <p style={{ margin: 0 }}>{t('pages.feasibility.results.vzevCost')}: {chf(result.vzev_consumer_cost_chf)}</p>
+                                        <p style={{ margin: '0.3rem 0 0', fontWeight: 600 }}>{t('pages.feasibility.results.savings')}: {chf(result.consumer_savings_chf)}</p>
+                                    </div>
+                                    <div>
+                                        <p className="eyebrow">{t('pages.feasibility.results.producer')}</p>
+                                        <p style={{ margin: 0 }}>{t('pages.feasibility.results.baselineRevenue')}: {chf(result.baseline_producer_revenue_chf)}</p>
+                                        <p style={{ margin: 0 }}>{t('pages.feasibility.results.vzevRevenue')}: {chf(result.vzev_producer_revenue_chf)}</p>
+                                        <p style={{ margin: '0.3rem 0 0', fontWeight: 600 }}>{t('pages.feasibility.results.gain')}: {chf(result.producer_gain_chf)}</p>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section className="card">
+                                <FeasibilitySensitivityChart
+                                    sensitivity={result.sensitivity}
+                                    currentRatePct={currentRatePct}
+                                    breakEvenRatePct={result.break_even_self_consumption_rate !== null ? Number(result.break_even_self_consumption_rate) * 100 : null}
+                                />
+                            </section>
+
+                            <section className="card">
+                                <FeasibilityCashflowChart
+                                    cashflowByYear={result.cashflow_by_year}
+                                    paybackYears={result.payback_years !== null ? Number(result.payback_years) : null}
+                                />
+                            </section>
+                        </>
+                    )}
+                </div>
+            </div>
+        </div>
+    )
+}
