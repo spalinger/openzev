@@ -13,6 +13,7 @@ import { ParticipantRowsEditor } from '../features/feasibility/ParticipantRowsEd
 import { PrefillFromZevCard } from '../features/feasibility/PrefillFromZevCard'
 import {
     applyPrefillToFormValues,
+    convertedInternalPriceForMode,
     defaultFeasibilityFormValues,
     feasibilityFormSchema,
     mapFormValuesToPayload,
@@ -20,6 +21,7 @@ import {
     resolveInternalEnergyPriceChf,
     resolveParticipantTotals,
     type FeasibilityFormValues,
+    type InternalEnergyPriceMode,
 } from '../features/feasibility/useFeasibilityForm'
 import { calculateFeasibility } from '../lib/api/feasibility'
 import { formatApiError } from '../lib/api/errors'
@@ -156,6 +158,14 @@ export function FeasibilityCalculatorPage() {
                             {t('pages.feasibility.form.internalEnergyPrice')}
                             <select
                                 {...form.register('internal_energy_price_mode')}
+                                onChange={(event) => {
+                                    // Convert the value so the effective price is preserved across the
+                                    // switch, instead of revealing the other field's stale value.
+                                    const newMode = event.target.value as InternalEnergyPriceMode
+                                    const converted = convertedInternalPriceForMode(form.getValues(), newMode)
+                                    if (converted) form.setValue(converted.field, converted.value)
+                                    void form.register('internal_energy_price_mode').onChange(event)
+                                }}
                                 style={{ width: 'auto', fontSize: '0.78rem', padding: '0.1rem 0.3rem' }}
                             >
                                 <option value="absolute">{t('pages.feasibility.form.internalEnergyPriceModeAbsolute')}</option>

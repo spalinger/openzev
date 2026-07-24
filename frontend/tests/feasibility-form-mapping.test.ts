@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   applyPrefillToFormValues,
+  convertedInternalPriceForMode,
   defaultFeasibilityFormValues,
   mapFormValuesToPayload,
   resolveAnnualProductionKwh,
@@ -71,6 +72,55 @@ describe('feasibility form mapping', () => {
         pv_kwp: '15.7',
         specific_yield_kwh_per_kwp: '1013',
       }).toFixed(4))
+    })
+  })
+
+  describe('convertedInternalPriceForMode', () => {
+    it('converts an absolute price into the equivalent percentage of retail', () => {
+      const values: FeasibilityFormValues = {
+        ...defaultFeasibilityFormValues,
+        retail_price_chf_per_kwh: '0.32',
+        internal_energy_price_chf_per_kwh: '0.20',
+      }
+      // 0.20 / 0.32 = 62.5%
+      expect(convertedInternalPriceForMode(values, 'percentage_of_retail')).toEqual({
+        field: 'internal_energy_price_pct_of_retail',
+        value: '62.5',
+      })
+    })
+
+    it('converts a percentage of retail back into the equivalent absolute price', () => {
+      const values: FeasibilityFormValues = {
+        ...defaultFeasibilityFormValues,
+        retail_price_chf_per_kwh: '0.32',
+        internal_energy_price_pct_of_retail: '62.5',
+      }
+      // 0.32 * 62.5% = 0.20
+      expect(convertedInternalPriceForMode(values, 'absolute')).toEqual({
+        field: 'internal_energy_price_chf_per_kwh',
+        value: '0.2',
+      })
+    })
+
+    it('round-trips through the all-in retail without drifting', () => {
+      const base: FeasibilityFormValues = {
+        ...defaultFeasibilityFormValues,
+        retail_price_chf_per_kwh: '0.348',
+        internal_energy_price_chf_per_kwh: '0.18',
+      }
+      const toPct = convertedInternalPriceForMode(base, 'percentage_of_retail')!
+      expect(toPct.value).toBe('51.7241')
+      const backToAbs = convertedInternalPriceForMode(
+        { ...base, internal_energy_price_pct_of_retail: toPct.value },
+        'absolute',
+      )!
+      expect(backToAbs.value).toBe('0.18')
+    })
+
+    it('returns null when retail is not a positive number to convert against', () => {
+      const values: FeasibilityFormValues = { ...defaultFeasibilityFormValues, retail_price_chf_per_kwh: '0' }
+      expect(convertedInternalPriceForMode(values, 'percentage_of_retail')).toBeNull()
+      expect(convertedInternalPriceForMode({ ...values, retail_price_chf_per_kwh: '' }, 'absolute')).toBeNull()
     })
   })
 

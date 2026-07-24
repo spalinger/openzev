@@ -131,6 +131,34 @@ export function resolveInternalEnergyPriceChf(values: FeasibilityFormValues): nu
   return Number(values.internal_energy_price_chf_per_kwh)
 }
 
+function trimNumber(value: number, decimals: number): string {
+  return String(Number(value.toFixed(decimals)))
+}
+
+// When the user flips the internal-energy-price mode, we convert the value so
+// the *effective* CHF/kWh price is preserved, instead of showing whatever
+// stale value the other field happened to hold. Returns the field to set and
+// its converted value, or null when it can't convert (retail isn't a positive
+// number to convert against) — in which case the mode just flips as before.
+// `newMode` is the mode being switched TO.
+export function convertedInternalPriceForMode(
+  values: FeasibilityFormValues,
+  newMode: InternalEnergyPriceMode,
+): { field: 'internal_energy_price_chf_per_kwh' | 'internal_energy_price_pct_of_retail'; value: string } | null {
+  const retail = Number(values.retail_price_chf_per_kwh)
+  if (!Number.isFinite(retail) || retail <= 0) return null
+
+  if (newMode === 'percentage_of_retail') {
+    const absolute = Number(values.internal_energy_price_chf_per_kwh)
+    if (!Number.isFinite(absolute)) return null
+    return { field: 'internal_energy_price_pct_of_retail', value: trimNumber((absolute / retail) * 100, 4) }
+  }
+
+  const pct = Number(values.internal_energy_price_pct_of_retail)
+  if (!Number.isFinite(pct)) return null
+  return { field: 'internal_energy_price_chf_per_kwh', value: trimNumber((retail * pct) / 100, 5) }
+}
+
 // Rows with no name yet (mid-edit) are dropped rather than blocking the live
 // recompute or being sent to an API that requires a name on every row.
 function namedParticipantRows(values: FeasibilityFormValues): ParticipantFormRow[] {
