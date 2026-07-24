@@ -66,7 +66,7 @@ PVshare Cockpit is a closed, subscription-based SaaS (CHF ~30/participant/year) 
 | Vacant unit auto-billing to ZEV responsible | Not explicit | Added as `idea` |
 | Proactive status-check page for ZEV owners | Data quality badges only | Added as `idea` |
 | Guided vZEV founding wizard with document templates | Setup wizard partial | Added as `idea` |
-| vZEV profit/feasibility calculator | Not present | Added as `idea` |
+| vZEV profit/feasibility calculator | `shipped` | Multi-participant calculator with prefill from real ZEV data — see Invoicing & Billing |
 | BFE reference market price auto-fetch (feed-in rate) | Manual tariff entry | Added as `idea` |
 | CO₂ savings display in participant statistics | Not present | Added as `idea` |
 | Partner / third-party billing access model | Not present | Added as `idea` |
@@ -109,6 +109,7 @@ PVshare Cockpit is a closed, subscription-based SaaS (CHF ~30/participant/year) 
 | Annual financial report for tax purposes | `shipped` | — | — |
 | Period overview with strict daily completeness checking | `shipped` | — | [spec](specs/2026-03-invoice-lifecycle-and-communication.md) |
 | Contract PDF (multi-language, tariff rates, metering points, billing interval) | `shipped` | — | — |
+| vZEV feasibility / profitability calculator (aggregate or per-participant, energy-flow topology, self-consumption & internal-price sensitivity, payback/ROI/NPV, prefill of a real ZEV's participants, measured self-consumption, and all-in tariffs) | `shipped` | — | [guide](user-guide/13-feasibility-calculator.md) |
 | Scheduled invoice auto-generation (cron-triggered, per-ZEV billing interval) | `idea` | `medium` | Would remove the manual "generate all" step each month |
 | Payment reference number / ESR reference on invoice | `idea` | `medium` | Needed for automated bank reconciliation in Swiss setup |
 | Invoice bulk export — ZIP of all PDFs for a period | `idea` | `medium` | Useful for accountants and year-end archival |
@@ -253,7 +254,6 @@ PVshare Cockpit is a closed, subscription-based SaaS (CHF ~30/participant/year) 
 | Participant invoice dispute / comment channel | `idea` | `low` | Would require a messaging/comment thread model |
 | Participant notification preferences (email opt-in/out per event type) | `idea` | `low` | Currently no per-participant notification settings |
 | CO₂ savings display in participant dashboard | `idea` | `low` | Show estimated CO₂ avoided from local solar consumption; engagement feature seen in German EaaS platforms |
-| vZEV profitability / feasibility calculator | `idea` | `low` | Embedded tool to estimate expected savings and revenue split before founding a ZEV; helps with participant recruitment |
 | Proactive status-check page for ZEV owners | `idea` | `medium` | Single-page diagnostic view showing config completeness, metering data health, tariff coverage, and pending actions with fix hints (PVshare's strongest UX differentiator) |
 
 ---

@@ -43,6 +43,12 @@ OpenZEV gives operators one place to manage participants, metering points, tarif
 - Process invoices through draft/approved/sent/paid/cancelled states
 - Generate Swiss-ready PDF invoices with QR bill support
 
+### Planning & Feasibility
+
+- Estimate vZEV savings, payback, ROI, and NPV before founding a community
+- Model individual producers and consumers with a per-participant benefit split and energy-flow diagram
+- Prefill a real ZEV's participants, measured self-consumption, and all-in tariffs as a starting point
+
 ### Invoice Communication
 
 - Send invoice emails asynchronously for reliable delivery
@@ -101,6 +107,7 @@ All end-user documentation has been moved to `docs/user-guide/` and organized by
 
 - User guide index: [docs/user-guide/README.md](docs/user-guide/README.md)
 - Energy allocation and billing details: [docs/user-guide/08-billing-allocation-explained.md](docs/user-guide/08-billing-allocation-explained.md)
+- vZEV feasibility calculator: [docs/user-guide/13-feasibility-calculator.md](docs/user-guide/13-feasibility-calculator.md)
 
 ## Quick Start (Docker)
 
