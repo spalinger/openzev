@@ -12,7 +12,7 @@ from datetime import date
 from decimal import Decimal
 
 from accounts.models import AppSettings
-from weasyprint import HTML
+from .pdf_render import render_pdf
 
 from .models import Invoice, InvoiceItem, InvoiceStatus
 from .pdf import _format_date_value, _render_template
@@ -312,4 +312,4 @@ def generate_financial_summary_pdf(zev, participant, year: int) -> bytes:
     }
 
     html_string = _render_template(FINANCIAL_SUMMARY_TEMPLATE, context)
-    return HTML(string=html_string, base_url=".").write_pdf()
+    return render_pdf(html_string)
