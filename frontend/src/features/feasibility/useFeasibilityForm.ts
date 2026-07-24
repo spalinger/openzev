@@ -2,9 +2,13 @@ import { z } from 'zod'
 import type { FeasibilityInput } from '../../types/api'
 
 export type InternalEnergyPriceMode = 'absolute' | 'percentage_of_retail'
+export type AnnualProductionMode = 'absolute' | 'from_kwp'
 
 export type FeasibilityFormValues = {
+  annual_production_mode: AnnualProductionMode
   annual_production_kwh: string
+  pv_kwp: string
+  specific_yield_kwh_per_kwp: string
   annual_consumption_kwh: string
   self_consumption_rate_pct: string
   retail_price_chf_per_kwh: string
@@ -32,7 +36,10 @@ function isPercentage(value: string): boolean {
 }
 
 export const feasibilityFormSchema = z.object({
+  annual_production_mode: z.enum(['absolute', 'from_kwp']),
   annual_production_kwh: z.string().refine(isNonNegativeNumber),
+  pv_kwp: z.string().refine(isNonNegativeNumber),
+  specific_yield_kwh_per_kwp: z.string().refine(isNonNegativeNumber),
   annual_consumption_kwh: z.string().refine(isNonNegativeNumber),
   self_consumption_rate_pct: z.string().refine(isPercentage),
   retail_price_chf_per_kwh: z.string().refine(isNonNegativeNumber),
@@ -55,7 +62,10 @@ export const feasibilityFormSchema = z.object({
 // the form so it shows a live result immediately; the backend remains the
 // single source of truth for the actual calculation.
 export const defaultFeasibilityFormValues: FeasibilityFormValues = {
+  annual_production_mode: 'absolute',
   annual_production_kwh: '10000',
+  pv_kwp: '10',
+  specific_yield_kwh_per_kwp: '950',
   annual_consumption_kwh: '8000',
   self_consumption_rate_pct: '50',
   retail_price_chf_per_kwh: '0.32',
@@ -70,6 +80,16 @@ export const defaultFeasibilityFormValues: FeasibilityFormValues = {
   discount_rate_pct: '3',
 }
 
+// Annual PV production can be entered directly (kWh) or derived from an
+// installed capacity (kWp) times an assumed specific yield (kWh/kWp/year).
+// Mirrors backend/feasibility/calculator.py's estimate_annual_production_kwh.
+export function resolveAnnualProductionKwh(values: FeasibilityFormValues): number {
+  if (values.annual_production_mode === 'from_kwp') {
+    return Number(values.pv_kwp) * Number(values.specific_yield_kwh_per_kwp)
+  }
+  return Number(values.annual_production_kwh)
+}
+
 // The internal energy price can be set directly (CHF/kWh) or as a percentage
 // of the retail price — e.g. "60% of Netzstrom". Resolves to the CHF/kWh
 // value the backend actually expects, regardless of which mode is active.
@@ -82,7 +102,7 @@ export function resolveInternalEnergyPriceChf(values: FeasibilityFormValues): nu
 
 export function mapFormValuesToPayload(values: FeasibilityFormValues): FeasibilityInput {
   return {
-    annual_production_kwh: values.annual_production_kwh,
+    annual_production_kwh: resolveAnnualProductionKwh(values).toString(),
     annual_consumption_kwh: values.annual_consumption_kwh,
     self_consumption_rate: (Number(values.self_consumption_rate_pct) / 100).toString(),
     retail_price_chf_per_kwh: values.retail_price_chf_per_kwh,

@@ -23,6 +23,7 @@ const ANNOTATION_COLOR = '#6b7280'
 type Props = {
     sensitivity: FeasibilitySensitivityPoint[]
     currentRatePct: number
+    currentNetBenefitChf: number
     breakEvenRatePct: number | null
 }
 
@@ -40,16 +41,13 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
     )
 }
 
-export function FeasibilitySensitivityChart({ sensitivity, currentRatePct, breakEvenRatePct }: Props) {
+export function FeasibilitySensitivityChart({ sensitivity, currentRatePct, currentNetBenefitChf, breakEvenRatePct }: Props) {
     const { t } = useTranslation()
 
     const data = sensitivity.map((point) => ({
         ratePct: Number(point.self_consumption_rate) * 100,
         value: Number(point.annual_net_benefit_chf),
     }))
-    const currentPoint = data.reduce((closest, point) =>
-        Math.abs(point.ratePct - currentRatePct) < Math.abs(closest.ratePct - currentRatePct) ? point : closest,
-    data[0])
 
     return (
         <div>
@@ -62,6 +60,8 @@ export function FeasibilitySensitivityChart({ sensitivity, currentRatePct, break
                     <CartesianGrid stroke="#e5e7eb" vertical={false} />
                     <XAxis
                         dataKey="ratePct"
+                        type="number"
+                        domain={[0, 100]}
                         tickFormatter={(v: number) => `${v.toFixed(0)}%`}
                         stroke={AXIS_COLOR}
                         tick={{ fontSize: 11, fill: '#374151' }}
@@ -85,10 +85,10 @@ export function FeasibilitySensitivityChart({ sensitivity, currentRatePct, break
                     )}
                     <Line type="monotone" dataKey="value" stroke={LINE_COLOR} strokeWidth={2} dot={false} isAnimationActive={false} />
                     <ReferenceDot
-                        x={currentPoint.ratePct}
-                        y={currentPoint.value}
+                        x={currentRatePct}
+                        y={currentNetBenefitChf}
                         r={5}
-                        fill={currentPoint.value < 0 ? NEGATIVE_COLOR : LINE_COLOR}
+                        fill={currentNetBenefitChf < 0 ? NEGATIVE_COLOR : LINE_COLOR}
                         stroke="#fff"
                         strokeWidth={2}
                         label={{ value: t('pages.feasibility.chart.yourScenario'), position: 'top', fontSize: 11, fontWeight: 600, fill: '#111827' }}
