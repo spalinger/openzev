@@ -577,6 +577,7 @@ export const de = {
                 load: 'Laden',
                 success: '{{count}} Teilnehmer geladen.',
                 successWithEstimates: '{{count}} Teilnehmer geladen ({{missing}} noch ohne Messdaten — geschätzter Standardwert verwendet).',
+                selfConsumptionMeasured: 'Eigenverbrauchsquote aus Messdaten ermittelt: {{rate}} %.',
                 error: 'Dieser ZEV konnte nicht geladen werden.',
             },
         },

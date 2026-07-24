@@ -584,6 +584,7 @@ export const it = {
                 load: 'Carica',
                 success: '{{count}} partecipanti caricati.',
                 successWithEstimates: '{{count}} partecipanti caricati ({{missing}} ancora senza dati di misurazione — usato un valore predefinito stimato).',
+                selfConsumptionMeasured: 'Tasso di autoconsumo misurato dai dati di misurazione: {{rate}}%.',
                 error: 'Impossibile caricare questo CEL.',
             },
         },

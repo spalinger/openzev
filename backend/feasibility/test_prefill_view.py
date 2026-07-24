@@ -66,3 +66,5 @@ class TestFeasibilityPrefillHappyPath:
         assert body["participants"][0]["has_metering_data"] is False
         assert body["retail_price_chf_per_kwh"] == "0.30000"
         assert body["feed_in_price_chf_per_kwh"] is None
+        # No readings in this ZEV yet -> self-consumption rate cannot be measured.
+        assert body["self_consumption_rate"] is None

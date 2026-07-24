@@ -584,6 +584,7 @@ export const fr = {
                 load: 'Charger',
                 success: '{{count}} participants chargés.',
                 successWithEstimates: '{{count}} participants chargés ({{missing}} sans données de mesure pour l’instant — valeur par défaut estimée utilisée).',
+                selfConsumptionMeasured: 'Taux d’autoconsommation mesuré à partir des données de mesure : {{rate}} %.',
                 error: 'Impossible de charger ce RCP.',
             },
         },

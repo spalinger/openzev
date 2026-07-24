@@ -135,6 +135,7 @@ class FeasibilityPrefillSerializer(serializers.Serializer):
     """
 
     participants = ParticipantPrefillSerializer(many=True)
+    self_consumption_rate = serializers.DecimalField(max_digits=5, decimal_places=4, allow_null=True)
     retail_price_chf_per_kwh = serializers.DecimalField(max_digits=8, decimal_places=5, allow_null=True)
     feed_in_price_chf_per_kwh = serializers.DecimalField(max_digits=8, decimal_places=5, allow_null=True)
     internal_energy_price_chf_per_kwh = serializers.DecimalField(max_digits=8, decimal_places=5, allow_null=True)

@@ -83,6 +83,63 @@ class TestParticipantEnergyPrefill:
         assert prefill.participants == []
 
 
+class TestSelfConsumptionRatePrefill:
+    """Measured ZEV-level self-consumption rate = self-consumed / produced,
+    where self-consumed is the per-timestamp min(production, consumption)."""
+
+    def test_measures_rate_from_per_timestamp_local_pool(self):
+        zev = factories.ZevFactory()
+        production_mp = factories.MeteringPointFactory(zev=zev, meter_type=MeteringPointType.PRODUCTION)
+        consumption_mp = factories.MeteringPointFactory(zev=zev, meter_type=MeteringPointType.CONSUMPTION)
+
+        # ts day0: produced 100, consumed 40 -> self-consumed min = 40
+        # ts day1: produced 20,  consumed 80 -> self-consumed min = 20
+        # total produced = 120, self-consumed = 60 -> rate = 60/120 = 0.5
+        _reading(production_mp, 0, "100", ReadingDirection.OUT)
+        _reading(production_mp, 1, "20", ReadingDirection.OUT)
+        _reading(consumption_mp, 0, "40", ReadingDirection.IN)
+        _reading(consumption_mp, 1, "80", ReadingDirection.IN)
+
+        prefill = build_prefill(zev)
+        assert prefill.self_consumption_rate == Decimal("0.5000")
+
+    def test_none_when_no_production(self):
+        zev = factories.ZevFactory()
+        consumption_mp = factories.MeteringPointFactory(zev=zev, meter_type=MeteringPointType.CONSUMPTION)
+        _reading(consumption_mp, 0, "50", ReadingDirection.IN)
+
+        prefill = build_prefill(zev)
+        assert prefill.self_consumption_rate is None
+
+    def test_none_when_no_consumption(self):
+        # Production but no consumption: reporting 0% would be misleading (we
+        # simply don't know what was consumed), so it stays None.
+        zev = factories.ZevFactory()
+        production_mp = factories.MeteringPointFactory(zev=zev, meter_type=MeteringPointType.PRODUCTION)
+        _reading(production_mp, 0, "50", ReadingDirection.OUT)
+
+        prefill = build_prefill(zev)
+        assert prefill.self_consumption_rate is None
+
+    def test_none_when_no_readings_at_all(self):
+        zev = factories.ZevFactory()
+        prefill = build_prefill(zev)
+        assert prefill.self_consumption_rate is None
+
+    def test_full_self_consumption_when_production_never_exceeds_consumption(self):
+        zev = factories.ZevFactory()
+        production_mp = factories.MeteringPointFactory(zev=zev, meter_type=MeteringPointType.PRODUCTION)
+        consumption_mp = factories.MeteringPointFactory(zev=zev, meter_type=MeteringPointType.CONSUMPTION)
+        # Consumption always meets or exceeds production -> everything produced is used locally.
+        _reading(production_mp, 0, "30", ReadingDirection.OUT)
+        _reading(production_mp, 1, "30", ReadingDirection.OUT)
+        _reading(consumption_mp, 0, "50", ReadingDirection.IN)
+        _reading(consumption_mp, 1, "50", ReadingDirection.IN)
+
+        prefill = build_prefill(zev)
+        assert prefill.self_consumption_rate == Decimal("1.0000")
+
+
 class TestTariffPrefill:
     def test_reads_flat_energy_tariffs_for_each_relevant_type(self):
         zev = factories.ZevFactory()

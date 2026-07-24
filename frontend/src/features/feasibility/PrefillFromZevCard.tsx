@@ -31,6 +31,12 @@ export function PrefillFromZevCard({ onPrefillLoaded }: Props) {
                     : t('pages.feasibility.prefill.success', { count: data.participants.length }),
                 'success',
             )
+            // The self-consumption rate is the single biggest driver, so call it
+            // out explicitly when it came from real data rather than a guess.
+            if (data.self_consumption_rate !== null) {
+                const pct = Number((Number(data.self_consumption_rate) * 100).toFixed(1))
+                pushToast(t('pages.feasibility.prefill.selfConsumptionMeasured', { rate: pct }), 'info')
+            }
         },
         onError: (error) => {
             pushToast(formatApiError(error, t('pages.feasibility.prefill.error')), 'error')

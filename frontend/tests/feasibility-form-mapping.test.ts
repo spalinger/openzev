@@ -128,6 +128,7 @@ describe('feasibility form mapping', () => {
         { name: 'Alice', annual_production_kwh: '3200', annual_consumption_kwh: '4100', has_metering_data: true },
         { name: 'Bob', annual_production_kwh: '0', annual_consumption_kwh: '4500', has_metering_data: false },
       ],
+      self_consumption_rate: '0.5833',
       retail_price_chf_per_kwh: '0.31000',
       feed_in_price_chf_per_kwh: null,
       internal_energy_price_chf_per_kwh: '0.18000',
@@ -156,6 +157,20 @@ describe('feasibility form mapping', () => {
         internal_energy_price_mode: 'percentage_of_retail',
       })
       expect(result.internal_energy_price_mode).toBe('absolute')
+    })
+
+    it('applies the measured self-consumption rate as a percentage', () => {
+      const result = applyPrefillToFormValues(prefill, defaultFeasibilityFormValues)
+      // 0.5833 ratio -> 58.33% (cleanly, without float artifacts).
+      expect(result.self_consumption_rate_pct).toBe('58.33')
+    })
+
+    it('keeps the current self-consumption rate when the ZEV could not measure one', () => {
+      const result = applyPrefillToFormValues(
+        { ...prefill, self_consumption_rate: null },
+        { ...defaultFeasibilityFormValues, self_consumption_rate_pct: '42' },
+      )
+      expect(result.self_consumption_rate_pct).toBe('42')
     })
   })
 })

@@ -184,13 +184,19 @@ export function mapFormValuesToPayload(values: FeasibilityFormValues): Feasibili
 
 // Applies a GET /feasibility/prefill/<zevId>/ response onto the current form:
 // switches to participant mode with one row per real participant, and
-// overrides any price the ZEV's tariffs could actually determine — a price
+// overrides any field the ZEV's real data could actually determine — a value
 // prefill couldn't resolve (returned null) is left exactly as it was, same
-// as any other field a user chooses not to touch.
+// as any other field a user chooses not to touch. The self-consumption rate
+// arrives as a 0..1 ratio and the form holds it as a 0..100 percent.
 export function applyPrefillToFormValues(
   prefill: FeasibilityPrefill,
   current: FeasibilityFormValues,
 ): FeasibilityFormValues {
+  const selfConsumptionPct =
+    prefill.self_consumption_rate !== null
+      ? String(Number((Number(prefill.self_consumption_rate) * 100).toFixed(2)))
+      : current.self_consumption_rate_pct
+
   return {
     ...current,
     energy_input_mode: 'participants',
@@ -199,6 +205,7 @@ export function applyPrefillToFormValues(
       annual_production_kwh: p.annual_production_kwh,
       annual_consumption_kwh: p.annual_consumption_kwh,
     })),
+    self_consumption_rate_pct: selfConsumptionPct,
     retail_price_chf_per_kwh: prefill.retail_price_chf_per_kwh ?? current.retail_price_chf_per_kwh,
     feed_in_price_chf_per_kwh: prefill.feed_in_price_chf_per_kwh ?? current.feed_in_price_chf_per_kwh,
     internal_energy_price_mode: 'absolute',

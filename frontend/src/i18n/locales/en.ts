@@ -578,6 +578,7 @@ export const en = {
                 load: 'Load',
                 success: 'Loaded {{count}} participants.',
                 successWithEstimates: 'Loaded {{count}} participants ({{missing}} without metering data yet — using an estimated default).',
+                selfConsumptionMeasured: 'Self-consumption rate measured from metering data: {{rate}}%.',
                 error: 'Could not load this ZEV.',
             },
         },

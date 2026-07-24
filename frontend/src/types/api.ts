@@ -779,6 +779,7 @@ export interface FeasibilityPrefillParticipant {
 
 export interface FeasibilityPrefill {
     participants: FeasibilityPrefillParticipant[]
+    self_consumption_rate: string | null
     retail_price_chf_per_kwh: string | null
     feed_in_price_chf_per_kwh: string | null
     internal_energy_price_chf_per_kwh: string | null
