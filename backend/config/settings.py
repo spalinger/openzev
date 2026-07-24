@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     "metering",
     "invoices",
     "audit",
+    "feasibility",
 ]
 
 MIDDLEWARE = [
