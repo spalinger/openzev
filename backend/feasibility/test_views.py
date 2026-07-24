@@ -49,6 +49,10 @@ class TestFeasibilityCalculateHappyPath:
         assert len(body["sensitivity"]) == 21
         assert len(body["cashflow_by_year"]) == 21
 
+        assert len(body["price_sensitivity"]) == 21
+        assert body["equal_split_price_chf_per_kwh"] == "0.19000"
+        assert body["fair_price_range"] == {"low_chf_per_kwh": "0.15000", "high_chf_per_kwh": "0.29000"}
+
     def test_optional_fields_fall_back_to_swiss_defaults(self, owner_client):
         minimal_payload = {
             "annual_production_kwh": "10000",

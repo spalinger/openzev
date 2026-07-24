@@ -46,6 +46,18 @@ class SensitivityPointSerializer(serializers.Serializer):
     annual_net_benefit_chf = serializers.DecimalField(max_digits=14, decimal_places=2)
 
 
+class PriceSensitivityPointSerializer(serializers.Serializer):
+    internal_price_pct_of_retail = serializers.DecimalField(max_digits=5, decimal_places=4)
+    internal_price_chf_per_kwh = serializers.DecimalField(max_digits=8, decimal_places=5)
+    producer_gain_chf = serializers.DecimalField(max_digits=14, decimal_places=2)
+    consumer_savings_chf = serializers.DecimalField(max_digits=14, decimal_places=2)
+
+
+class FairPriceRangeSerializer(serializers.Serializer):
+    low_chf_per_kwh = serializers.DecimalField(max_digits=8, decimal_places=5)
+    high_chf_per_kwh = serializers.DecimalField(max_digits=8, decimal_places=5)
+
+
 class FeasibilityResultSerializer(serializers.Serializer):
     """Read-only serializer for ``calculator.FeasibilityResult``.
 
@@ -74,3 +86,7 @@ class FeasibilityResultSerializer(serializers.Serializer):
 
     sensitivity = SensitivityPointSerializer(many=True)
     break_even_self_consumption_rate = serializers.DecimalField(max_digits=5, decimal_places=4, allow_null=True)
+
+    price_sensitivity = PriceSensitivityPointSerializer(many=True)
+    equal_split_price_chf_per_kwh = serializers.DecimalField(max_digits=8, decimal_places=5, allow_null=True)
+    fair_price_range = FairPriceRangeSerializer(allow_null=True)

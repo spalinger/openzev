@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 
 TWO_PLACES = Decimal("0.01")
+FIVE_PLACES = Decimal("0.00001")
 
 # Resolution of the self-consumption sensitivity curve: 0%, 5%, ..., 100%.
 SENSITIVITY_STEPS = 21
@@ -30,6 +31,12 @@ SENSITIVITY_STEPS = 21
 
 def _money(value: Decimal) -> Decimal:
     return value.quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
+
+
+def _price(value: Decimal) -> Decimal:
+    """Quantize a CHF/kWh price to 5 decimal places, matching the precision
+    tariff prices are entered at elsewhere in the app."""
+    return value.quantize(FIVE_PLACES, rounding=ROUND_HALF_UP)
 
 
 @dataclass(frozen=True)
@@ -88,6 +95,29 @@ class SensitivityPoint:
 
 
 @dataclass(frozen=True)
+class PriceSensitivityPoint:
+    """One point on the internal-price sweep: how the split between producer
+    and consumer changes as the internal energy price moves, at the user's
+    chosen self-consumption rate (self-consumed kWh is held constant)."""
+
+    internal_price_pct_of_retail: Decimal
+    internal_price_chf_per_kwh: Decimal
+    producer_gain_chf: Decimal
+    consumer_savings_chf: Decimal
+
+
+@dataclass(frozen=True)
+class FairPriceRange:
+    """A recommended internal-price range, narrower than the trivial
+    win-win range because it also requires the producer's gain to cover
+    their share of the vZEV's running costs (annual_opex_chf) — not just be
+    better than feed-in. See ``_fair_price_range`` for the derivation."""
+
+    low_chf_per_kwh: Decimal
+    high_chf_per_kwh: Decimal
+
+
+@dataclass(frozen=True)
 class FeasibilityResult:
     self_consumed_kwh: Decimal
     grid_import_kwh: Decimal
@@ -110,6 +140,10 @@ class FeasibilityResult:
 
     sensitivity: list[SensitivityPoint]
     break_even_self_consumption_rate: Decimal | None
+
+    price_sensitivity: list[PriceSensitivityPoint]
+    equal_split_price_chf_per_kwh: Decimal | None
+    fair_price_range: FairPriceRange | None
 
 
 def _self_consumed_kwh(rate: Decimal, production_kwh: Decimal, consumption_kwh: Decimal) -> Decimal:
@@ -156,6 +190,64 @@ def _break_even_rate(sensitivity: list[SensitivityPoint]) -> Decimal | None:
             span = curr.self_consumption_rate - prev.self_consumption_rate
             return prev.self_consumption_rate + fraction * span
     return None
+
+
+def _build_price_sensitivity(inputs: FeasibilityInput, self_consumed: Decimal) -> list[PriceSensitivityPoint]:
+    """Sweep the internal energy price from 0% to 100% of the retail price,
+    holding self-consumed energy constant at the user's chosen scenario, and
+    show how the value splits between producer and consumer at each price.
+
+    Both lines are exactly linear in price (no kink, unlike the self-
+    consumption sweep), since self_consumed doesn't depend on price.
+    """
+    points = []
+    for i in range(SENSITIVITY_STEPS):
+        pct = Decimal(i) / Decimal(SENSITIVITY_STEPS - 1)
+        price = pct * inputs.retail_price_chf_per_kwh
+        producer_gain = self_consumed * (price - inputs.feed_in_price_chf_per_kwh)
+        consumer_savings = self_consumed * (
+            inputs.retail_price_chf_per_kwh - inputs.internal_grid_fee_chf_per_kwh - price
+        )
+        points.append(
+            PriceSensitivityPoint(
+                internal_price_pct_of_retail=pct,
+                internal_price_chf_per_kwh=_price(price),
+                producer_gain_chf=_money(producer_gain),
+                consumer_savings_chf=_money(consumer_savings),
+            )
+        )
+    return points
+
+
+def _equal_split_price(inputs: FeasibilityInput) -> Decimal | None:
+    """The internal price where producer_gain == consumer_savings exactly.
+
+    Explicitly NOT the recommended "fair" price: the producer carries the
+    vZEV's capex and operational responsibility that the consumer doesn't,
+    so an equal split under-compensates them. See ``_fair_price_range``.
+    """
+    if _net_unit_benefit(inputs) <= 0:
+        return None
+    return (
+        inputs.retail_price_chf_per_kwh - inputs.internal_grid_fee_chf_per_kwh + inputs.feed_in_price_chf_per_kwh
+    ) / 2
+
+
+def _fair_price_range(inputs: FeasibilityInput, self_consumed: Decimal) -> FairPriceRange | None:
+    """A recommended internal-price range that is narrower than the trivial
+    win-win range [feed_in, retail - grid_fee] on its lower end: the
+    producer's price floor is raised so their gain also covers their share
+    of annual_opex_chf, not merely beats feed-in. Returns None if there is
+    no price that does this while still saving the consumer money (the
+    scenario's running costs outweigh the value it creates).
+    """
+    if self_consumed <= 0:
+        return None
+    upper = inputs.retail_price_chf_per_kwh - inputs.internal_grid_fee_chf_per_kwh
+    lower = inputs.feed_in_price_chf_per_kwh + inputs.annual_opex_chf / self_consumed
+    if lower > upper:
+        return None
+    return FairPriceRange(low_chf_per_kwh=_price(lower), high_chf_per_kwh=_price(upper))
 
 
 def _payback_years(annual_net_benefit: Decimal, capex: Decimal) -> Decimal | None:
@@ -234,6 +326,9 @@ def compute_feasibility(inputs: FeasibilityInput) -> FeasibilityResult:
         ],
         sensitivity=sensitivity,
         break_even_self_consumption_rate=_break_even_rate(sensitivity),
+        price_sensitivity=_build_price_sensitivity(inputs, self_consumed),
+        equal_split_price_chf_per_kwh=_equal_split_price(inputs),
+        fair_price_range=_fair_price_range(inputs, self_consumed),
     )
 
 

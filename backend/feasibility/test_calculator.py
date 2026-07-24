@@ -102,6 +102,69 @@ class TestTypicalScenario:
         assert result.cashflow_by_year[-1] == Decimal("-2000.00") + 20 * Decimal("700.00")
 
 
+class TestPriceSensitivity:
+    """The internal-price sweep (self-consumed kWh fixed at 5000, per
+    TestTypicalScenario): producer_gain and consumer_savings are exactly
+    linear in price since self_consumed doesn't depend on it.
+
+    equal_split_price = (retail - grid_fee + feed_in) / 2 = (0.32-0.03+0.09)/2 = 0.19
+    fair range: low = feed_in + opex/S = 0.09 + 300/5000 = 0.15
+                high = retail - grid_fee = 0.32 - 0.03 = 0.29
+    """
+
+    def test_price_sensitivity_curve_endpoints(self):
+        result = compute_feasibility(_typical_input())
+        assert len(result.price_sensitivity) == 21
+
+        zero_price = result.price_sensitivity[0]
+        assert zero_price.internal_price_chf_per_kwh == Decimal("0.00000")
+        assert zero_price.producer_gain_chf == Decimal("-450.00")  # 5000*(0-0.09)
+        assert zero_price.consumer_savings_chf == Decimal("1450.00")  # 5000*(0.29-0)
+
+        full_retail = result.price_sensitivity[-1]
+        assert full_retail.internal_price_chf_per_kwh == Decimal("0.32000")
+        assert full_retail.producer_gain_chf == Decimal("1150.00")  # 5000*(0.32-0.09)
+        assert full_retail.consumer_savings_chf == Decimal("-150.00")  # 5000*(0.29-0.32)
+
+    def test_equal_split_price(self):
+        result = compute_feasibility(_typical_input())
+        assert result.equal_split_price_chf_per_kwh == Decimal("0.19000")
+
+        # Sanity: at the equal-split price, producer_gain really does equal
+        # consumer_savings (independently recomputed, not read off the
+        # 5%-step sample grid, since 0.19 doesn't land on one of those steps).
+        price = result.equal_split_price_chf_per_kwh
+        self_consumed = result.self_consumed_kwh
+        producer_gain = self_consumed * (price - Decimal("0.09"))
+        consumer_savings = self_consumed * (Decimal("0.32") - Decimal("0.03") - price)
+        assert producer_gain == consumer_savings
+
+    def test_fair_price_range(self):
+        result = compute_feasibility(_typical_input())
+        assert result.fair_price_range is not None
+        assert result.fair_price_range.low_chf_per_kwh == Decimal("0.15000")
+        assert result.fair_price_range.high_chf_per_kwh == Decimal("0.29000")
+        # The naive equal split (0.19) sits inside the recommended range, but
+        # nearer its floor than its ceiling -- it is not itself the "fair" pick.
+        assert result.fair_price_range.low_chf_per_kwh < result.equal_split_price_chf_per_kwh < result.fair_price_range.high_chf_per_kwh
+
+    def test_fair_price_range_none_when_opex_too_high(self):
+        # Max possible producer gain span is S*(upper-feed_in) = 5000*0.20 = 1000;
+        # an opex above that leaves no price that both compensates the producer
+        # and still saves the consumer money.
+        result = compute_feasibility(_typical_input(annual_opex_chf=Decimal("1100")))
+        assert result.fair_price_range is None
+
+    def test_fair_price_range_none_when_no_self_consumption(self):
+        result = compute_feasibility(_typical_input(self_consumption_rate=Decimal("0")))
+        assert result.fair_price_range is None
+
+    def test_equal_split_price_none_when_no_net_benefit(self):
+        # grid_fee high enough that retail - grid_fee <= feed_in: no win-win price exists at all.
+        result = compute_feasibility(_typical_input(internal_grid_fee_chf_per_kwh=Decimal("0.30")))
+        assert result.equal_split_price_chf_per_kwh is None
+
+
 class TestSinglePeriodNpv:
     """A scenario chosen so the year-1 discounting divides out exactly:
     1030 / 1.03 == 1000 with no rounding, giving NPV == 0 by hand."""
