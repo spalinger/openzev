@@ -153,11 +153,55 @@ class TestTariffPrefill:
 
         prefill = build_prefill(zev)
 
+        # No grid fees or levies here, so all-in retail == the energy price.
         assert prefill.retail_price_chf_per_kwh == Decimal("0.31000")
         assert prefill.feed_in_price_chf_per_kwh == Decimal("0.08000")
         assert prefill.internal_energy_price_chf_per_kwh == Decimal("0.18000")
 
-    def test_ignores_percentage_of_energy_tariffs(self):
+    def test_retail_is_all_in_energy_plus_grid_fees_plus_levies(self):
+        zev = factories.ZevFactory()
+        grid_energy = factories.TariffFactory(
+            zev=zev, category=TariffCategory.ENERGY, energy_type=EnergyType.GRID
+        )
+        factories.TariffPeriodFactory(tariff=grid_energy, price_chf_per_kwh=Decimal("0.30000"))
+        # A flat per-kWh grid usage fee (Netznutzung), same energy type.
+        grid_fee = factories.TariffFactory(
+            zev=zev, category=TariffCategory.GRID_FEES, energy_type=EnergyType.GRID
+        )
+        factories.TariffPeriodFactory(tariff=grid_fee, price_chf_per_kwh=Decimal("0.10000"))
+        # A levy priced as a percentage of the grid energy base (like the demo ZEV).
+        factories.TariffFactory(
+            zev=zev,
+            category=TariffCategory.LEVIES,
+            energy_type=EnergyType.GRID,
+            billing_mode=BillingMode.PERCENTAGE_OF_ENERGY,
+            percentage=Decimal("20.00"),
+        )
+
+        prefill = build_prefill(zev)
+        # base = 0.30 + 0.10 = 0.40; all-in = 0.40 * (1 + 20%) = 0.48000
+        assert prefill.retail_price_chf_per_kwh == Decimal("0.48000")
+
+    def test_internal_energy_stays_energy_only_ignoring_local_grid_fees(self):
+        # A ZEV could still have a reduced grid-fee tariff configured for local
+        # energy in the real invoicing system, but the vZEV feasibility model
+        # prices local energy as energy only — so it must not be folded in.
+        zev = factories.ZevFactory()
+        local_energy = factories.TariffFactory(
+            zev=zev, category=TariffCategory.ENERGY, energy_type=EnergyType.LOCAL
+        )
+        factories.TariffPeriodFactory(tariff=local_energy, price_chf_per_kwh=Decimal("0.18000"))
+        local_grid_fee = factories.TariffFactory(
+            zev=zev, category=TariffCategory.GRID_FEES, energy_type=EnergyType.LOCAL
+        )
+        factories.TariffPeriodFactory(tariff=local_grid_fee, price_chf_per_kwh=Decimal("0.05000"))
+
+        prefill = build_prefill(zev)
+        assert prefill.internal_energy_price_chf_per_kwh == Decimal("0.18000")
+
+    def test_retail_none_when_only_a_percentage_tariff_exists(self):
+        # A percentage-of-energy tariff has nothing to anchor to without a flat
+        # grid energy base, so retail can't be determined and stays None.
         zev = factories.ZevFactory()
         factories.TariffFactory(
             zev=zev,
