@@ -3,16 +3,22 @@ import { useMutation } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
+import { EnergyFlowChart } from '../components/EnergyFlowChart'
 import { StatCard } from '../components/StatCard'
 import { FeasibilityCashflowChart } from '../features/feasibility/FeasibilityCashflowChart'
 import { FeasibilityPriceSensitivityChart } from '../features/feasibility/FeasibilityPriceSensitivityChart'
 import { FeasibilitySensitivityChart } from '../features/feasibility/FeasibilitySensitivityChart'
+import { ParticipantResultsTable } from '../features/feasibility/ParticipantResultsTable'
+import { ParticipantRowsEditor } from '../features/feasibility/ParticipantRowsEditor'
+import { PrefillFromZevCard } from '../features/feasibility/PrefillFromZevCard'
 import {
+    applyPrefillToFormValues,
     defaultFeasibilityFormValues,
     feasibilityFormSchema,
     mapFormValuesToPayload,
     resolveAnnualProductionKwh,
     resolveInternalEnergyPriceChf,
+    resolveParticipantTotals,
     type FeasibilityFormValues,
 } from '../features/feasibility/useFeasibilityForm'
 import { calculateFeasibility } from '../lib/api/feasibility'
@@ -49,6 +55,7 @@ export function FeasibilityCalculatorPage() {
 
     const result = mutation.data
     const currentRatePct = Number(watchedValues.self_consumption_rate_pct) || 0
+    const participantTotals = resolveParticipantTotals(watchedValues)
 
     return (
         <div className="page-stack">
@@ -58,49 +65,77 @@ export function FeasibilityCalculatorPage() {
                 <p className="muted">{t('pages.feasibility.description')}</p>
             </header>
 
+            <PrefillFromZevCard
+                onPrefillLoaded={(prefill) => form.reset(applyPrefillToFormValues(prefill, form.getValues()))}
+            />
+
             <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 420px) 1fr', gap: '1.5rem', alignItems: 'start' }}>
                 <form className="card page-stack" onSubmit={(event) => event.preventDefault()}>
-                    <h3 style={{ marginTop: 0 }}>{t('pages.feasibility.form.systemTitle')}</h3>
-                    <div>
-                        <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                            {t('pages.feasibility.form.annualProduction')}
-                            <select
-                                {...form.register('annual_production_mode')}
-                                style={{ width: 'auto', fontSize: '0.78rem', padding: '0.1rem 0.3rem' }}
-                            >
-                                <option value="absolute">{t('pages.feasibility.form.annualProductionModeAbsolute')}</option>
-                                <option value="from_kwp">{t('pages.feasibility.form.annualProductionModeFromKwp')}</option>
-                            </select>
-                        </span>
-                        {watchedValues.annual_production_mode === 'from_kwp' ? (
-                            <>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem', marginTop: '0.3rem' }}>
-                                    <label>
-                                        <span className="muted" style={{ fontSize: '0.78rem' }}>{t('pages.feasibility.form.pvKwp')}</span>
-                                        <input type="number" step="any" min="0" {...form.register('pv_kwp')} />
-                                    </label>
-                                    <label>
-                                        <span className="muted" style={{ fontSize: '0.78rem' }}>{t('pages.feasibility.form.specificYield')}</span>
-                                        <input type="number" step="any" min="0" {...form.register('specific_yield_kwh_per_kwp')} />
-                                    </label>
-                                </div>
-                                <span className="muted" style={{ fontSize: '0.78rem' }}>
-                                    {t('pages.feasibility.form.annualProductionComputed', {
-                                        value: resolveAnnualProductionKwh(watchedValues).toFixed(0),
-                                    })}
-                                </span>
-                            </>
-                        ) : (
+                    <h3 style={{ marginTop: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                        {t('pages.feasibility.form.systemTitle')}
+                        <select
+                            {...form.register('energy_input_mode')}
+                            style={{ width: 'auto', fontSize: '0.78rem', padding: '0.1rem 0.3rem' }}
+                        >
+                            <option value="aggregate">{t('pages.feasibility.form.energyInputModeAggregate')}</option>
+                            <option value="participants">{t('pages.feasibility.form.energyInputModeParticipants')}</option>
+                        </select>
+                    </h3>
+
+                    {watchedValues.energy_input_mode === 'participants' ? (
+                        <div>
+                            <p className="muted" style={{ fontSize: '0.78rem', marginTop: 0 }}>{t('pages.feasibility.form.participantsHint')}</p>
+                            <ParticipantRowsEditor form={form} />
+                            <p className="muted" style={{ fontSize: '0.82rem', marginTop: '0.5rem' }}>
+                                {t('pages.feasibility.form.participantsTotal', {
+                                    production: participantTotals.production.toFixed(0),
+                                    consumption: participantTotals.consumption.toFixed(0),
+                                })}
+                            </p>
+                        </div>
+                    ) : (
+                        <div>
+                            <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                                {t('pages.feasibility.form.annualProduction')}
+                                <select
+                                    {...form.register('annual_production_mode')}
+                                    style={{ width: 'auto', fontSize: '0.78rem', padding: '0.1rem 0.3rem' }}
+                                >
+                                    <option value="absolute">{t('pages.feasibility.form.annualProductionModeAbsolute')}</option>
+                                    <option value="from_kwp">{t('pages.feasibility.form.annualProductionModeFromKwp')}</option>
+                                </select>
+                            </span>
+                            {watchedValues.annual_production_mode === 'from_kwp' ? (
+                                <>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem', marginTop: '0.3rem' }}>
+                                        <label>
+                                            <span className="muted" style={{ fontSize: '0.78rem' }}>{t('pages.feasibility.form.pvKwp')}</span>
+                                            <input type="number" step="any" min="0" {...form.register('pv_kwp')} />
+                                        </label>
+                                        <label>
+                                            <span className="muted" style={{ fontSize: '0.78rem' }}>{t('pages.feasibility.form.specificYield')}</span>
+                                            <input type="number" step="any" min="0" {...form.register('specific_yield_kwh_per_kwp')} />
+                                        </label>
+                                    </div>
+                                    <span className="muted" style={{ fontSize: '0.78rem' }}>
+                                        {t('pages.feasibility.form.annualProductionComputed', {
+                                            value: resolveAnnualProductionKwh(watchedValues).toFixed(0),
+                                        })}
+                                    </span>
+                                </>
+                            ) : (
+                                <label>
+                                    <input type="number" step="any" min="0" {...form.register('annual_production_kwh')} />
+                                </label>
+                            )}
+                            <p className="muted" style={{ fontSize: '0.78rem', margin: '0.2rem 0 0' }}>{t('pages.feasibility.form.specificYieldHint')}</p>
                             <label>
-                                <input type="number" step="any" min="0" {...form.register('annual_production_kwh')} />
+                                <span>{t('pages.feasibility.form.annualConsumption')}</span>
+                                <input type="number" step="any" min="0" {...form.register('annual_consumption_kwh')} />
                             </label>
-                        )}
-                        <p className="muted" style={{ fontSize: '0.78rem', margin: '0.2rem 0 0' }}>{t('pages.feasibility.form.specificYieldHint')}</p>
-                    </div>
-                    <label>
-                        <span>{t('pages.feasibility.form.annualConsumption')}</span>
-                        <input type="number" step="any" min="0" {...form.register('annual_consumption_kwh')} />
-                    </label>
+                        </div>
+                    )}
+
                     <label>
                         <span>{t('pages.feasibility.form.selfConsumptionRate')}</span>
                         <input type="number" step="any" min="0" max="100" {...form.register('self_consumption_rate_pct')} />
@@ -216,6 +251,35 @@ export function FeasibilityCalculatorPage() {
                                     </div>
                                 </div>
                             </section>
+
+                            {result.participants.length > 0 && (
+                                <section className="card page-stack">
+                                    <h3 style={{ marginTop: 0 }}>{t('pages.feasibility.results.participantsTitle')}</h3>
+                                    <ParticipantResultsTable participants={result.participants} />
+                                </section>
+                            )}
+
+                            {result.participants.length > 0 && (
+                                <section className="card">
+                                    <h3 style={{ marginTop: 0 }}>{t('pages.feasibility.results.topologyTitle')}</h3>
+                                    <EnergyFlowChart
+                                        totals={{
+                                            produced_kwh: result.participants.reduce((sum, p) => sum + Number(p.annual_production_kwh), 0),
+                                            consumed_kwh: result.participants.reduce((sum, p) => sum + Number(p.annual_consumption_kwh), 0),
+                                            imported_kwh: Number(result.grid_import_kwh),
+                                            exported_kwh: Number(result.grid_export_kwh),
+                                        }}
+                                        participantStats={result.participants.map((p) => ({
+                                            participant_id: p.name,
+                                            participant_name: p.name,
+                                            total_consumed_kwh: Number(p.annual_consumption_kwh),
+                                            total_produced_kwh: Number(p.annual_production_kwh),
+                                            from_zev_kwh: Number(p.from_local_pool_kwh),
+                                            from_grid_kwh: Number(p.from_grid_kwh),
+                                        }))}
+                                    />
+                                </section>
+                            )}
 
                             <section className="card">
                                 <FeasibilitySensitivityChart

@@ -695,6 +695,12 @@ export interface HourlyProfileResponse {
     hourly_profile: HourlyProfileEntry[] | null
 }
 
+export interface FeasibilityParticipantInput {
+    name: string
+    annual_production_kwh?: string
+    annual_consumption_kwh?: string
+}
+
 export interface FeasibilityInput {
     annual_production_kwh: string
     annual_consumption_kwh: string
@@ -707,6 +713,7 @@ export interface FeasibilityInput {
     capex_chf?: string
     horizon_years?: number
     discount_rate?: string
+    participants?: FeasibilityParticipantInput[]
 }
 
 export interface FeasibilitySensitivityPoint {
@@ -724,6 +731,19 @@ export interface FeasibilityPriceSensitivityPoint {
 export interface FeasibilityFairPriceRange {
     low_chf_per_kwh: string
     high_chf_per_kwh: string
+}
+
+export interface FeasibilityParticipantResult {
+    name: string
+    annual_production_kwh: string
+    annual_consumption_kwh: string
+    self_consumed_from_own_production_kwh: string
+    exported_kwh: string
+    from_local_pool_kwh: string
+    from_grid_kwh: string
+    producer_gain_chf: string
+    consumer_savings_chf: string
+    net_benefit_chf: string
 }
 
 export interface FeasibilityResult {
@@ -748,4 +768,20 @@ export interface FeasibilityResult {
     price_sensitivity: FeasibilityPriceSensitivityPoint[]
     equal_split_price_chf_per_kwh: string | null
     fair_price_range: FeasibilityFairPriceRange | null
+    participants: FeasibilityParticipantResult[]
+}
+
+export interface FeasibilityPrefillParticipant {
+    name: string
+    annual_production_kwh: string
+    annual_consumption_kwh: string
+    has_metering_data: boolean
+}
+
+export interface FeasibilityPrefill {
+    participants: FeasibilityPrefillParticipant[]
+    retail_price_chf_per_kwh: string | null
+    feed_in_price_chf_per_kwh: string | null
+    internal_energy_price_chf_per_kwh: string | null
+    internal_grid_fee_chf_per_kwh: string | null
 }

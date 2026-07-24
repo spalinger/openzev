@@ -1,15 +1,30 @@
 import { z } from 'zod'
-import type { FeasibilityInput } from '../../types/api'
+import type { FeasibilityInput, FeasibilityPrefill } from '../../types/api'
 
 export type InternalEnergyPriceMode = 'absolute' | 'percentage_of_retail'
 export type AnnualProductionMode = 'absolute' | 'from_kwp'
+export type EnergyInputMode = 'aggregate' | 'participants'
+
+export type ParticipantFormRow = {
+  name: string
+  annual_production_kwh: string
+  annual_consumption_kwh: string
+}
+
+export const emptyParticipantRow: ParticipantFormRow = {
+  name: '',
+  annual_production_kwh: '0',
+  annual_consumption_kwh: '0',
+}
 
 export type FeasibilityFormValues = {
+  energy_input_mode: EnergyInputMode
   annual_production_mode: AnnualProductionMode
   annual_production_kwh: string
   pv_kwp: string
   specific_yield_kwh_per_kwp: string
   annual_consumption_kwh: string
+  participants: ParticipantFormRow[]
   self_consumption_rate_pct: string
   retail_price_chf_per_kwh: string
   feed_in_price_chf_per_kwh: string
@@ -35,12 +50,20 @@ function isPercentage(value: string): boolean {
   return !Number.isNaN(n) && n >= 0 && n <= 100
 }
 
+const participantRowSchema = z.object({
+  name: z.string(),
+  annual_production_kwh: z.string().refine(isNonNegativeNumber),
+  annual_consumption_kwh: z.string().refine(isNonNegativeNumber),
+})
+
 export const feasibilityFormSchema = z.object({
+  energy_input_mode: z.enum(['aggregate', 'participants']),
   annual_production_mode: z.enum(['absolute', 'from_kwp']),
   annual_production_kwh: z.string().refine(isNonNegativeNumber),
   pv_kwp: z.string().refine(isNonNegativeNumber),
   specific_yield_kwh_per_kwp: z.string().refine(isNonNegativeNumber),
   annual_consumption_kwh: z.string().refine(isNonNegativeNumber),
+  participants: z.array(participantRowSchema),
   self_consumption_rate_pct: z.string().refine(isPercentage),
   retail_price_chf_per_kwh: z.string().refine(isNonNegativeNumber),
   feed_in_price_chf_per_kwh: z.string().refine(isNonNegativeNumber),
@@ -62,11 +85,13 @@ export const feasibilityFormSchema = z.object({
 // the form so it shows a live result immediately; the backend remains the
 // single source of truth for the actual calculation.
 export const defaultFeasibilityFormValues: FeasibilityFormValues = {
+  energy_input_mode: 'aggregate',
   annual_production_mode: 'absolute',
   annual_production_kwh: '10000',
   pv_kwp: '10',
   specific_yield_kwh_per_kwp: '950',
   annual_consumption_kwh: '8000',
+  participants: [],
   self_consumption_rate_pct: '50',
   retail_price_chf_per_kwh: '0.32',
   feed_in_price_chf_per_kwh: '0.09',
@@ -109,11 +134,39 @@ export function resolveInternalEnergyPriceChf(values: FeasibilityFormValues): nu
   return Number(values.internal_energy_price_chf_per_kwh)
 }
 
+// Rows with no name yet (mid-edit) are dropped rather than blocking the live
+// recompute or being sent to an API that requires a name on every row.
+function namedParticipantRows(values: FeasibilityFormValues): ParticipantFormRow[] {
+  if (values.energy_input_mode !== 'participants') return []
+  return values.participants.filter((row) => row.name.trim() !== '')
+}
+
+// Total production/consumption across the named participant rows — this is
+// what actually drives the aggregate scenario math when energy_input_mode
+// is 'participants', exactly mirroring how the backend's FeasibilityInput
+// treats the participant list as additive: the caller (here) is responsible
+// for keeping the aggregate totals consistent with the row list's sum.
+export function resolveParticipantTotals(values: FeasibilityFormValues): { production: number; consumption: number } {
+  const rows = namedParticipantRows(values)
+  return {
+    production: rows.reduce((sum, row) => sum + Number(row.annual_production_kwh || '0'), 0),
+    consumption: rows.reduce((sum, row) => sum + Number(row.annual_consumption_kwh || '0'), 0),
+  }
+}
+
 export function mapFormValuesToPayload(values: FeasibilityFormValues): FeasibilityInput {
+  const rows = namedParticipantRows(values)
+  const useParticipants = values.energy_input_mode === 'participants' && rows.length > 0
+  const participantTotals = resolveParticipantTotals(values)
+
   return {
     // decimal_places below mirror each field's DecimalField in feasibility/serializers.py.
-    annual_production_kwh: toFixedString(resolveAnnualProductionKwh(values), 4),
-    annual_consumption_kwh: values.annual_consumption_kwh,
+    annual_production_kwh: useParticipants
+      ? toFixedString(participantTotals.production, 4)
+      : toFixedString(resolveAnnualProductionKwh(values), 4),
+    annual_consumption_kwh: useParticipants
+      ? toFixedString(participantTotals.consumption, 4)
+      : values.annual_consumption_kwh,
     self_consumption_rate: toFixedString(Number(values.self_consumption_rate_pct) / 100, 4),
     retail_price_chf_per_kwh: values.retail_price_chf_per_kwh,
     feed_in_price_chf_per_kwh: values.feed_in_price_chf_per_kwh,
@@ -123,5 +176,38 @@ export function mapFormValuesToPayload(values: FeasibilityFormValues): Feasibili
     capex_chf: values.capex_chf,
     horizon_years: Number(values.horizon_years),
     discount_rate: toFixedString(Number(values.discount_rate_pct) / 100, 4),
+    participants: useParticipants
+      ? rows.map((row) => ({
+          name: row.name,
+          annual_production_kwh: toFixedString(Number(row.annual_production_kwh || '0'), 4),
+          annual_consumption_kwh: toFixedString(Number(row.annual_consumption_kwh || '0'), 4),
+        }))
+      : [],
+  }
+}
+
+// Applies a GET /feasibility/prefill/<zevId>/ response onto the current form:
+// switches to participant mode with one row per real participant, and
+// overrides any price the ZEV's tariffs could actually determine — a price
+// prefill couldn't resolve (returned null) is left exactly as it was, same
+// as any other field a user chooses not to touch.
+export function applyPrefillToFormValues(
+  prefill: FeasibilityPrefill,
+  current: FeasibilityFormValues,
+): FeasibilityFormValues {
+  return {
+    ...current,
+    energy_input_mode: 'participants',
+    participants: prefill.participants.map((p) => ({
+      name: p.name,
+      annual_production_kwh: p.annual_production_kwh,
+      annual_consumption_kwh: p.annual_consumption_kwh,
+    })),
+    retail_price_chf_per_kwh: prefill.retail_price_chf_per_kwh ?? current.retail_price_chf_per_kwh,
+    feed_in_price_chf_per_kwh: prefill.feed_in_price_chf_per_kwh ?? current.feed_in_price_chf_per_kwh,
+    internal_energy_price_mode: 'absolute',
+    internal_energy_price_chf_per_kwh:
+      prefill.internal_energy_price_chf_per_kwh ?? current.internal_energy_price_chf_per_kwh,
+    internal_grid_fee_chf_per_kwh: prefill.internal_grid_fee_chf_per_kwh ?? current.internal_grid_fee_chf_per_kwh,
   }
 }
