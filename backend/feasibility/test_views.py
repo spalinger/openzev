@@ -12,7 +12,6 @@ TYPICAL_PAYLOAD = {
     "retail_price_chf_per_kwh": "0.32",
     "feed_in_price_chf_per_kwh": "0.09",
     "internal_energy_price_chf_per_kwh": "0.20",
-    "internal_grid_fee_chf_per_kwh": "0.03",
     "annual_opex_chf": "300",
     "capex_chf": "2000",
     "horizon_years": 20,
@@ -40,18 +39,19 @@ class TestFeasibilityCalculateHappyPath:
         assert body["self_consumed_kwh"] == "5000.00"
         assert body["grid_import_kwh"] == "3000.00"
         assert body["grid_export_kwh"] == "5000.00"
-        assert body["annual_gross_benefit_chf"] == "1000.00"
-        assert body["annual_net_benefit_chf"] == "700.00"
-        assert body["consumer_savings_chf"] == "450.00"
+        assert body["annual_gross_benefit_chf"] == "1150.00"
+        assert body["annual_net_benefit_chf"] == "850.00"
+        assert body["consumer_savings_chf"] == "600.00"
         assert body["producer_gain_chf"] == "550.00"
-        assert body["roi"] == "0.3500"
-        assert body["break_even_self_consumption_rate"] == "0.1500"
+        assert body["roi"] == "0.4250"
+        # 300 / (10000*0.23) = 3/23 = 0.130434... -> rounded to the field's decimal_places=4.
+        assert body["break_even_self_consumption_rate"] == "0.1304"
         assert len(body["sensitivity"]) == 21
         assert len(body["cashflow_by_year"]) == 21
 
         assert len(body["price_sensitivity"]) == 21
-        assert body["equal_split_price_chf_per_kwh"] == "0.19000"
-        assert body["fair_price_range"] == {"low_chf_per_kwh": "0.15000", "high_chf_per_kwh": "0.29000"}
+        assert body["equal_split_price_chf_per_kwh"] == "0.20500"
+        assert body["fair_price_range"] == {"low_chf_per_kwh": "0.15000", "high_chf_per_kwh": "0.32000"}
 
     def test_participants_breakdown_sums_to_aggregate(self, owner_client):
         payload = dict(
@@ -71,8 +71,8 @@ class TestFeasibilityCalculateHappyPath:
         by_name = {p["name"]: p for p in body["participants"]}
         assert by_name["Producer A"]["producer_gain_chf"] == "330.00"
         assert by_name["Producer B"]["producer_gain_chf"] == "220.00"
-        assert by_name["Consumer C"]["consumer_savings_chf"] == "281.25"
-        assert by_name["Consumer D"]["consumer_savings_chf"] == "168.75"
+        assert by_name["Consumer C"]["consumer_savings_chf"] == "375.00"
+        assert by_name["Consumer D"]["consumer_savings_chf"] == "225.00"
 
         total_gain = sum(float(p["producer_gain_chf"]) for p in body["participants"])
         total_savings = sum(float(p["consumer_savings_chf"]) for p in body["participants"])
@@ -99,9 +99,9 @@ class TestFeasibilityCalculateHappyPath:
         assert response.status_code == 200
 
         body = response.json()
-        # With defaults (retail 0.32, feed_in 0.09, internal_grid_fee 0.03) the net
-        # unit benefit is 0.20, matching the hand-computed scenario's gross benefit.
-        assert body["annual_gross_benefit_chf"] == "1000.00"
+        # With defaults (retail 0.32, feed_in 0.09) the net unit benefit is 0.23,
+        # matching the hand-computed scenario's gross benefit.
+        assert body["annual_gross_benefit_chf"] == "1150.00"
 
 
 class TestFeasibilityCalculateValidation:

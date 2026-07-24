@@ -131,7 +131,6 @@ describe('feasibility form mapping', () => {
       retail_price_chf_per_kwh: '0.31000',
       feed_in_price_chf_per_kwh: null,
       internal_energy_price_chf_per_kwh: '0.18000',
-      internal_grid_fee_chf_per_kwh: null,
     }
 
     it('switches to participant mode with one row per participant', () => {
@@ -147,9 +146,8 @@ describe('feasibility form mapping', () => {
       const result = applyPrefillToFormValues(prefill, defaultFeasibilityFormValues)
       expect(result.retail_price_chf_per_kwh).toBe('0.31000')
       expect(result.internal_energy_price_chf_per_kwh).toBe('0.18000')
-      // feed_in and grid fee were null in the prefill -> untouched defaults survive.
+      // feed_in was null in the prefill -> untouched default survives.
       expect(result.feed_in_price_chf_per_kwh).toBe(defaultFeasibilityFormValues.feed_in_price_chf_per_kwh)
-      expect(result.internal_grid_fee_chf_per_kwh).toBe(defaultFeasibilityFormValues.internal_grid_fee_chf_per_kwh)
     })
 
     it('resets internal energy price mode to absolute so the prefilled CHF value is used as-is', () => {

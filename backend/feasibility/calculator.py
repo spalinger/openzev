@@ -13,9 +13,12 @@ which mirrors the per-timestamp local-pool allocation used for real invoices
 annual assumption since no readings exist yet.
 
 Value created by the vZEV is proportional to self-consumed energy, priced at
-``retail - feed_in - internal_grid_fee`` — the internal energy price only
-redistributes that value between producer and consumers, it does not change
-the total (see ``test_calculator.py`` for the invariant check).
+``retail - feed_in`` — the internal energy price only redistributes that
+value between producer and consumers, it does not change the total (see
+``test_calculator.py`` for the invariant check). There is no separate
+internal grid fee: within a vZEV, locally consumed energy is only ever
+priced as energy, never a network fee — unlike a real invoice's tariffs,
+which may still bill grid fees separately.
 """
 from __future__ import annotations
 
@@ -80,7 +83,6 @@ class FeasibilityInput:
     retail_price_chf_per_kwh: Decimal
     feed_in_price_chf_per_kwh: Decimal
     internal_energy_price_chf_per_kwh: Decimal
-    internal_grid_fee_chf_per_kwh: Decimal = Decimal("0")
     annual_opex_chf: Decimal = Decimal("0")
     capex_chf: Decimal = Decimal("0")
     horizon_years: int = 20
@@ -107,7 +109,6 @@ def _validate(inputs: FeasibilityInput) -> None:
         "retail_price_chf_per_kwh",
         "feed_in_price_chf_per_kwh",
         "internal_energy_price_chf_per_kwh",
-        "internal_grid_fee_chf_per_kwh",
         "annual_opex_chf",
         "capex_chf",
     )
@@ -212,11 +213,7 @@ def _self_consumed_kwh(rate: Decimal, production_kwh: Decimal, consumption_kwh: 
 
 
 def _net_unit_benefit(inputs: FeasibilityInput) -> Decimal:
-    return (
-        inputs.retail_price_chf_per_kwh
-        - inputs.feed_in_price_chf_per_kwh
-        - inputs.internal_grid_fee_chf_per_kwh
-    )
+    return inputs.retail_price_chf_per_kwh - inputs.feed_in_price_chf_per_kwh
 
 
 def _annual_net_benefit_for_rate(rate: Decimal, inputs: FeasibilityInput) -> Decimal:
@@ -264,9 +261,7 @@ def _build_price_sensitivity(inputs: FeasibilityInput, self_consumed: Decimal) -
         pct = Decimal(i) / Decimal(SENSITIVITY_STEPS - 1)
         price = pct * inputs.retail_price_chf_per_kwh
         producer_gain = self_consumed * (price - inputs.feed_in_price_chf_per_kwh)
-        consumer_savings = self_consumed * (
-            inputs.retail_price_chf_per_kwh - inputs.internal_grid_fee_chf_per_kwh - price
-        )
+        consumer_savings = self_consumed * (inputs.retail_price_chf_per_kwh - price)
         points.append(
             PriceSensitivityPoint(
                 internal_price_pct_of_retail=pct,
@@ -287,22 +282,20 @@ def _equal_split_price(inputs: FeasibilityInput) -> Decimal | None:
     """
     if _net_unit_benefit(inputs) <= 0:
         return None
-    return (
-        inputs.retail_price_chf_per_kwh - inputs.internal_grid_fee_chf_per_kwh + inputs.feed_in_price_chf_per_kwh
-    ) / 2
+    return (inputs.retail_price_chf_per_kwh + inputs.feed_in_price_chf_per_kwh) / 2
 
 
 def _fair_price_range(inputs: FeasibilityInput, self_consumed: Decimal) -> FairPriceRange | None:
     """A recommended internal-price range that is narrower than the trivial
-    win-win range [feed_in, retail - grid_fee] on its lower end: the
-    producer's price floor is raised so their gain also covers their share
-    of annual_opex_chf, not merely beats feed-in. Returns None if there is
+    win-win range [feed_in, retail] on its lower end: the producer's price
+    floor is raised so their gain also covers their share of
+    annual_opex_chf, not merely beats feed-in. Returns None if there is
     no price that does this while still saving the consumer money (the
     scenario's running costs outweigh the value it creates).
     """
     if self_consumed <= 0:
         return None
-    upper = inputs.retail_price_chf_per_kwh - inputs.internal_grid_fee_chf_per_kwh
+    upper = inputs.retail_price_chf_per_kwh
     lower = inputs.feed_in_price_chf_per_kwh + inputs.annual_opex_chf / self_consumed
     if lower > upper:
         return None
@@ -323,7 +316,6 @@ def _build_participant_results(inputs: FeasibilityInput, self_consumed_total: De
 
     total_production = sum((p.annual_production_kwh for p in inputs.participants), Decimal("0"))
     total_consumption = sum((p.annual_consumption_kwh for p in inputs.participants), Decimal("0"))
-    internal_all_in = inputs.internal_energy_price_chf_per_kwh + inputs.internal_grid_fee_chf_per_kwh
 
     results = []
     for participant in inputs.participants:
@@ -349,7 +341,10 @@ def _build_participant_results(inputs: FeasibilityInput, self_consumed_total: De
         producer_gain = vzev_producer_revenue - baseline_producer_revenue
 
         baseline_consumer_cost = participant.annual_consumption_kwh * inputs.retail_price_chf_per_kwh
-        vzev_consumer_cost = from_grid * inputs.retail_price_chf_per_kwh + from_local_pool * internal_all_in
+        vzev_consumer_cost = (
+            from_grid * inputs.retail_price_chf_per_kwh
+            + from_local_pool * inputs.internal_energy_price_chf_per_kwh
+        )
         consumer_savings = baseline_consumer_cost - vzev_consumer_cost
 
         results.append(
@@ -411,8 +406,10 @@ def compute_feasibility(inputs: FeasibilityInput) -> FeasibilityResult:
     baseline_consumer_cost = inputs.annual_consumption_kwh * inputs.retail_price_chf_per_kwh
     baseline_producer_revenue = inputs.annual_production_kwh * inputs.feed_in_price_chf_per_kwh
 
-    internal_all_in = inputs.internal_energy_price_chf_per_kwh + inputs.internal_grid_fee_chf_per_kwh
-    vzev_consumer_cost = grid_import * inputs.retail_price_chf_per_kwh + self_consumed * internal_all_in
+    vzev_consumer_cost = (
+        grid_import * inputs.retail_price_chf_per_kwh
+        + self_consumed * inputs.internal_energy_price_chf_per_kwh
+    )
     vzev_producer_revenue = (
         grid_export * inputs.feed_in_price_chf_per_kwh + self_consumed * inputs.internal_energy_price_chf_per_kwh
     )

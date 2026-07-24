@@ -43,9 +43,6 @@ class FeasibilityInputSerializer(serializers.Serializer):
     internal_energy_price_chf_per_kwh = serializers.DecimalField(
         max_digits=8, decimal_places=5, min_value=0, default=defaults.INTERNAL_ENERGY_PRICE_CHF_PER_KWH
     )
-    internal_grid_fee_chf_per_kwh = serializers.DecimalField(
-        max_digits=8, decimal_places=5, min_value=0, default=defaults.INTERNAL_GRID_FEE_CHF_PER_KWH
-    )
     annual_opex_chf = serializers.DecimalField(
         max_digits=10, decimal_places=2, min_value=0, default=defaults.ANNUAL_OPEX_CHF
     )
@@ -141,4 +138,3 @@ class FeasibilityPrefillSerializer(serializers.Serializer):
     retail_price_chf_per_kwh = serializers.DecimalField(max_digits=8, decimal_places=5, allow_null=True)
     feed_in_price_chf_per_kwh = serializers.DecimalField(max_digits=8, decimal_places=5, allow_null=True)
     internal_energy_price_chf_per_kwh = serializers.DecimalField(max_digits=8, decimal_places=5, allow_null=True)
-    internal_grid_fee_chf_per_kwh = serializers.DecimalField(max_digits=8, decimal_places=5, allow_null=True)

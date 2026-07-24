@@ -93,17 +93,12 @@ class TestTariffPrefill:
         ):
             tariff = factories.TariffFactory(zev=zev, category=TariffCategory.ENERGY, energy_type=energy_type)
             factories.TariffPeriodFactory(tariff=tariff, period_type=PeriodType.FLAT, price_chf_per_kwh=Decimal(price))
-        grid_fee_tariff = factories.TariffFactory(
-            zev=zev, category=TariffCategory.GRID_FEES, energy_type=EnergyType.LOCAL
-        )
-        factories.TariffPeriodFactory(tariff=grid_fee_tariff, price_chf_per_kwh=Decimal("0.02500"))
 
         prefill = build_prefill(zev)
 
         assert prefill.retail_price_chf_per_kwh == Decimal("0.31000")
         assert prefill.feed_in_price_chf_per_kwh == Decimal("0.08000")
         assert prefill.internal_energy_price_chf_per_kwh == Decimal("0.18000")
-        assert prefill.internal_grid_fee_chf_per_kwh == Decimal("0.02500")
 
     def test_ignores_percentage_of_energy_tariffs(self):
         zev = factories.ZevFactory()
@@ -124,7 +119,6 @@ class TestTariffPrefill:
         assert prefill.retail_price_chf_per_kwh is None
         assert prefill.feed_in_price_chf_per_kwh is None
         assert prefill.internal_energy_price_chf_per_kwh is None
-        assert prefill.internal_grid_fee_chf_per_kwh is None
 
     def test_ignores_expired_tariffs(self):
         zev = factories.ZevFactory()

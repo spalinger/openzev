@@ -9,12 +9,13 @@ for entering real numbers. Two independent approximations:
    (a brand-new ZEV) fall back to a generic default and are flagged via
    ``has_metering_data=False`` so the frontend can call that out.
 2. Tariff prices: takes the simplest currently-active flat energy tariff of
-   each relevant type (category=ENERGY/GRID_FEES, billing_mode=ENERGY) and
-   ignores percentage-of-energy/fixed-fee tariffs, HT/NT splits within a
-   tariff, and any tariffs beyond the one currently active. Returns None for
-   a price it can't determine this way — the caller falls back to the
-   calculator's own Swiss defaults, exactly as it already does for any
-   field a user leaves blank.
+   each relevant type (category=ENERGY, billing_mode=ENERGY) and ignores
+   percentage-of-energy/fixed-fee tariffs, HT/NT splits within a tariff, and
+   any tariffs beyond the one currently active. Returns None for a price it
+   can't determine this way — the caller falls back to the calculator's own
+   Swiss defaults, exactly as it already does for any field a user leaves
+   blank. There is no internal grid fee to prefill: within a vZEV, locally
+   consumed energy is only ever priced as energy.
 """
 from __future__ import annotations
 
@@ -45,7 +46,6 @@ class FeasibilityPrefill:
     retail_price_chf_per_kwh: Decimal | None
     feed_in_price_chf_per_kwh: Decimal | None
     internal_energy_price_chf_per_kwh: Decimal | None
-    internal_grid_fee_chf_per_kwh: Decimal | None
 
 
 def _active_flat_tariff_price(zev: Zev, *, category: str, energy_type: str, today: dt.date) -> Decimal | None:
@@ -135,8 +135,5 @@ def build_prefill(zev: Zev) -> FeasibilityPrefill:
         ),
         internal_energy_price_chf_per_kwh=_active_flat_tariff_price(
             zev, category=TariffCategory.ENERGY, energy_type=EnergyType.LOCAL, today=today
-        ),
-        internal_grid_fee_chf_per_kwh=_active_flat_tariff_price(
-            zev, category=TariffCategory.GRID_FEES, energy_type=EnergyType.LOCAL, today=today
         ),
     )

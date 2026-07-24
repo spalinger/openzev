@@ -176,10 +176,6 @@ export function FeasibilityCalculatorPage() {
                         )}
                         <span className="muted" style={{ fontSize: '0.78rem' }}>{t('pages.feasibility.form.internalEnergyPriceHint')}</span>
                     </label>
-                    <label>
-                        <span>{t('pages.feasibility.form.internalGridFee')}</span>
-                        <input type="number" step="any" min="0" {...form.register('internal_grid_fee_chf_per_kwh')} />
-                    </label>
 
                     <h3>{t('pages.feasibility.form.costsTitle')}</h3>
                     <label>

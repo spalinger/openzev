@@ -513,7 +513,6 @@ export const de = {
                 internalEnergyPriceModePercentage: '% des Netzstrompreises',
                 internalEnergyPriceComputed: '= CHF {{value}}/kWh',
                 internalEnergyPriceHint: 'Was Verbraucher dem Produzenten für lokale Energie innerhalb des vZEV zahlen.',
-                internalGridFee: 'Interne Netzgebühr (CHF/kWh)',
                 costsTitle: 'Kosten & Annahmen',
                 annualOpex: 'Jährliche Betriebskosten (CHF)',
                 capex: 'Einrichtungskosten — Messung, Administration (CHF)',

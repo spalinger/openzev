@@ -708,7 +708,6 @@ export interface FeasibilityInput {
     retail_price_chf_per_kwh?: string
     feed_in_price_chf_per_kwh?: string
     internal_energy_price_chf_per_kwh?: string
-    internal_grid_fee_chf_per_kwh?: string
     annual_opex_chf?: string
     capex_chf?: string
     horizon_years?: number
@@ -783,5 +782,4 @@ export interface FeasibilityPrefill {
     retail_price_chf_per_kwh: string | null
     feed_in_price_chf_per_kwh: string | null
     internal_energy_price_chf_per_kwh: string | null
-    internal_grid_fee_chf_per_kwh: string | null
 }

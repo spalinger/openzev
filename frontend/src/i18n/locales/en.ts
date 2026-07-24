@@ -514,7 +514,6 @@ export const en = {
                 internalEnergyPriceModePercentage: '% of retail',
                 internalEnergyPriceComputed: '= CHF {{value}}/kWh',
                 internalEnergyPriceHint: 'What consumers pay the producer for local energy inside the vZEV.',
-                internalGridFee: 'Internal grid fee (CHF/kWh)',
                 costsTitle: 'Costs & assumptions',
                 annualOpex: 'Annual operating cost (CHF)',
                 capex: 'Setup cost — metering, admin (CHF)',

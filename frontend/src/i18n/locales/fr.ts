@@ -520,7 +520,6 @@ export const fr = {
                 internalEnergyPriceModePercentage: '% du prix du réseau',
                 internalEnergyPriceComputed: '= CHF {{value}}/kWh',
                 internalEnergyPriceHint: 'Ce que les consommateurs paient au producteur pour l’énergie locale au sein du RCP.',
-                internalGridFee: 'Redevance réseau interne (CHF/kWh)',
                 costsTitle: 'Coûts & hypothèses',
                 annualOpex: 'Coûts d’exploitation annuels (CHF)',
                 capex: 'Coûts de mise en place — comptage, administration (CHF)',

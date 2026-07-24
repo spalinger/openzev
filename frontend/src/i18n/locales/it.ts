@@ -520,7 +520,6 @@ export const it = {
                 internalEnergyPriceModePercentage: '% del prezzo di rete',
                 internalEnergyPriceComputed: '= CHF {{value}}/kWh',
                 internalEnergyPriceHint: 'Quanto i consumatori pagano al produttore per l’energia locale all’interno del CEL.',
-                internalGridFee: 'Costo di rete interno (CHF/kWh)',
                 costsTitle: 'Costi & ipotesi',
                 annualOpex: 'Costi operativi annui (CHF)',
                 capex: 'Costi di allestimento — misurazione, amministrazione (CHF)',

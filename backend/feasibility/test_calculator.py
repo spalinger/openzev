@@ -24,7 +24,6 @@ def _typical_input(**overrides) -> FeasibilityInput:
         retail_price_chf_per_kwh=Decimal("0.32"),
         feed_in_price_chf_per_kwh=Decimal("0.09"),
         internal_energy_price_chf_per_kwh=Decimal("0.20"),
-        internal_grid_fee_chf_per_kwh=Decimal("0.03"),
         annual_opex_chf=Decimal("300"),
         capex_chf=Decimal("2000"),
         horizon_years=20,
@@ -38,8 +37,8 @@ class TestTypicalScenario:
     """Hand-computed reference scenario, see module docstring math:
 
     self_consumed = min(0.5*10000, 8000) = 5000
-    net_unit_benefit = 0.32 - 0.09 - 0.03 = 0.20
-    gross_benefit = 5000 * 0.20 = 1000.00
+    net_unit_benefit = 0.32 - 0.09 = 0.23
+    gross_benefit = 5000 * 0.23 = 1150.00
     """
 
     def test_energy_balance(self):
@@ -56,37 +55,39 @@ class TestTypicalScenario:
 
     def test_vzev_costs_and_split(self):
         result = compute_feasibility(_typical_input())
-        # 3000*0.32 + 5000*(0.20+0.03) = 960 + 1150
-        assert result.vzev_consumer_cost_chf == Decimal("2110.00")
+        # 3000*0.32 + 5000*0.20 = 960 + 1000
+        assert result.vzev_consumer_cost_chf == Decimal("1960.00")
         # 5000*0.09 + 5000*0.20 = 450 + 1000
         assert result.vzev_producer_revenue_chf == Decimal("1450.00")
-        assert result.consumer_savings_chf == Decimal("450.00")
+        assert result.consumer_savings_chf == Decimal("600.00")
         assert result.producer_gain_chf == Decimal("550.00")
 
     def test_gross_and_net_benefit(self):
         result = compute_feasibility(_typical_input())
-        assert result.annual_gross_benefit_chf == Decimal("1000.00")
-        assert result.annual_net_benefit_chf == Decimal("700.00")  # 1000 - 300 opex
+        assert result.annual_gross_benefit_chf == Decimal("1150.00")
+        assert result.annual_net_benefit_chf == Decimal("850.00")  # 1150 - 300 opex
 
     def test_payback_and_roi(self):
         result = compute_feasibility(_typical_input())
-        expected_payback = (Decimal("2000") / Decimal("700")).quantize(Decimal("0.0001"))
+        expected_payback = (Decimal("2000") / Decimal("850")).quantize(Decimal("0.0001"))
         assert result.payback_years.quantize(Decimal("0.0001")) == expected_payback
-        assert result.roi == Decimal("0.35")  # 700/2000
+        assert result.roi == Decimal("0.425")  # 850/2000
 
     def test_npv_matches_independent_annuity_sum(self):
         result = compute_feasibility(_typical_input())
         expected = Decimal("-2000")
         for year in range(1, 21):
-            expected += Decimal("700") / (Decimal("1.03") ** year)
+            expected += Decimal("850") / (Decimal("1.03") ** year)
         assert result.npv_chf == expected.quantize(Decimal("0.01"))
 
     def test_break_even_self_consumption_rate(self):
-        # plateau at sigma=1: S=min(10000,8000)=8000 -> gross=1600, net=1300 > 0, so a
+        # plateau at sigma=1: S=min(10000,8000)=8000 -> gross=1840, net=1540 > 0, so a
         # break-even exists in the unconstrained (linear) region: opex / (P*net_unit_benefit)
-        # = 300 / (10000*0.20) = 0.15, which lands exactly on the 5%-step sampling grid.
+        # = 300 / (10000*0.23) = 3/23, which does not land on the 5%-step sampling grid, so
+        # compare against an independently computed (not hardcoded-literal) expected value.
         result = compute_feasibility(_typical_input())
-        assert result.break_even_self_consumption_rate == Decimal("0.15")
+        expected = Decimal("300") / (Decimal("10000") * Decimal("0.23"))
+        assert result.break_even_self_consumption_rate == expected
 
     def test_sensitivity_curve_shape(self):
         result = compute_feasibility(_typical_input())
@@ -99,18 +100,20 @@ class TestTypicalScenario:
         result = compute_feasibility(_typical_input())
         assert len(result.cashflow_by_year) == 21  # horizon_years + 1 (year 0 = -capex)
         assert result.cashflow_by_year[0] == Decimal("-2000.00")
-        assert result.cashflow_by_year[1] == Decimal("-1300.00")  # -2000 + 700
-        assert result.cashflow_by_year[-1] == Decimal("-2000.00") + 20 * Decimal("700.00")
+        assert result.cashflow_by_year[1] == Decimal("-1150.00")  # -2000 + 850
+        assert result.cashflow_by_year[-1] == Decimal("-2000.00") + 20 * Decimal("850.00")
 
 
 class TestPriceSensitivity:
     """The internal-price sweep (self-consumed kWh fixed at 5000, per
     TestTypicalScenario): producer_gain and consumer_savings are exactly
-    linear in price since self_consumed doesn't depend on it.
+    linear in price since self_consumed doesn't depend on it. There is no
+    internal grid fee in this model — within a vZEV, locally consumed
+    energy is only ever priced as energy.
 
-    equal_split_price = (retail - grid_fee + feed_in) / 2 = (0.32-0.03+0.09)/2 = 0.19
+    equal_split_price = (retail + feed_in) / 2 = (0.32+0.09)/2 = 0.205
     fair range: low = feed_in + opex/S = 0.09 + 300/5000 = 0.15
-                high = retail - grid_fee = 0.32 - 0.03 = 0.29
+                high = retail = 0.32
     """
 
     def test_price_sensitivity_curve_endpoints(self):
@@ -120,40 +123,40 @@ class TestPriceSensitivity:
         zero_price = result.price_sensitivity[0]
         assert zero_price.internal_price_chf_per_kwh == Decimal("0.00000")
         assert zero_price.producer_gain_chf == Decimal("-450.00")  # 5000*(0-0.09)
-        assert zero_price.consumer_savings_chf == Decimal("1450.00")  # 5000*(0.29-0)
+        assert zero_price.consumer_savings_chf == Decimal("1600.00")  # 5000*(0.32-0)
 
         full_retail = result.price_sensitivity[-1]
         assert full_retail.internal_price_chf_per_kwh == Decimal("0.32000")
         assert full_retail.producer_gain_chf == Decimal("1150.00")  # 5000*(0.32-0.09)
-        assert full_retail.consumer_savings_chf == Decimal("-150.00")  # 5000*(0.29-0.32)
+        assert full_retail.consumer_savings_chf == Decimal("0.00")  # 5000*(0.32-0.32)
 
     def test_equal_split_price(self):
         result = compute_feasibility(_typical_input())
-        assert result.equal_split_price_chf_per_kwh == Decimal("0.19000")
+        assert result.equal_split_price_chf_per_kwh == Decimal("0.20500")
 
         # Sanity: at the equal-split price, producer_gain really does equal
         # consumer_savings (independently recomputed, not read off the
-        # 5%-step sample grid, since 0.19 doesn't land on one of those steps).
+        # 5%-step sample grid, since 0.205 doesn't land on one of those steps).
         price = result.equal_split_price_chf_per_kwh
         self_consumed = result.self_consumed_kwh
         producer_gain = self_consumed * (price - Decimal("0.09"))
-        consumer_savings = self_consumed * (Decimal("0.32") - Decimal("0.03") - price)
+        consumer_savings = self_consumed * (Decimal("0.32") - price)
         assert producer_gain == consumer_savings
 
     def test_fair_price_range(self):
         result = compute_feasibility(_typical_input())
         assert result.fair_price_range is not None
         assert result.fair_price_range.low_chf_per_kwh == Decimal("0.15000")
-        assert result.fair_price_range.high_chf_per_kwh == Decimal("0.29000")
-        # The naive equal split (0.19) sits inside the recommended range, but
+        assert result.fair_price_range.high_chf_per_kwh == Decimal("0.32000")
+        # The naive equal split (0.205) sits inside the recommended range, but
         # nearer its floor than its ceiling -- it is not itself the "fair" pick.
         assert result.fair_price_range.low_chf_per_kwh < result.equal_split_price_chf_per_kwh < result.fair_price_range.high_chf_per_kwh
 
     def test_fair_price_range_none_when_opex_too_high(self):
-        # Max possible producer gain span is S*(upper-feed_in) = 5000*0.20 = 1000;
+        # Max possible producer gain span is S*(upper-feed_in) = 5000*0.23 = 1150;
         # an opex above that leaves no price that both compensates the producer
         # and still saves the consumer money.
-        result = compute_feasibility(_typical_input(annual_opex_chf=Decimal("1100")))
+        result = compute_feasibility(_typical_input(annual_opex_chf=Decimal("1200")))
         assert result.fair_price_range is None
 
     def test_fair_price_range_none_when_no_self_consumption(self):
@@ -161,8 +164,8 @@ class TestPriceSensitivity:
         assert result.fair_price_range is None
 
     def test_equal_split_price_none_when_no_net_benefit(self):
-        # grid_fee high enough that retail - grid_fee <= feed_in: no win-win price exists at all.
-        result = compute_feasibility(_typical_input(internal_grid_fee_chf_per_kwh=Decimal("0.30")))
+        # feed_in at or above retail: no win-win price exists at all.
+        result = compute_feasibility(_typical_input(feed_in_price_chf_per_kwh=Decimal("0.35")))
         assert result.equal_split_price_chf_per_kwh is None
 
 
@@ -175,17 +178,16 @@ class TestSinglePeriodNpv:
             annual_production_kwh=Decimal("1000"),
             annual_consumption_kwh=Decimal("1000"),
             self_consumption_rate=Decimal("1"),
-            retail_price_chf_per_kwh=Decimal("1.50"),
+            retail_price_chf_per_kwh=Decimal("1.33"),
             feed_in_price_chf_per_kwh=Decimal("0.30"),
             internal_energy_price_chf_per_kwh=Decimal("0.50"),
-            internal_grid_fee_chf_per_kwh=Decimal("0.17"),
             annual_opex_chf=Decimal("0"),
             capex_chf=Decimal("1000"),
             horizon_years=1,
             discount_rate=Decimal("0.03"),
         )
         result = compute_feasibility(inputs)
-        assert result.annual_net_benefit_chf == Decimal("1030.00")  # 1000*(1.50-0.30-0.17)
+        assert result.annual_net_benefit_chf == Decimal("1030.00")  # 1000*(1.33-0.30)
         assert result.npv_chf == Decimal("0.00")
         assert result.roi == Decimal("1.03")
         assert result.payback_years.quantize(Decimal("0.0001")) == (
@@ -256,7 +258,7 @@ class TestEdgeCases:
 
     def test_break_even_none_when_unreachable(self):
         # opex so high that even 100% self-consumption (capped at consumption=8000)
-        # can't cover it: plateau = 8000*0.20 - 5000 = -3400 < 0.
+        # can't cover it: plateau = 8000*0.23 - 5000 = -3160 < 0.
         result = compute_feasibility(_typical_input(annual_opex_chf=Decimal("5000")))
         assert result.break_even_self_consumption_rate is None
 
@@ -269,7 +271,7 @@ class TestEdgeCases:
         result = compute_feasibility(_typical_input(capex_chf=Decimal("0")))
         expected = Decimal("0")
         for year in range(1, 21):
-            expected += Decimal("700") / (Decimal("1.03") ** year)
+            expected += Decimal("850") / (Decimal("1.03") ** year)
         assert result.npv_chf == expected.quantize(Decimal("0.01"))
 
 
@@ -284,7 +286,6 @@ class TestValidation:
             ("retail_price_chf_per_kwh", Decimal("-0.01")),
             ("feed_in_price_chf_per_kwh", Decimal("-0.01")),
             ("internal_energy_price_chf_per_kwh", Decimal("-0.01")),
-            ("internal_grid_fee_chf_per_kwh", Decimal("-0.01")),
             ("annual_opex_chf", Decimal("-1")),
             ("capex_chf", Decimal("-1")),
             ("discount_rate", Decimal("-0.01")),
@@ -354,10 +355,10 @@ class TestMultiParticipant:
         assert by_name["Producer A"].producer_gain_chf == Decimal("330.00")
         # Producer B: baseline 4000*0.09=360; vzev 2000*0.09+2000*0.20=580; gain=220
         assert by_name["Producer B"].producer_gain_chf == Decimal("220.00")
-        # Consumer C: baseline 5000*0.32=1600; vzev 1875*0.32+3125*0.23=1318.75; savings=281.25
-        assert by_name["Consumer C"].consumer_savings_chf == Decimal("281.25")
-        # Consumer D: baseline 3000*0.32=960; vzev 1125*0.32+1875*0.23=791.25; savings=168.75
-        assert by_name["Consumer D"].consumer_savings_chf == Decimal("168.75")
+        # Consumer C: baseline 5000*0.32=1600; vzev 1875*0.32+3125*0.20=1225; savings=375
+        assert by_name["Consumer C"].consumer_savings_chf == Decimal("375.00")
+        # Consumer D: baseline 3000*0.32=960; vzev 1125*0.32+1875*0.20=735; savings=225
+        assert by_name["Consumer D"].consumer_savings_chf == Decimal("225.00")
 
         # Pure producers have zero consumer_savings; pure consumers have zero producer_gain.
         assert by_name["Producer A"].consumer_savings_chf == Decimal("0.00")
@@ -374,8 +375,8 @@ class TestMultiParticipant:
         total_net_benefit = sum(p.net_benefit_chf for p in result.participants)
 
         assert total_producer_gain == result.producer_gain_chf == Decimal("550.00")
-        assert total_consumer_savings == result.consumer_savings_chf == Decimal("450.00")
-        assert total_net_benefit == result.annual_gross_benefit_chf == Decimal("1000.00")
+        assert total_consumer_savings == result.consumer_savings_chf == Decimal("600.00")
+        assert total_net_benefit == result.annual_gross_benefit_chf == Decimal("1150.00")
 
     def test_prosumer_gets_both_producer_gain_and_consumer_savings(self):
         prosumer_input = _typical_input(
@@ -394,8 +395,8 @@ class TestMultiParticipant:
         # Sole participant holds 100% of both production and consumption shares,
         # so they receive the entire aggregate result.
         assert prosumer.producer_gain_chf == result.producer_gain_chf == Decimal("550.00")
-        assert prosumer.consumer_savings_chf == result.consumer_savings_chf == Decimal("450.00")
-        assert prosumer.net_benefit_chf == Decimal("1000.00")
+        assert prosumer.consumer_savings_chf == result.consumer_savings_chf == Decimal("600.00")
+        assert prosumer.net_benefit_chf == Decimal("1150.00")
 
     def test_empty_participants_list_by_default(self):
         result = compute_feasibility(_typical_input())

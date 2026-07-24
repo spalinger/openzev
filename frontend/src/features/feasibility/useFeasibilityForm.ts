@@ -31,7 +31,6 @@ export type FeasibilityFormValues = {
   internal_energy_price_mode: InternalEnergyPriceMode
   internal_energy_price_chf_per_kwh: string
   internal_energy_price_pct_of_retail: string
-  internal_grid_fee_chf_per_kwh: string
   annual_opex_chf: string
   capex_chf: string
   horizon_years: string
@@ -70,7 +69,6 @@ export const feasibilityFormSchema = z.object({
   internal_energy_price_mode: z.enum(['absolute', 'percentage_of_retail']),
   internal_energy_price_chf_per_kwh: z.string().refine(isNonNegativeNumber),
   internal_energy_price_pct_of_retail: z.string().refine(isNonNegativeNumber),
-  internal_grid_fee_chf_per_kwh: z.string().refine(isNonNegativeNumber),
   annual_opex_chf: z.string().refine(isNonNegativeNumber),
   capex_chf: z.string().refine(isNonNegativeNumber),
   horizon_years: z.string().refine((v) => {
@@ -98,7 +96,6 @@ export const defaultFeasibilityFormValues: FeasibilityFormValues = {
   internal_energy_price_mode: 'absolute',
   internal_energy_price_chf_per_kwh: '0.20',
   internal_energy_price_pct_of_retail: '62.5',
-  internal_grid_fee_chf_per_kwh: '0.03',
   annual_opex_chf: '300',
   capex_chf: '2000',
   horizon_years: '20',
@@ -171,7 +168,6 @@ export function mapFormValuesToPayload(values: FeasibilityFormValues): Feasibili
     retail_price_chf_per_kwh: values.retail_price_chf_per_kwh,
     feed_in_price_chf_per_kwh: values.feed_in_price_chf_per_kwh,
     internal_energy_price_chf_per_kwh: toFixedString(resolveInternalEnergyPriceChf(values), 5),
-    internal_grid_fee_chf_per_kwh: values.internal_grid_fee_chf_per_kwh,
     annual_opex_chf: values.annual_opex_chf,
     capex_chf: values.capex_chf,
     horizon_years: Number(values.horizon_years),
@@ -208,6 +204,5 @@ export function applyPrefillToFormValues(
     internal_energy_price_mode: 'absolute',
     internal_energy_price_chf_per_kwh:
       prefill.internal_energy_price_chf_per_kwh ?? current.internal_energy_price_chf_per_kwh,
-    internal_grid_fee_chf_per_kwh: prefill.internal_grid_fee_chf_per_kwh ?? current.internal_grid_fee_chf_per_kwh,
   }
 }
