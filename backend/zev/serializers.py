@@ -61,8 +61,10 @@ class ParticipantSerializer(serializers.ModelSerializer):
         if not email:
             raise serializers.ValidationError({"email": "Participant email is required."})
 
+        request = self.context.get("request")
+        is_admin = bool(request and request.user.is_admin)
         user = getattr(self.instance, "user", None)
-        if user is not None and user.role != UserRole.PARTICIPANT:
+        if user is not None and user.role != UserRole.PARTICIPANT and not is_admin:
             raise serializers.ValidationError({"user": "Linked account must have participant role."})
 
         return attrs
