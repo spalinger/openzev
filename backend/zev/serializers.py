@@ -1,8 +1,10 @@
 from rest_framework import serializers
 from django.core.exceptions import ValidationError as DjangoValidationError
+from .geocoding import get_cached_building_footprint
 from .models import Zev, Participant, MeteringPoint, MeteringPointAssignment
 from accounts.models import UserRole
 from .services import create_zev_with_owner_setup, ensure_participant_account
+from .tasks import trigger_geocode_if_address_present
 
 
 class MeteringPointSerializer(serializers.ModelSerializer):
@@ -38,9 +40,13 @@ class ParticipantSerializer(serializers.ModelSerializer):
     full_name = serializers.ReadOnlyField()
     metering_points = serializers.SerializerMethodField()
     has_metering_point_assignment = serializers.SerializerMethodField()
+    building_footprint = serializers.SerializerMethodField()
 
     def get_initial_password(self, obj):
         return getattr(obj, "_initial_password", None)
+
+    def get_building_footprint(self, obj):
+        return get_cached_building_footprint(obj.address_line1, obj.postal_code, obj.city)
 
     def get_has_metering_point_assignment(self, obj):
         return obj.metering_point_assignments.exists()
@@ -73,12 +79,14 @@ class ParticipantSerializer(serializers.ModelSerializer):
         participant = super().create(validated_data)
         _, initial_password = ensure_participant_account(participant)
         participant._initial_password = initial_password
+        trigger_geocode_if_address_present(participant)
         return participant
 
     def update(self, instance, validated_data):
         participant = super().update(instance, validated_data)
         _, initial_password = ensure_participant_account(participant)
         participant._initial_password = initial_password
+        trigger_geocode_if_address_present(participant)
         return participant
 
     class Meta:
@@ -104,6 +112,7 @@ class ParticipantSerializer(serializers.ModelSerializer):
             "notes",
             "metering_points",
             "has_metering_point_assignment",
+            "building_footprint",
             "created_at",
             "updated_at",
         ]
@@ -115,6 +124,7 @@ class ParticipantSerializer(serializers.ModelSerializer):
             "full_name",
             "metering_points",
             "has_metering_point_assignment",
+            "building_footprint",
             "created_at",
             "updated_at",
         ]

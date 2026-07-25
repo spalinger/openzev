@@ -209,6 +209,13 @@ export interface ZevWizardResult {
     }>
 }
 
+// The real OSM building footprint (its actual, possibly angled, outline) —
+// GeoJSON coordinate order is always [longitude, latitude].
+export interface ParticipantBuildingFootprint {
+    type: 'Polygon' | 'MultiPolygon'
+    coordinates: number[][][] | number[][][][]
+}
+
 export interface Participant {
     id: string
     zev: string
@@ -229,6 +236,7 @@ export interface Participant {
     valid_to?: string | null
     metering_points?: MeteringPoint[]
     has_metering_point_assignment?: boolean
+    building_footprint?: ParticipantBuildingFootprint | null
 }
 
 export interface ParticipantAccountCreateResult {

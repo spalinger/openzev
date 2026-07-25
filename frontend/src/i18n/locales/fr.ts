@@ -788,6 +788,12 @@ export const fr = {
                 address: 'Adresse',
                 validity: 'Validité',
             },
+            map: {
+                title: 'Carte',
+                empty: "Aucune adresse de participant n'a encore pu être localisée.",
+                notShown_one: "{{count}} participant non affiché (adresse introuvable).",
+                notShown_other: "{{count}} participants non affichés (adresses introuvables).",
+            },
             validity: {
                 current: 'Actuelle',
                 upcoming: 'À venir',

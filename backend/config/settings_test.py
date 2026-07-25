@@ -10,3 +10,12 @@ from .settings import *  # noqa: F401,F403
 # well over a hundred users, so hashing dominates the run time. Tests don't need
 # real password security — MD5 cuts the full suite from minutes to well under one.
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+
+# Every participant read touches the geocoding cache (ParticipantSerializer's
+# building_footprint field). Tests shouldn't need a real Redis instance for that —
+# an in-memory cache behaves the same for anything under test.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+    }
+}

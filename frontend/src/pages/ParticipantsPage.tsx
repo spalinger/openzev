@@ -7,6 +7,7 @@ import {
     type ParticipantCredentialsNoticeData,
 } from '../features/participants/ParticipantCredentialsNotice'
 import { ParticipantFormModal } from '../features/participants/ParticipantFormModal'
+import { ParticipantsMap } from '../features/participants/ParticipantsMap'
 import { ParticipantToolbar, type ParticipantReadinessFilter } from '../features/participants/ParticipantToolbar'
 import {
     createParticipant,
@@ -275,6 +276,18 @@ export function ParticipantsPage() {
                 selectedZevId={selectedZevId || ''}
                 isPending={createMutation.isPending || updateMutation.isPending}
             />
+
+            <section className="card">
+                <h3 style={{ marginTop: 0 }}>{t('pages.participants.map.title')}</h3>
+                <ParticipantsMap
+                    participants={participantCards.map((entry) => ({
+                        id: entry.participant.id,
+                        displayName: entry.displayName,
+                        address: entry.address,
+                        buildingFootprint: entry.participant.building_footprint,
+                    }))}
+                />
+            </section>
 
             <ParticipantCardsSection
                 participantCards={participantCards}

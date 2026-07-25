@@ -78,6 +78,14 @@ Each meter shows:
 
 > **See also:** [Metering Points](04-metering-points.md) for setup details.
 
+## Map
+
+The Participants page shows a small map with each participant's building outlined on OpenStreetMap. It's built from the address fields (street, postal code, city), assuming a Swiss address, and updates automatically whenever a participant's address is added or changed.
+
+- Participants at the same building share a single outline; its popup lists everyone there.
+- An address that can't be located (typo, incomplete, or simply not entered yet) is just left off the map — a note below it says how many participants aren't shown. There's no manual pin-placement in this iteration.
+- Locating a building can take a short while after saving a new or changed address, since it happens in the background — refresh the page if a just-added participant hasn't appeared yet.
+
 ## Removing a Participant
 
 Participants are **never deleted**—instead, mark them inactive:

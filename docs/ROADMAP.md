@@ -160,6 +160,7 @@ PVshare Cockpit is a closed, subscription-based SaaS (CHF ~30/participant/year) 
 | Auto-create user account on participant creation | `shipped` | — | — |
 | Participant contract PDF (metering points, tariffs, billing interval, notes) | `shipped` | — | — |
 | Participant status indicator | `shipped` | — | — |
+| Participant location map (OpenStreetMap building outlines, geocoded from address) | `shipped` | — | [ADR 0012](adr/0012-participant-geocoding-via-nominatim.md) |
 | `MeteringPoint` CRUD (consumption, production, bidirectional types) | `shipped` | — | [spec](specs/2026-03-metering-point-management.md) |
 | Assignment-only validity model (`MeteringPointAssignment` with date range) | `shipped` | — | [ADR 0009](adr/0009-remove-direct-meteringpoint-participant-fk.md) |
 | `MeteringPointAssignment` CRUD with overlap/containment validation | `shipped` | — | [spec](specs/2026-03-metering-point-management.md) |
