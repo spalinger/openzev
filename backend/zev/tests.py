@@ -263,6 +263,64 @@ class ParticipantAccountLifecycleTests(TestCase):
 		self.assertTrue(created.user.must_change_password)
 
 
+class AdminCanEditOwnerParticipantTests(TestCase):
+	"""The owner's own participant record (linked to a zev_owner-role account,
+	not a participant-role one) is invoice-critical — it's the creditor
+	address on generated PDFs — so an admin must be able to edit it, even
+	though a regular participant edit is normally blocked for non-participant
+	accounts."""
+
+	def setUp(self):
+		self.client = APIClient()
+		self.owner = make_user("owner_for_edit_test", UserRole.ZEV_OWNER)
+		self.zev = Zev.objects.create(
+			name="Owner Edit ZEV",
+			owner=self.owner,
+			zev_type="vzev",
+			invoice_prefix="O",
+		)
+		self.owner_participant = Participant.objects.create(
+			zev=self.zev,
+			user=self.owner,
+			first_name="Olivia",
+			last_name="Owner",
+			email="olivia.owner@example.com",
+			address_line1="Old Street 1",
+			postal_code="8000",
+			city="Zurich",
+			valid_from=date(2026, 1, 1),
+		)
+
+	def test_admin_can_edit_the_owner_participant_address(self):
+		admin = make_user("admin_edit_owner", UserRole.ADMIN)
+		auth(self.client, admin)
+
+		resp = self.client.patch(
+			f"/api/v1/zev/participants/{self.owner_participant.id}/",
+			{"address_line1": "New Street 5", "postal_code": "3000", "city": "Bern"},
+			format="json",
+		)
+
+		self.assertEqual(resp.status_code, 200)
+		self.owner_participant.refresh_from_db()
+		self.assertEqual(self.owner_participant.address_line1, "New Street 5")
+		self.assertEqual(self.owner_participant.city, "Bern")
+
+	def test_zev_owner_cannot_edit_their_own_owner_participant_record(self):
+		auth(self.client, self.owner)
+
+		resp = self.client.patch(
+			f"/api/v1/zev/participants/{self.owner_participant.id}/",
+			{"address_line1": "New Street 5", "postal_code": "3000", "city": "Bern"},
+			format="json",
+		)
+
+		self.assertEqual(resp.status_code, 400)
+		self.assertIn("user", resp.data)
+		self.owner_participant.refresh_from_db()
+		self.assertEqual(self.owner_participant.address_line1, "Old Street 1")
+
+
 class ParticipantAccountLinkingTests(TestCase):
 	def setUp(self):
 		self.client = APIClient()
