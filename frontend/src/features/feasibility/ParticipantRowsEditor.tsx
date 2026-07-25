@@ -11,41 +11,46 @@ export function ParticipantRowsEditor({ form }: Props) {
     const { fields, append, remove } = useFieldArray({ control: form.control, name: 'participants' })
 
     return (
-        <div>
-            {fields.length > 0 && (
-                <div
-                    style={{
-                        display: 'grid',
-                        gridTemplateColumns: '2fr 1fr 1fr auto',
-                        gap: '0.4rem',
-                        marginBottom: '0.3rem',
-                    }}
-                >
-                    <span className="muted" style={{ fontSize: '0.72rem' }}>{t('pages.feasibility.form.participantName')}</span>
-                    <span className="muted" style={{ fontSize: '0.72rem' }}>{t('pages.feasibility.form.participantProduction')}</span>
-                    <span className="muted" style={{ fontSize: '0.72rem' }}>{t('pages.feasibility.form.participantConsumption')}</span>
-                    <span />
-                </div>
-            )}
+        <div style={{ display: 'grid', gap: '0.6rem' }}>
             {fields.map((field, index) => (
                 <div
                     key={field.id}
-                    style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr auto', gap: '0.4rem', marginBottom: '0.4rem' }}
+                    style={{
+                        border: '1px solid rgba(148, 163, 184, 0.35)',
+                        borderRadius: '0.75rem',
+                        padding: '0.6rem 0.7rem 0.7rem',
+                        display: 'grid',
+                        gap: '0.5rem',
+                    }}
                 >
-                    <input
-                        placeholder={t('pages.feasibility.form.participantNamePlaceholder')}
-                        {...form.register(`participants.${index}.name` as const)}
-                    />
-                    <input type="number" step="any" min="0" {...form.register(`participants.${index}.annual_production_kwh` as const)} />
-                    <input type="number" step="any" min="0" {...form.register(`participants.${index}.annual_consumption_kwh` as const)} />
-                    <button
-                        type="button"
-                        className="button button-danger button-compact"
-                        onClick={() => remove(index)}
-                        aria-label={t('common.delete')}
-                    >
-                        {t('common.delete')}
-                    </button>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.5rem', alignItems: 'end' }}>
+                        <label style={{ margin: 0 }}>
+                            <span className="muted" style={{ fontSize: '0.72rem' }}>{t('pages.feasibility.form.participantName')}</span>
+                            <input
+                                placeholder={t('pages.feasibility.form.participantNamePlaceholder')}
+                                {...form.register(`participants.${index}.name` as const)}
+                            />
+                        </label>
+                        <button
+                            type="button"
+                            className="button button-danger button-compact"
+                            onClick={() => remove(index)}
+                            aria-label={t('common.delete')}
+                            title={t('common.delete')}
+                        >
+                            {t('common.delete')}
+                        </button>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                        <label style={{ margin: 0 }}>
+                            <span className="muted" style={{ fontSize: '0.72rem' }}>{t('pages.feasibility.form.participantProduction')}</span>
+                            <input type="number" step="any" min="0" {...form.register(`participants.${index}.annual_production_kwh` as const)} />
+                        </label>
+                        <label style={{ margin: 0 }}>
+                            <span className="muted" style={{ fontSize: '0.72rem' }}>{t('pages.feasibility.form.participantConsumption')}</span>
+                            <input type="number" step="any" min="0" {...form.register(`participants.${index}.annual_consumption_kwh` as const)} />
+                        </label>
+                    </div>
                 </div>
             ))}
             <button
