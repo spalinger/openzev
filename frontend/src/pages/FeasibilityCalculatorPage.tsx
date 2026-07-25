@@ -71,7 +71,15 @@ export function FeasibilityCalculatorPage() {
                 onPrefillLoaded={(prefill) => form.reset(applyPrefillToFormValues(prefill, form.getValues()))}
             />
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 420px) 1fr', gap: '1.5rem', alignItems: 'start' }}>
+            <div
+                style={{
+                    display: 'grid',
+                    gridTemplateColumns:
+                        watchedValues.energy_input_mode === 'participants' ? 'minmax(320px, 540px) 1fr' : 'minmax(320px, 420px) 1fr',
+                    gap: '1.5rem',
+                    alignItems: 'start',
+                }}
+            >
                 <form className="card page-stack" onSubmit={(event) => event.preventDefault()}>
                     <h3 style={{ marginTop: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                         {t('pages.feasibility.form.systemTitle')}
