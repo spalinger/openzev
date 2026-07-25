@@ -174,6 +174,9 @@ def create_zev_with_owner_setup(*, zev_data: dict, owner_data: dict, metering_po
         valid_from=zev.start_date,
     )
 
+    from .tasks import trigger_geocode_if_address_present
+    trigger_geocode_if_address_present(owner_participant)
+
     created_metering_points: list[dict] = []
     for metering_point_data in metering_points_data:
         metering_point = MeteringPoint.objects.create(

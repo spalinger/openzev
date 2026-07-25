@@ -157,6 +157,16 @@ EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="openzev@example.com")
 FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:5173")
 
+# ── Cache ─────────────────────────────────────────────────────────────────────
+# Separate logical Redis DB from the Celery broker (db 0) so cache keys never
+# collide with Celery's own bookkeeping keys.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": env("CACHE_URL", default="redis://localhost:6379/1"),
+    }
+}
+
 # ── Celery ────────────────────────────────────────────────────────────────────
 CELERY_BROKER_URL = env("CELERY_BROKER_URL", default="redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = CELERY_BROKER_URL

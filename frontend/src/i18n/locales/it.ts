@@ -788,6 +788,12 @@ export const it = {
                 address: 'Indirizzo',
                 validity: 'Validità',
             },
+            map: {
+                title: 'Mappa',
+                empty: 'Non è ancora stato possibile localizzare alcun indirizzo dei partecipanti.',
+                notShown_one: '{{count}} partecipante non mostrato (indirizzo non localizzabile).',
+                notShown_other: '{{count}} partecipanti non mostrati (indirizzi non localizzabili).',
+            },
             validity: {
                 current: 'Attuale',
                 upcoming: 'Futura',

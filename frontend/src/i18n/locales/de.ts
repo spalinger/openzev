@@ -781,6 +781,12 @@ export const de = {
                 address: 'Adresse',
                 validity: 'Gültigkeit',
             },
+            map: {
+                title: 'Karte',
+                empty: 'Es konnten noch keine Teilnehmeradressen lokalisiert werden.',
+                notShown_one: '{{count}} Teilnehmer nicht angezeigt (Adresse konnte nicht lokalisiert werden).',
+                notShown_other: '{{count}} Teilnehmer nicht angezeigt (Adressen konnten nicht lokalisiert werden).',
+            },
             validity: {
                 current: 'Aktuell',
                 upcoming: 'Bevorstehend',

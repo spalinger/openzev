@@ -752,6 +752,12 @@ export const en = {
                 address: 'Address',
                 validity: 'Validity',
             },
+            map: {
+                title: 'Map',
+                empty: 'No participant addresses could be located yet.',
+                notShown_one: '{{count}} participant not shown (address could not be located).',
+                notShown_other: '{{count}} participants not shown (address could not be located).',
+            },
             validity: {
                 current: 'Current',
                 upcoming: 'Upcoming',

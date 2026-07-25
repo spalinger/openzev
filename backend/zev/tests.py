@@ -1,4 +1,5 @@
 from datetime import date, datetime, timezone
+from unittest import mock
 
 from django.test import TestCase
 from django.core import mail
@@ -114,7 +115,8 @@ class ZevCreationWizardTests(TestCase):
 		)
 		self.assertEqual(resp.status_code, 403)
 
-	def test_admin_can_create_zev_with_owner_and_metering_points(self):
+	@mock.patch("zev.tasks.warm_participant_geocode_cache_task.delay")
+	def test_admin_can_create_zev_with_owner_and_metering_points(self, mock_geocode_delay):
 		auth(self.client, self.admin)
 		resp = self.client.post(
 			"/api/v1/zev/zevs/create-with-owner/",
@@ -181,7 +183,8 @@ class ParticipantAccountLifecycleTests(TestCase):
 		)
 		auth(self.client, self.owner)
 
-	def test_create_participant_creates_account_and_initial_password(self):
+	@mock.patch("zev.tasks.warm_participant_geocode_cache_task.delay")
+	def test_create_participant_creates_account_and_initial_password(self, mock_geocode_delay):
 		resp = self.client.post(
 			"/api/v1/zev/participants/",
 			{
@@ -209,7 +212,8 @@ class ParticipantAccountLifecycleTests(TestCase):
 		self.assertTrue(participant.user.must_change_password)
 		self.assertEqual(resp.data["title"], "ms")
 
-	def test_update_participant_saves_contact_details(self):
+	@mock.patch("zev.tasks.warm_participant_geocode_cache_task.delay")
+	def test_update_participant_saves_contact_details(self, mock_geocode_delay):
 		participant = Participant.objects.create(
 			zev=self.zev,
 			first_name="Nina",
