@@ -295,7 +295,8 @@ class AdminCanEditOwnerParticipantTests(TestCase):
 			valid_from=date(2026, 1, 1),
 		)
 
-	def test_admin_can_edit_the_owner_participant_address(self):
+	@mock.patch("zev.tasks.warm_participant_geocode_cache_task.delay")
+	def test_admin_can_edit_the_owner_participant_address(self, mock_geocode_delay):
 		admin = make_user("admin_edit_owner", UserRole.ADMIN)
 		auth(self.client, admin)
 
