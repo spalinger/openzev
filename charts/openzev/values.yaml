@@ -92,6 +92,9 @@ database:
 # Redis is external to this chart.
 redis:
   url: "redis://redis:6379/0"
+  # Cache DB (e.g. geocoding results) — kept on a separate logical Redis DB
+  # from the Celery broker above so cache keys never collide with Celery's.
+  cacheUrl: "redis://redis:6379/1"
 
 email:
   backend: "django.core.mail.backends.console.EmailBackend"

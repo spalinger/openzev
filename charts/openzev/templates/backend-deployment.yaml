@@ -54,6 +54,8 @@ spec:
               {{- end }}
             - name: CELERY_BROKER_URL
               value: {{ .Values.redis.url | quote }}
+            - name: CACHE_URL
+              value: {{ .Values.redis.cacheUrl | quote }}
             - name: EMAIL_BACKEND
               value: {{ .Values.email.backend | quote }}
             - name: EMAIL_HOST
