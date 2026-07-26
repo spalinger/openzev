@@ -1,4 +1,5 @@
 from datetime import timedelta
+from unittest import mock
 
 from django.test import TestCase
 from django.utils import timezone
@@ -359,6 +360,37 @@ class AuditPhase3InstrumentationTests(TestCase):
         ).latest("created_at")
         self.assertEqual(event.action_category, AuditActionCategory.PARTICIPANT)
         self.assertEqual(event.status, AuditEventStatus.SUCCESS)
+
+    @mock.patch("zev.tasks.warm_participant_geocode_cache_task.delay")
+    def test_participant_update_emits_audit_event_with_field_changes(self, mock_geocode_delay):
+        auth(self.client, self.admin)
+        response = self.client.patch(
+            f"/api/v1/zev/participants/{self.participant.id}/",
+            {
+                "first_name": "Updated",
+                "phone": "+41 79 123 45 67",
+                "address_line1": "Musterstrasse 1",
+                "postal_code": "8000",
+                "city": "Zurich",
+                "notes": "Prefers e-mail contact.",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        event = AuditEvent.objects.filter(
+            action_type="participant.update",
+            target_id=str(self.participant.id),
+        ).latest("created_at")
+        self.assertEqual(event.status, AuditEventStatus.SUCCESS)
+        self.assertEqual(event.changes_json.get("first_name", {}).get("before"), "Phase")
+        self.assertEqual(event.changes_json.get("first_name", {}).get("after"), "Updated")
+        self.assertEqual(event.changes_json.get("phone", {}).get("after"), "+41 79 123 45 67")
+        self.assertEqual(event.changes_json.get("address_line1", {}).get("after"), "Musterstrasse 1")
+        self.assertEqual(event.changes_json.get("postal_code", {}).get("after"), "8000")
+        self.assertEqual(event.changes_json.get("city", {}).get("after"), "Zurich")
+        self.assertEqual(event.changes_json.get("notes", {}).get("after"), "Prefers e-mail contact.")
+        self.assertNotIn("last_name", event.changes_json)
 
     def test_metering_delete_readings_emits_audit_event(self):
         MeterReading.objects.create(

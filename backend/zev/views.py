@@ -137,25 +137,44 @@ class ParticipantViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
             metadata={"zev_id": str(participant.zev_id)},
         )
 
+    PARTICIPANT_TRACKED_FIELDS = [
+        "title",
+        "first_name",
+        "last_name",
+        "email",
+        "phone",
+        "address_line1",
+        "address_line2",
+        "postal_code",
+        "city",
+        "valid_from",
+        "valid_to",
+        "notes",
+        "user",
+    ]
+
+    def _participant_snapshot(self, participant):
+        return {
+            "title": participant.title,
+            "first_name": participant.first_name,
+            "last_name": participant.last_name,
+            "email": participant.email,
+            "phone": participant.phone,
+            "address_line1": participant.address_line1,
+            "address_line2": participant.address_line2,
+            "postal_code": participant.postal_code,
+            "city": participant.city,
+            "valid_from": participant.valid_from,
+            "valid_to": participant.valid_to,
+            "notes": participant.notes,
+            "user": str(participant.user_id) if participant.user_id else None,
+        }
+
     def perform_update(self, serializer):
         participant = self.get_object()
-        before = {
-            "first_name": participant.first_name,
-            "last_name": participant.last_name,
-            "email": participant.email,
-            "valid_from": participant.valid_from,
-            "valid_to": participant.valid_to,
-            "user": str(participant.user_id) if participant.user_id else None,
-        }
+        before = self._participant_snapshot(participant)
         participant = serializer.save()
-        after = {
-            "first_name": participant.first_name,
-            "last_name": participant.last_name,
-            "email": participant.email,
-            "valid_from": participant.valid_from,
-            "valid_to": participant.valid_to,
-            "user": str(participant.user_id) if participant.user_id else None,
-        }
+        after = self._participant_snapshot(participant)
         _record_zev_event(
             request=self.request,
             action_category=AuditActionCategory.PARTICIPANT,
@@ -165,11 +184,7 @@ class ParticipantViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
             target_id=str(participant.pk),
             target_display=participant.full_name,
             summary=f"Updated participant {participant.full_name}.",
-            changes=build_diff(
-                before,
-                after,
-                ["first_name", "last_name", "email", "valid_from", "valid_to", "user"],
-            ),
+            changes=build_diff(before, after, self.PARTICIPANT_TRACKED_FIELDS),
         )
 
     def perform_destroy(self, instance):
