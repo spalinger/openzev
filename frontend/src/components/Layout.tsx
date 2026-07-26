@@ -28,8 +28,7 @@ export function Layout() {
         location.pathname.startsWith('/zev-settings') ||
         location.pathname.startsWith('/metering-points') ||
         location.pathname.startsWith('/metering-data') ||
-        location.pathname.startsWith('/audit-logs') ||
-        location.pathname.startsWith('/admin/zevs'),
+        location.pathname.startsWith('/audit-logs'),
     )
     const [isAdminNavOpen, setIsAdminNavOpen] = useState(location.pathname.startsWith('/admin'))
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
@@ -45,16 +44,16 @@ export function Layout() {
     useEffect(() => {
         if (location.pathname.startsWith('/admin')) {
             setIsAdminNavOpen(true)
-        }
-        if (
+            setIsManageNavOpen(false)
+        } else if (
             location.pathname.startsWith('/participants') ||
             location.pathname.startsWith('/zev-settings') ||
             location.pathname.startsWith('/metering-points') ||
             location.pathname.startsWith('/metering-data') ||
-            location.pathname.startsWith('/audit-logs') ||
-            location.pathname.startsWith('/admin/zevs')
+            location.pathname.startsWith('/audit-logs')
         ) {
             setIsManageNavOpen(true)
+            setIsAdminNavOpen(false)
         }
     }, [location.pathname])
 
@@ -99,8 +98,7 @@ export function Layout() {
         location.pathname.startsWith('/zev-settings') ||
         location.pathname.startsWith('/metering-points') ||
         location.pathname.startsWith('/metering-data') ||
-        location.pathname.startsWith('/audit-logs') ||
-        location.pathname.startsWith('/admin/zevs')
+        location.pathname.startsWith('/audit-logs')
 
     const ownerById = new Map((usersQuery.data?.results ?? []).map((candidate) => [candidate.id, candidate]))
     const selectedZevOwner = selectedZev ? ownerById.get(selectedZev.owner) : undefined
@@ -163,7 +161,11 @@ export function Layout() {
                                         <button
                                             type="button"
                                             className={`nav-toggle${manageIsActive ? ' active' : ''}`}
-                                            onClick={() => setIsManageNavOpen((prev) => !prev)}
+                                            onClick={() => setIsManageNavOpen((prev) => {
+                                                const next = !prev
+                                                if (next) setIsAdminNavOpen(false)
+                                                return next
+                                            })}
                                             title={t('nav.manageZev')}
                                         >
                                             <span className="nav-toggle-main">
@@ -269,7 +271,11 @@ export function Layout() {
                                         <button
                                             type="button"
                                             className={`nav-toggle${adminIsActive ? ' active' : ''}`}
-                                            onClick={() => setIsAdminNavOpen((prev) => !prev)}
+                                            onClick={() => setIsAdminNavOpen((prev) => {
+                                                const next = !prev
+                                                if (next) setIsManageNavOpen(false)
+                                                return next
+                                            })}
                                             title={t('nav.adminConsole')}
                                         >
                                             <span className="nav-toggle-main">

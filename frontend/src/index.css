@@ -111,7 +111,9 @@ label {
   display: grid;
   gap: 1.5rem;
   flex: 1;
+  min-width: 0;
   min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   padding-right: 0.25rem;
   scrollbar-width: thin;
@@ -187,6 +189,7 @@ label {
 .nav-list {
   display: grid;
   gap: 0.5rem;
+  min-width: 0;
 }
 
 .nav-zev-selector {
@@ -237,6 +240,7 @@ label {
 .nav-link,
 .nav-toggle {
   width: 100%;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 0.8rem;
@@ -258,6 +262,7 @@ label {
 .nav-section {
   display: grid;
   gap: 0.4rem;
+  min-width: 0;
 }
 
 .nav-toggle {
@@ -272,6 +277,8 @@ label {
   display: inline-flex;
   align-items: center;
   gap: 0.8rem;
+  min-width: 0;
+  flex: 1;
 }
 
 .nav-icon {
@@ -290,6 +297,9 @@ label {
 
 .nav-label {
   min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .nav-caret {
@@ -301,6 +311,7 @@ label {
   display: grid;
   gap: 0.4rem;
   padding-left: 1rem;
+  min-width: 0;
 }
 
 .nav-sublist .nav-link {
