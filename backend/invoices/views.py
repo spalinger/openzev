@@ -1,4 +1,5 @@
 import io
+import logging
 import zipfile
 from datetime import date as date_type
 
@@ -16,7 +17,12 @@ from .serializers import (
 )
 from .engine import generate_invoice
 from .pdf import save_invoice_pdf
-from .tasks import send_invoice_email_task, generate_zev_invoices_task, generate_zev_pdfs_task
+from .tasks import (
+    generate_invoice_pdf_task,
+    generate_zev_invoices_task,
+    generate_zev_pdfs_task,
+    send_invoice_email_task,
+)
 from .period_overview import compute_period_overview
 from .workflow import (
     InvoiceWorkflowError,
@@ -28,6 +34,8 @@ from .workflow import (
 )
 from audit.models import AuditActionCategory, AuditEventStatus
 from audit.services import build_diff, record_audit_event
+
+logger = logging.getLogger(__name__)
 
 
 def _invoice_target_display(invoice: Invoice) -> str:
@@ -160,6 +168,28 @@ class InvoiceViewSet(
             return Response(
                 {"error": "Invoice generation failed. The invoice may already exist in a non-regenerable state."},
                 status=status.HTTP_409_CONFLICT,
+            )
+        # Queued rather than rendered inline: a render takes seconds, and the
+        # caller only needs the invoice back. The PDF follows on its own so it
+        # is never something the operator has to ask for.
+        #
+        # A broker outage must not fail the request. The invoice is the
+        # deliverable and it is already committed; failing here would return an
+        # error for work that succeeded, and the operator would have no idea the
+        # invoice exists. The PDF is recoverable — the email task renders one
+        # lazily if it is still missing, and there is a per-invoice regenerate
+        # action — so the failure is recorded and the response stands.
+        try:
+            generate_invoice_pdf_task.delay(str(invoice.pk))
+        except Exception as exc:
+            logger.error("Could not queue PDF generation for invoice %s: %s", invoice.invoice_number, exc)
+            _record_invoice_event(
+                request=request,
+                action_type="invoice.generate_pdf",
+                summary=f"Could not queue PDF generation for invoice {_invoice_target_display(invoice)}.",
+                status=AuditEventStatus.FAILED,
+                invoice=invoice,
+                metadata={"error": str(exc)},
             )
         _record_invoice_event(
             request=request,
