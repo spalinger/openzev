@@ -89,17 +89,22 @@ class AllocatedReading:
 
     ``energy_kwh`` is the summed reading for that metering point at that
     timestamp; ``zev_consumption_kwh``/``zev_production_kwh`` are the physical
-    community totals the split was computed against. ``holder_id`` is ``None``
-    for a gap reading (no assignment active at the timestamp).
+    community totals the split was computed against. ``holder_id`` is the
+    participant's UUID (``Participant.id`` is a ``UUIDField``) or ``None`` for a
+    gap reading (no assignment active at the timestamp). ``split`` is ``None``
+    when the caller passed ``with_split=False`` — a consumer that only needs
+    holder-attributed totals and does not want ``allocation.split``'s fail-fast
+    contracts applied to every community reading (the PDF stats production
+    loop, which just sums each holder's production).
     """
 
     metering_point_id: uuid.UUID
     timestamp: datetime
-    holder_id: int | None
+    holder_id: uuid.UUID | None
     energy_kwh: Decimal
     zev_consumption_kwh: Decimal
     zev_production_kwh: Decimal
-    split: ConsumptionSplit | ProductionSplit
+    split: ConsumptionSplit | ProductionSplit | None
 
 
 def iter_allocated_readings(
@@ -111,6 +116,7 @@ def iter_allocated_readings(
     windows: AssignmentWindows,
     consumption_by_ts: dict | None = None,
     production_by_ts: dict | None = None,
+    with_split: bool = True,
 ):
     """Yield an :class:`AllocatedReading` per (metering point, timestamp) group.
 
@@ -122,6 +128,18 @@ def iter_allocated_readings(
 
     The reading filter uses the caller's ``[start_dt, end_dt)`` bounds exactly,
     so migrating a consumer keeps its reading set byte-identical.
+
+    ``with_split`` controls whether the per-reading split is computed. The
+    default (``True``) runs ``split_consumption``/``split_production`` — and
+    their fail-fast non-negative contracts — for every yielded reading, which is
+    what the invoice engine and the consumption PDF stats want. A consumer that
+    only needs holder-attributed totals (e.g. the PDF stats production loop,
+    which sums each holder's production and never reads ``.split``) passes
+    ``False``: the split is skipped, so a corrupt reading (a meter correction
+    or bad import with a negative ``energy_kwh``) is attributed to its holder
+    instead of raising for the whole community. The fail-fast contract on a
+    participant's *own* readings is still enforced by the invoice engine, which
+    iterates that participant's meters and calls ``split_production`` directly.
     """
     try:
         meter_types, direction = _KINDS[kind]
@@ -153,7 +171,9 @@ def iter_allocated_readings(
         energy_kwh = row["energy_kwh"] or Decimal("0")
         zev_consumption = consumption_by_ts.get(ts, Decimal("0"))
         zev_production = production_by_ts.get(ts, Decimal("0"))
-        if kind == CONSUMPTION:
+        if not with_split:
+            split = None  # caller only wants holder-attributed totals
+        elif kind == CONSUMPTION:
             split = split_consumption(energy_kwh, zev_consumption, zev_production)
         else:
             split = split_production(energy_kwh, zev_production, zev_consumption)
