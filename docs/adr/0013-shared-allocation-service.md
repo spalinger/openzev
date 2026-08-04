@@ -87,7 +87,7 @@ Trade-offs:
 - Requires updating 10 call sites across 4 apps
 - Behavior must stay byte-identical for unchanged data during the transition, or invoices, PDFs, and dashboards will not reconcile
 - Per-timestamp filtering changes billed amounts for periods with mid-period assignment changes — safe pre-launch, but must be revisited with customer communication if introduced after go-live
-- The fetch-and-filter orchestration (query readings → build windows → loop → resolve holder → call split) is still duplicated per consumer; only the formulas are centralized (see follow-ups)
+- The fetch-and-filter orchestration (query readings → build windows → loop → resolve holder → call split) was still duplicated per consumer at the time of this decision; it has since been centralized in `allocation/read_model.py` (see verification)
 
 ## Acceptance criteria
 
@@ -123,12 +123,12 @@ Verification (at time of implementation):
 - `AssignmentWindows` windows are immutable (tuple) after construction
 - The generate endpoint reports allocation failures (`AllocationError`) as 400 with the underlying error instead of the 409 reserved for existing invoices (`invoices/tests.py`); the celery bulk task's audit event already carries the exact exception message
 - `generate_invoices_for_zev` isolates failures per participant and reports generated/failed counts with per-participant errors (`invoices/test_batch_actions.py`)
+- The allocation read-model (`allocation/read_model.py`) centralizes the fetch/resolve/split orchestration; `allocation/test_read_model.py` pins physical totals, per-timestamp holder resolution, gap handling, and split math
 - Full backend suite passes (`python -m pytest -q`)
 
 Follow-ups from review (not this change):
 
 - **Batch per-timestamp allocator**: an `allocate_consumption`/`allocate_production` API taking all readings of a timestamp would own quantization and residual assignment (largest remainder, deterministic tie-break), making conservation exact at the settlement quantum. The current scalar functions cannot allocate a residual deterministically — they do not know the participant set.
-- **Allocation read-model**: an `iter_allocated_readings()` iterator yielding an `AllocatedReading` dataclass would remove the duplicated fetch-and-filter orchestration across consumers. The ADR centralizes the formulas; the orchestration is still per-consumer.
 - **Naming vocabulary**: `from_zev` vs `local` map to public API fields (`from_zev_kwh`, `from_grid_kwh`) consumed by the frontend; renaming is a breaking API change and would need frontend updates in the same PR.
 - **Gap-report feature**: surface excluded readings in the invoice document (not just the engine log) — product decision.
 - **Query-count tests**: the allocation service adds at most one query per consumer (windows fetch); pinning this with `assertNumQueries` is a follow-up.
