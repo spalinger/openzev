@@ -198,6 +198,16 @@ export interface ApiKeyWithSecret extends ApiKey {
     key: string
 }
 
+/** A key as the admin console sees it: same fields, plus its owner. */
+export interface AdminApiKey extends ApiKey {
+    user: number
+    username: string
+    user_email: string
+    user_role: string
+    revoked_at: string | null
+    is_revoked: boolean
+}
+
 export interface ApiKeyInput {
     name: string
     read_only: boolean
@@ -433,27 +443,6 @@ export interface TariffPeriodInput {
     time_from?: string | null
     time_to?: string | null
     weekdays?: string
-}
-
-export interface TariffPresetPeriod {
-    period_type: 'flat' | 'high' | 'low'
-    price_chf_per_kwh: string
-    time_from?: string | null
-    time_to?: string | null
-    weekdays?: string
-}
-
-export interface TariffPreset {
-    name: string
-    category: 'energy' | 'grid_fees' | 'levies' | 'metering'
-    billing_mode: TariffBillingMode
-    energy_type?: 'local' | 'grid' | 'feed_in' | null
-    fixed_price_chf?: string | null
-    percentage?: string | null
-    valid_from: string
-    valid_to?: string | null
-    notes?: string
-    periods: TariffPresetPeriod[]
 }
 
 export interface Invoice {

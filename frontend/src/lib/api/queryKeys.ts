@@ -9,12 +9,14 @@ export const queryKeys = {
     oauthProviders: () => ['auth', 'oauth-providers'] as const,
     socialAccounts: () => ['auth', 'social-accounts'] as const,
     apiKeys: () => ['auth', 'api-keys'] as const,
+    allApiKeys: (user?: number | '', status?: string) => ['auth', 'all-api-keys', user ?? '', status ?? ''] as const,
     oauthProviderConfigs: () => ['auth', 'oauth-provider-configs'] as const,
   },
   zev: {
     list: () => ['zev', 'list'] as const,
     participants: (zevId?: string) => ['zev', 'participants', zevId ?? 'all'] as const,
     meteringPoints: (zevId?: string) => ['zev', 'metering-points', zevId ?? 'all'] as const,
+    transferSections: () => ['zev', 'transfer-sections'] as const,
   },
   tariffs: {
     list: (zevId?: string) => ['tariffs', 'list', zevId ?? 'all'] as const,
