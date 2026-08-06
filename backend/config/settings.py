@@ -117,6 +117,10 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = Path(env("MEDIA_ROOT", default=str(BASE_DIR / "media")))
 
+# Named in transfer-archive manifests so an imported archive says which
+# instance it came from. Empty on a single-instance deployment.
+INSTANCE_NAME = env("INSTANCE_NAME", default="")
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ── Django REST Framework ─────────────────────────────────────────────────────

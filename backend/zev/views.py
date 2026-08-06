@@ -1,3 +1,4 @@
+import logging
 import tempfile
 from datetime import date as date_type, datetime, timedelta, timezone as dt_timezone
 
@@ -44,6 +45,8 @@ from .transfer import (
 from audit.models import AuditActionCategory, AuditEventStatus
 from audit.mixins import AuditedUpdateMixin
 from audit.services import record_audit_event
+
+logger = logging.getLogger(__name__)
 
 
 class ZevViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
@@ -124,11 +127,24 @@ class ZevViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
             }
         )
 
+    def _record_transfer_audit(self, request, **kwargs):
+        """Record a transfer audit event without failing the operation.
+
+        On import the ZEV is already committed by the time this runs, and on
+        export the archive is already built — an audit failure must not turn a
+        completed transfer into an error (or, worse, into a duplicate import
+        when the client retries what looked like a failure).
+        """
+        try:
+            record_audit_event(request=request, **kwargs)
+        except Exception:  # noqa: BLE001 - the audit is a log line, not the operation
+            logger.exception("Failed to record transfer audit event")
+
     @action(detail=True, methods=["get"], url_path="export")
     def export_archive(self, request, pk=None):
         """Download the ZEV as a transfer archive."""
         zev = self.get_object()
-        sections = self._parse_sections(request.query_params.get("sections"))
+        sections = self._parse_sections(request.query_params.getlist("sections"))
 
         # Spooled: a structure-only export never touches the disk, while a
         # community with years of readings rolls over instead of being held in
@@ -145,8 +161,8 @@ class ZevViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
             )
         except ValueError as exc:
             buffer.close()
-            record_audit_event(
-                request=request,
+            self._record_transfer_audit(
+                request,
                 action_category=AuditActionCategory.GOVERNANCE,
                 action_type="zev.export",
                 target_type="zev.Zev",
@@ -160,8 +176,8 @@ class ZevViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         buffer.seek(0)
-        record_audit_event(
-            request=request,
+        self._record_transfer_audit(
+            request,
             action_category=AuditActionCategory.GOVERNANCE,
             action_type="zev.export",
             target_type="zev.Zev",
@@ -217,12 +233,12 @@ class ZevViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
         if upload is None:
             return Response({"detail": "A ZIP archive is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        sections = self._parse_sections(request.data.get("sections"))
+        sections = self._parse_sections(request.data.getlist("sections"))
         name_override = (request.data.get("name") or "").strip()
 
         def _failed(summary, payload, http_status=status.HTTP_400_BAD_REQUEST):
-            record_audit_event(
-                request=request,
+            self._record_transfer_audit(
+                request,
                 action_category=AuditActionCategory.IMPORT,
                 action_type="zev.import",
                 target_type="zev.Zev",
@@ -252,8 +268,8 @@ class ZevViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
         except (ArchiveError, ValueError) as exc:
             return _failed(f"ZEV import failed: {exc}", {"detail": str(exc)})
 
-        record_audit_event(
-            request=request,
+        self._record_transfer_audit(
+            request,
             action_category=AuditActionCategory.IMPORT,
             action_type="zev.import",
             target_type="zev.Zev",
@@ -271,13 +287,16 @@ class ZevViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
 
     @staticmethod
     def _parse_sections(raw):
-        """``"zev,participants"`` or a repeated form field -> a list, or None for all."""
+        """Repeated form fields and/or comma-separated values -> a list, or None for all."""
         if raw is None:
             return None
-        if isinstance(raw, (list, tuple)):
-            names = [str(item).strip() for item in raw]
-        else:
-            names = [part.strip() for part in str(raw).split(",")]
+        if not isinstance(raw, (list, tuple)):
+            raw = [raw]
+        names = []
+        for item in raw:
+            if item is None:
+                continue
+            names.extend(part.strip() for part in str(item).split(","))
         names = [name for name in names if name]
         return names or None
 

@@ -20,18 +20,21 @@ archive with several problems takes one round trip to diagnose.
 import csv
 import io
 import json
+import logging
 import uuid
 import zipfile
-from decimal import InvalidOperation
+from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import transaction
+from django.db import DataError, IntegrityError, transaction
 
 from invoices.models import Invoice, InvoiceItem
 from metering.importers.csv_importer import _parse_datetime_utc, _parse_decimal
 from metering.models import ImportLog, ImportSource, MeterReading, ReadingDirection, ReadingResolution
 from tariffs.models import Tariff, TariffPeriod
 from zev.models import MeteringPoint, MeteringPointAssignment, Participant, Zev
+
+logger = logging.getLogger(__name__)
 
 from .schema import (
     ASSIGNMENT_FIELDS,
@@ -48,6 +51,7 @@ from .schema import (
     SECTION_READINGS,
     SECTION_TARIFFS,
     SECTION_ZEV,
+    SECTIONS,
     TARIFF_FIELDS,
     TARIFF_PERIOD_FIELDS,
     ZEV_FIELDS,
@@ -58,6 +62,13 @@ from .schema import (
 )
 
 READING_BATCH_SIZE = 2000
+
+# ``MeterReading.energy_kwh`` is a DecimalField(max_digits=12, decimal_places=4):
+# the largest representable value is 99999999.9999. ``_parse_decimal`` rounds to
+# four decimal places, so 99999999.99995 becomes 100000000.0000 and would fail
+# at the database as a DataError — after the whole batch had been submitted.
+# The per-row check below has to catch that, not the database.
+MAX_ENERGY_KWH = Decimal("99999999.9999")
 
 # A malformed readings file can produce one error per row. The response has to
 # stay a response, so the list is capped and the true total reported alongside.
@@ -116,17 +127,43 @@ def _normalise(detail):
 # ── Reading the archive ────────────────────────────────────────────────────
 
 
-def read_manifest(archive):
+def _read_member(archive, name):
+    """Read one member, turning zip-level failures into ``ArchiveError``.
+
+    ``ZipFile.read`` raises ``BadZipFile`` for members whose payload fails its
+    CRC check — a truncated or corrupted upload — and that is not a subclass of
+    the exceptions the callers otherwise translate, so without this a damaged
+    archive would surface as an unhandled 500 instead of a readable message.
+    """
     try:
-        raw = archive.read(MANIFEST_NAME)
+        return archive.read(name)
+    except zipfile.BadZipFile as exc:
+        raise ArchiveError(f"{name} is corrupt or truncated: {exc}") from exc
+
+
+def _load_json_document(archive, name, *, missing_message):
+    """Read and JSON-parse one member, or raise ``ArchiveError``.
+
+    Missing members and members whose payload fails its CRC check
+    (``BadZipFile``) or is not UTF-8 JSON become readable errors rather than
+    unhandled exceptions.
+    """
+    try:
+        raw = _read_member(archive, name)
     except KeyError as exc:
-        raise ArchiveError(
-            f"This ZIP file is not an OpenZEV export: it has no {MANIFEST_NAME}."
-        ) from exc
+        raise ArchiveError(missing_message) from exc
     try:
-        manifest = json.loads(raw.decode("utf-8"))
+        return json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ArchiveError(f"{MANIFEST_NAME} is not readable JSON: {exc}") from exc
+        raise ArchiveError(f"{name} is not readable JSON: {exc}") from exc
+
+
+def read_manifest(archive):
+    manifest = _load_json_document(
+        archive,
+        MANIFEST_NAME,
+        missing_message=f"This ZIP file is not an OpenZEV export: it has no {MANIFEST_NAME}.",
+    )
     if not isinstance(manifest, dict):
         raise ArchiveError(f"{MANIFEST_NAME} must contain a JSON object.")
 
@@ -136,6 +173,33 @@ def read_manifest(archive):
     if not isinstance(sections, list) or not sections:
         raise ArchiveError(f"{MANIFEST_NAME} does not list any sections.")
     manifest["sections"] = list(normalise_sections(sections))
+
+    # ``counts`` is the manifest's integrity record: an archive without it can
+    # quietly import missing section contents, defeating the verification step.
+    # It must be present, a plain object of non-negative integers, and account
+    # for every declared section. ``zev`` is the one exemption because the
+    # exporter counts sections that hold lists - the settings section is a
+    # single object and carries no count.
+    counts = manifest.get("counts")
+    if not isinstance(counts, dict):
+        raise ArchiveError(f"{MANIFEST_NAME} must record section counts as a JSON object.")
+    for key, value in counts.items():
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ArchiveError(
+                f"{MANIFEST_NAME} count for '{key}' must be a non-negative integer."
+            )
+    for section in manifest["sections"]:
+        if section == SECTION_ZEV:
+            continue
+        if section not in counts:
+            raise ArchiveError(
+                f"{MANIFEST_NAME} does not record a count for section '{section}'."
+            )
+
+    source_zev = manifest.get("source_zev")
+    if source_zev is not None and not isinstance(source_zev, dict):
+        raise ArchiveError(f"{MANIFEST_NAME} 'source_zev' must be a JSON object.")
+
     return manifest
 
 
@@ -157,14 +221,11 @@ def inspect_archive(fileobj):
 
 
 def _load_json(archive, name, *, expect_list=True):
-    try:
-        raw = archive.read(name)
-    except KeyError as exc:
-        raise ArchiveError(f"The archive is missing {name}, which its manifest says it contains.") from exc
-    try:
-        payload = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ArchiveError(f"{name} is not readable JSON: {exc}") from exc
+    payload = _load_json_document(
+        archive,
+        name,
+        missing_message=f"The archive is missing {name}, which its manifest says it contains.",
+    )
     if expect_list and not isinstance(payload, list):
         raise ArchiveError(f"{name} must contain a JSON array.")
     if not expect_list and not isinstance(payload, dict):
@@ -191,9 +252,22 @@ def _import_participants(archive, zev, collector):
     connects them by hand.
     """
     id_map = {}
+    seen_ids = set()
     for position, raw in enumerate(_load_json(archive, SECTION_FILES[SECTION_PARTICIPANTS]), start=1):
         fields = _pick(raw, PARTICIPANT_FIELDS, position, SECTION_PARTICIPANTS)
         label = f"{fields.get('first_name', '')} {fields.get('last_name', '')}".strip() or f"#{position}"
+        source_id = str(raw["id"]) if raw.get("id") else None
+        if source_id is not None and source_id in seen_ids:
+            # Two entries sharing an archive id would silently rewire every
+            # assignment and invoice to whichever participant came last - reject
+            # the duplicate before anything dependent can resolve to it.
+            collector.add(
+                SECTION_PARTICIPANTS,
+                position,
+                label,
+                {"id": [f"Duplicate participant source id '{source_id}'."]},
+            )
+            continue
         participant = Participant(zev=zev, **fields)
         try:
             with transaction.atomic():  # savepoint: one rejection must not poison the rest
@@ -202,8 +276,9 @@ def _import_participants(archive, zev, collector):
         except (DjangoValidationError, ValueError, TypeError) as exc:
             collector.add(SECTION_PARTICIPANTS, position, label, exc)
             continue
-        if raw.get("id"):
-            id_map[str(raw["id"])] = participant
+        if source_id is not None:
+            seen_ids.add(source_id)
+            id_map[source_id] = participant
     return id_map
 
 
@@ -248,6 +323,7 @@ def _import_metering_points(archive, zev, participants_by_archive_id, collector)
         )
 
     points_by_meter_id = {}
+    assignment_count = 0
     for position, raw in enumerate(entries, start=1):
         fields = _pick(raw, METERING_POINT_FIELDS, position, SECTION_METERING_POINTS)
         label = str(fields.get("meter_id") or f"#{position}")
@@ -262,19 +338,23 @@ def _import_metering_points(archive, zev, participants_by_archive_id, collector)
         points_by_meter_id[point.meter_id] = point
 
         for assignment_position, raw_assignment in enumerate(raw.get("assignments") or [], start=1):
-            _import_assignment(
+            if _import_assignment(
                 point,
                 raw_assignment,
                 participants_by_archive_id,
                 collector,
                 label=f"{label} #{assignment_position}",
                 position=position,
-            )
+            ):
+                assignment_count += 1
 
-    return points_by_meter_id
+    return points_by_meter_id, assignment_count
 
 
 def _import_assignment(point, raw, participants_by_archive_id, collector, *, label, position):
+    """Import one assignment; True when it was created."""
+    if not isinstance(raw, dict):
+        raise ArchiveError(f"Assignment {label} is not a JSON object.")
     participant = participants_by_archive_id.get(str(raw.get("participant_id")))
     if participant is None:
         # Either the participant section was not selected, or its entry failed
@@ -285,7 +365,7 @@ def _import_assignment(point, raw, participants_by_archive_id, collector, *, lab
             label,
             {"participant_id": ["No imported participant matches this assignment."]},
         )
-        return
+        return False
 
     fields = _pick(raw, ASSIGNMENT_FIELDS, position, SECTION_METERING_POINTS)
     assignment = MeteringPointAssignment(metering_point=point, participant=participant, **fields)
@@ -298,6 +378,8 @@ def _import_assignment(point, raw, participants_by_archive_id, collector, *, lab
             assignment.save()
     except (DjangoValidationError, ValueError, TypeError) as exc:
         collector.add(SECTION_METERING_POINTS, position, label, exc)
+        return False
+    return True
 
 
 def _import_tariffs(archive, zev, collector):
@@ -355,7 +437,7 @@ def _import_invoices(archive, zev, participants_by_archive_id, collector):
                     item.full_clean(exclude=["invoice"])
                     items.append(item)
                 InvoiceItem.objects.bulk_create(items)
-        except (DjangoValidationError, ValueError, TypeError) as exc:
+        except (DjangoValidationError, ValueError, TypeError, IntegrityError) as exc:
             collector.add(SECTION_INVOICES, position, label, exc)
             continue
 
@@ -403,55 +485,100 @@ def _import_readings(archive, points_by_meter_id, collector, *, batch_id):
         if name.startswith(f"{READINGS_DIR}/") and name.lower().endswith(".csv")
     ]
 
+    # (meter, timestamp, direction) already written for this import. The unique
+    # constraint would catch a duplicate anyway, but only as an IntegrityError
+    # that takes the whole batch down with it and names nothing useful. The set
+    # spans every member, not just this file: two members naming the same meter
+    # are as much a duplicate as two rows in one file.
+    seen = set()
+
     for name in sorted(members):
-        with archive.open(name) as member:
-            text = io.TextIOWrapper(member, encoding="utf-8", newline="")
-            reader = csv.DictReader(text)
-            missing = {"meter_id", "timestamp", "energy_kwh"} - set(reader.fieldnames or [])
-            if missing:
-                collector.add(
-                    SECTION_READINGS,
-                    None,
-                    name,
-                    {"__all__": [f"Missing column(s): {', '.join(sorted(missing))}."]},
-                )
-                continue
-
-            # (timestamp, direction) already written for this meter. The unique
-            # constraint would catch a duplicate anyway, but only as an
-            # IntegrityError that takes the whole batch down with it and names
-            # nothing useful.
-            seen = set()
-            pending = []
-            for row_number, row in enumerate(reader, start=2):
-                reading = _build_reading(row, points_by_meter_id, batch_id)
-                if isinstance(reading, dict):
-                    collector.add(SECTION_READINGS, row_number, name, reading)
-                    continue
-
-                key = (reading.metering_point_id, reading.timestamp, reading.direction)
-                if key in seen:
+        try:
+            with archive.open(name) as member:
+                text = io.TextIOWrapper(member, encoding="utf-8", newline="")
+                reader = csv.DictReader(text)
+                missing = {"meter_id", "timestamp", "energy_kwh"} - set(reader.fieldnames or [])
+                if missing:
                     collector.add(
                         SECTION_READINGS,
-                        row_number,
+                        None,
                         name,
-                        {"__all__": ["Duplicate reading for this metering point, timestamp and direction."]},
+                        {"__all__": [f"Missing column(s): {', '.join(sorted(missing))}."]},
                     )
+                    text.detach()
                     continue
-                seen.add(key)
 
-                pending.append(reading)
-                if len(pending) >= READING_BATCH_SIZE:
-                    MeterReading.objects.bulk_create(pending)
-                    total += len(pending)
-                    pending = []
+                pending = []
+                for row_number, row in enumerate(reader, start=2):
+                    reading = _build_reading(row, points_by_meter_id, batch_id)
+                    if isinstance(reading, dict):
+                        collector.add(SECTION_READINGS, row_number, name, reading)
+                        continue
 
-            if pending:
-                MeterReading.objects.bulk_create(pending)
-                total += len(pending)
-            text.detach()
+                    key = (reading.metering_point_id, reading.timestamp, reading.direction)
+                    if key in seen:
+                        collector.add(
+                            SECTION_READINGS,
+                            row_number,
+                            name,
+                            {"__all__": ["Duplicate reading for this metering point, timestamp and direction."]},
+                        )
+                        continue
+                    seen.add(key)
+
+                    pending.append(reading)
+                    if len(pending) >= READING_BATCH_SIZE:
+                        total += _bulk_create_readings(pending, name, collector)
+                        pending = []
+
+                if pending:
+                    total += _bulk_create_readings(pending, name, collector)
+                text.detach()
+        except (zipfile.BadZipFile, UnicodeDecodeError, csv.Error) as exc:
+            # A member whose payload failed its CRC check, or whose text
+            # cannot be decoded (a NUL byte, say) must not take the whole
+            # import down with an unhandled exception — one file is reported
+            # and the rest still gets its chance.
+            collector.add(
+                SECTION_READINGS,
+                None,
+                name,
+                {"__all__": [f"Unreadable readings file: {exc}"]},
+            )
 
     return total
+
+
+def _bulk_create_readings(rows, member_name, collector):
+    """Insert one batch, converting database-level failures into collected errors.
+
+    The rows were validated individually, so a failure here is something the
+    per-row checks did not cover — a future constraint, a value that overflowed
+    the column width. It must not take the whole import down: the batch is
+    reported by file, and whatever comes next still gets its chance. The insert
+    runs in a savepoint so a rejected batch leaves the surrounding transaction
+    usable on PostgreSQL. Returns the number of rows actually inserted, so the
+    manifest count check does not count a rejected batch as imported data.
+    """
+    try:
+        with transaction.atomic():
+            MeterReading.objects.bulk_create(rows)
+    except (IntegrityError, DataError) as exc:
+        # The exception text can carry database internals (constraint names,
+        # column dumps); the admin-facing response gets a generic sentence and
+        # the detail goes to the log.
+        logger.exception(
+            "Database rejected a batch of %s readings from archive member %r",
+            len(rows), member_name, exc_info=exc,
+        )
+        collector.add(
+            SECTION_READINGS,
+            None,
+            member_name,
+            {"__all__": ["The database rejected a batch of readings; the batch was skipped. See the server log for details."]},
+        )
+        return 0
+    return len(rows)
 
 
 def _build_reading(row, points_by_meter_id, batch_id):
@@ -470,6 +597,13 @@ def _build_reading(row, points_by_meter_id, batch_id):
         energy = _parse_decimal(row.get("energy_kwh"))
     except (InvalidOperation, ValueError, TypeError) as exc:
         return {"energy_kwh": [f"Unreadable energy value: {exc}"]}
+
+    if abs(energy) > MAX_ENERGY_KWH:
+        return {
+            "energy_kwh": [
+                f"Energy value {energy} exceeds the maximum representable value ({MAX_ENERGY_KWH} kWh)."
+            ]
+        }
 
     direction = (row.get("direction") or ReadingDirection.IN).strip().lower()
     if direction not in _VALID_DIRECTIONS:
@@ -571,10 +705,11 @@ def _run_import(archive, manifest, sections, *, owner, name_override, collector,
 
     points_by_meter_id = {}
     if SECTION_METERING_POINTS in sections:
-        points_by_meter_id = _import_metering_points(
+        points_by_meter_id, assignment_count = _import_metering_points(
             archive, zev, participants_by_archive_id, collector
         )
         summary["counts"][SECTION_METERING_POINTS] = len(points_by_meter_id)
+        summary["counts"]["assignments"] = assignment_count
 
     if SECTION_TARIFFS in sections:
         summary["counts"][SECTION_TARIFFS] = _import_tariffs(archive, zev, collector)
@@ -603,4 +738,38 @@ def _run_import(archive, manifest, sections, *, owner, name_override, collector,
             zev.invoice_counter = next_counter
             zev.save(update_fields=["invoice_counter"])
 
+    _verify_manifest_counts(manifest, summary, collector)
+
     return summary
+
+
+def _verify_manifest_counts(manifest, summary, collector):
+    """Where the manifest and what the importer produced disagree, the archive
+    is corrupt or tampered (a readings member dropped out of a truncated ZIP,
+    say), and a backup feature must not report such an import as a success."""
+    declared = manifest.get("counts") or {}
+    for key, expected in declared.items():
+        if key not in summary["counts"]:
+            continue  # a section the user chose not to import
+        # ``assignments`` is counted under the metering-points section.
+        section = key if key in SECTIONS else SECTION_METERING_POINTS
+        # Entry-level failures already explain a shortfall for that section —
+        # re-reporting it as an integrity problem would just be noise. The
+        # check exists for the *unexplained* discrepancy: a readings member
+        # that dropped out of a truncated ZIP, say.
+        if any(e["section"] == section for e in collector.errors):
+            continue
+        actual = summary["counts"][key]
+        if actual != expected:
+            name = key[:-1] if expected == 1 and key.endswith("s") else key
+            collector.add(
+                section,
+                None,
+                "manifest",
+                {
+                    "__all__": [
+                        f"The archive declares {expected} {name}, but the import produced {actual}. "
+                        "The archive is corrupt or was modified; nothing was imported."
+                    ]
+                },
+            )

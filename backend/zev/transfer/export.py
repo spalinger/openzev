@@ -11,16 +11,19 @@ change of caller, not a rewrite.
 """
 
 import csv
+import hashlib
 import io
 import json
 import zipfile
 from datetime import datetime, timezone
 
 from django.core.serializers.json import DjangoJSONEncoder
+from django.db import connection, transaction
+from django.db.models import Prefetch
 
 from invoices.models import Invoice
 from metering.models import MeterReading
-from tariffs.models import Tariff
+from tariffs.models import Tariff, TariffPeriod
 from zev.models import MeteringPoint, MeteringPointAssignment, Participant
 
 from .schema import (
@@ -65,30 +68,18 @@ def _reading_csv_name(meter_id):
     ``meter_id`` is free text: real Swiss ids are alphanumeric, but nothing in
     the model stops a slash or a backslash, and either would make the extracted
     archive write outside ``readings/``.
+
+    Sanitising alone is not enough: two distinct ids such as ``A/B`` and
+    ``A_B`` sanitise to the same string, and writing a second ZIP member under
+    the same name would silently drop the first meter's readings from the
+    archive — the worst failure mode for a backup feature. Appending a short
+    hash of the raw id makes the member name a lossless function of the id, so
+    every meter always gets its own file. (Importers read ``meter_id`` from the
+    CSV rows, never from the member name, so renaming is safe on round-trip.)
     """
     safe = "".join(char if char.isalnum() or char in "-_." else "_" for char in meter_id)
-    return f"{READINGS_DIR}/{safe or 'meter'}.csv"
-
-
-def _disambiguate(name, used):
-    """Return ``name``, or ``name-2``/``name-3``/… on collision with ``used``.
-
-    Two meter ids that sanitize to the same member name (``"A/B"`` and
-    ``"A_B"``) would otherwise write duplicate ZIP members, and a duplicate
-    member can only be read back as the first one — the second meter's
-    readings would be lost without any error.
-    """
-    if name not in used:
-        used.add(name)
-        return name
-    stem, _, extension = name.rpartition(".")
-    suffix = 2
-    candidate = f"{stem}-{suffix}.{extension}"
-    while candidate in used:
-        suffix += 1
-        candidate = f"{stem}-{suffix}.{extension}"
-    used.add(candidate)
-    return candidate
+    digest = hashlib.sha1(meter_id.encode("utf-8")).hexdigest()[:8]
+    return f"{READINGS_DIR}/{safe or 'meter'}-{digest}.csv"
 
 
 def _export_zev(zev):
@@ -132,16 +123,22 @@ def _export_metering_points(zev):
 
 
 def _export_tariffs(zev):
+    # The Prefetch pins the period ordering, so ``periods.all()`` below serves
+    # from the prefetch cache instead of re-querying per tariff (a plain
+    # prefetch_related("periods") is defeated by the order_by).
+    tariffs = Tariff.objects.filter(zev=zev).prefetch_related(
+        Prefetch("periods", queryset=TariffPeriod.objects.order_by("period_type", "id"))
+    ).order_by("name", "valid_from")
     return [
         {
             "id": str(tariff.id),
             **_fields(tariff, TARIFF_FIELDS),
             "periods": [
                 {"id": str(period.id), **_fields(period, TARIFF_PERIOD_FIELDS)}
-                for period in tariff.periods.all().order_by("period_type", "id")
+                for period in tariff.periods.all()
             ],
         }
-        for tariff in Tariff.objects.filter(zev=zev).prefetch_related("periods").order_by("name", "valid_from")
+        for tariff in tariffs
     ]
 
 
@@ -167,15 +164,15 @@ def _export_invoices(zev):
 def _write_readings(archive, zev):
     """Stream every reading of the ZEV into ``readings/<meter>.csv``.
 
-    Returns the per-meter row counts for the manifest. A meter with no readings
-    still gets a header-only file, so the archive says "no data" rather than
-    leaving the importer to guess between that and a dropped file.
+    Returns the per-meter row counts; the manifest's readings count is their
+    sum. A meter with no readings still gets a header-only file, so the archive
+    says "no data" rather than leaving the importer to guess between that and a
+    dropped file.
     """
     counts = {}
-    used_names = set()
     for point in MeteringPoint.objects.filter(zev=zev).order_by("meter_id"):
         rows = 0
-        with archive.open(_disambiguate(_reading_csv_name(point.meter_id), used_names), "w") as member:
+        with archive.open(_reading_csv_name(point.meter_id), "w") as member:
             # ZipFile members are binary; readings are ASCII once serialised.
             text = io.TextIOWrapper(member, encoding="utf-8", newline="")
             writer = csv.writer(text)
@@ -219,6 +216,27 @@ def build_archive(zev, sections, fileobj, *, instance_name=""):
         raise ValueError("Select at least one section to export.")
     check_dependencies(sections)
 
+    # One transaction so the whole archive is a snapshot: sections are read at
+    # different moments (readings alone can stream for minutes on a large
+    # community), and without a repeatable-read snapshot a concurrent edit can
+    # leave an archive that never existed as a state, with manifest counts that
+    # disagree with the CSV contents.
+    with transaction.atomic(durable=True):
+        if connection.vendor == "postgresql":
+            # transaction.atomic() alone only buys READ COMMITTED on
+            # PostgreSQL; the export needs every statement to see the same
+            # committed state, so pin the transaction to REPEATABLE READ.
+            # durable=True means this block must be the outermost transaction:
+            # inside an outer atomic it fails loudly with a RuntimeError
+            # instead of degrading to a savepoint where SET TRANSACTION
+            # ISOLATION LEVEL would blow up as Postgres 25001.
+            with connection.cursor() as cursor:
+                cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+        return _write_archive(zev, sections, fileobj, instance_name=instance_name)
+
+
+def _write_archive(zev, sections, fileobj, *, instance_name=""):
+    """The actual writer, inside ``build_archive``'s transaction."""
     counts = {}
     with zipfile.ZipFile(fileobj, "w", zipfile.ZIP_DEFLATED) as archive:
         if SECTION_ZEV in sections:
@@ -232,6 +250,7 @@ def build_archive(zev, sections, fileobj, *, instance_name=""):
         if SECTION_METERING_POINTS in sections:
             points = _export_metering_points(zev)
             counts[SECTION_METERING_POINTS] = len(points)
+            counts["assignments"] = sum(len(p["assignments"]) for p in points)
             archive.writestr(SECTION_FILES[SECTION_METERING_POINTS], _dump(points))
 
         if SECTION_TARIFFS in sections:

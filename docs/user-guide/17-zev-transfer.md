@@ -8,8 +8,10 @@ export with just the Tariffs section selected does what that used to do.
 
 - **Moving a community between instances** — from a trial installation to a
   production one, or between hosting providers.
-- **Taking a copy off the instance** — an archive is a complete, readable record
-  of a community's structure, readings and billing history.
+- **Taking a copy off the instance** — an archive is a readable record of a
+  community. The default export captures the structure (settings, participants,
+  metering points and tariffs); tick readings and invoices for a full copy
+  including billing history.
 - **Starting a new community from an existing one** — export the tariffs and the
   metering-point layout, import them, then add participants by hand.
 
@@ -23,7 +25,10 @@ added later, but today an import is a copy.
 
 1. Open **(v)ZEV verwalten → Einstellungen** for the community.
 2. Scroll to **Export ZEV** and click **Export ZEV**.
-3. Tick the sections you want.
+3. Pick the sections you want. The **structure sections are pre-ticked** — ZEV
+   settings, participants, metering points and tariffs — and readings and
+   invoices start unticked, because they are the bulk of the file and can take a
+   while to stream.
 4. Click **Download archive**.
 
 You get a file named `openzev-export-<community>-<date>.zip`.
@@ -136,6 +141,21 @@ Unsupported archive format version 2. This instance reads version(s): 1.
 
 Upgrade the target instance and try again.
 
+### Corrupt or inconsistent archives
+
+An archive that cannot be read — a file that is not really a ZIP, a manifest
+that is damaged, a readings file that is unreadable — is refused with a clear
+message instead of failing halfway through. Nothing is created unless
+everything validates, and the import also checks that each section really
+contains the number of entries its manifest promises; if the archive's own
+declaration disagrees with its contents, it is rejected as inconsistent.
+
+### Readings member names
+
+Inside the archive, each meter's readings live in a file named after the meter
+ID, with a short checksum suffix so two meter IDs that look similar after
+sanitising still get separate files (e.g. `A/B` and `A_B`).
+
 ## Archive contents
 
 The archive is an ordinary ZIP; you can open it to check what you are about to
@@ -149,7 +169,7 @@ openzev-export-demo-community-2026-08-04.zip
   metering_points.json   including assignments
   tariffs.json           versions and price bands
   invoices.json          invoices and line items
-  readings/<meter>.csv   one file per meter
+  readings/<meter>.csv   one file per meter (name includes a short checksum)
 ```
 
 Readings use the same column layout the
@@ -167,8 +187,9 @@ about seven.
 
 A large community with several years of data will take proportionally longer, and
 the export runs while your browser waits. If you are moving something very large
-and the request times out, export in sections — structure first, then readings —
-and import them as separate steps.
+and the request times out, split the export into separate archives — the
+structure sections are the default, readings can be exported afterwards — and
+import them as separate steps.
 
 ## Related
 

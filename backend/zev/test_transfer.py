@@ -9,10 +9,12 @@ read at all when its format version is one this instance does not understand.
 
 import io
 import json
+import struct
 import zipfile
 from datetime import date, datetime, time, timezone
 from decimal import Decimal
 
+from django.db import transaction
 from django.test import TestCase
 from rest_framework.test import APIClient
 
@@ -116,6 +118,13 @@ def export_to_bytes(zev, sections=None):
     return buffer.getvalue()
 
 
+def reading_member(meter_id):
+    """The ZIP member name the exporter derives from ``meter_id``."""
+    from zev.transfer.export import _reading_csv_name
+
+    return _reading_csv_name(meter_id)
+
+
 def export_and_clear(zev, sections=None):
     """Export ``zev``, then delete it so its meter ids are free again.
 
@@ -167,6 +176,14 @@ class SectionDependencyTests(TestCase):
             export_to_bytes(zev, ["readings"])
         self.assertIn("metering_points", str(ctx.exception))
 
+    def test_export_refuses_to_run_inside_an_outer_transaction(self):
+        owner = make_user("dep_owner2", UserRole.ZEV_OWNER)
+        zev = Zev.objects.create(name="Deps", owner=owner)
+        buffer = io.BytesIO()
+        with self.assertRaises(RuntimeError):
+            with transaction.atomic():
+                build_archive(zev, SECTIONS, buffer)
+
 
 class ArchiveShapeTests(TestCase):
     @classmethod
@@ -179,8 +196,8 @@ class ArchiveShapeTests(TestCase):
             names = set(archive.namelist())
             manifest = json.loads(archive.read(MANIFEST_NAME))
         self.assertIn("zev.json", names)
-        self.assertIn("readings/SHAPE-CONS-1.csv", names)
-        self.assertIn("readings/SHAPE-PROD-1.csv", names)
+        self.assertIn(reading_member("SHAPE-CONS-1"), names)
+        self.assertIn(reading_member("SHAPE-PROD-1"), names)
         self.assertEqual(manifest["format_version"], FORMAT_VERSION)
         self.assertEqual(manifest["counts"]["readings"], 3)
 
@@ -214,29 +231,36 @@ class ArchiveShapeTests(TestCase):
             names = archive.namelist()
         self.assertTrue(all(name.startswith(("readings/", "manifest", "zev.", "participants", "metering", "tariffs", "invoices")) for name in names))
         self.assertNotIn("../../etc/passwd.csv", names)
-        self.assertIn("readings/.._.._etc_passwd.csv", names)
+        self.assertTrue(any(name.startswith("readings/.._.._etc_passwd-") for name in names))
 
-    def test_meter_ids_that_sanitize_to_the_same_name_keep_their_readings(self):
-        """``"A/B"`` and ``"A_B"`` must not share a ZIP member: a duplicate
-        member can only be read back as the first one, losing the second
-        meter's readings without an error."""
-        for meter_id, energy in (("SHAPE A/B", Decimal("9.0")), ("SHAPE A_B", Decimal("8.0"))):
-            point = MeteringPoint.objects.create(
-                zev=self.zev, meter_id=meter_id, meter_type=MeteringPointType.CONSUMPTION,
-            )
-            MeterReading.objects.create(
-                metering_point=point,
-                timestamp=datetime(2026, 2, 1, 0, 0, tzinfo=timezone.utc),
-                energy_kwh=energy,
-                direction="in",
-                resolution=ReadingResolution.HOURLY,
-            )
+    def test_two_meter_ids_that_sanitise_to_one_name_still_get_separate_members(self):
+        """``A/B`` and ``A_B`` must not share a ZIP member — the archive would
+        silently drop one meter's readings, which a backup must never do."""
+        first = MeteringPoint.objects.create(
+            zev=self.zev, meter_id="M/1", meter_type=MeteringPointType.CONSUMPTION
+        )
+        second = MeteringPoint.objects.create(
+            zev=self.zev, meter_id="M_1", meter_type=MeteringPointType.CONSUMPTION
+        )
+        MeterReading.objects.create(
+            metering_point=first,
+            timestamp=datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc),
+            energy_kwh=Decimal("1.0000"), direction="in",
+        )
+        MeterReading.objects.create(
+            metering_point=second,
+            timestamp=datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc),
+            energy_kwh=Decimal("2.0000"), direction="in",
+        )
         with zipfile.ZipFile(io.BytesIO(export_to_bytes(self.zev))) as archive:
-            reading_members = [name for name in archive.namelist() if name.startswith("readings/")]
-            payload = b"".join(archive.read(name) for name in set(reading_members))
-        self.assertIn(b"9.0", payload)
-        self.assertIn(b"8.0", payload)
-
+            # Both ids sanitise to the same stem; the hash suffix keeps them apart.
+            reading_members = sorted(
+                name for name in archive.namelist() if name.startswith("readings/M_1-")
+            )
+            contents = "".join(archive.read(name).decode() for name in reading_members)
+        self.assertEqual(len(reading_members), 2)
+        self.assertIn("M/1", contents)
+        self.assertIn("M_1", contents)
 
 class RoundTripTests(TestCase):
     @classmethod
@@ -466,7 +490,7 @@ class RejectedArchiveTests(TestCase):
     def test_a_bad_reading_row_names_its_line(self):
         raw = self._archive(
             replace={
-                "readings/REJ-CONS-1.csv": (
+                reading_member("REJ-CONS-1"): (
                     b"meter_id,timestamp,energy_kwh,direction,resolution,import_source\n"
                     b"REJ-CONS-1,2026-01-01T00:00:00+00:00,notanumber,in,hourly,csv\n"
                 )
@@ -482,7 +506,7 @@ class RejectedArchiveTests(TestCase):
         row = b"REJ-CONS-1,2026-01-01T00:00:00+00:00,1.0,in,hourly,csv\n"
         raw = self._archive(
             replace={
-                "readings/REJ-CONS-1.csv": (
+                reading_member("REJ-CONS-1"): (
                     b"meter_id,timestamp,energy_kwh,direction,resolution,import_source\n" + row + row
                 )
             }
@@ -494,13 +518,126 @@ class RejectedArchiveTests(TestCase):
 
     def test_a_readings_file_missing_a_column_is_reported_once_not_per_row(self):
         raw = self._archive(
-            replace={"readings/REJ-CONS-1.csv": b"meter_id,timestamp\nREJ-CONS-1,2026-01-01T00:00:00+00:00\n"}
+            replace={reading_member("REJ-CONS-1"): b"meter_id,timestamp\nREJ-CONS-1,2026-01-01T00:00:00+00:00\n"}
         )
         with self.assertRaises(ImportFailed) as ctx:
             self._import(raw)
         entries = [e for e in ctx.exception.errors if e["section"] == "readings"]
         self.assertEqual(len(entries), 1)
         self.assertIn("energy_kwh", json.dumps(entries[0]["errors"]))
+
+    def _stored_copy(self, raw):
+        """Recompress ``raw`` with no compression, so a corrupted payload is
+        caught by the CRC check on read instead of being absorbed by zlib."""
+        out = io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(raw)) as source, zipfile.ZipFile(
+            out, "w", zipfile.ZIP_STORED
+        ) as target:
+            for name in source.namelist():
+                target.writestr(name, source.read(name))
+        return out.getvalue()
+
+    def _corrupt_member_payload(self, raw, member):
+        """Flip a byte inside ``member``'s payload, leaving the ZIP structure intact."""
+        data = bytearray(raw)
+        pos = 0
+        while True:
+            pos = data.find(b"PK\x03\x04", pos)
+            if pos == -1:
+                raise AssertionError(f"{member} not found in archive")
+            name_len, extra_len = struct.unpack_from("<HH", data, pos + 26)
+            name = data[pos + 30 : pos + 30 + name_len].decode("utf-8")
+            if name == member:
+                payload_start = pos + 30 + name_len + extra_len
+                data[payload_start + 5] ^= 0xFF
+                return bytes(data)
+            pos += 4 + name_len + extra_len
+
+    def test_a_corrupt_manifest_is_refused_cleanly(self):
+        raw = self._corrupt_member_payload(self._stored_copy(self._archive()), MANIFEST_NAME)
+        with self.assertRaises(ArchiveError) as ctx:
+            self._import(raw)
+        self.assertIn("corrupt", str(ctx.exception))
+        self.assertFalse(Zev.objects.filter(owner=self.importer).exists())
+
+    def test_a_corrupt_readings_member_is_reported_not_a_crash(self):
+        raw = self._corrupt_member_payload(
+            self._stored_copy(self._archive()), reading_member("REJ-CONS-1")
+        )
+        with self.assertRaises(ImportFailed) as ctx:
+            self._import(raw)
+        entries = [e for e in ctx.exception.errors if e["section"] == "readings"]
+        self.assertEqual(len(entries), 1)
+        self.assertIn("Unreadable readings file", json.dumps(entries[0]["errors"]))
+
+    def test_a_readings_member_with_binary_garbage_is_reported_once(self):
+        """Not valid UTF-8: decoding fails mid-file, and that must be one
+        collected error, not an unhandled exception taking the import down."""
+        raw = self._archive(
+            replace={
+                reading_member("REJ-CONS-1"): (
+                    b"meter_id,timestamp,energy_kwh,direction,resolution,import_source\n"
+                    b"REJ-CONS-1,2026-01-01T00:00:00+00:00,1.0,in,hourly,csv\n"
+                    b"\xff\xfe\x00\x80garbage\n"
+                )
+            }
+        )
+        with self.assertRaises(ImportFailed) as ctx:
+            self._import(raw)
+        entries = [e for e in ctx.exception.errors if e["section"] == "readings"]
+        self.assertEqual(len(entries), 1)
+        self.assertIn("Unreadable readings file", json.dumps(entries[0]["errors"]))
+
+    def test_an_energy_value_beyond_the_column_width_is_rejected_by_row(self):
+        """99999999.99995 rounds to 100000000.0000, which overflows the
+        DecimalField — the database would reject it as a DataError and take the
+        whole import down; the row check must catch it first."""
+        raw = self._archive(
+            replace={
+                reading_member("REJ-CONS-1"): (
+                    b"meter_id,timestamp,energy_kwh,direction,resolution,import_source\n"
+                    b"REJ-CONS-1,2026-01-01T00:00:00+00:00,99999999.99995,in,hourly,csv\n"
+                )
+            }
+        )
+        with self.assertRaises(ImportFailed) as ctx:
+            self._import(raw)
+        entries = [e for e in ctx.exception.errors if e["section"] == "readings"]
+        self.assertEqual(len(entries), 1)
+        self.assertIn("exceeds", json.dumps(entries[0]["errors"]))
+
+    def test_a_duplicate_across_two_members_is_rejected(self):
+        """The dedup set spans every readings member: two members naming the
+        same meter must not slip past it and die on the unique constraint."""
+        rows = (
+            b"meter_id,timestamp,energy_kwh,direction,resolution,import_source\n"
+            b"REJ-CONS-1,2026-01-01T00:00:00+00:00,1.2500,in,hourly,csv\n"
+            b"REJ-CONS-1,2026-01-01T01:00:00+00:00,2.5000,in,hourly,csv\n"
+        )
+        raw = self._archive(replace={"readings/sneaky-extra.csv": rows})
+        with self.assertRaises(ImportFailed) as ctx:
+            self._import(raw)
+        duplicates = [
+            e for e in ctx.exception.errors if "Duplicate reading" in json.dumps(e["errors"])
+        ]
+        self.assertEqual(len(duplicates), 2)
+        self.assertFalse(Zev.objects.filter(owner=self.importer).exists())
+
+    def test_an_archive_with_readings_missing_from_the_zip_is_rejected(self):
+        """The manifest declares 3 readings; the ZIP has none. Importing must
+        not quietly succeed with zero readings — the archive is corrupt or was
+        modified, and a backup feature has to say so."""
+        raw = export_and_clear(self.source)
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            to_drop = tuple(name for name in archive.namelist() if name.startswith("readings/"))
+        self.assertTrue(to_drop)
+        raw = rewrite_archive(raw, drop=to_drop)
+        with self.assertRaises(ImportFailed) as ctx:
+            self._import(raw)
+        entries = [e for e in ctx.exception.errors if e.get("label") == "manifest"]
+        self.assertEqual(len(entries), 1)
+        self.assertIn("declares 3 readings", json.dumps(entries[0]["errors"]))
+        self.assertFalse(Zev.objects.filter(owner=self.importer).exists())
 
     def test_the_error_list_is_capped_but_the_total_is_not(self):
         raw = self._archive(
@@ -517,6 +654,185 @@ class RejectedArchiveTests(TestCase):
         self.assertEqual(ctx.exception.total_errors, 120)
         self.assertEqual(len(ctx.exception.errors), 50)
         self.assertIn("showing the first 50", ctx.exception.summary)
+
+    def test_a_non_object_assignment_is_refused_not_a_crash(self):
+        """A ``null`` or string entry inside ``assignments`` must surface as a
+        readable ``ArchiveError`` (400 at the endpoint), not an unhandled
+        ``AttributeError`` (500) from ``raw.get(...)`` on a non-dict value."""
+        raw = self._archive(
+            replace={
+                "metering_points.json": [
+                    {
+                        "id": "mp-1",
+                        "meter_id": "REJ-CONS-1",
+                        "meter_type": "consumption",
+                        "assignments": [None, "not-an-object"],
+                    }
+                ]
+            }
+        )
+        with self.assertRaises(ArchiveError) as ctx:
+            self._import(raw)
+        self.assertIn("Assignment", str(ctx.exception))
+        self.assertFalse(Zev.objects.filter(owner=self.importer).exists())
+
+    def test_duplicate_invoice_numbers_are_reported_not_a_crash(self):
+        """The per-ZEV ``(zev, invoice_number)`` constraint sits outside what
+        ``full_clean(exclude=[\"zev\", ...])`` sees, so a duplicate number hits
+        ``save()`` as an ``IntegrityError`` - it must be a collected per-entry
+        failure, not an unhandled 500."""
+        raw = self._archive()
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            participants = json.loads(archive.read("participants.json"))
+        invoice = {
+            "participant_id": participants[0]["id"],
+            "invoice_number": "REJ-00001",
+            "period_start": "2026-01-01",
+            "period_end": "2026-01-31",
+            "status": "sent",
+            "subtotal_chf": "42.00",
+            "total_chf": "45.36",
+            "vat_rate": "0.0800",
+            "vat_chf": "3.36",
+        }
+        raw = rewrite_archive(raw, replace={"invoices.json": [dict(invoice), dict(invoice)]})
+        with self.assertRaises(ImportFailed) as ctx:
+            self._import(raw)
+        self.assertEqual(len(ctx.exception.errors), 1)
+        self.assertEqual(ctx.exception.errors[0]["label"], "REJ-00001")
+        self.assertFalse(Zev.objects.filter(owner=self.importer).exists())
+
+    def test_a_manifest_missing_counts_is_refused(self):
+        """An archive without ``counts`` defeats the manifest verification step;
+        ``read_manifest`` must require it up front."""
+        raw = self._archive()
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            manifest = json.loads(archive.read(MANIFEST_NAME))
+        manifest.pop("counts")
+        raw = rewrite_archive(raw, replace={MANIFEST_NAME: manifest})
+        with self.assertRaises(ArchiveError) as ctx:
+            self._import(raw)
+        self.assertIn("counts", str(ctx.exception))
+        self.assertFalse(Zev.objects.filter(owner=self.importer).exists())
+
+    def test_a_manifest_with_a_non_integer_count_is_refused(self):
+        """``counts`` values must be non-negative integers; a malformed value is
+        a structural failure, not an ``AttributeError`` from ``.items()``."""
+        raw = self._archive()
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            manifest = json.loads(archive.read(MANIFEST_NAME))
+        manifest["counts"]["participants"] = "two"
+        raw = rewrite_archive(raw, replace={MANIFEST_NAME: manifest})
+        with self.assertRaises(ArchiveError) as ctx:
+            self._import(raw)
+        self.assertIn("participants", str(ctx.exception))
+
+    def test_a_manifest_missing_a_count_for_a_declared_section_is_refused(self):
+        """The importer cannot verify an archive whose manifest omits the count
+        for a declared section — the check would silently pass and a tampered
+        archive could slip through. The guard must reject it outright."""
+        raw = self._archive()
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            manifest = json.loads(archive.read(MANIFEST_NAME))
+        del manifest["counts"]["participants"]
+        raw = rewrite_archive(raw, replace={MANIFEST_NAME: manifest})
+        with self.assertRaises(ArchiveError) as ctx:
+            self._import(raw)
+        self.assertIn("participants", str(ctx.exception))
+
+    def test_a_manifest_with_a_non_object_source_zev_is_refused(self):
+        """A truthy non-object ``source_zev`` (e.g. ``[1]``) used to reach
+        ``.get(\"name\")`` and crash with an unhandled ``AttributeError``."""
+        raw = self._archive()
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            manifest = json.loads(archive.read(MANIFEST_NAME))
+        manifest["source_zev"] = [1]
+        raw = rewrite_archive(raw, replace={MANIFEST_NAME: manifest})
+        with self.assertRaises(ArchiveError) as ctx:
+            self._import(raw)
+        self.assertIn("source_zev", str(ctx.exception))
+
+    def test_duplicate_participant_source_ids_are_rejected(self):
+        """Two participants sharing an archive id would silently rewire every
+        assignment and invoice to the last one; the duplicate must be reported
+        instead of silently remapping."""
+        raw = self._archive()
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            participants = json.loads(archive.read("participants.json"))
+        raw = rewrite_archive(
+            raw,
+            replace={"participants.json": [participants[0], dict(participants[0])]},
+        )
+        with self.assertRaises(ImportFailed) as ctx:
+            self._import(raw)
+        duplicates = [
+            e for e in ctx.exception.errors if "Duplicate participant" in json.dumps(e["errors"])
+        ]
+        self.assertEqual(len(duplicates), 1)
+        self.assertFalse(Zev.objects.filter(owner=self.importer).exists())
+
+
+class SchemaParityTests(TestCase):
+    """The archive's hand-written field lists are a file format, not a mirror
+    of the serializers — but they must stay true to the models. A field renamed
+    or removed on a model silently stops travelling unless this catches it."""
+
+    MODEL_BY_SECTION = {
+        "ZEV_FIELDS": Zev,
+        "PARTICIPANT_FIELDS": Participant,
+        "METERING_POINT_FIELDS": MeteringPoint,
+        "ASSIGNMENT_FIELDS": MeteringPointAssignment,
+        "TARIFF_FIELDS": Tariff,
+        "TARIFF_PERIOD_FIELDS": TariffPeriod,
+        "INVOICE_FIELDS": Invoice,
+        "INVOICE_ITEM_FIELDS": InvoiceItem,
+    }
+
+    # Fields that travel through dedicated keys instead of the field lists:
+    # surrogate ids (top-level "id" and nested "participant_id"), ownership and
+    # audit plumbing (FKs to the ZEV, user, or parent row, created/updated
+    # stamps), and pdf_file (deliberately not archived — PDFs are regenerated).
+    FIELDS_EXCLUDED_FROM_ARCHIVE = {
+        "ZEV_FIELDS": {"id", "owner", "created_at", "updated_at"},
+        "PARTICIPANT_FIELDS": {"id", "zev", "user", "created_at", "updated_at"},
+        "METERING_POINT_FIELDS": {"id", "zev", "created_at", "updated_at"},
+        "ASSIGNMENT_FIELDS": {"id", "metering_point", "participant", "created_at", "updated_at"},
+        "TARIFF_FIELDS": {"id", "zev", "created_at", "updated_at"},
+        "TARIFF_PERIOD_FIELDS": {"id", "tariff"},
+        "INVOICE_FIELDS": {"id", "zev", "participant", "pdf_file", "created_at", "updated_at"},
+        "INVOICE_ITEM_FIELDS": {"id", "invoice"},
+    }
+
+    def test_field_lists_match_their_models_exactly(self):
+        from zev.transfer import schema
+
+        for list_name, model in self.MODEL_BY_SECTION.items():
+            declared = set(getattr(schema, list_name))
+            model_fields = {field.name for field in model._meta.fields}
+            excluded = self.FIELDS_EXCLUDED_FROM_ARCHIVE[list_name]
+            self.assertEqual(
+                declared,
+                model_fields - excluded,
+                (
+                    f"{list_name} has drifted from {model.__name__}. "
+                    "Remove fields that stopped travelling or stop excluding "
+                    "fields that now do — either way the archive's format "
+                    "description and the model disagree."
+                ),
+            )
+
+    def test_reading_csv_columns_exist_on_the_reading_model(self):
+        from zev.transfer import schema
+
+        model_fields = {field.name for field in MeterReading._meta.fields}
+        for name in schema.READING_CSV_COLUMNS:
+            if name == "meter_id":
+                continue  # the meter column names the owning metering point
+            self.assertIn(
+                name,
+                model_fields,
+                f"READING_CSV_COLUMNS names {name!r}, which is not a MeterReading field.",
+            )
 
 
 class TransferEndpointTests(TestCase):
@@ -619,6 +935,32 @@ class TransferEndpointTests(TestCase):
         auth(self.client, self.admin)
         response = self.client.post(f"{ZEV_URL}/import-archive/", {}, format="multipart")
         self.assertEqual(response.status_code, 400)
+
+    def test_import_accepts_repeated_sections_fields(self):
+        """The documented ``sections=zev&sections=participants`` form must not
+        silently drop all but the last value for want of a ``getlist()``."""
+        raw = export_and_clear(self.zev)
+        auth(self.client, self.admin)
+        response = self.client.post(
+            f"{ZEV_URL}/import-archive/",
+            {"file": self._upload(raw), "sections": ["zev", "participants"]},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        body = response.json()
+        self.assertEqual(body["sections"], ["zev", "participants"])
+        self.assertEqual(list(body["counts"]), ["participants"])
+
+    def test_export_accepts_repeated_sections_query_params(self):
+        auth(self.client, self.owner)
+        response = self.client.get(
+            f"{ZEV_URL}/{self.zev.id}/export/",
+            {"sections": ["zev", "participants"]},
+        )
+        self.assertEqual(response.status_code, 200)
+        with zipfile.ZipFile(io.BytesIO(b"".join(response.streaming_content))) as archive:
+            manifest = json.loads(archive.read(MANIFEST_NAME))
+        self.assertEqual(manifest["sections"], ["zev", "participants"])
 
     def test_inspect_returns_the_manifest_without_creating_anything(self):
         before = Zev.objects.count()
