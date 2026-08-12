@@ -249,6 +249,53 @@ Two protections ship with this branch:
 The admin UI (`AdminPdfTemplatesPage.tsx`) shows a stale banner when
 `is_customized && is_stale`, and `DELETE` reverts to the on-disk default.
 
+### 5.3 Catalog-driven field reference
+
+The "Verfügbare Felder" reference used to be a static list hardcoded in the
+frontend (`AdminPdfTemplatesPage.tsx`), which drifted from the real render
+contexts — the contract redesign shipped eight context fields the UI never
+listed (participation start, document id, VAT display, clause-5 tariff rule /
+percentage line / reference product, tariff-row validity, payment terms), and
+the invoice and annual-statement references were missing fields too
+(`status_display`, invoice-number prefix/suffix, `item.unit_label`,
+`savings_data.*`, `energy_summary.*`, invoice-row status).
+
+The reference is now catalog-driven and shared across all template surfaces:
+
+- **Backend source of truth.** `invoices/field_catalog.py` holds one curated
+  catalog per template type (invoice, contract, annual_statement) and per
+  email key (invoice_email, participant_invitation, email_verification).
+  Each entry carries the exact token to paste (`variable`), a React i18n key
+  (`description_key`) and — for every enumerable entry — a `sample_path`
+  into the matching sample context. The template `GET` endpoints
+  (`PdfTemplateView.get`, `EmailTemplateView.get`) return `fields` next to
+  `content`/`is_customized`/`is_stale`; no new endpoint, permission or audit
+  surface.
+- **Computed examples.** A dotted-path resolver walks each `sample_path`
+  through the same `build_sample_*_context()` builders the preview and
+  save-time validation render against (list indices for loop rows, method
+  calls for `get_status_display`), so the shown example is exactly what the
+  preview prints. Entries whose sample value is `None` (the SVG charts) carry
+  `example: null`. The email
+  catalogs resolve against small mirror builders of the send-time
+  `format_map` contexts (`invoices/tasks.py`, `zev/services.py`,
+  `accounts/views.py`).
+- **Anti-drift test.** `invoices/test_field_catalog.py` pins every catalog
+  entry against its sample context (every `sample_path` must resolve), asserts
+  the email catalogs match the send-time contexts key-for-key, and checks the
+  payload shape — a new context feature that forgets its catalog entry fails
+  the test suite.
+- **Shared frontend component.** `frontend/src/components/FieldReference.tsx`
+  replaces the static PDF sidebar and the email reference tables
+  (`AdminEmailTemplatesPage.tsx`, `ZevEmailTemplateFields.tsx`). It adds
+  search, click-to-insert at the caret (loop tags insert as an indented block
+  with the caret inside; shift-click inserts without moving focus), example
+  values, and a usage badge counting occurrences in the current content.
+  `TemplateTextarea` tooltips now include the example value and flag unknown
+  `{{ … }}` tokens with a warning underline ("Kein verfügbares Feld") while
+  typing — mirroring the save-time strict validation that would otherwise
+  reject them.
+
 ## 6. Contract template anatomy
 
 **Files:** `backend/templates/contracts/participant_contract_pdf.html`;
@@ -555,6 +602,26 @@ classes.
 
 (8 methods — the class also guards the compat claim that old overrides keep
 working.)
+
+### Backend — `invoices/test_field_catalog.py`
+
+11 test methods across 3 `SimpleTestCase` classes:
+`PdfCatalogResolutionTests` (5) — every PDF catalog `sample_path` resolves
+against its context and the examples are computed, not hand-typed
+(`test_every_sample_path_resolves_against_its_context`,
+`test_resolved_examples_are_computed_not_hand_typed`,
+`test_variables_are_unique_within_a_catalog`,
+`test_catalog_covers_concrete_translation_tokens_in_default_templates`,
+`test_catalog_contains_the_newer_contract_fields`);
+`EmailCatalogResolutionTests` (2) — the email catalogs mirror the send-time
+contexts (`test_every_sample_path_resolves_against_its_context`,
+`test_email_catalog_covers_the_send_time_contexts`); and
+`CatalogPayloadShapeTests` (4) — the `fields` payload shape on every
+template type, empty for unknown types, and preview parity
+(`test_pdf_catalog_payload_has_the_ui_shape`,
+`test_email_catalog_payload_has_the_ui_shape`,
+`test_unknown_template_type_returns_empty_catalog`,
+`test_example_values_match_the_preview`).
 
 ### Regression coverage in `invoices/test_pdf.py`
 

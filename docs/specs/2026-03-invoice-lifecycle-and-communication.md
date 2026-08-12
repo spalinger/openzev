@@ -308,7 +308,7 @@ The invoice, contract, and annual-statement PDF templates are editable via the a
 
 | Method | URL | Permission | Description |
 |---|---|---|---|
-| `GET` | `/invoices/invoices/pdf-template/` | `admin` only | Return current content + `is_customized` flag (DB if overridden, else on-disk default) |
+| `GET` | `/invoices/invoices/pdf-template/` | `admin` only | Return current content + `is_customized` flag + `fields` catalog (DB if overridden, else on-disk default) |
 | `PATCH` | `/invoices/invoices/pdf-template/` | `admin` only | Save content to database; never writes to filesystem |
 | `DELETE` | `/invoices/invoices/pdf-template/` | `admin` only | Remove DB override; reverts to on-disk default |
 
@@ -316,7 +316,7 @@ The invoice, contract, and annual-statement PDF templates are editable via the a
 
 | Method | URL | Permission | Description |
 |---|---|---|---|
-| `GET` | `/invoices/invoices/contract-pdf-template/` | `admin` only | Return current content + `is_customized` flag |
+| `GET` | `/invoices/invoices/contract-pdf-template/` | `admin` only | Return current content + `is_customized` flag + `fields` catalog |
 | `PATCH` | `/invoices/invoices/contract-pdf-template/` | `admin` only | Save content to database |
 | `DELETE` | `/invoices/invoices/contract-pdf-template/` | `admin` only | Remove DB override; reverts to on-disk default |
 
@@ -324,7 +324,7 @@ The invoice, contract, and annual-statement PDF templates are editable via the a
 
 | Method | URL | Permission | Description |
 |---|---|---|---|
-| `GET` | `/invoices/invoices/annual-statement-pdf-template/` | `admin` only | Return current content + `is_customized` flag |
+| `GET` | `/invoices/invoices/annual-statement-pdf-template/` | `admin` only | Return current content + `is_customized` flag + `fields` catalog |
 | `PATCH` | `/invoices/invoices/annual-statement-pdf-template/` | `admin` only | Save content to database |
 | `DELETE` | `/invoices/invoices/annual-statement-pdf-template/` | `admin` only | Remove DB override; reverts to on-disk default |
 #### Invoice PDF download
@@ -349,6 +349,20 @@ Request body: `{ "content": "<html>...", "template_type": "invoice" | "contract"
   "template_name": "invoices/invoice_pdf.html",
   "content": "<!DOCTYPE html>...",
   "is_customized": true,
+  "fields": [
+    {
+      "group_key": "participant",
+      "group_title_key": "admin.fields.participant",
+      "fields": [
+        {
+          "variable": "{{ participant.full_name }}",
+          "description_key": "admin.fields.fullName",
+          "sample_path": "participant.full_name",
+          "example": "Hans Beispiel"
+        }
+      ]
+    }
+  ],
   "detail": "PDF template updated successfully."
 }
 ```
@@ -356,6 +370,11 @@ Request body: `{ "content": "<html>...", "template_type": "invoice" | "contract"
 - `is_customized: false` means the on-disk default is active.
 - `is_customized: true` means a DB row overrides the default.
 - DELETE returns `is_customized: false` and the default content.
+- GET also returns `fields`: the curated field catalog for the template type
+  (`invoices/field_catalog.py`), with `example` values resolved from the same
+  sample context that powers the preview endpoint and save-time validation.
+  `group_title_key` is a React i18n key (`null` for the email catalogs);
+  entries whose sample value is `None` (the SVG charts) carry `example: null`.
 
 ---
 
@@ -441,14 +460,14 @@ rejected (HTTP `400`). The retried send creates a **new** `EmailLog` entry.
 
 ### 7.4 System email template management
 
-Admin-only endpoints manage the global `EmailTemplate` overrides (§3.5) for the three template keys defined in `EMAIL_TEMPLATE_DEFAULTS`: `invoice_email`, `participant_invitation`, `email_verification`. Mutations are audit-logged; non-admin attempts return `403` and are audit-logged as `DENIED`.
+The global `EmailTemplate` overrides (§3.5) use the three template keys defined in `EMAIL_TEMPLATE_DEFAULTS`: `invoice_email`, `participant_invitation`, `email_verification`. Admins and ZEV owners may read the current template and its field catalog (per-ZEV editors show their fallback values); only mutations are admin-only, audit-logged, and denied non-admin attempts are recorded as `DENIED`.
 
 | Method | URL | Description |
 |---|---|---|
-| `GET` | `/invoices/invoices/email-templates/` | List all template keys with current `subject`, `body`, and `is_customized` (DB override if present, else hardcoded default) |
-| `GET` | `/invoices/invoices/email-template/{key}/` | Single template: `{template_key, subject, body, is_customized}`; `404` for unknown keys |
-| `PATCH` | `/invoices/invoices/email-template/{key}/` | Save `subject`/`body` to the database (`template.email.update`); blank or non-string values → `400` |
-| `DELETE` | `/invoices/invoices/email-template/{key}/` | Remove the DB override, reverting to the hardcoded default (`template.email.reset`) |
+| `GET` | `/invoices/invoices/email-templates/` | `admin` only: list all template keys with current `subject`, `body`, and `is_customized` (DB override if present, else hardcoded default) |
+| `GET` | `/invoices/invoices/email-template/{key}/` | Admins and ZEV owners may read one template and its `fields` catalog (participants and guests → `403`); `404` for unknown keys |
+| `PATCH` | `/invoices/invoices/email-template/{key}/` | `admin` only: save `subject`/`body` to the database (`template.email.update`); blank or non-string values → `400` |
+| `DELETE` | `/invoices/invoices/email-template/{key}/` | `admin` only: remove the DB override, reverting to the hardcoded default (`template.email.reset`) |
 
 ---
 

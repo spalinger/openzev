@@ -54,7 +54,7 @@ Global settings (date formats, VAT rates) and ZEV-level configuration (billing i
 
 "Read only" for AppSettings means GET `/api/v1/auth/app-settings/` is allowed for any authenticated user; the frontend `AppSettingsProvider` loads it at boot for date formatting everywhere.
 
-All admin-only surfaces are wrapped in `<ProtectedRoute allowedRoles={['admin']}>` on the frontend. On the backend, VAT rate endpoints, the invoice `dashboard`, and the PDF/email template endpoints use the `IsAdmin` permission class directly, while `app_settings` uses `IsAuthenticated` with a manual `request.user.is_admin` check in the view body.
+All admin-only surfaces are wrapped in `<ProtectedRoute allowedRoles={['admin']}>` on the frontend. On the backend, VAT rate endpoints, the invoice `dashboard`, and PDF template endpoints use the `IsAdmin` permission class directly; email template reads use `IsAuthenticated` while email mutations remain admin-only via `IsAdmin`. The `app_settings` endpoint uses `IsAuthenticated` with a manual `request.user.is_admin` check in the view body.
 
 ---
 
