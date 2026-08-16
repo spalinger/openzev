@@ -27,10 +27,11 @@ from rest_framework import exceptions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.permissions import IsAdmin
+from accounts.permissions import IsAdmin, IsZevOwnerOrAdmin
 from audit.models import AuditActionCategory, AuditEventStatus
 from audit.services import record_audit_event
 
+from .field_catalog import email_field_catalog, pdf_field_catalog
 from .models import EMAIL_TEMPLATE_DEFAULTS, EmailTemplate, PdfTemplate
 from .pdf_render import render_pdf
 from .template_context import (
@@ -193,6 +194,7 @@ class PdfTemplateView(_AdminTemplateView):
             "content": content,
             "is_customized": record is not None,
             "is_stale": _is_stale(record, self.template_name),
+            "fields": pdf_field_catalog(self.template_type),
         })
 
     def patch(self, request, *args, **kwargs):
@@ -228,6 +230,7 @@ class PdfTemplateView(_AdminTemplateView):
             "content": content,
             "is_customized": True,
             "is_stale": False,
+            "fields": pdf_field_catalog(self.template_type),
             "detail": "PDF template updated successfully.",
         })
 
@@ -235,7 +238,13 @@ class PdfTemplateView(_AdminTemplateView):
         """Revert to the on-disk default."""
         PdfTemplate.objects.filter(template_name=self.template_name).delete()
         self._record(request, action_suffix="reset", summary=f"Reset PDF template {self.template_name} to default.")
-        return Response({"template_name": self.template_name, "content": _read_default_template(self.template_name), "is_customized": False, "detail": "PDF template reset to default."})
+        return Response({
+            "template_name": self.template_name,
+            "content": _read_default_template(self.template_name),
+            "is_customized": False,
+            "fields": pdf_field_catalog(self.template_type),
+            "detail": "PDF template reset to default.",
+        })
 
 
 class PdfTemplatePreviewView(_AdminTemplateView):
@@ -330,10 +339,17 @@ class EmailTemplateListView(_AdminTemplateView):
 class EmailTemplateView(_AdminTemplateView):
     """Read, customise or reset a single email template.
 
-    GET    — returns current subject+body (DB override if present, else hardcoded default).
-    PATCH  — saves subject/body to the database.
-    DELETE — removes the DB override, reverting to the hardcoded default.
+    GET    — admins and ZEV owners may read the global default and field
+             catalog; this supports per-ZEV editors showing their fallback
+             values.
+    PATCH  — admins save subject/body to the database.
+    DELETE — admins remove the DB override, reverting to the hardcoded default.
     """
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [IsZevOwnerOrAdmin()]
+        return super().get_permissions()
 
     def denial_audit(self, request) -> dict:
         template_key = str(self.kwargs.get("template_key") or "")
@@ -374,6 +390,7 @@ class EmailTemplateView(_AdminTemplateView):
             "subject": record.subject if record else defaults["subject"],
             "body": record.body if record else defaults["body"],
             "is_customized": record is not None,
+            "fields": email_field_catalog(template_key),
         })
 
     def patch(self, request, template_key=None, *args, **kwargs):
@@ -401,6 +418,7 @@ class EmailTemplateView(_AdminTemplateView):
             "subject": subject,
             "body": body,
             "is_customized": True,
+            "fields": email_field_catalog(template_key),
             "detail": "Email template updated successfully.",
         })
 
@@ -421,5 +439,6 @@ class EmailTemplateView(_AdminTemplateView):
             "subject": defaults["subject"],
             "body": defaults["body"],
             "is_customized": False,
+            "fields": email_field_catalog(template_key),
             "detail": "Email template reset to default.",
         })

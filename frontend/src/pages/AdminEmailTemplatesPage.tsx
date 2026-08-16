@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Tabs } from '@mantine/core'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { PageSkeleton } from '../components/PageSkeleton'
 import { useTranslation } from 'react-i18next'
 import {
@@ -10,21 +10,22 @@ import {
 } from '../lib/api/invoices'
 import { queryKeys } from '../lib/api/queryKeys'
 import { useToast } from '../lib/toast'
-import { EmailFieldReference } from '../components/EmailFieldReference'
-import { EMAIL_TEMPLATE_FIELDS, type EmailField, type EmailTemplateKey } from '../lib/emailTemplateFields'
+import { FieldReference, insertTemplateToken } from '../components/FieldReference'
+
+type TemplateKey = 'invoice_email' | 'participant_invitation' | 'email_verification'
 
 function EmailTemplateEditor({
     templateKey,
     title,
-    fields,
 }: {
-    templateKey: EmailTemplateKey
+    templateKey: TemplateKey
     title: string
-    fields: EmailField[]
 }) {
     const { t } = useTranslation()
     const { pushToast } = useToast()
     const queryClient = useQueryClient()
+    const subjectRef = useRef<HTMLInputElement>(null)
+    const bodyRef = useRef<HTMLTextAreaElement>(null)
 
     const query = useQuery({
         queryKey: queryKeys.admin.emailTemplate(templateKey),
@@ -59,6 +60,22 @@ function EmailTemplateEditor({
         onError: () => pushToast(t('common.error'), 'error'),
     })
 
+    const handleInsert = (variable: string, keepFocus: boolean) => {
+        const active = document.activeElement
+        const target =
+            active === subjectRef.current || active === bodyRef.current
+                ? (active as HTMLInputElement | HTMLTextAreaElement)
+                : bodyRef.current
+        if (target) {
+            insertTemplateToken(target, variable, keepFocus)
+            if (target === subjectRef.current) {
+                setSubject(target.value)
+            } else {
+                setBody(target.value)
+            }
+        }
+    }
+
     return (
         <div className="content-with-aside">
             <section className="card page-stack">
@@ -75,6 +92,7 @@ function EmailTemplateEditor({
                         <label>
                             <span>{t('admin.emailTemplates.subject')}</span>
                             <input
+                                ref={subjectRef}
                                 type="text"
                                 value={subject}
                                 onChange={(e) => setSubject(e.target.value)}
@@ -112,19 +130,23 @@ function EmailTemplateEditor({
                     </>
                 )}
             </section>
-            <EmailFieldReference fields={fields} variant="aside" />
+<FieldReference
+                groups={query.data?.fields ?? []}
+                content={`${subject}\n${body}`}
+                onInsert={handleInsert}
+            />
         </div>
     )
 }
 
 export function AdminEmailTemplatesPage() {
     const { t } = useTranslation()
-    const [activeTab, setActiveTab] = useState<EmailTemplateKey>('invoice_email')
+    const [activeTab, setActiveTab] = useState<TemplateKey>('invoice_email')
 
-    const tabs: { key: EmailTemplateKey; label: string; fields: EmailField[] }[] = [
-        { key: 'invoice_email', label: t('admin.emailTemplates.invoiceEmail'), fields: EMAIL_TEMPLATE_FIELDS.invoice_email },
-        { key: 'participant_invitation', label: t('admin.emailTemplates.invitationEmail'), fields: EMAIL_TEMPLATE_FIELDS.participant_invitation },
-        { key: 'email_verification', label: t('admin.emailTemplates.verificationEmail'), fields: EMAIL_TEMPLATE_FIELDS.email_verification },
+    const tabs: { key: TemplateKey; label: string }[] = [
+        { key: 'invoice_email', label: t('admin.emailTemplates.invoiceEmail') },
+        { key: 'participant_invitation', label: t('admin.emailTemplates.invitationEmail') },
+        { key: 'email_verification', label: t('admin.emailTemplates.verificationEmail') },
     ]
 
     return (
@@ -142,7 +164,7 @@ export function AdminEmailTemplatesPage() {
                 value={activeTab}
                 keepMounted={false}
                 onChange={(value) => {
-                    if (value) setActiveTab(value as EmailTemplateKey)
+                    if (value) setActiveTab(value as TemplateKey)
                 }}
             >
                 <Tabs.List aria-label={t('admin.emailTemplates.title')}>
@@ -153,12 +175,11 @@ export function AdminEmailTemplatesPage() {
                     ))}
                 </Tabs.List>
 
-                {tabs.map((tab) => (
+{tabs.map((tab) => (
                     <Tabs.Panel key={tab.key} value={tab.key}>
                         <EmailTemplateEditor
                             templateKey={tab.key}
                             title={tab.label}
-                            fields={tab.fields}
                         />
                     </Tabs.Panel>
                 ))}

@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
+import { useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { fetchEmailTemplate } from '../lib/api/invoices'
 import { queryKeys } from '../lib/api/queryKeys'
-import { EmailFieldReference } from './EmailFieldReference'
-import { EMAIL_TEMPLATE_FIELDS } from '../lib/emailTemplateFields'
+import { FieldReference, insertTemplateToken } from './FieldReference'
 
 type ZevEmailTemplateFieldsProps = {
     subjectTemplate: string
@@ -21,6 +21,8 @@ export function ZevEmailTemplateFields({
     showHeader = true,
 }: ZevEmailTemplateFieldsProps) {
     const { t } = useTranslation()
+    const subjectRef = useRef<HTMLInputElement>(null)
+    const bodyRef = useRef<HTMLTextAreaElement>(null)
 
     const globalTemplateQuery = useQuery({
         queryKey: queryKeys.admin.emailTemplate('invoice_email'),
@@ -29,6 +31,22 @@ export function ZevEmailTemplateFields({
 
     const globalSubject = globalTemplateQuery.data?.subject ?? ''
     const globalBody = globalTemplateQuery.data?.body ?? ''
+
+    const handleInsert = (variable: string, keepFocus: boolean) => {
+        const active = document.activeElement
+        const target =
+            active === subjectRef.current || active === bodyRef.current
+                ? (active as HTMLInputElement | HTMLTextAreaElement)
+                : bodyRef.current
+        if (target) {
+            insertTemplateToken(target, variable, keepFocus)
+            if (target === subjectRef.current) {
+                onSubjectTemplateChange(target.value)
+            } else {
+                onBodyTemplateChange(target.value)
+            }
+        }
+    }
 
     return (
         <>
@@ -46,6 +64,7 @@ export function ZevEmailTemplateFields({
                     <span>{t('admin.emailTemplates.subject')}</span>
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                         <input
+                            ref={subjectRef}
                             style={{ flex: 1 }}
                             value={subjectTemplate}
                             placeholder={globalSubject}
@@ -70,6 +89,7 @@ export function ZevEmailTemplateFields({
                     <span>{t('admin.emailTemplates.body')}</span>
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
                         <textarea
+                            ref={bodyRef}
                             style={{ flex: 1 }}
                             rows={10}
                             value={bodyTemplate}
@@ -89,7 +109,11 @@ export function ZevEmailTemplateFields({
                     </div>
                 </label>
 
-                <EmailFieldReference fields={EMAIL_TEMPLATE_FIELDS.invoice_email} variant="details" />
+                <FieldReference
+                    groups={globalTemplateQuery.data?.fields ?? []}
+                    content={`${subjectTemplate}\n${bodyTemplate}`}
+                    onInsert={handleInsert}
+                />
             </div>
         </>
     )

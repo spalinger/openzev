@@ -2536,6 +2536,30 @@ h3 {
   background: var(--surface);
 }
 
+.field-reference-token {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #0369a1;
+  font: inherit;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  white-space: nowrap;
+  text-align: left;
+  cursor: pointer;
+}
+
+.field-reference-token:hover {
+  color: #075985;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.field-reference-token:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
 /* Success banner */
 .success-banner {
   padding: 0.9rem 1rem;
