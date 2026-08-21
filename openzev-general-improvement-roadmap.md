@@ -1,6 +1,6 @@
 # OpenZEV general improvement roadmap
 
-Reviewed against the current branch and repository on 2026-08-08.
+Reviewed against the current branch and repository on 2026-08-22.
 
 ## Executive priority
 
@@ -41,11 +41,11 @@ The plan below should strengthen these patterns rather than replace them with a 
 
 ## P0.2 Restrict the global user list
 
-> Status: ✅ in PR #430 (open).
+> Status: ✅ shipped in #430 (2026-08) — `UserListCreateView` is now `IsAdmin`-only.
 
-`UserListCreateView` currently returns every active participant user to every ZEV owner. Frontend consumers are admin pages and account linking is admin-only.
+`UserListCreateView` formerly returned every active participant user to every ZEV owner; since #430 the endpoint is admin-only (`backend/accounts/views.py:96`). Frontend consumers are admin pages and account linking is admin-only.
 
-Preferred fix:
+Applied fix:
 
 ```python
 class UserListCreateView(generics.ListCreateAPIView):
@@ -56,9 +56,9 @@ If an owner-specific list is genuinely needed, expose a separate minimal seriali
 
 ### Acceptance criteria
 
-- Owner A cannot enumerate Owner B's user account, name, or email.
-- Admin account management remains functional.
-- Audit filter options continue using their dedicated visibility-scoped endpoint.
+- Owner A cannot enumerate Owner B's user account, name, or email. — ✅ met via `IsAdmin` gate.
+- Admin account management remains functional. — ✅ met.
+- Audit filter options continue using their dedicated visibility-scoped endpoint (`backend/audit/views.py:94` `AuditFilterOptionsView`). — ✅ met.
 
 ## P0.3 Add CSRF enforcement for cookie JWTs
 
@@ -81,7 +81,7 @@ If an owner-specific list is genuinely needed, expose a separate minimal seriali
 
 - Add Gitleaks with an `ozv_...` rule and full-history checkout.
 - Add `pip-audit`/OSV scanning.
-- Resolve the current high-severity transitive npm advisory (`brace-expansion`).
+- The `brace-expansion` transitive advisory is mitigated in the lockfile at `5.0.9`; retain scanning to prevent regression.
 - Add Trivy vulnerability scanning, not only SBOM generation.
 - Keep Renovate, but set a security-update SLA.
 
@@ -181,11 +181,10 @@ Current manual `pg_dump` instructions are not a recovery system.
 
 ## P1.3 Add login/auth/email throttling
 
-Only API-key requests are currently throttled. Add scoped throttles for:
+> Status: ⚠️ partially shipped in #433 — auth login/refresh/register/verify-email and OAuth initiate/exchange are now throttled per-IP (`backend/accounts/throttling.py`, `backend/config/settings.py:153`); remaining items below still open.
 
-- token login/refresh;
-- registration and verification;
-- OAuth initiate/callback/exchange;
+API-key and the above auth endpoints are now throttled. Add scoped throttles for the remaining:
+
 - password changes and invitation resets;
 - invoice email/retry endpoints;
 - expensive report/PDF endpoints;
@@ -406,9 +405,8 @@ Split by resource/workflow into modules, but keep service boundaries inside the 
 
 ## P3.2 Finish i18n migration
 
-There are many hard-coded user-facing English strings despite the repository rule requiring i18n, notably in:
+There are many hard-coded user-facing English strings despite the repository rule requiring i18n. `Layout.tsx` is now fully translated; remaining hotspots notably include:
 
-- `Layout.tsx`
 - `ImportsPage.tsx`
 - `EmailLogsModal.tsx`
 - loading/error/not-found pages
@@ -540,12 +538,12 @@ Test OAuth callbacks, PDF previews, maps, and fonts before enforcing CSP.
 
 ## Milestone 0 — emergency security (week 1)
 
-1. `fix/security-user-list-scope` — ✅ PR #430 open
+1. `fix/security-user-list-scope` — ✅ shipped in #430
 2. `fix/security-cookie-csrf`
 3. `ci/secret-and-dependency-scanning`
 4. `fix/security-upload-parsing-limits`
 
-**Exit gate:** no known cross-tenant write/read leak; CSRF and secret exposure closed; scanners green.
+**Exit gate:** `P0.2` user-list leak closed in #430; remaining gate is CSRF, upload limits, and scanners green.
 
 ## Milestone 1 — production operations (weeks 2–4)
 
@@ -554,9 +552,9 @@ Test OAuth callbacks, PDF previews, maps, and fonts before enforcing CSP.
 9. `build/harden-runtime-containers`
 10. `ops/health-readiness-and-migrations`
 11. `ci/postgres-integration-tests`
-12. `fix/security-auth-throttling`
+12. `fix/security-auth-throttling` — ⚠️ partially shipped in #433 (remaining: password-change, email/report, import throttles)
 
-**Exit gate:** monitored deployment, tested restore, non-root containers, safe migrations, production DB lane.
+**Exit gate:** monitored deployment, tested restore, non-root containers, safe migrations, production DB lane; auth throttling partially done in #433.
 
 ## Milestone 2 — contract/data safety (weeks 5–8)
 
@@ -605,10 +603,10 @@ Test OAuth callbacks, PDF previews, maps, and fonts before enforcing CSP.
 
 # Top ten actionable backlog items
 
-1. Make `/auth/users/` admin-only/scoped. — ✅ PR #430 open
+1. Make `/auth/users/` admin-only/scoped. — ✅ shipped in #430
 2. Enforce CSRF for cookie JWT requests.
 3. Add upload limits and hardened XML parsing.
-4. Add Gitleaks, dependency scanning, and fix current npm high advisory.
+4. Add Gitleaks, dependency scanning, and Trivy vuln scanning (npm advisory already mitigated at `5.0.9`).
 5. Add Sentry/GlitchTip with PII scrubbing and request IDs.
 6. Automate DB/media backups and complete a restore drill.
 7. Run non-root hardened containers with safe migration/health patterns.
