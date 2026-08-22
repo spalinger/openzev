@@ -62,20 +62,22 @@ If an owner-specific list is genuinely needed, expose a separate minimal seriali
 
 ## P0.3 Add CSRF enforcement for cookie JWTs
 
+> Status: ✅ shipped in #446 (2026-08) — `CookieJWTAuthentication` now enforces CSRF via `SessionAuthentication.enforce_csrf` on cookie-authenticated unsafe requests; `CsrfViewMiddleware` kept for admin/Django views, `set_auth_cookies(request,response)` issues `csrftoken` via `get_token`, `CSRF_TRUSTED_ORIGINS` defaults to `CORS_ALLOWED_ORIGINS`, frontend `api` axios instance scopes `xsrfCookieName`/`xsrfHeaderName` (no `axios.defaults`), case-insensitive `Api-Key` and unified `_make_jwt_for_user` claims (`backend/accounts/jwt_utils.py`).
+
 `CookieJWTAuthentication` accepts JWTs from cookies but does not run a CSRF check. `SameSite=Lax` is defense-in-depth, not the primary check.
 
 - Enforce CSRF only for cookie-authenticated unsafe requests.
-- Issue the CSRF cookie during login/refresh.
-- Configure Axios `xsrfCookieName`/`xsrfHeaderName`.
+- Issue the CSRF cookie during login/refresh (and verify-email/initial-password/OAuth/impersonation).
+- Configure Axios `xsrfCookieName`/`xsrfHeaderName` scoped to `api` instance.
 - Add tests for missing, invalid, and valid tokens.
-- Retain bearer/API-key support without CSRF.
+- Retain bearer/API-key support without CSRF (case-insensitive `Api-Key`).
 
 ### Acceptance criteria
 
-- Cookie-authenticated POST/PATCH/DELETE without CSRF fails.
-- Same requests with valid CSRF pass.
-- Bearer and API-key clients continue to work.
-- Login/refresh/logout behavior is tested.
+- Cookie-authenticated POST/PATCH/DELETE without CSRF fails. — ✅ met via `accounts/test_csrf.py` (9 tests).
+- Same requests with valid CSRF pass. — ✅ met.
+- Bearer and API-key clients continue to work. — ✅ met (`Api-Key` case-insensitive at `backend/accounts/authentication.py:26`, `ApiKeyAuthentication` lower).
+- Login/refresh/logout behavior is tested. — ✅ met (`test_csrf.py` + `tests/api-client-refresh.test.ts` 21 files/124 tests); `CSRF_TRUSTED_ORIGINS` defaults to `CORS_ALLOWED_ORIGINS` (`backend/config/settings.py:197`), frontend `frontend/.env.example:1` → `/api/v1` same-origin note in `README.md:260`.
 
 ## P0.5 Add secret and dependency scanning
 
@@ -539,11 +541,11 @@ Test OAuth callbacks, PDF previews, maps, and fonts before enforcing CSP.
 ## Milestone 0 — emergency security (week 1)
 
 1. `fix/security-user-list-scope` — ✅ shipped in #430
-2. `fix/security-cookie-csrf`
+2. `fix/security-cookie-csrf` — ✅ shipped in #446
 3. `ci/secret-and-dependency-scanning`
 4. `fix/security-upload-parsing-limits`
 
-**Exit gate:** `P0.2` user-list leak closed in #430; remaining gate is CSRF, upload limits, and scanners green.
+**Exit gate:** `P0.2` user-list leak closed in #430; `P0.3` CSRF closed in #446; remaining gate is upload limits and scanners green.
 
 ## Milestone 1 — production operations (weeks 2–4)
 
@@ -604,7 +606,7 @@ Test OAuth callbacks, PDF previews, maps, and fonts before enforcing CSP.
 # Top ten actionable backlog items
 
 1. Make `/auth/users/` admin-only/scoped. — ✅ shipped in #430
-2. Enforce CSRF for cookie JWT requests.
+2. Enforce CSRF for cookie JWT requests. — ✅ shipped in #446 (`CookieJWTAuthentication` + `SessionAuthentication.enforce_csrf`, `CsrfViewMiddleware` kept, `jwt_utils._make_jwt_for_user`, `api` xsrf scoped, 9 backend + 124 frontend tests)
 3. Add upload limits and hardened XML parsing.
 4. Add Gitleaks, dependency scanning, and Trivy vuln scanning (npm advisory already mitigated at `5.0.9`).
 5. Add Sentry/GlitchTip with PII scrubbing and request IDs.
