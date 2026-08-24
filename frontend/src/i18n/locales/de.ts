@@ -1722,8 +1722,6 @@ export const de = {
             title: 'Rechnung {{number}}',
             backToInvoices: 'Zurück zu den Rechnungen',
             generatePdf: 'PDF erstellen',
-            loading: 'Rechnungsdetails werden geladen…',
-            loadError: 'Rechnungsdetails konnten nicht geladen werden.',
             status: 'Status',
             total: 'Gesamt',
             subtotal: 'Zwischensumme',

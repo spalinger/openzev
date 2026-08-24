@@ -1733,8 +1733,6 @@ export const en = {
             title: 'Invoice {{number}}',
             backToInvoices: 'Back to Invoices',
             generatePdf: 'Generate PDF',
-            loading: 'Loading invoice details…',
-            loadError: 'Failed to load invoice details.',
             status: 'Status',
             total: 'Total',
             subtotal: 'Subtotal',

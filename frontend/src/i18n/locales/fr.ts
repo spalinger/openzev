@@ -1722,8 +1722,6 @@ export const fr = {
             title: 'Facture {{number}}',
             backToInvoices: 'Retour aux factures',
             generatePdf: 'Générer le PDF',
-            loading: 'Chargement des détails de la facture…',
-            loadError: 'Échec du chargement des détails de la facture.',
             status: 'Statut',
             total: 'Total',
             subtotal: 'Sous-total',
