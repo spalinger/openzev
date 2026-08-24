@@ -35,7 +35,7 @@ MAX_CSV_BYTES = MAX_UPLOAD_BYTES
 MAX_CSV_ROWS = getattr(settings, "IMPORT_MAX_ROWS", 200_000)
 MAX_CSV_COLUMNS = 1_500
 MAX_VALUES_COUNT = 1440  # one value per minute per day
-MAX_XLSX_DECOMPRESSED_BYTES = 50 * 1024 * 1024  # decompressed budget, deliberately not aliased to MAX_UPLOAD_BYTES
+MAX_XLSX_DECOMPRESSED_BYTES = 50 * 1024 * 1024
 MAX_XLSX_MEMBERS = 200
 MAX_XLSX_RATIO = 500
 
@@ -117,7 +117,7 @@ def _read_csv_table(file, *, has_header, delimiter):
     binary = getattr(file, "file", file)
 
     rows = []
-    # The header is not a data row, so a headered file may carry one extra row.
+    # A headered file carries one extra row beyond the data-row cap.
     row_cap = MAX_CSV_ROWS + (1 if has_header else 0)
     text_wrapper = None
     try:

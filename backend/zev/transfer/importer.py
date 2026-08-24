@@ -78,9 +78,6 @@ READING_BATCH_SIZE = 2000
 # The per-row check below has to catch that, not the database.
 MAX_ENERGY_KWH = Decimal("99999999.9999")
 
-# A malformed readings file can produce one error per row. The response has to
-# stay a response, so the list is capped and the true total reported alongside.
-
 # Upload hardening limits — rationale: docs/specs/2026-03-metering-import-and-quality.md §4.4.
 MAX_TRANSFER_DECOMPRESSED_BYTES = getattr(settings, "TRANSFER_MAX_DECOMPRESSED_MB", 500) * 1024 * 1024
 MAX_TRANSFER_MEMBERS = 500
