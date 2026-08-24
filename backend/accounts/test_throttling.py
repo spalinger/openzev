@@ -155,7 +155,6 @@ class UploadEndpointThrottleTests(TestCase):
         for _ in range(4):
             self.client.post(IMPORT_CSV, format="multipart")
         self.assertEqual(self.client.post(IMPORT_CSV, format="multipart").status_code, 429)
-        # Exhausting the import budget leaves the archive budget untouched.
         self.assertNotEqual(self.client.post(INSPECT_ARCHIVE, format="multipart").status_code, 429)
 
     @mock.patch.object(ApiKeyRateThrottle, "THROTTLE_RATES", {"api_key": "3/hour"})

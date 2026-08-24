@@ -476,7 +476,6 @@ class ImportView(viewsets.ViewSet):
             metadata={
                 "filename": file.name,
                 "format_profile": format_profile,
-                # The preview succeeded, so both values are int-coercible.
                 "interval_minutes": int(interval_minutes),
                 "values_count": int(values_count),
             },
