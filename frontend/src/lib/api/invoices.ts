@@ -86,7 +86,7 @@ export async function downloadAllPdfs(payload: {
   return data as Blob
 }
 
-export async function downloadAnnualStatement(params: {
+export async function fetchAnnualStatementBlob(params: {
   year: number
   participant_id?: string
   zev_id?: string
@@ -96,6 +96,15 @@ export async function downloadAnnualStatement(params: {
     responseType: 'blob',
   })
   return data as Blob
+}
+
+/** Download a single annual statement as a file. */
+export async function downloadAnnualStatement(params: {
+  year: number
+  participant_id?: string
+  zev_id?: string
+}): Promise<Blob> {
+  return fetchAnnualStatementBlob(params)
 }
 
 export async function downloadAllAnnualStatements(params: {

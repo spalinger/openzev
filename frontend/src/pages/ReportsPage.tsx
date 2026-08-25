@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useMutation } from '@tanstack/react-query'
-import { downloadAnnualStatement, downloadAllAnnualStatements, downloadFinancialSummary } from '../lib/api/invoices'
+import { downloadAnnualStatement, downloadAllAnnualStatements, downloadFinancialSummary, fetchAnnualStatementBlob } from '../lib/api/invoices'
 import { downloadBlob } from '../lib/downloadBlob'
 import { useAuth } from '../lib/auth'
 import { useManagedZev } from '../lib/managedZev'
+import { PdfPreview } from '../components/PdfPreview'
+import { usePdfObjectUrl } from '../lib/usePdfObjectUrl'
 import { ReportsEmptyState } from '../features/reports/ReportsEmptyState'
 import { YearDownloadCard } from '../features/reports/YearDownloadCard'
 import { PageSkeleton } from '../components/PageSkeleton'
@@ -48,6 +50,19 @@ export function ReportsPage() {
     const financialSummaryMutation = useYearDownload(
         () => downloadFinancialSummary({ year: selectedYear, zev_id: isZevScopedRole ? selectedZevId || undefined : undefined }),
         () => `financial-summary-${selectedYear}.pdf`,
+    )
+
+    // Inline preview of the own annual statement — participant-only, since the
+    // single-PDF endpoint requires participant_id + zev_id for admins/owners
+    // (their card downloads the whole-ZEV ZIP instead).
+    const [showAnnualStatementPreview, setShowAnnualStatementPreview] = useState(false)
+    const annualStatementFetcher = useMemo(
+        () => () => fetchAnnualStatementBlob({ year: selectedYear }),
+        [selectedYear],
+    )
+    const { url: annualStatementUrl, loading: previewLoading, error: previewError } = usePdfObjectUrl(
+        annualStatementFetcher,
+        showAnnualStatementPreview,
     )
 
     // One annual-statement card whose wording and mutation follow the role:
@@ -94,14 +109,43 @@ export function ReportsPage() {
                     </div>
 
                     <div className="grid grid-2">
-                        <YearDownloadCard
-                            titleKey="pages.reports.annualStatement.title"
-                            descriptionKey={annualStatement.descriptionKey}
-                            busy={annualStatement.mutation.isPending}
-                            error={annualStatement.mutation.isError ? t('pages.reports.annualStatement.error') : null}
-                            onDownload={() => annualStatement.mutation.mutate()}
-                            actionLabelKey={annualStatement.actionLabelKey}
-                        />
+                        <div style={{ display: 'grid', gap: '0.75rem', alignContent: 'start' }}>
+                            <YearDownloadCard
+                                titleKey="pages.reports.annualStatement.title"
+                                descriptionKey={annualStatement.descriptionKey}
+                                busy={annualStatement.mutation.isPending}
+                                error={annualStatement.mutation.isError ? t('pages.reports.annualStatement.error') : null}
+                                onDownload={() => annualStatement.mutation.mutate()}
+                                actionLabelKey={annualStatement.actionLabelKey}
+                            />
+                            {!isZevScopedRole && (
+                                <>
+                                    <div>
+                                        <button
+                                            className="button button-secondary button-compact"
+                                            type="button"
+                                            onClick={() => setShowAnnualStatementPreview((v) => !v)}
+                                        >
+                                            {showAnnualStatementPreview
+                                                ? t('common.hideDetails')
+                                                : t('common.showDetails')}
+                                        </button>
+                                    </div>
+                                    {showAnnualStatementPreview && previewLoading && (
+                                        <p className="muted">{t('common.loading')}</p>
+                                    )}
+                                    {showAnnualStatementPreview && previewError && (
+                                        <p className="muted">{t('pages.reports.annualStatement.error')}</p>
+                                    )}
+                                    {showAnnualStatementPreview && annualStatementUrl && (
+                                        <PdfPreview
+                                            src={annualStatementUrl}
+                                            title={t('pages.reports.annualStatement.title')}
+                                        />
+                                    )}
+                                </>
+                            )}
+                        </div>
                         <YearDownloadCard
                             titleKey="pages.reports.financialSummary.title"
                             descriptionKey="pages.reports.financialSummary.description"

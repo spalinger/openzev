@@ -2,7 +2,7 @@
 
 - Branch: `followup/contract-annual-statement-embed` — base `feat/ui-print-parity`
 - Companion note: `docs/followups/contract-annual-statement-embed.md`
-- Status: plan drafted 2026-08-25; implementation not started.
+- Status: implemented 2026-08-25.
 - All references below verified against the branch tip at planning time.
 
 ## Goal

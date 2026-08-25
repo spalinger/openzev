@@ -92,6 +92,11 @@ export async function downloadParticipantContractPdf(participantId: string, file
   downloadBlob(response.data as Blob, filename)
 }
 
+export async function fetchParticipantContractPdfBlob(participantId: string): Promise<Blob> {
+  const response = await api.get(`/zev/participants/${participantId}/contract-pdf/`, { responseType: 'blob' })
+  return response.data as Blob
+}
+
 export async function fetchMeteringPoints(): Promise<MeteringPoint[]> {
   return fetchAllPages<MeteringPoint>('/zev/metering-points/')
 }
