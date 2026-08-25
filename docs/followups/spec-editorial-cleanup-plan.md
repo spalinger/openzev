@@ -2,7 +2,7 @@
 
 - Branch: `followup/spec-editorial-cleanup` — base `feat/ui-print-parity`
 - Companion note: `docs/followups/spec-editorial-cleanup.md`
-- Status: plan drafted 2026-08-25; implementation not started.
+- Status: implemented 2026-08-25.
 - All references below verified against the branch tip at planning time.
 
 ## Goal

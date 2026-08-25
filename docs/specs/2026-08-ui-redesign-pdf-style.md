@@ -16,7 +16,7 @@
 
 ## 1. Problem and outcome
 
-The app and its printable documents drifted into two product languages. The web UI uses a sky-blue Mantine ramp (`#0284c7` / `#f0f9ff`→`#0c4a6e` in `frontend/src/main.tsx:29-42`) plus a hand-rolled `frontend/src/index.css` (≈43 KB, ≈211 hardcoded hexes) and a slate `#0f172a` sidebar (`index.css:92`). The PDF system in `backend/templates/pdf/shared_pdf_base.html:23-42` already had a coherent forest/ink/paper system (`--brand-deep #0d2b1d`, `--brand #143828`, `--brand-mid #1f5c3a`, `--gold #bfa05a`, etc.) shared by invoice, contract, annual statement and financial summary via a single `<style>` partial. Three styling systems (hand-rolled CSS + Mantine v9 + MUI Data Grid on two pages) coexist; chart colors live in a 2-constant `frontend/src/lib/chartTokens.ts`.
+The app and its printable documents drifted into two product languages. The web UI uses a sky-blue Mantine ramp (`#0284c7` / `#f0f9ff`→`#0c4a6e` in `frontend/src/main.tsx`) plus a hand-rolled `frontend/src/index.css` (≈43 KB, ≈211 hardcoded hexes) and a slate `#0f172a` sidebar (`index.css`). The PDF system in `backend/templates/pdf/shared_pdf_base.html` already had a coherent forest/ink/paper system (`--brand-deep #0d2b1d`, `--brand #143828`, `--brand-mid #1f5c3a`, `--gold #bfa05a`, etc.) shared by invoice, contract, annual statement and financial summary via a single `<style>` partial. Three styling systems (hand-rolled CSS + Mantine v9 + MUI Data Grid on two pages) coexist; chart colors live in a 2-constant `frontend/src/lib/chartTokens.ts`.
 
 The PDF preview is structurally wrong: `POST /api/v1/invoices/invoices/preview-pdf-template/` returns HTML and `frontend/src/pages/AdminPdfTemplatesPage.tsx` does `iframe.contentDocument.write(html)`. Browsers ignore `@page`, margin boxes, `position: running(...)`, mm geometry and PDF/A XMP — the preview can never match the shipped bytes. `frontend/src/pages/InvoiceDetailPage.tsx` has no document preview at all even though `Invoice.pdf_file` / `pdf_url` stores the artifact.
 
@@ -83,12 +83,12 @@ Top-level keys:
 | `primitives` | `object` | PDF names verbatim, plus `--white` and the desaturated status fills (`--neutral-100` `#e2e8f0`, `--info-100` `#e0f2fe`, `--success-100` `#dcfce7`, `--danger-100` `#fee2e2`, `--warning-100` `#fef9c3` — the existing `.badge-*` families) — the only place hex literals may live |
 | `semantics` | `object` | Alias map `semanticName → primitiveName` (e.g. `"--app-bg": "var(--surface)"`). Components reference semantics only. |
 | `themes` | `object<string, object>` | The default theme is expressed by `semantics` directly (emitted as `:root`). `themes` holds only *alternate* maps (`paper-light`, `high-contrast`, etc.) once one ships — deferred until a tested use case exists. Adding a theme is a token-file change only (pure data: reassignment of the same semantic names to primitives/ramp steps; no component code branches). |
-| `charts` | `object` | Mirrors `invoices/pdf_charts.py:7-18` 1:1 (see §4.3) |
+| `charts` | `object` | Mirrors `invoices/pdf_charts.py` 1:1 (see §4.3) |
 | `type` | `object` | Font families for screen (`Inter Variable`) and print (`Helvetica Neue`). Additional scale/tracking/numeric-policy properties are deferred until they are consumed by generated outputs.
 
 The schema is purpose-built (no external token framework). DTCG 2025.10 (`.tokens.json`, `$value`/`$type` groups) is the recognized standard and the migration target **if** a design-tool pipeline (Figma Variables, Style Dictionary) ever enters the workflow — not adopted now: there is no design-tool consumer today and the generator stays dependency-free. The primitive → semantic-alias → theme structure already maps 1:1 onto DTCG concepts.
 
-`primitives` verbatim (from `shared_pdf_base.html:23-42`):
+`primitives` verbatim (from `shared_pdf_base.html`):
 
 ```json
 {
@@ -135,7 +135,7 @@ The schema is purpose-built (no external token framework). DTCG 2025.10 (`.token
 
 Semantic examples (final map decided in Phase 0; names below are normative):
 
-- `--app-bg` → `var(--surface)` (replaces `index.css:4 #f8fafc` + sky radials `index.css:25-28`)
+- `--app-bg` → `var(--surface)` (replaces the `background: #f8fafc` rule and sky radials in `index.css`)
 - `--surface-card` → `var(--white)` with `border: var(--line)` (replaces `card`/`table-card` `rgba(255,255,255,0.9)` / `rgba(148,163,184,0.2)`); semantics always alias primitives — never raw hex
 - `--text-primary` → `var(--ink)`; `--text-body` → `var(--ink-soft)`; `--text-muted` → `var(--muted)`
 - `--border-default` → `var(--line)`; `--border-subtle` → `var(--line-subtle)`
@@ -152,10 +152,10 @@ All five are pure derivations; hand-editing them is a lint/test error.
 | File | Consumes | Consumed by |
 |---|---|---|
 | `frontend/src/styles/tokens.css` | `primitives + semantics + themes` → `:root` map (alternate `[data-theme]` maps only when a second theme ships) | Imported in `frontend/src/main.tsx` before `index.css`; every component uses `var(--semantic)` |
-| `frontend/src/styles/generatedTheme.ts` | Mantine theme object: `primitives.brand` ramp + semantics (`primaryColor: "brand"`, `primaryShade: 6`, `fontFamily` sync with `index.css:2`) — replaces sky ramp `#f0f9ff … #0c4a6e` | Imported by `MantineProvider` in `main.tsx`; the entrypoint stays hand-written — generated code lives only in visibly generated files |
+| `frontend/src/styles/generatedTheme.ts` | Mantine theme object: `primitives.brand` ramp + semantics (`primaryColor: "brand"`, `primaryShade: 6`, `fontFamily` sync with `index.css`) — replaces sky ramp `#f0f9ff … #0c4a6e` | Imported by `MantineProvider` in `main.tsx`; the entrypoint stays hand-written — generated code lives only in visibly generated files |
 | `frontend/src/lib/chartTokens.ts` | `charts` block, emitted as **resolved literal strings** (Recharts props and SVG `fill="…"` need real color values; they do not resolve `var(--…)`) | `DashboardPage`, `MeteringChartPage`, `TariffPriceHistoryChart`, feasibility charts, `EnergyFlowChart`, `RawMeteringTable` (recharts) |
 | `backend/invoices/generated_chart_tokens.py` | `charts` block as plain Python constants (same literals as `chartTokens.ts`) | imported by `invoices/pdf_charts.py` and `invoices/annual_statement.py` (its SVG chart) — no duplicated color literals in Python |
-| `backend/templates/pdf/_tokens.css` | `primitives` (same block as `shared_pdf_base.html:23-42`) | `{% include "pdf/_tokens.css" %}` from `shared_pdf_base.html` (or an equivalent `_tokens.html` partial) — the PDF stays the source of the same hex values; no hex drift between screen and print |
+| `backend/templates/pdf/_tokens.css` | `primitives` (same block as `shared_pdf_base.html`) | `{% include "pdf/_tokens.css" %}` from `shared_pdf_base.html` (or an equivalent `_tokens.html` partial) — the PDF stays the source of the same hex values; no hex drift between screen and print |
 
 `scripts/generate-tokens.mjs` (new, no deps): reads `tokens.json`, validates its schema (required keys; semantics reference existing primitives; hex literals only inside `primitives`), and emits the five files deterministically. A unit test `design/tokens.test.mjs` asserts that regenerating and diffing produces no changes (parity by construction).
 
@@ -185,7 +185,7 @@ The annual-statement SVG chart and two `pdf_charts.py` accents previously carrie
 
 ### 4.4 `index.css` contracts retained
 
-The existing management-page contracts from `2026-04-frontend-management-page-design.md:100-112` (`.page-stack`, `.card/.table-card/.stat-card`, `.button*`, `.badge-*`, `.actions-row*`, `.participant-*/.metering-*/.tariff-*/.invoice-*`) remain the design system. This change re-skins them (values → `var(--semantic)`) and does not introduce a second component library.
+The existing management-page contracts from `2026-04-frontend-management-page-design.md` § `Contract: CSS contracts` (`.page-stack`, `.card/.table-card/.stat-card`, `.button*`, `.badge-*`, `.actions-row*`, `.participant-*/.metering-*/.tariff-*/.invoice-*`) remain the design system. This change re-skins them (values → `var(--semantic)`) and does not introduce a second component library.
 
 ### 4.5 Deleted
 
@@ -203,16 +203,16 @@ The PDF language is an excellent print system and a mediocre spec for a dense bi
 
 | Keep from the PDF | Do NOT copy to screen | Improve on both |
 |---|---|---|
-| Forest/ink/paper palette (`--brand*`, `--ink*`, `--surface`, `--zebra`) | 9.5pt / Helvetica print scale — screen stays `Inter Variable` (`index.css:2`, `main.tsx:25`) at functional sizes | Type hierarchy: page title 1.5–1.75rem/650/−0.02em + one-line description; labels 0.75–0.8125rem/500; uppercase only for true section kickers via `text-transform`, never in translation strings |
+| Forest/ink/paper palette (`--brand*`, `--ink*`, `--surface`, `--zebra`) | 9.5pt / Helvetica print scale — screen stays `Inter Variable` (the `font-family` rule in `index.css`, `MantineProvider` in `main.tsx`) at functional sizes | Type hierarchy: page title 1.5–1.75rem/650/−0.02em + one-line description; labels 0.75–0.8125rem/500; uppercase only for true section kickers via `text-transform`, never in translation strings |
 | Tabular numerals for CHF/kWh (`font-variant-numeric: tabular-nums`) | Uppercase `.eyebrow` on every field label | Fewer boxes: one card surface, more whitespace, radius 8/10px, shadows only on overlays |
-| One accent (gold *or* mid-green), once per view | `.amount-card` gradient + `.amount-card-shine` circle repeated as button chrome (`invoice_pdf.html:91-113`; the contract analogue is `.tariff-card`/`.tariff-card-shine` at `contract_pdf.html:122-144` — the contract template has no `.amount-card`) | Tables: sticky header, right-aligned quantities/money, 36–40px rows, hover, selected = `var(--brand-pale)` |
+| One accent (gold *or* mid-green), once per view | `.amount-card` gradient + `.amount-card-shine` circle repeated as button chrome (`invoice_pdf.html` `.amount-card` rule; the contract analogue is `.tariff-card`/`.tariff-card-shine` in `contract_pdf.html` — the contract template has no `.amount-card`) | Tables: sticky header, right-aligned quantities/money, 36–40px rows, hover, selected = `var(--brand-pale)` |
 | Dark-header hairline tables (`line-items thead th` `var(--brand-deep)`) | `document-header` anatomy as page chrome for Imports/Tariffs/Admin | Status: small filled desaturated pills (`.badge-*` remapped), never raw text |
 | Shared chart palette (PDF ≡ dashboard) | Brand dots / accent bars / shine circles as recurring chrome | Dashboard: one hero number + 3–4 KPIs + one energy-flow + short exception list |
 | Paper + ink calm (`--surface #f8faf7`, `--ink #0f172a`) | | Login: quiet paper + brand mark (no gradient circus) |
 
 ### 5.2 Gold usage (WCAG AA)
 
-`--gold #bfa05a` on white `#fff` is contrast `~2.8:1`. WCAG AA requires `4.5:1` for normal text (`3:1` for large/bold ≥18pt/14pt-bold) — gold-on-white **fails** and would block the Phase 4 contrast audit. The PDF already obeys this: gold is only `savings-row.highlight .savings-value` on `var(--brand-deep)` at `9pt/900` inside `.amount-card` (`invoice_pdf.html:180-184`). Binding rule:
+`--gold #bfa05a` on white `#fff` is contrast `~2.8:1`. WCAG AA requires `4.5:1` for normal text (`3:1` for large/bold ≥18pt/14pt-bold) — gold-on-white **fails** and would block the Phase 4 contrast audit. The PDF already obeys this: gold is only `savings-row.highlight .savings-value` on `var(--brand-deep)` at `9pt/900` inside `.amount-card` (in `invoice_pdf.html`). Binding rule:
 
 - `--gold` is decorative/display only. Permitted on `var(--brand-deep)` / `var(--brand)` at `≥16pt` or `≥14pt/700`, or as 1–2px accent bars/dots that are not text.
 - Never as text color on `#fff` / `var(--surface)` / `var(--brand-pale)` / `var(--zebra)`. Status pills in dense tables use desaturated fills (`--brand-pale`, `var(--success-100)`, `var(--danger-100)`, etc. — status hexes live in `primitives`, §4.1) with `--ink-soft` text — the same rule the PDF follows.
@@ -231,25 +231,25 @@ The PDF language is an excellent print system and a mediocre spec for a dense bi
 
 ### 6.1 PDF template preview — PDF output (admin-only)
 
-**Endpoint:** `POST /api/v1/invoices/invoices/preview-pdf-template/` — `PdfTemplatePreviewView` (`invoices/views_templates.py:229`, `permission_classes=[IsAdmin]` via `_AdminTemplateView`). Audit behaviour: the mutation endpoints (`PdfTemplateView` PATCH/DELETE) are audit-logged and DENIED-log non-admin 403s via `denial_audit`; the preview endpoint is stateless and does not override `denial_audit`, so neither its successes nor its 403s are audit-logged — unchanged by this spec.
+**Endpoint:** `POST /api/v1/invoices/invoices/preview-pdf-template/` — `PdfTemplatePreviewView` (`invoices/views_templates.py` `PdfTemplatePreviewView`, `permission_classes=[IsAdmin]` via `_AdminTemplateView`). Audit behaviour: the mutation endpoints (`PdfTemplateView` PATCH/DELETE) are audit-logged and DENIED-log non-admin 403s via `denial_audit`; the preview endpoint is stateless and does not override `denial_audit`, so neither its successes nor its 403s are audit-logged — unchanged by this spec.
 
 Today the view renders the submitted `content` with a sample context and returns `{ html }`. This change keeps HTML as a debug toggle and adds real PDF output:
 
 | Field | Type | Notes |
 |---|---|---|
-| `content` | `string` | Required, non-blank — blank/whitespace → `400 {"error": "Template content is required."}`. Capped at `MAX_TEMPLATE_CHARS` (500 000 chars) on **both** the preview and the `PATCH` save path — oversized → `400 {"error": "Template content exceeds the …-character cap."}` — so a pasted megabyte-scale document cannot pin a WeasyPrint worker at preview time, or later at document/email render time once stored. Preview renders **non-strict** (`views_templates.py:81` — "preview stays non-strict so admins can type in progress"): syntax errors reject with `400 {"error": "Template rendering error: …"}`, unknown *output* variables render empty. The `strict-validation` engine + `string_if_invalid` sentinel rejection (with its documented limitation that variables consulted only in `{% if %}/{% for %}` control flow are not detected) applies at `PATCH` save time only. |
+| `content` | `string` | Required, non-blank — blank/whitespace → `400 {"error": "Template content is required."}`. Capped at `MAX_TEMPLATE_CHARS` (500 000 chars) on **both** the preview and the `PATCH` save path — oversized → `400 {"error": "Template content exceeds the …-character cap."}` — so a pasted megabyte-scale document cannot pin a WeasyPrint worker at preview time, or later at document/email render time once stored. Preview renders **non-strict** (in `views_templates.py` — "preview stays non-strict so admins can type in progress"): syntax errors reject with `400 {"error": "Template rendering error: …"}`, unknown *output* variables render empty. The `strict-validation` engine + `string_if_invalid` sentinel rejection (with its documented limitation that variables consulted only in `{% if %}/{% for %}` control flow are not detected) applies at `PATCH` save time only. |
 | `template_type` | `"invoice" \| "contract" \| "annual_statement"` | Default `invoice`. Selects the sample context builder in `invoices/template_context.py`: `build_sample_invoice_context()` / `build_sample_contract_context()` / `build_sample_annual_statement_context()`. Unknown values → `400 {"error": "Unsupported template type."}` — the preview validates the body-supplied type; the PATCH save path keeps the helper's invoice fallback (its `template_type` arrives from fixed URL routes). |
 | `output` | `"html" \| "pdf"` | Default `html` for backwards compat; `pdf` requests real bytes. Also accepted as `?output=pdf` query param — either form selects PDF output. (The specced-elsewhere `?format=pdf` spelling is unavailable here: DRF's `URL_FORMAT_OVERRIDE` content negotiation intercepts unknown `format` values with a 404 before the view dispatches.) |
 
 **Behaviour:**
 
-- Resolve sample context for `template_type` (same helpers the existing preview and `PdfTemplateView` validation already use; invoice sample already gained `unit_label` and `zev.invoice_language`, contract sample `payment_terms_unit` so no variable is falsely flagged unknown — see `2026-08-contract-pdf-redesign.md:604`).
-- Render: `Template(content).render(Context(sampleContext))` via `_render_with_sample_context` (`views_templates.py:68`, non-strict). Unlike `invoices/pdf.py:_render_template` there is no `render_to_string` fallback — preview content is a complete template body, not an include-bearing partial. The contract sample context sets `is_preview: True` (`template_context.py:191`) so `{% if is_preview %}` placeholder prose (`local_tariff_note_placeholder`, `additional_placeholder`) renders in contract preview but never on issued documents; the invoice and annual-statement sample contexts do not set the flag today.
+- Resolve sample context for `template_type` (same helpers the existing preview and `PdfTemplateView` validation already use; invoice sample already gained `unit_label` and `zev.invoice_language`, contract sample `payment_terms_unit` so no variable is falsely flagged unknown — see `2026-08-contract-pdf-redesign.md` § contract sample context).
+- Render: `Template(content).render(Context(sampleContext))` via `_render_with_sample_context` (in `views_templates.py`, non-strict). Unlike `invoices/pdf.py:_render_template` there is no `render_to_string` fallback — preview content is a complete template body, not an include-bearing partial. The contract sample context sets `is_preview: True` (in `template_context.py`) so `{% if is_preview %}` placeholder prose (`local_tariff_note_placeholder`, `additional_placeholder`) renders in contract preview but never on issued documents; the invoice and annual-statement sample contexts do not set the flag today.
 - If `output == "html"`: return existing shape `200 { html }` (unchanged; debug mode). The frontend renders debug HTML as **escaped source text** — it is never written into an iframe or executed. (`iframe.contentDocument.write` of server-rendered admin HTML is a same-origin script-execution footgun even admin-only: a template pasted from elsewhere could run script in the app origin.) Render errors → `400 { error: "Template rendering error: …" }`; blank content → `400`.
-- If `output == "pdf"`: pipe the rendered HTML through the existing `invoices/pdf_render.py:render_pdf(html)` (WeasyPrint → PDF/A-3b, XMP `pdfaid` + sRGB OutputIntent + font subsets, same helper contract/financial-summary already use). Return `200` with `Content-Type: application/pdf`, `Content-Disposition: inline; filename="preview-{template_type}.pdf"`. Template-level failures (syntax errors, unrenderable input) → `400 { error }` (same error surface as HTML mode); unexpected renderer/infrastructure failures → `500 {"error": "PDF rendering failed."}` — deliberately generic (WeasyPrint exceptions can carry server paths); the full traceback goes to the log via `logger.exception`. Preview content is capped at a documented maximum size (oversized → `400`) to bound WeasyPrint work. No `PdfTemplate` row is written — preview is stateless.
+- If `output == "pdf"`: pipe the rendered HTML through the existing `invoices/pdf_render.py` `render_pdf` (WeasyPrint → PDF/A-3b, XMP `pdfaid` + sRGB OutputIntent + font subsets, same helper contract/financial-summary already use). Return `200` with `Content-Type: application/pdf`, `Content-Disposition: inline; filename="preview-{template_type}.pdf"`. Template-level failures (syntax errors, unrenderable input) → `400 { error }` (same error surface as HTML mode); unexpected renderer/infrastructure failures → `500 {"error": "PDF rendering failed."}` — deliberately generic (WeasyPrint exceptions can carry server paths); the full traceback goes to the log via `logger.exception`. Preview content is capped at a documented maximum size (oversized → `400`) to bound WeasyPrint work. No `PdfTemplate` row is written — preview is stateless.
 - No tenant or ZEV scoping — sample data is synthetic.
 - Parity ≠ byte-equality: sample contexts, timestamps and generated IDs differ from issued documents. The guarantee is the same rendering pipeline, template version, token output and PDF profile — the preview is visually and structurally representative of the issued document.
-- Server-side fetch policy: `render_pdf` passes WeasyPrint a `URLFetcher` restricted to `data:` URIs (`invoices/pdf_render.py:ALLOWED_URL_PROTOCOLS`). Every shipped template is fully inline (inline CSS, inline SVG, zero external references; the PDF/A ICC profile ships inside the weasyprint package and bypasses the fetcher), so document rendering needs no other protocol. Local-file reads (explicit `file:` URLs, and relative URLs resolved against `base_url`) and outbound http/https/ftp from admin-editable template content are denied on **both** the preview and the issued-document paths — WeasyPrint fetching is an SSRF/local-file-exposure consideration even on an admin-only surface. A rejected resource degrades like a missing one: WeasyPrint logs it and renders without it.
+- Server-side fetch policy: `render_pdf` passes WeasyPrint a `URLFetcher` restricted to `data:` URIs (in `invoices/pdf_render.py` `ALLOWED_URL_PROTOCOLS`). Every shipped template is fully inline (inline CSS, inline SVG, zero external references; the PDF/A ICC profile ships inside the weasyprint package and bypasses the fetcher), so document rendering needs no other protocol. Local-file reads (explicit `file:` URLs, and relative URLs resolved against `base_url`) and outbound http/https/ftp from admin-editable template content are denied on **both** the preview and the issued-document paths — WeasyPrint fetching is an SSRF/local-file-exposure consideration even on an admin-only surface. A rejected resource degrades like a missing one: WeasyPrint logs it and renders without it.
 
 **Frontend consumer:** `frontend/src/lib/api/invoices.ts:previewPdfTemplateBlob(content, templateType, signal?)` — blob fetch posting `output:"pdf"` with `Accept: application/pdf` (when a client sends `Accept: application/pdf`, the view falls back to its default renderer instead of answering 406, since the success payload is opaque bytes produced outside DRF renderers); `AdminPdfTemplatesPage.tsx` renders the blob as an object-URL `<iframe title="PDF preview">` (native viewer gives A4 pagination/fidelity for free). Debounced 700 ms auto-render via one shared `renderPreview(source)` callback that owns the revision counter (discards out-of-order responses) and the `AbortController` (cancels superseded requests — a slow WeasyPrint render can otherwise finish after a newer one). Auto-render fires whenever the preview view is visible and content changes; because editor and preview are mutually exclusive views, typing never renders — in practice this is one render on entering the preview and one after each editor round-trip, and it applies to every template size (the backend preview cap bounds pathological content). The last object URL stays visible with a transient "re-rendering…" state; the previous URL is revoked only after the replacement frame has loaded, and on unmount. An HTML/source toggle stays for debugging pasted snippets — displayed as escaped text, never executed; an explicit render button remains for manual re-renders.
 
@@ -289,25 +289,11 @@ Re-skin in place; no new UI library; one token sweep. Existing contracts from `2
 
 ### 7.2 Token sweep
 
-**Files first touched (Phase 1):**
-
-- `frontend/src/main.tsx:24-43` — replace sky ramp (`#f0f9ff`→`#0c4a6e`, `primaryShade:6`, `primaryColor:"brand"` sky) with brand ramp derived from tokens (`--brand-deep` base, `--brand-mid` interactive, `--brand-pale` hover). Update sync comment re `fontFamily` (`Inter Variable` stays on screen; `Helvetica Neue` stays PDF-only).
-- `frontend/src/index.css` — full tokenisation:
-  - `:root` `background: #f8fafc` (`index.css:4`) + `body` radials (`index.css:25-28` sky+green) → `background: var(--app-bg)` (`--surface #f8faf7`).
-  - `.sidebar` `background #0f172a` (`index.css:92`) → `var(--sidebar-bg)` (`--brand-deep #0d2b1d`).
-  - `.eyebrow #38bdf8` (`index.css:186`) → `var(--text-muted)` (`--muted #64748b`) or brand-mid where on-dark needs it; uppercase + `0.08em` only on true section kickers, not every form label.
-  - `.button` sky→green gradient (`index.css:1041` `#0284c7→#16a34a`) → `background: var(--interactive)` flat (with hover `var(--interactive-hover)`); retain `.button-secondary/.button-danger/.button-compact` as semantic but remapped to tokens.
-  - `.card/.table-card/.stat-card` `rgba(255,255,255,0.9)` + `rgba(148,163,184,0.2)` → `var(--surface-card)` + `var(--border-default)`; collapse double border+shadow on section cards.
-  - `.badge-*` remap (`index.css:979-1019` `#e2e8f0`/`#e0f2fe`/`#dcfce7`/`#fee2e2`/`#fef9c3` families) → `--brand-pale`/`--status-*` semantics (filled desaturated, `font-weight:700`, never gold-on-white).
-  - `.page-stack th` / `.raw-metering-*` header treatments → `var(--surface-card)` / `var(--border-default)` / `--brand-deep` dark-header variant only for document-like tables.
-  - Global `:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px }` (covers Mantine + MUI).
-  - Inputs/selects `border #cbd5e1` / `background #fff` → `var(--border-default)` / `var(--surface-card)`; errors stay `#fee2e2/#991b1b` but derived via semantics.
-
-A `rg --pcre2 '#[0-9a-fA-F]{3,8}\b' frontend/src` inventory is committed as a Phase 0 grep table in this spec's PR description, mapping each hex → semantic (not as a repo file). `stylelint` (next) prevents new hexes from Phase 1 onward.
+The chrome-sweep commit fully tokenised `index.css` and `main.tsx`: the `:root` `background` and `body` sky/green radials became `var(--app-bg)`; `.sidebar` `#0f172a` became `var(--sidebar-bg)`; `.button` sky→green gradient became `var(--interactive)`; `.card` / `.badge-*` / `.page-stack` / inputs and global `:focus-visible` were all remapped onto semantic tokens. A `rg` hex inventory was committed in the spec PR description. `stylelint` `color-no-hex` and `scripts/check-frontend-hex.mjs` prevent new raw color literals from Phase 1 onward.
 
 ### 7.3 Typography
 
-- App keeps `Inter Variable` (`index.css:2`, `main.tsx:25`). PDF keeps `Helvetica Neue, Helvetica, Arial` (`shared_pdf_base.html:51` `9.5pt`). Do not unify.
+- App keeps `Inter Variable` (the `font-family` rule in `index.css`, `MantineProvider` in `main.tsx`). PDF keeps `Helvetica Neue, Helvetica, Arial` (`shared_pdf_base.html` (`9.5pt`)). Do not unify.
 - Hierarchy: page title `1.5–1.75rem / 650 / -0.02em` + one-line description; section kicker `0.75rem / 700 / 0.08em / uppercase` via `text-transform`; body `0.875–1rem / 400`; labels `0.75–0.8125rem / 500`. `tabular-nums` only on CHF/kWh/money/quantities (`td.numeric`, `savings-value`, `kpi-value`, `raw-metering-num`).
 
 ### 7.4 Tables
@@ -349,8 +335,8 @@ The planned dev-only mockup routes `frontend/src/pages/design/PreviewDashboard.t
 |---|---|---|---|---|
 | Dashboard | `frontend/src/pages/DashboardPage.tsx` | `/` (`index` under `Layout`) | `queryKeys.metering.dashboardSummary({…})` + `queryKeys.invoices.list(zevId)` + `queryKeys.metering.hourlyProfile(…)` | none — read-only: KPI (ZEV-wide) → energy-flow → open-invoices exception list → charts. Header eyebrow is the selected ZEV name scope line (blank with no ZEV selected); no document-download controls (those live on Reports). |
 | Reports | `frontend/src/pages/ReportsPage.tsx` | `/reports` | none (mutations only) | `downloadAnnualStatement({year})` (participant single PDF), `downloadAllAnnualStatements({year, zev_id})` (admin/owner ZIP), `downloadFinancialSummary({year, zev_id?})` — `zev_id` for admin/owner, omitted for participant (backend scopes by participant). Role branches mirror the former dashboard: admin/owner ZIP + financial summary; participant single PDF + financial summary. Layout: ZEV-name header eyebrow (admin/owner only), one shared year selector (`aria-label`, no visible label, disabled while a download is pending, defaults to the last completed year, recomputed per render), two `YearDownloadCard`s in a `grid grid-2` (icon+text download buttons, `role="alert"` error line styled by `.error-text`), `ReportsEmptyState` guard distinguishing no-ZEV (`pages.reports.noZev*`) from stale/no selection (`pages.reports.selectZev*`). |
-| Invoices list | `frontend/src/pages/InvoicesPage.tsx` | `/invoices` | `queryKeys.invoices.periodOverview(...)` = `['invoices', 'period-overview', zevId, periodStart, periodEnd]` (`queryKeys.ts:27-28`) | `generate/approve-all/send-all` invalidates period-overview |
-| Invoice detail | `frontend/src/pages/InvoiceDetailPage.tsx` | `/invoices/:invoiceId` (`App.tsx:182`) | `queryKeys.invoices.detail(invoiceId)` = `['invoices', 'detail', invoiceId]` (`queryKeys.ts:25`) | `generate-pdf` → set `pdf_url`; embed `PdfPreview src={pdfUrl}` |
+| Invoices list | `frontend/src/pages/InvoicesPage.tsx` | `/invoices` | `queryKeys.invoices.periodOverview(...)` = `['invoices', 'period-overview', zevId, periodStart, periodEnd]` (`queryKeys.ts`) | `generate/approve-all/send-all` invalidates period-overview |
+| Invoice detail | `frontend/src/pages/InvoiceDetailPage.tsx` | `/invoices/:invoiceId` (`App.tsx`) | `queryKeys.invoices.detail(invoiceId)` = `['invoices', 'detail', invoiceId]` (`queryKeys.ts`) | `generate-pdf` → set `pdf_url`; embed `PdfPreview src={pdfUrl}` |
 | Template editor | `frontend/src/pages/AdminPdfTemplatesPage.tsx` | `/admin/pdf-templates` | `queryKeys.admin.invoicePdfTemplate()` / `.contractPdfTemplate()` / `.annualStatementPdfTemplate()` = `['admin', 'pdf-template', <type>]` (`queryKeys.ts`) | `previewPdfTemplateBlob` debounced → object URL |
 | Participants etc. | existing | existing | existing | existing — re-skin only |
 
@@ -380,7 +366,7 @@ This is the anchor the UI shares, not a spec to copy verbatim (see §5.1). The P
 
 | Token | Hex | Role (PDF) | UI role |
 |---|---|---|---|
-| `--ink` | `#0f172a` | primary text | `--text-primary` (already matches UI `:root` `color` `index.css:3`) |
+| `--ink` | `#0f172a` | primary text | `--text-primary` (already matches UI `:root` `color` `index.css`) |
 | `--ink-soft` | `#334155` | body in tables/cards | `--text-body` |
 | `--muted` | `#64748b` | labels, eyebrows, meta | `--text-muted` |
 | `--line` | `#e2e8f0` | borders, row seps | `--border-default` |
@@ -401,14 +387,14 @@ This is the anchor the UI shares, not a spec to copy verbatim (see §5.1). The P
 
 **Document anatomy (not copied 1:1, but shared where it helps family resemblance):**
 
-- `.document-header` flex + hairline + `brand-mid` 40mm underline (`shared_pdf_base.html:80-98`) — stays PDF-only; UI uses the simpler page-header/toolbar pattern from `2026-04-frontend-management-page-design.md:139-150`.
-- `.page-meta` running header/footer (`shared_pdf_base.html:169-216`, `position: running(footer-meta)` + `@page @bottom-center {content: element(footer-meta)}`) — PDF-only.
-- Invoice `amount-card` dark forest gradient (`invoice_pdf.html:91-113`) — stays as a **document** motif + at most one dark KPI card per screen view; never as the default button skin.
-- Contract `section-heading` masked rule (`contract_pdf.html:20-43`) — PDF-only; UI section kickers are the eyebrow style without the spanning rule.
+- `.document-header` flex + hairline + `brand-mid` 40mm underline (`shared_pdf_base.html` `.document-header`) — stays PDF-only; UI uses the simpler page-header/toolbar pattern from `2026-04-frontend-management-page-design.md`.
+- `.page-meta` running header/footer (`shared_pdf_base.html` `.page-meta`) — PDF-only.
+- Invoice `amount-card` dark forest gradient (`invoice_pdf.html` `.amount-card`) — stays as a **document** motif + at most one dark KPI card per screen view; never as the default button skin.
+- Contract `section-heading` masked rule (`contract_pdf.html` `.section-heading`) — PDF-only; UI section kickers are the eyebrow style without the spanning rule.
 
 ---
 
-## 9. Phased rollout (every phase = independently mergeable PRs)
+## 9. Phase ordering (shipped as one branch; phases are the conceptual rollout order)
 
 - **Phase 0 — Decide, instrument, picture it** (mockup gate waived; regenerated user-guide screenshots served as the acceptance artefacts — see §7.8)
 
@@ -473,7 +459,7 @@ Order: Dashboard → invoices list → participants → metering/imports → tar
 
 - `invoices/views_templates.py` — `PdfTemplatePreviewView.post` adds `output` branch, calls `render_pdf()` for `application/pdf` response; no permission or audit change.
 - `backend/invoices/pdf_charts.py` — palette constants imported from `generated_chart_tokens.py` (duplicated literals removed).
-- `backend/templates/pdf/shared_pdf_base.html` — replace the literal `:root` block (lines 23-42, inside the file's single `<style>` partial) with `{% include "pdf/_tokens.css" %}` so `_tokens.css` becomes the hex source. The include belongs inside the `<style>` block (consumers already include the base, e.g. `invoice_pdf.html:11`; the base's lines 1-20 are an inert `{% comment %}` usage note). No change to `PdfTemplate` override resolution (DB HTML stays standalone, keeps working without the include).
+- `backend/templates/pdf/shared_pdf_base.html` — replace the literal `:root` block (lines 23-42, inside the file's single `<style>` partial) with `{% include "pdf/_tokens.css" %}` so `_tokens.css` becomes the hex source. The include belongs inside the `<style>` block (consumers already include the base, e.g. `invoice_pdf.html`; the base's opening lines are an inert `{% comment %}` usage note). No change to `PdfTemplate` override resolution (DB HTML stays standalone, keeps working without the include).
 
 **Frontend changed:**
 
@@ -498,7 +484,7 @@ Order: Dashboard → invoices list → participants → metering/imports → tar
 | Risk | Impact | Mitigation |
 |---|---|---|
 | 43 KB hand-rolled CSS with ≈211 hardcoded hexes | Medium | Phase 0 grep inventory `rg --pcre2 '#[0-9a-f]{3,8}\b'` + hex→semantic map; tokenise per-file; `stylelint color-no-hex` in CI from Phase 1 |
-| `management-page-design` contract drift | Medium | Phase 2–3 PRs update `2026-04-frontend-management-page-design.md:100-112` (`.badge-*`/`.button*`/`.card`) in the same commit; CI checks import of `tokens.css` |
+| `management-page-design` contract drift | Medium | Phase 2–3 PRs update `2026-04-frontend-management-page-design.md` (`.badge-*`/`.button*`/`.card`) in the same commit; CI checks import of `tokens.css` |
 | Three styling systems drift again | Medium | D4/D7: tokens generated into all three; Mantine is a consumer; one Data Grid `sx` module; no new MUI; `@mui/x-date-pickers` removed in Phase 2 and all MUI retired in Phase 5 — the trajectory ends at one styling system |
 | MUI → Mantine date-picker cutover regressions (locale text, value handling) | Low | Five call sites only; `DatesProvider` already localises Mantine; per-site visual + keyboard check in Phase 2 |
 | Data Grid → TanStack Table feature parity (sorting/filter/pagination/selection/density) | Medium | Phase 5 gated on Phase 4 acceptance; per-page port with the parity checklist before the `DataGrid` import is deleted |
@@ -598,7 +584,7 @@ Existing suites stay green (contract: 48 tests in `test_contract_context.py`; te
 
 ---
 
-## 14. Implementation notes (Phases 0–5, this branch)
+## 14. Deviations from the phased plan
 
 - **Phase 0** — `design/tokens.json`, `scripts/generate-tokens.mjs` (+ `--check`),
   `design/tokens.test.mjs`, five committed generated outputs. The generator holds
@@ -661,81 +647,13 @@ Existing suites stay green (contract: 48 tests in `test_contract_context.py`; te
   flush the throttle counters first (`docker compose exec redis redis-cli
   -n 1 FLUSHDB`; celery uses db 0). Screenshots ship unblurred: the demo
   seed carries fictional data, so the former PII blur CSS and its selector
-  test were removed. **A11y pass completed** (see "Four-locale keyboard/a11y
-  pass" below).
+  test were removed. The four-locale keyboard/a11y pass is complete
+  (WCAG contrast fixes + live axe-core sweep, zero violations).
 
-- **Phase 5** — MUI fully retired per ADR 0015: `ImportsPage` and
-  `AdminInvoicesPage` moved to a shared TanStack-based `DataTable`
-  (`@tanstack/react-table` v8), `ActionMenu` → Mantine `Menu`,
-  `AuditEventDrawer` → Mantine `Drawer`, remaining `Switch`/`Tabs` → Mantine.
-  Removed: `@mui/material`, `@mui/x-data-grid`, `@emotion/react`,
-  `@emotion/styled`, `lib/dataGridLocale.ts`. The bundle's dedicated MUI
-  vendor chunk is gone.
+Screenshot capture procedures were extracted to `frontend/screenshots/README.md`.
 
-- **Follow-up fixes (post-Phase-5 review)** — the preview editor's debounced
-  effect depended on its own output state (`rendering`/`previewUrl`), so every
-  successful render re-triggered another fetch and the explicit Render button's
-  request was always aborted; one shared `renderPreview(source)` path now owns
-  revision/abort/object-URL lifecycle. `InvoiceDetailPage` PDF-generation
-  failures surface a translated error instead of rejecting unhandled;
-  `.text-error`/`.app-route-loading` were referenced but undefined since the
-  `App.css` deletion and are now defined. The preview endpoint validates
-  `template_type` (400 on unknown), returns a generic 500 body (detail via
-  `logger.exception`), and its docstring no longer advertises the dead
-  `?format=pdf` spelling. `render_pdf` restricts WeasyPrint fetching to
-  `data:` URIs on all paths (§6.1). The token generator's hex-containment
-  regex lost its stateful `g` flag, stale MUI chunk-split config was removed,
-  and the pre-redesign chart colours in `annual_statement.py`/`pdf_charts.py`
-  were remapped onto the shared chart palette (§4.3) — nothing is in
-  production, so no frozen values remain. The legacy
-  annual-statement/financial-summary templates followed in the same pass:
-  both now include `pdf/_tokens.css` and reference `var(--…)` (dark
-  `--brand-deep` table headers with white text, `--brand-mid` accents,
-  ink/muted/line grey ladder, `--brand-pale` highlight washes), and the
-  invoice/contract white fills became `var(--white)`; the hex sweep was
-  extended to the backend surfaces so the state is enforced, not just
-  reached. The per-ZEV email-template editor (`ZevEmailTemplateFields`) was
-  aligned post-review too: its "Verfügbare Felder" list had drifted from the
-  admin E-Mail-Vorlagen page (missing `{due_date}`, which the backend render
-  context and model help text always supported) and still used pre-redesign
-  table styling; it now lists all 7 variables and shares the token-styled
-   field-table treatment of the admin template pages (admin-governance
-   baseline spec §9.7 updated accordingly). It has since been consolidated
-   further: the variable list is rendered by the shared `EmailFieldReference`
-   component, styled via the dedicated `.email-field-reference` CSS class in
-   `frontend/src/index.css` (monospace variable column with ellipsis, fixed
-   table layout, 50% first column). The four-locale keyboard/a11y
-   pass is complete (below).
-
-- **Four-locale keyboard/a11y pass** — executed in two steps. Static WCAG
-  audit computed from `design/tokens.json` found five failing pairs, all
-  fixed token-side: period-selector active preset label (`--muted` on
-  `--brand-pale` 4.10:1 → `--ink-soft` 8.9:1), admin pending-emails KPI and
-  data-quality yellow label (gold on light 2.50/2.33:1 → `--warning-800`,
-  matching the green/red sibling pattern), email-log pending pill (white on
-  gold 2.50:1 → `warning-800` fill ~6.4:1), and the impersonation banner's
-  gold border (2.33:1 < 3:1 non-text → `--warning-300`). A live axe-core
-  sweep (WCAG 2.0/2.1 A+AA, 11 pages × EN/DE/FR/IT) then found two serious
-  issues: the scrollable field-reference asides on both admin template
-  editors were not keyboard-reachable (`scrollable-region-focusable`; now
-  focusable and labelled via a new `admin.fieldReference` key in all four
-  locales) and the sidebar GitHub footer failed contrast (`--muted` on
-  `--brand-deep` 3.20:1 → `--brand-accent` 7.86:1; version span opacity
-  0.65 → 0.8 = 5.59:1). Re-sweep reports zero violations; keyboard tab-
-  through (sidebar, `PeriodSelector`, template tabs with roving tabindex +
-  Arrow/Home/End, modal traps), DE compound wrapping, uppercase-via-CSS,
-  and object-URL iframe behaviour verified manually across browsers.
-  User-guide screenshots regenerated afterwards.
-
-- **Template-preview auto-render gate removed** — the Phase-5 size gate
-  (>20 000 characters → render button only) sat below the shipped invoice
-  (31k) and contract (34k) defaults, so those two tabs never auto-rendered
-  and landed on a stale or empty preview. Editor and preview are mutually
-  exclusive views (typing never triggers a render), so the gate only decided
-  whether the single render on preview entry fires; it now fires for every
-  template size (debounced 700 ms), bounded server-side by the 500 000-
-  character preview cap, with the explicit Render button kept for manual
-  re-renders. The same pass fixed the browser preview 406ing on its own
-  `Accept: application/pdf` header: `PdfTemplatePreviewView` now falls back
-  to the default renderer instead of raising `NotAcceptable` (regression
-  test `test_accept_pdf_header_does_not_fail_content_negotiation`).
+The ZEV email-template editor's "Verfügbare Felder" variable list is rendered by
+the shared `EmailFieldReference` component (`.email-field-reference` styling in
+`frontend/src/index.css`: monospace variable column with ellipsis, fixed table
+layout, 50% first column), matching the token-styled field tables of the admin
+template pages (admin-governance baseline spec §9.7).
