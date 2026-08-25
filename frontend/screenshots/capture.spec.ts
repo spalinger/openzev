@@ -55,10 +55,16 @@ async function navigateTo(page: Page, urlPath: string) {
 /**
  * Step back one billing period.
  *
- * Pages open on the *current* period, which is still in progress and carries no
- * invoices. `seed_demo` bills the previous complete quarter, so the captures
- * that should show real data step back once. Matches the arrow icon rather than
- * the button label, which is translated.
+ * The dashboard and metering-data pages open on the *current* period
+ * (`getCurrentBillingPeriod`), which is still in progress and carries no
+ * readings worth showing, so those captures step back once to reach the
+ * quarter `seed_demo` fills.
+ *
+ * The invoices page is deliberately **not** among them: it already opens on
+ * the last complete period (`getPreviousBillingPeriod`), so stepping back
+ * there would overshoot into an empty one.
+ *
+ * Matches the arrow icon rather than the button label, which is translated.
  */
 async function goToPreviousPeriod(page: Page) {
   await page.locator('button:has(svg[data-icon="arrow-left"])').first().click()
@@ -370,6 +376,23 @@ test.describe('User Guide Screenshots', () => {
     await screenshot(page, '03-participants', 'participants')
   })
 
+  // 03b — The participant form, showing the allocation weight field and its hint
+  test('03b-participant-allocation-weight', async ({ page }) => {
+    await navigateTo(page, '/participants')
+    await page.getByRole('button', { name: /neuer teilnehmer|new participant|nouveau participant|nuovo partecipante/i })
+      .first().click()
+    await page.waitForSelector('div[style*="z-index: 1000"]', { timeout: 5_000 })
+    const weight = page.locator('input[name="allocation_weight"]')
+    await weight.fill('2')
+    // The participant form is taller than the 900px viewport, so the weight
+    // field and its hint sit below the fold. Centre them, or the capture shows
+    // a clipped field with the explanatory hint cut off entirely.
+    await weight.evaluate((el) => el.scrollIntoView({ block: 'center' }))
+    await page.waitForTimeout(400)
+
+    await screenshotViewport(page, '03b-participant-allocation-weight')
+  })
+
   // 04 — Metering Points
   test('04-metering-points', async ({ page }) => {
     await navigateTo(page, '/metering-points')
@@ -465,12 +488,33 @@ test.describe('User Guide Screenshots', () => {
     await screenshot(page, '07b-tariff-versions')
   })
 
+  // 07c — The shared-fee split key, which only exists for the two shared modes
+  test('07c-tariff-split-key', async ({ page }) => {
+    await navigateTo(page, '/tariffs')
+    await page.getByRole('button', { name: /new tariff|neuer tarif|nouveau tarif|nuova tariffa/i })
+      .first().click()
+    await page.waitForSelector('div[style*="z-index: 1000"]', { timeout: 5_000 })
+
+    // The split-key selector is rendered only for shared_monthly_fee /
+    // shared_yearly_fee, so pick one before capturing.
+    await page.locator('select[name="billing_mode"]').selectOption('shared_monthly_fee')
+    await page.locator('input[name="fixed_price_chf"]').fill('90.00')
+    const splitKey = page.locator('select[name="split_key"]')
+    await expect(splitKey).toBeVisible({ timeout: 5_000 })
+    await splitKey.selectOption('weight')
+    await page.waitForTimeout(400)
+
+    await screenshotViewport(page, '07c-tariff-split-key')
+  })
+
   // 08 — Invoices (period overview)
   test('08-invoices', async ({ page }) => {
     await navigateTo(page, '/invoices')
     await page.waitForSelector('table, .card', { timeout: 10_000 })
-    // Invoices are seeded for the last complete period, not the current one.
-    await goToPreviousPeriod(page)
+    // No step back here: InvoicesPage already opens on the last *complete*
+    // period (getPreviousBillingPeriod), which is the one seed_demo bills.
+    // Stepping back again would land a period earlier and capture an empty
+    // table.
     await screenshot(page, '08-invoices', 'invoices')
   })
 
