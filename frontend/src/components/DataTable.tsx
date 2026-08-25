@@ -132,7 +132,7 @@ export function DataTable<T>({
                 than one page — a single-page footer would render permanently
                 disabled buttons. */}
             {rows.length > 0 && table.getPageCount() > 1 && (
-                <div className="data-table-footer actions-row actions-row-end muted" style={{ fontSize: '0.82rem', alignItems: 'center' }}>
+                <div className="actions-row actions-row-end muted" style={{ fontSize: '0.82rem', alignItems: 'center' }}>
                     <span>
                         {t('common.pagination.range', {
                             from: table.getState().pagination.pageIndex * table.getState().pagination.pageSize + 1,

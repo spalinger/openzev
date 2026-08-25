@@ -339,6 +339,7 @@ export function EnergyFlowChart({ totals, participantStats, highlightParticipant
 
     return (
         <svg
+            data-testid="energy-flow-chart"
             viewBox={`0 0 ${VIEW_W} ${viewH}`}
             style={{ width: '100%', height: 'auto', display: 'block' }}
             onMouseLeave={() => { setHoverNode(null); setHoverLink(null) }}
@@ -403,14 +404,14 @@ export function EnergyFlowChart({ totals, participantStats, highlightParticipant
 
                         {isLeft && (
                             <>
-                                <text className="sankey-participant-label" x={x - 8} y={n.y + n.h / 2 - 6} textAnchor="end" dominantBaseline="central" fontSize={11} fill={CHART_INK}>{n.label}</text>
+                                <text x={x - 8} y={n.y + n.h / 2 - 6} textAnchor="end" dominantBaseline="central" fontSize={11} fill={CHART_INK}>{n.label}</text>
                                 <text x={x - 8} y={n.y + n.h / 2 + 7} textAnchor="end" dominantBaseline="central" fontSize={10} fill={CHART_MUTED}>{n.value.toFixed(1)} kWh</text>
                             </>
                         )}
 
                         {isRight && (
                             <>
-                                <text className="sankey-participant-label" x={x + BAR_W + 8} y={n.y + n.h / 2 - 6} textAnchor="start" dominantBaseline="central" fontSize={11} fill={CHART_INK}>{n.label}</text>
+                                <text x={x + BAR_W + 8} y={n.y + n.h / 2 - 6} textAnchor="start" dominantBaseline="central" fontSize={11} fill={CHART_INK}>{n.label}</text>
                                 <text x={x + BAR_W + 8} y={n.y + n.h / 2 + 7} textAnchor="start" dominantBaseline="central" fontSize={10} fill={CHART_MUTED}>{n.value.toFixed(1)} kWh</text>
                             </>
                         )}

@@ -12,7 +12,7 @@ import { join, resolve } from 'node:path'
  * 52 call sites and is a deliberate readability marker rather than an
  * oversight, since `.button` already carries the primary appearance.
  */
-const RETIRED_CLASSES = ['form-group', 'button-sm']
+const RETIRED_CLASSES = ['form-group', 'button-sm', 'data-table-footer', 'sankey-participant-label']
 
 const SRC = resolve(__dirname, '../src')
 

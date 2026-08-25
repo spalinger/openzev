@@ -305,7 +305,7 @@ test.describe('User Guide Screenshots', () => {
     await page.waitForSelector('.card', { timeout: 10_000 })
     await goToPreviousPeriod(page)
     // The energy-flow Sankey only renders once the period has readings.
-    await page.waitForSelector('.sankey-participant-label', { timeout: 15_000 })
+    await page.waitForSelector('[data-testid="energy-flow-chart"]', { timeout: 15_000 })
     await screenshotFull(page, '02-dashboard')
   })
 
@@ -319,7 +319,7 @@ test.describe('User Guide Screenshots', () => {
     await navigateTo(page, '/')
     await page.waitForSelector('.card, .stat-card', { timeout: 10_000 })
     await goToPreviousPeriod(page)
-    await page.waitForSelector('.sankey-participant-label', { timeout: 15_000 })
+    await page.waitForSelector('[data-testid="energy-flow-chart"]', { timeout: 15_000 })
     await screenshotFull(page, '02b-participant-dashboard')
   })
 
