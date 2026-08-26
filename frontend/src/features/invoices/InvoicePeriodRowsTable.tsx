@@ -4,14 +4,9 @@ import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { ActionMenu, type ActionMenuItem } from '../../components/ActionMenu'
 import { getLatestEmailLog } from './emailLogs'
+import { invoiceStatusBadgeClass } from './invoiceStatus'
+import { openInvoicePdf } from '../../lib/api/invoices'
 import type { InvoicePeriodParticipantRow } from '../../types/api'
-
-function invoiceStatusBadgeClass(status: string): string {
-  if (status === 'paid') return 'badge badge-success'
-  if (status === 'cancelled') return 'badge badge-danger'
-  if (status === 'approved' || status === 'sent') return 'badge badge-info'
-  return 'badge badge-neutral'
-}
 
 function emailStatusBadgeClass(status: string): string {
   if (status === 'sent') return 'badge badge-success'
@@ -114,7 +109,7 @@ export function InvoicePeriodRowsTable({
                           {t('pages.invoices.viewLogs')} ({invoice.email_logs?.length ?? 0})
                         </button>
                         {(invoice.email_logs?.filter((log) => log.status === 'failed').length ?? 0) > 0 && (
-                          <span style={{ color: '#ef4444', marginLeft: '0.3rem', fontSize: '0.85rem', fontWeight: 'bold' }}>
+                          <span style={{ color: 'var(--danger-600)', marginLeft: '0.3rem', fontSize: '0.85rem', fontWeight: 'bold' }}>
                             {t('pages.invoices.failedEmails', {
                               n: invoice.email_logs?.filter((log) => log.status === 'failed').length,
                             })}
@@ -136,10 +131,10 @@ export function InvoicePeriodRowsTable({
                   {invoice ? (
                     invoice.pdf_url ? (
                       <div className="invoice-cell-stack">
-                        <a href={invoice.pdf_url} target="_blank" rel="noreferrer" className="table-inline-link">
+                        <button type="button" onClick={() => { if (invoice) openInvoicePdf(invoice.id) }} className="table-inline-link">
                           <FontAwesomeIcon icon={faFilePdf} fixedWidth />
                           {t('pages.invoices.openPdf')}
-                        </a>
+                        </button>
                         <span className="badge badge-success">{t('pages.invoices.pdfReady')}</span>
                       </div>
                     ) : (
