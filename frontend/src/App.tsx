@@ -2,6 +2,7 @@ import { Suspense, lazy } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Layout } from './components/Layout'
 import { ProtectedRoute } from './components/ProtectedRoute'
+import { PageSkeleton } from './components/PageSkeleton'
 import { ManagedZevProvider } from './lib/managedZev'
 
 const AccountProfilePage = lazy(async () => ({ default: (await import('./pages/AccountProfilePage')).AccountProfilePage }))
@@ -31,7 +32,7 @@ const ZevSettingsPage = lazy(async () => ({ default: (await import('./pages/ZevS
 const OAuthCallbackPage = lazy(async () => ({ default: (await import('./pages/OAuthCallbackPage')).OAuthCallbackPage }))
 
 function RouteFallback() {
-  return <div className="app-route-loading">Loading...</div>
+  return <PageSkeleton variant="page" />
 }
 
 function App() {

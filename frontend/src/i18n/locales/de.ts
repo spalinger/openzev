@@ -505,6 +505,11 @@ export const de = {
             startDescription: 'Schrittweiser Ablauf mit Spaltenzuordnung und Vorschauprüfung.',
             loading: 'Importprotokolle werden geladen...',
             loadFailed: 'Importprotokolle konnten nicht geladen werden.',
+            emptyState: {
+                title: 'Noch keine Importe',
+                description: 'Starten Sie Ihren ersten Import, um Messdaten in diesen ZEV zu bringen.',
+                createAction: 'Import starten',
+            },
             noRows: 'Noch keine Importprotokolle.',
             columns: {
                 created: 'Erstellt',
@@ -1019,6 +1024,7 @@ export const de = {
                 title: 'Noch keine Teilnehmer',
                 description: 'Erstellen Sie den ersten Teilnehmer, um mit Zuweisungen und Abrechnung zu starten.',
                 createAction: 'Ersten Teilnehmer erstellen',
+                meteringPointsAction: 'Zu den Messstellen',
             },
             noResults: {
                 title: 'Keine Teilnehmenden entsprechen diesen Filtern',
@@ -1508,6 +1514,11 @@ export const de = {
             title: 'ZEVs',
             description: 'Gemeinschaften, die Sie in OpenZEV verwalten können.',
             newZev: 'Neuer ZEV',
+            emptyState: {
+                title: 'Noch keine ZEVs',
+                description: 'Erstellen Sie Ihre erste ZEV-Gemeinschaft, um Teilnehmende und Messstellen zu verwalten.',
+                createAction: 'ZEV erstellen',
+            },
             adminOnly: 'Nur Administratoren können neue ZEVs erstellen.',
             validation: {
                 zevNameRequired: 'ZEV-Name ist erforderlich.',

@@ -505,6 +505,11 @@ export const fr = {
             startDescription: 'Flux pas à pas avec mappage des colonnes et contrôles d’aperçu.',
             loading: 'Chargement des journaux d’import...',
             loadFailed: 'Impossible de charger les journaux d’import.',
+            emptyState: {
+                title: 'Aucune importation pour l’instant',
+                description: 'Démarrez votre première importation pour importer des données de mesure dans ce RCP.',
+                createAction: 'Démarrer l’importation',
+            },
             noRows: 'Aucun journal d’import pour le moment.',
             columns: {
                 created: 'Créé',
@@ -1019,6 +1024,7 @@ export const fr = {
                 title: 'Aucun participant pour le moment',
                 description: 'Créez votre premier participant pour démarrer les attributions et la facturation.',
                 createAction: 'Créer le premier participant',
+                meteringPointsAction: 'Aller aux points de mesure',
             },
             noResults: {
                 title: 'Aucun participant ne correspond à ces filtres',
@@ -1508,6 +1514,11 @@ export const fr = {
             title: 'RCP',
             description: 'Communautés que vous pouvez gérer dans OpenZEV.',
             newZev: 'Nouveau RCP',
+            emptyState: {
+                title: 'Aucun RCP pour l’instant',
+                description: 'Créez votre première communauté RCP pour gérer les participant·e·s et les points de mesure.',
+                createAction: 'Créer un RCP',
+            },
             adminOnly: 'Seuls les administrateurs peuvent créer de nouveaux RCP.',
             validation: {
                 zevNameRequired: 'Le nom du RCP est requis.',

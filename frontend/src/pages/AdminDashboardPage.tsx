@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import type { ReactNode } from 'react'
 import { fetchDashboardStats } from '../lib/api/invoices'
+import { PageSkeleton } from '../components/PageSkeleton'
 import { queryKeys } from '../lib/api/queryKeys'
 
 const KPI_LABEL_STYLE = {
@@ -38,18 +39,43 @@ export function AdminDashboardPage() {
         refetchInterval: 30000,
     })
 
+    const header = (
+        <header>
+            <p className="eyebrow">{t('nav.adminConsole')}</p>
+            <h2>{t('nav.adminOverview')}</h2>
+        </header>
+    )
+
+    if (isLoading) {
+        return (
+            <div className="page-stack">
+                {header}
+                <PageSkeleton variant="kpiRow" />
+            </div>
+        )
+    }
+
+    if (error) {
+        return (
+            <div className="page-stack">
+                {header}
+                <div className="card error-banner">{t('common.error')}</div>
+            </div>
+        )
+    }
+
+    if (!stats) {
+        return (
+            <div className="page-stack">
+                {header}
+                <p className="muted">{t('common.noData')}</p>
+            </div>
+        )
+    }
+
     return (
         <div className="page-stack">
-            <header>
-                <p className="eyebrow">{t('nav.adminConsole')}</p>
-                <h2>{t('nav.adminOverview')}</h2>
-            </header>
-
-            {isLoading && <p className="muted">{t('common.loading')}</p>}
-
-            {error && <div className="card error-banner">{t('common.error')}</div>}
-
-            {!isLoading && !error && !stats && <p className="muted">{t('common.noData')}</p>}
+            {header}
 
             {stats && (
                 <>

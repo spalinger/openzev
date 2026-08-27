@@ -505,6 +505,11 @@ export const it = {
             startDescription: 'Flusso passo dopo passo con mappatura colonne e controlli di anteprima.',
             loading: 'Caricamento dei registri di importazione...',
             loadFailed: 'Impossibile caricare i registri di importazione.',
+            emptyState: {
+                title: 'Ancora nessuna importazione',
+                description: 'Avvia la tua prima importazione per portare i dati di misura in questo RCP.',
+                createAction: 'Avvia importazione',
+            },
             noRows: 'Nessun registro di importazione ancora.',
             columns: {
                 created: 'Creato',
@@ -1019,6 +1024,7 @@ export const it = {
                 title: 'Nessun partecipante ancora',
                 description: 'Crea il primo partecipante per iniziare assegnazioni e fatturazione.',
                 createAction: 'Crea primo partecipante',
+                meteringPointsAction: 'Vai ai punti di misura',
             },
             noResults: {
                 title: 'Nessun partecipante corrisponde a questi filtri',
@@ -1508,6 +1514,11 @@ export const it = {
             title: 'RCP',
             description: 'Comunità che puoi gestire in OpenZEV.',
             newZev: 'Nuovo RCP',
+            emptyState: {
+                title: 'Ancora nessun RCP',
+                description: 'Crea la tua prima comunità RCP per iniziare a gestire partecipanti e punti di misura.',
+                createAction: 'Crea RCP',
+            },
             adminOnly: 'Solo gli amministratori possono creare nuovi RCP.',
             validation: {
                 zevNameRequired: 'Il nome del RCP è obbligatorio.',

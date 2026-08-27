@@ -24,6 +24,8 @@ import { createZevWithOwner, deleteZev, fetchParticipants, fetchZevs, updateZev 
 import { fetchUsers } from '../lib/api/auth'
 import { formatApiError } from '../lib/api/errors'
 import { queryKeys } from '../lib/api/queryKeys'
+import { EmptyState } from '../components/EmptyState'
+import { PageSkeleton } from '../components/PageSkeleton'
 import { useTranslation } from 'react-i18next'
 import { todayLocalIso } from '../lib/dates'
 import { getDefaultZevForm, mapZevToForm } from '../lib/zevForm'
@@ -345,7 +347,16 @@ export function ZevListPage() {
         }
     }
 
-    if (isLoading) return <div className="card">{t('common.loading')}</div>
+    if (isLoading)
+        return (
+            <div className="page-stack">
+                <header>
+                    <h2>{t('pages.zevs.title')}</h2>
+                    <p className="muted">{t('pages.zevs.description')}</p>
+                </header>
+                <PageSkeleton variant="table" />
+            </div>
+        )
     if (isError) return <div className="card error-banner">{t('common.error')}</div>
 
     const ownerNameById = new Map((usersQuery.data ?? []).map((candidate) => [candidate.id, `${candidate.first_name} ${candidate.last_name}`]))
@@ -795,7 +806,18 @@ export function ZevListPage() {
                 />
             )}
 
-            <div className="table-card">
+            {(data?.length ?? 0) === 0 ? (
+                <EmptyState
+                    titleKey="pages.zevs.emptyState.title"
+                    descriptionKey="pages.zevs.emptyState.description"
+                    actions={
+                        isAdmin
+                            ? [{ labelKey: 'pages.zevs.emptyState.createAction', onClick: openCreateModal, variant: 'primary', icon: faPlus }]
+                            : []
+                    }
+                />
+            ) : (
+                <div className="table-card">
                 <table>
                     <thead>
                         <tr>
@@ -854,7 +876,8 @@ export function ZevListPage() {
                         )}
                     </tbody>
                 </table>
-            </div>
+                </div>
+            )}
         </div>
     )
 }
