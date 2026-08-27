@@ -348,29 +348,72 @@ def _count_billable_months(tariff: Tariff, period_start: date, period_end: date)
     return _count_intersecting_months(overlap_start, overlap_end)
 
 
+def _last_overlapping_window(windows: list[tuple], month_start: date, month_end: date):
+    """The window that owns one metering point's fee for a month.
+
+    ``windows`` is ``(valid_from, valid_to, allocation_mode, participant_id)``
+    for a single metering point; ``month_start``/``month_end`` are the part of
+    the calendar month actually billed (already clamped to the tariff/period
+    overlap).  Returns ``(valid_from, mode, participant_id)`` of the window
+    with the latest ``valid_from`` among those overlapping that range, or
+    ``None`` if none overlaps it.
+
+    The non-overlap rule (``MeteringPointAssignment._validate_no_overlap``)
+    allows at most one window per metering point at any date, so "last to
+    start" is unambiguous.  This is the tie-break that keeps the personal
+    and community per-metering-point counts disjoint when a mode switch — or
+    a holder change — falls inside a month: the last window to start owns
+    the whole month, billed on whichever side it names.  §4.6.1 already
+    commits to a tie-break of this shape — months are never prorated, so one
+    side always gets the full month.
+    """
+    best: tuple[date, object, object] | None = None
+    for valid_from, valid_to, mode, participant_id in windows:
+        if valid_from > month_end or (valid_to is not None and valid_to < month_start):
+            continue
+        if best is None or valid_from > best[0]:
+            best = (valid_from, mode, participant_id)
+    return best
+
 def _count_billable_metering_points_by_month(participant: Participant, tariff: Tariff, period_start: date, period_end: date) -> int:
     """How many of the participant's own metering points each billed month covers.
 
-    Excludes ``COMMUNITY``-mode assignments **for the month in question**, not
-    with a blanket join filter — the same per-window care as the mode-aware
-    gate in ``generate_invoice`` (§7.3/§7.5): a meter personal in one month and
-    community the next must count in the first month and be excluded from the
-    second. A community meter's fee is charged separately, split by weight,
-    in ``_price_fixed_fees``.
+    A metering point counts for a month only if it has an ``is_active``
+    assignment to the participant that owns the month with a ``PERSONAL``
+    window (``_last_overlapping_window``) — the same per-window care as the
+    mode-aware gate in ``generate_invoice`` (§7.3/§7.5): a meter personal in
+    one month and community the next counts in the first month and is
+    excluded from the second.  The ownership rule also keeps this count
+    disjoint from the community count (§4.6.4) when a mode switch falls
+    inside a month: the month belongs to exactly one side.  A community
+    meter's fee is charged separately, split by weight, in
+    ``_price_fixed_fees``.
     """
     overlap_start = max(period_start, tariff.valid_from)
     overlap_end = min(period_end, tariff.valid_to or period_end)
     if overlap_start > overlap_end:
         return 0
 
-    # Single fetch: month-by-month activity is computed in Python instead of
-    # issuing two queries per month.
-    assignments = list(
+    # Two fetches, however many months are billed: first the participant's
+    # own assignments (which metering points are "theirs" at all), then the
+    # FULL window history of those metering points.  Ownership needs every
+    # window: a later COMMUNITY window held by the same participant must
+    # supersede an earlier PERSONAL one, and a window held by somebody else
+    # must be visible too, or the two counters would bill the month twice.
+    own_mp_ids = set(
         MeteringPointAssignment.objects.filter(
             participant=participant,
             metering_point__is_active=True,
-        ).values_list("metering_point_id", "valid_from", "valid_to", "allocation_mode")
+        ).values_list("metering_point_id", flat=True)
     )
+    if not own_mp_ids:
+        return 0
+    windows_by_mp: dict = {}
+    for mp_id, vf, vt, mode, pid in MeteringPointAssignment.objects.filter(
+        metering_point_id__in=own_mp_ids,
+        metering_point__is_active=True,
+    ).values_list("metering_point_id", "valid_from", "valid_to", "allocation_mode", "participant_id"):
+        windows_by_mp.setdefault(mp_id, []).append((vf, vt, mode, pid))
 
     total_metering_points = 0
     cursor = _month_start(overlap_start)
@@ -382,16 +425,11 @@ def _count_billable_metering_points_by_month(participant: Participant, tariff: T
 
         month_start = max(month_first_day, overlap_start)
         month_end = min(month_last_day, overlap_end)
-        month_has_active = any(
-            vf <= month_last_day and (vt is None or vt >= month_first_day) and mode == AllocationMode.PERSONAL
-            for _mp_id, vf, vt, mode in assignments
-        )
-        if month_start <= month_end and month_has_active:
-            total_metering_points += len({
-                mp_id
-                for mp_id, vf, vt, mode in assignments
-                if vf <= month_end and (vt is None or vt >= month_start) and mode == AllocationMode.PERSONAL
-            })
+        if month_start <= month_end:
+            for mp_id in own_mp_ids:
+                owner = _last_overlapping_window(windows_by_mp.get(mp_id, []), month_start, month_end)
+                if owner is not None and owner[1] == AllocationMode.PERSONAL and owner[2] == participant.id:
+                    total_metering_points += 1
 
         cursor = next_month
 
@@ -399,29 +437,31 @@ def _count_billable_metering_points_by_month(participant: Participant, tariff: T
 
 
 def _count_community_metering_points_by_month(zev: Zev, tariff: Tariff, period_start: date, period_end: date) -> dict[date, int]:
-    """Active, ``COMMUNITY``-mode metering points billable each month.
+    """Active metering points whose owning window is ``COMMUNITY``, per month.
 
     Mirrors ``_count_billable_metering_points_by_month`` but is ZEV-wide
-    rather than participant-scoped, and counts only ``COMMUNITY`` windows —
-    the two counts are deliberately disjoint per month, so together they
-    account for every active metering point exactly once. Feeds the
-    per-metering-point community contribution (§7.5): each active community
-    meter's fee is charged once per month, then divided between eligible
-    participants by weight. Keyed by the first day of the month; a month with
-    no active community meter is absent, not zero.
+    rather than participant-scoped.  All modes are fetched on purpose —
+    dropping the ``COMMUNITY`` filter lets the ownership pick see a
+    superseding ``PERSONAL`` window: a meter whose mode switches mid-month
+    is billed by whichever side owns the month
+    (``_last_overlapping_window``), never by both.
+
+    Feeds the per-metering-point community contribution (§7.5): each
+    community meter's fee is charged once per month, then divided between
+    eligible participants by weight. Keyed by the first day of the month; a
+    month with no active community meter is absent, not zero.
     """
     overlap_start = max(period_start, tariff.valid_from)
     overlap_end = min(period_end, tariff.valid_to or period_end)
     if overlap_start > overlap_end:
         return {}
 
-    assignments = list(
-        MeteringPointAssignment.objects.filter(
-            metering_point__zev=zev,
-            metering_point__is_active=True,
-            allocation_mode=AllocationMode.COMMUNITY,
-        ).values_list("metering_point_id", "valid_from", "valid_to")
-    )
+    windows_by_mp: dict = {}
+    for mp_id, vf, vt, mode, pid in MeteringPointAssignment.objects.filter(
+        metering_point__zev=zev,
+        metering_point__is_active=True,
+    ).values_list("metering_point_id", "valid_from", "valid_to", "allocation_mode", "participant_id"):
+        windows_by_mp.setdefault(mp_id, []).append((vf, vt, mode, pid))
 
     counts: dict[date, int] = {}
     cursor = _month_start(overlap_start)
@@ -434,11 +474,12 @@ def _count_community_metering_points_by_month(zev: Zev, tariff: Tariff, period_s
         month_start = max(month_first_day, overlap_start)
         month_end = min(month_last_day, overlap_end)
         if month_start <= month_end:
-            count = len({
-                mp_id
-                for mp_id, vf, vt in assignments
-                if vf <= month_end and (vt is None or vt >= month_start)
-            })
+            count = sum(
+                1
+                for mp_id, windows in windows_by_mp.items()
+                if (owner := _last_overlapping_window(windows, month_start, month_end)) is not None
+                and owner[1] == AllocationMode.COMMUNITY
+            )
             if count:
                 counts[cursor] = count
 
@@ -793,10 +834,11 @@ def _price_fixed_fees(participant, tariffs, period_start, period_end, accumulato
     The ``SHARED_*`` modes divide one community-wide amount between the
     members active in each month, so their total is built month by month
     rather than as ``quantity * unit_price``. The per-metering-point modes
-    bill personal and community metering points separately (§7.5): the
-    personal count excludes ``COMMUNITY``-mode assignments, and each active
-    community meter contributes its own weight-split ``bucket="shared"``
-    line — ``split_key`` plays no part here, since a community meter's cost
+    bill personal and community metering points separately (§7.5): month
+    ownership (``_last_overlapping_window``) makes the two counts disjoint
+    even when a mode switch or holder change falls inside a month, and each
+    community-owned meter-month contributes a weight-split ``bucket="shared"``
+    share — ``split_key`` plays no part here, since a community meter's cost
     always allocates by weight.
 
     Both weight-split paths share one fetch of the ZEV's participant windows,
@@ -863,7 +905,7 @@ def _price_fixed_fees(participant, tariffs, period_start, period_end, accumulato
                         continue
                     shared_total += unit_price * Decimal(count) * participant.allocation_weight / denominator
                     shared_months += 1
-                if shared_months > 0:
+                if shared_months > 0 and not _is_zero_chf(shared_total):
                     accumulator.add(
                         tariff=tariff, quantity=Decimal(shared_months), total=shared_total,
                         unit="month", bucket="shared",
@@ -902,11 +944,19 @@ def _price_fixed_fees(participant, tariffs, period_start, period_end, accumulato
                     continue
                 total += unit_price * numerator / denominator
                 charged_months += 1
-            if charged_months == 0:
+            # Skip months without membership, and shares that round to
+            # CHF 0.00 — a zero-weight member of a WEIGHT-split fee would
+            # otherwise get a "N Monate / CHF 0.00" line, and a shared fee
+            # configured at CHF 0.00 (either split key) would print a zero
+            # share of nothing (§4.6.3).  Plain, non-shared fees keep their
+            # CHF 0.00 line: there the point of the line is to show the fee
+            # exists, and they never reach this branch.
+            if charged_months == 0 or _is_zero_chf(total):
                 continue
-            # Quantity is the months this participant is charged for, so the
-            # line reads "2 months" and the derived unit price comes out as
-            # their average monthly share — the figure they want to see.
+            # Quantity is the months this participant is charged for, so
+            # the line reads "2 months" and the derived unit price comes
+            # out as their average monthly share — the figure they want
+            # to see.
             quantity = Decimal(charged_months)
         else:
             total = quantity * unit_price
@@ -955,6 +1005,23 @@ def _build_item_payloads(accumulator) -> tuple[list, Decimal]:
     return payloads, subtotal.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+def _utc_date(ts: datetime) -> date:
+    """UTC civil date of a reading timestamp.
+
+    Assignment matching, tariff lookup, and completeness all key on this
+    (ADR 0007). Importers write UTC-aware timestamps; a naive datetime is
+    taken as UTC (bare ``astimezone`` would assume the host timezone).
+    """
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=tz.utc)
+    return ts.astimezone(tz.utc).date()
+
+
+def _is_zero_chf(total: Decimal) -> bool:
+    """Whether ``total`` renders as CHF 0.00 under §5 rounding."""
+    return total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) == 0
+
+
 @transaction.atomic
 def generate_invoice(participant: Participant, period_start: date, period_end: date) -> Invoice:
     """
@@ -981,6 +1048,14 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
 
     skipped_consumption_readings = 0
     skipped_consumption_kwh = Decimal("0")
+    # Reading ids already counted as personal gaps: a mixed-mode meter is in
+    # both the personal and the community queryset, and its gap readings must
+    # be counted exactly once, so the community loops skip them.  The set
+    # holds only gap readings — bounded by the assignment gaps in the period,
+    # not by the reading volume: even a year-long unassigned stretch at
+    # 15-minute resolution is ~35k UUIDs (~4 MB) — which is why the loops can
+    # stream everything else with ``.iterator()`` and still deduplicate here.
+    personal_gap_reading_ids: set = set()
 
     items_accumulator = ItemAccumulator()
 
@@ -990,6 +1065,7 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
         if resolution is None:
             # A true gap: no assignment covers this timestamp. Belongs to
             # nobody in this billing run.
+            personal_gap_reading_ids.add(reading.id)
             skipped_consumption_readings += 1
             skipped_consumption_kwh += reading.energy_kwh
             continue
@@ -1009,18 +1085,20 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
         local_kwh_acc += r_local
         grid_kwh_acc += r_grid
 
+        day = _utc_date(ts)
+
         # Compute GRID energy base sum once per timestamp.
         # Percentage-of-energy tariffs price any energy type as a fraction of
         # what a participant would normally pay for grid energy.
         grid_base_price_sum = sum(
             (_get_tariff_price(t, ts) or Decimal("0"))
-            for t in tariffs.energy(EnergyType.GRID, ts.date())
+            for t in tariffs.energy(EnergyType.GRID, day)
         )
 
         for energy_type, quantity in ((EnergyType.LOCAL, r_local), (EnergyType.GRID, r_grid)):
             if quantity <= 0:
                 continue
-            for tariff in tariffs.energy(energy_type, ts.date()):
+            for tariff in tariffs.energy(energy_type, day):
                 price = _get_tariff_price(tariff, ts) or Decimal("0")
                 items_accumulator.add(
                     tariff=tariff,
@@ -1031,7 +1109,7 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
 
             # Percentage-of-energy tariffs: base is always the GRID rate sum,
             # applied to whichever energy_type the tariff is configured for.
-            for tariff in tariffs.percentage(energy_type, ts.date()):
+            for tariff in tariffs.percentage(energy_type, day):
                 effective_price = grid_base_price_sum * (tariff.percentage / Decimal("100"))
                 items_accumulator.add(
                     tariff=tariff,
@@ -1050,6 +1128,7 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
         ts = reading.timestamp
         resolution = readings.assignment_windows.assignment_at(reading.metering_point_id, ts)
         if resolution is None:
+            personal_gap_reading_ids.add(reading.id)
             skipped_production_readings += 1
             skipped_production_kwh += reading.energy_kwh
             continue
@@ -1066,13 +1145,15 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
 
         exported_kwh_acc += exported_kwh
 
+        day = _utc_date(ts)
+
         grid_base_price_sum = sum(
             (_get_tariff_price(t, ts) or Decimal("0"))
-            for t in tariffs.energy(EnergyType.GRID, ts.date())
+            for t in tariffs.energy(EnergyType.GRID, day)
         )
 
         if local_sold_kwh > 0:
-            for tariff in tariffs.energy(EnergyType.LOCAL, ts.date()):
+            for tariff in tariffs.energy(EnergyType.LOCAL, day):
                 price = _get_tariff_price(tariff, ts) or Decimal("0")
                 items_accumulator.add(
                     tariff=tariff,
@@ -1082,7 +1163,7 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
                     bucket="producer_credit",
                 )
 
-            for tariff in tariffs.percentage(EnergyType.LOCAL, ts.date()):
+            for tariff in tariffs.percentage(EnergyType.LOCAL, day):
                 effective_price = grid_base_price_sum * (tariff.percentage / Decimal("100"))
                 items_accumulator.add(
                     tariff=tariff,
@@ -1094,7 +1175,7 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
                 )
 
         if exported_kwh > 0:
-            for tariff in tariffs.energy(EnergyType.FEED_IN, ts.date()):
+            for tariff in tariffs.energy(EnergyType.FEED_IN, day):
                 price = _get_tariff_price(tariff, ts) or Decimal("0")
                 items_accumulator.add(
                     tariff=tariff,
@@ -1111,12 +1192,22 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
     # weight share. Fed into the same open accumulators as the personal
     # loops, so total_local_kwh/total_grid_kwh/total_feed_in_kwh include
     # shared energy.
+    skipped_community_consumption_readings = 0
+    skipped_community_consumption_kwh = Decimal("0")
     for reading in readings.community_consumption.order_by("timestamp").iterator():
         ts = reading.timestamp
         resolution = readings.assignment_windows.assignment_at(reading.metering_point_id, ts)
-        if resolution is None or resolution.allocation_mode != AllocationMode.COMMUNITY:
-            continue  # gap, or this window is personal — billed elsewhere
-        day = ts.date()
+        if resolution is None:
+            # A true gap: no assignment covers this timestamp — belongs to
+            # nobody. Counted here only if the personal loops did not already
+            # count it (a mixed-mode meter appears in both querysets).
+            if reading.id not in personal_gap_reading_ids:
+                skipped_community_consumption_readings += 1
+                skipped_community_consumption_kwh += reading.energy_kwh
+            continue
+        if resolution.allocation_mode != AllocationMode.COMMUNITY:
+            continue  # personal window — billed in the personal loop above
+        day = _utc_date(ts)
         if not _overlaps(participant.valid_from, participant.valid_to, day, day):
             continue  # a mid-period joiner/leaver pays no share outside their own membership
         weight_sum = readings.weight_sum_by_date.get(day)
@@ -1137,13 +1228,13 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
 
         grid_base_price_sum = sum(
             (_get_tariff_price(t, ts) or Decimal("0"))
-            for t in tariffs.energy(EnergyType.GRID, ts.date())
+            for t in tariffs.energy(EnergyType.GRID, day)
         )
 
         for energy_type, quantity in ((EnergyType.LOCAL, shared_local), (EnergyType.GRID, shared_grid)):
             if quantity <= 0:
                 continue
-            for tariff in tariffs.energy(energy_type, ts.date()):
+            for tariff in tariffs.energy(energy_type, day):
                 price = _get_tariff_price(tariff, ts) or Decimal("0")
                 items_accumulator.add(
                     tariff=tariff,
@@ -1152,7 +1243,7 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
                     unit="kWh",
                     bucket="shared",
                 )
-            for tariff in tariffs.percentage(energy_type, ts.date()):
+            for tariff in tariffs.percentage(energy_type, day):
                 effective_price = grid_base_price_sum * (tariff.percentage / Decimal("100"))
                 items_accumulator.add(
                     tariff=tariff,
@@ -1163,12 +1254,19 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
                     bucket="shared",
                 )
 
+    skipped_community_production_readings = 0
+    skipped_community_production_kwh = Decimal("0")
     for reading in readings.community_production.order_by("timestamp").iterator():
         ts = reading.timestamp
         resolution = readings.assignment_windows.assignment_at(reading.metering_point_id, ts)
-        if resolution is None or resolution.allocation_mode != AllocationMode.COMMUNITY:
+        if resolution is None:
+            if reading.id not in personal_gap_reading_ids:
+                skipped_community_production_readings += 1
+                skipped_community_production_kwh += reading.energy_kwh
             continue
-        day = ts.date()
+        if resolution.allocation_mode != AllocationMode.COMMUNITY:
+            continue
+        day = _utc_date(ts)
         if not _overlaps(participant.valid_from, participant.valid_to, day, day):
             continue
         weight_sum = readings.weight_sum_by_date.get(day)
@@ -1188,11 +1286,11 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
 
         grid_base_price_sum = sum(
             (_get_tariff_price(t, ts) or Decimal("0"))
-            for t in tariffs.energy(EnergyType.GRID, ts.date())
+            for t in tariffs.energy(EnergyType.GRID, day)
         )
 
         if shared_local_sold > 0:
-            for tariff in tariffs.energy(EnergyType.LOCAL, ts.date()):
+            for tariff in tariffs.energy(EnergyType.LOCAL, day):
                 price = _get_tariff_price(tariff, ts) or Decimal("0")
                 items_accumulator.add(
                     tariff=tariff,
@@ -1201,7 +1299,7 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
                     unit="kWh",
                     bucket="shared_producer_credit",
                 )
-            for tariff in tariffs.percentage(EnergyType.LOCAL, ts.date()):
+            for tariff in tariffs.percentage(EnergyType.LOCAL, day):
                 effective_price = grid_base_price_sum * (tariff.percentage / Decimal("100"))
                 items_accumulator.add(
                     tariff=tariff,
@@ -1213,7 +1311,7 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
                 )
 
         if shared_exported > 0:
-            for tariff in tariffs.energy(EnergyType.FEED_IN, ts.date()):
+            for tariff in tariffs.energy(EnergyType.FEED_IN, day):
                 price = _get_tariff_price(tariff, ts) or Decimal("0")
                 items_accumulator.add(
                     tariff=tariff,
@@ -1225,11 +1323,14 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
 
     _price_fixed_fees(participant, tariffs_list, period_start, period_end, items_accumulator)
 
-    if skipped_consumption_readings or skipped_production_readings:
+    if skipped_consumption_readings or skipped_production_readings or \
+       skipped_community_consumption_readings or skipped_community_production_readings:
         logger.warning(
-            "Invoice for participant %s (period %s..%s) excluded %d consumption "
-            "reading(s) / %s kWh and %d production reading(s) / %s kWh that fall "
-            "outside assignment windows (gaps or unassigned metering points)",
+            "Invoice for participant %s (period %s..%s) excluded %d personal consumption "
+            "reading(s) / %s kWh, %d personal production reading(s) / %s kWh, "
+            "%d community consumption reading(s) / %s kWh and "
+            "%d community production reading(s) / %s kWh "
+            "that fall in assignment gaps within the period",
             participant.id,
             period_start,
             period_end,
@@ -1237,6 +1338,10 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
             skipped_consumption_kwh,
             skipped_production_readings,
             skipped_production_kwh,
+            skipped_community_consumption_readings,
+            skipped_community_consumption_kwh,
+            skipped_community_production_readings,
+            skipped_community_production_kwh,
         )
 
     local_kwh = local_kwh_acc.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
