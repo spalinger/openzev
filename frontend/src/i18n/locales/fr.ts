@@ -194,7 +194,6 @@ export const fr = {
         failed: 'Échec',
     },
     admin: {
-        fieldReference: 'Référence des champs',
         pdfTemplates: 'Gérer les modèles PDF',
         pdfTemplatesDescription: 'Modifiez les modèles HTML utilisés pour générer les factures et les contrats PDF.',
         templateContent: 'Contenu du modèle',

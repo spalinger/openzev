@@ -194,7 +194,6 @@ export const de = {
         failed: 'Fehlgeschlagen',
     },
     admin: {
-        fieldReference: 'Feldreferenz',
         pdfTemplates: 'PDF-Vorlagen verwalten',
         pdfTemplatesDescription: 'Bearbeiten Sie die HTML-Vorlagen für Rechnungs- und Vertrags-PDFs.',
         templateContent: 'Vorlageninhalt',

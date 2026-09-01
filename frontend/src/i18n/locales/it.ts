@@ -194,7 +194,6 @@ export const it = {
         failed: 'Non riuscito',
     },
     admin: {
-        fieldReference: 'Riferimento dei campi',
         pdfTemplates: 'Gestisci modelli PDF',
         pdfTemplatesDescription: 'Modifica i modelli HTML utilizzati per generare fatture e contratti PDF.',
         templateContent: 'Contenuto del modello',

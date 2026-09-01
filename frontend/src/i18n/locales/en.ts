@@ -203,7 +203,6 @@ export const en = {
         failed: 'Failed',
     },
     admin: {
-        fieldReference: 'Field reference',
         pdfTemplates: 'Manage PDF templates',
         pdfTemplatesDescription: 'Edit the HTML templates used to generate invoice and contract PDFs.',
         templateContent: 'Template content',
