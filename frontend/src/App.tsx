@@ -1,7 +1,9 @@
 import { Suspense, lazy } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { Layout } from './components/Layout'
 import { ProtectedRoute } from './components/ProtectedRoute'
+import { PageSkeleton } from './components/PageSkeleton'
 import { ManagedZevProvider } from './lib/managedZev'
 
 const AccountProfilePage = lazy(async () => ({ default: (await import('./pages/AccountProfilePage')).AccountProfilePage }))
@@ -30,13 +32,19 @@ const ZevSettingsPage = lazy(async () => ({ default: (await import('./pages/ZevS
 const OAuthCallbackPage = lazy(async () => ({ default: (await import('./pages/OAuthCallbackPage')).OAuthCallbackPage }))
 
 function RouteFallback() {
-  return <div className="app-route-loading">Loading...</div>
+  return <PageSkeleton variant="page" />
+}
+
+// Neutral loading state for the lazy auth pages, which render outside Layout.
+function AuthRouteFallback() {
+  const { t } = useTranslation()
+  return <div className="app-route-loading">{t('common.loading')}</div>
 }
 
 function App() {
   return (
     <BrowserRouter>
-      <Suspense fallback={<RouteFallback />}>
+      <Suspense fallback={<AuthRouteFallback />}>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/verify-email" element={<VerifyEmailPage />} />
@@ -46,7 +54,9 @@ function App() {
             element={
               <ProtectedRoute>
                 <ManagedZevProvider>
-                  <Layout />
+                  <Suspense fallback={<RouteFallback />}>
+                    <Layout />
+                  </Suspense>
                 </ManagedZevProvider>
               </ProtectedRoute>
             }
