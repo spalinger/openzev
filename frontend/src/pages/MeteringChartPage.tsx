@@ -27,6 +27,7 @@ import {
     getCurrentBillingPeriod,
 } from '../lib/billingPeriod'
 import { useAppSettings } from '../lib/appSettings'
+import { formatKwh } from '../lib/numbers'
 import { formatMeteringBucketLabel } from '../lib/meteringLabels'
 import type { AppSettings, ChartDataPoint } from '../types/api'
 import { CHART_GRID, CONS_COLORS, NEGATIVE_COLOR, PROD_COLORS } from '../lib/chartTokens'
@@ -80,7 +81,7 @@ function CustomTooltip({
             <p style={{ margin: '0 0 4px', fontWeight: 600 }}>{formatMeteringBucketLabel(label, resolution, settings)}</p>
             {payload.map((entry) => (
                 <p key={entry.name} style={{ margin: '2px 0', color: entry.color }}>
-                    {entry.name}: <strong>{entry.value.toFixed(3)} kWh</strong>
+                    {entry.name}: <strong>{formatKwh(entry.value, { maxDecimals: 2 })} kWh</strong>
                 </p>
             ))}
         </div>
@@ -313,13 +314,13 @@ export function MeteringChartPage() {
                                     )}
                                     <StatBadge
                                         label={t('pages.meteringData.stats.totalConsumption')}
-                                        value={`${totalIn.toFixed(2)} kWh`}
+                                        value={`${formatKwh(totalIn)} kWh`}
                                         color={PROD_COLORS[0]}
                                     />
                                     {hasOut && (
                                         <StatBadge
                                             label={t('pages.meteringData.stats.totalFeedIn')}
-                                            value={`${totalOut.toFixed(2)} kWh`}
+                                            value={`${formatKwh(totalOut)} kWh`}
                                             color={CONS_COLORS[0]}
                                         />
                                     )}

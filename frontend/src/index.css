@@ -192,6 +192,12 @@ label {
   white-space: nowrap;
 }
 
+/* Keep value+unit pairs together — prevents the unit from wrapping to the next
+   line in tight table cells. */
+.value-unit {
+  white-space: nowrap;
+}
+
 .data-table-sort {
   display: inline-flex;
   align-items: center;
