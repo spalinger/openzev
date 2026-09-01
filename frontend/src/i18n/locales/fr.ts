@@ -25,7 +25,6 @@ export const fr = {
         adminFeatures: 'Fonctionnalités',
         adminOAuth: 'Fournisseurs OAuth',
         adminSystemSettings: 'Paramètres système',
-        adminVatSettings: 'Paramètres TVA',
         adminInvoices: 'Factures',
         adminAuditLogs: 'Journaux d\'audit',
         auditLogs: 'Journaux d\'audit',
@@ -1886,7 +1885,7 @@ export const fr = {
     adminSystemSettings: {
         eyebrow: 'Console d\'administration',
         title: 'Paramètres système',
-        description: 'Gérez au même endroit les formats de date globaux, les fonctionnalités et les fournisseurs OAuth.',
+        description: 'Gérez au même endroit les formats de date globaux, les fonctionnalités, les fournisseurs OAuth et les taux de TVA.',
         summary: {
             featureFlags: 'Fonctionnalités',
             enabledFeatures: '{{count}} activées',
@@ -1907,6 +1906,10 @@ export const fr = {
             oauth: {
                 label: 'OAuth',
                 description: 'Configurez les fournisseurs de connexion sociale et centralisez leurs paramètres.',
+            },
+            vat: {
+                label: 'TVA',
+                description: 'Taux TVA par période de validité ; appliqué en fin de période si le RCP a un numéro TVA.',
             },
         },
         regional: {
@@ -1929,9 +1932,6 @@ export const fr = {
         },
     },
     adminVatSettings: {
-        eyebrow: 'Console d\'administration',
-        title: 'Gestion de la TVA',
-        description: 'Gérez les taux de TVA globaux par période de validité. Les factures utilisent le taux actif à la date de fin de période, mais uniquement si le RCP dispose d\'un numéro TVA.',
         createTitle: 'Ajouter un taux TVA',
         editTitle: 'Modifier le taux TVA',
         listTitle: 'Taux TVA configurés',
