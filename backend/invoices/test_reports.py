@@ -12,11 +12,16 @@ import zipfile
 from datetime import date, datetime
 from datetime import timezone as dt_timezone
 from decimal import Decimal
+from unittest import mock
 
 from django.test import TestCase
 from rest_framework.test import APIClient
 
 from accounts.models import UserRole
+from allocation.read_model import (
+    community_totals_by_timestamp,
+    eligible_participant_shares,
+)
 from testing.helpers import authenticate as auth, make_user
 from zev.models import Participant
 
@@ -135,6 +140,71 @@ class AnnualStatementsZipTests(ReportTestCase):
             sorted(names),
             ["annual-statement-2026-Muster_Pia.pdf", "annual-statement-2026-Zweit_Bea.pdf"],
         )
+
+    def test_zip_builds_participant_shares_once_for_every_statement(self):
+        make_participant(self.zev, first="Bea", last="Zweit")
+
+        with (
+            mock.patch(
+                "invoices.views_reports.eligible_participant_shares",
+                wraps=eligible_participant_shares,
+            ) as build_shares,
+            mock.patch(
+                "invoices.views_reports.community_totals_by_timestamp",
+                wraps=community_totals_by_timestamp,
+            ) as build_totals,
+            mock.patch(
+                "invoices.views_reports.generate_annual_statement_pdf",
+                return_value=b"PDF",
+            ) as generate_statement,
+        ):
+            resp = self._get(
+                STATEMENTS_ZIP,
+                self.owner,
+                year=2026,
+                zev_id=str(self.zev.pk),
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        build_shares.assert_called_once()
+        build_totals.assert_called_once()
+        self.assertEqual(generate_statement.call_count, 2)
+        shares_by_date = generate_statement.call_args_list[0].kwargs["shares_by_date"]
+        self.assertTrue(
+            all(
+                call.kwargs["shares_by_date"] is shares_by_date
+                for call in generate_statement.call_args_list
+            )
+        )
+        zev_totals_by_ts = generate_statement.call_args_list[0].kwargs["zev_totals_by_ts"]
+        self.assertTrue(
+            all(
+                call.kwargs["zev_totals_by_ts"] is zev_totals_by_ts
+                for call in generate_statement.call_args_list
+            )
+        )
+
+    def test_zip_returns_500_when_shared_participant_calculation_fails(self):
+        with (
+            mock.patch(
+                "invoices.views_reports.eligible_participant_shares",
+                side_effect=ValueError("invalid shared data"),
+            ) as build_shares,
+            mock.patch(
+                "invoices.views_reports.generate_annual_statement_pdf",
+            ) as generate_statement,
+        ):
+            resp = self._get(
+                STATEMENTS_ZIP,
+                self.owner,
+                year=2026,
+                zev_id=str(self.zev.pk),
+            )
+
+        self.assertEqual(resp.status_code, 500)
+        self.assertEqual(resp.json(), {"error": "Could not generate annual statements."})
+        build_shares.assert_called_once()
+        generate_statement.assert_not_called()
 
     def test_participant_is_refused(self):
         resp = self._get(STATEMENTS_ZIP, self.puser, year=2026, zev_id=str(self.zev.pk))

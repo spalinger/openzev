@@ -420,3 +420,21 @@ class EligibleParticipantSharesTests(TestCase):
 
     def test_a_zev_with_no_participants_returns_empty(self):
         self.assertEqual(eligible_participant_shares(self.zev, PERIOD_START, PERIOD_END), {})
+
+    def test_preloaded_windows_avoid_a_participant_query(self):
+        alice = self._participant("Alice Muster", PERIOD_START, weight="3")
+        bob = self._participant("Bob Beispiel", PERIOD_START, weight="1")
+        windows = [
+            (alice.id, alice.valid_from, alice.valid_to, alice.allocation_weight),
+            (bob.id, bob.valid_from, bob.valid_to, bob.allocation_weight),
+        ]
+
+        with self.assertNumQueries(0):
+            shares = eligible_participant_shares(
+                self.zev, PERIOD_START, PERIOD_END, windows=windows,
+            )
+
+        self.assertEqual(
+            shares[PERIOD_START],
+            {alice.id: Decimal("0.75"), bob.id: Decimal("0.25")},
+        )

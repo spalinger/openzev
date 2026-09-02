@@ -6,6 +6,7 @@ from decimal import Decimal
 from allocation.read_model import (
     CONSUMPTION,
     PRODUCTION,
+    ParticipantSharesByDate,
     community_totals_by_timestamp,
     eligible_participant_shares,
     iter_allocated_readings,
@@ -63,7 +64,13 @@ def _build_savings_data(invoice, tr: dict) -> dict | None:
     }
 
 
-def _compute_period_participant_stats(invoice) -> tuple[dict, list[dict]]:
+def _compute_period_participant_stats(
+    invoice,
+    *,
+    shares_by_date: ParticipantSharesByDate | None = None,
+    zev_totals_by_ts: tuple[dict, dict] | None = None,
+    assignment_windows: AssignmentWindows | None = None,
+) -> tuple[dict, list[dict]]:
     """Compute ZEV-level totals and per-participant energy stats for the invoice
     period, using the same local-pool allocation logic as the dashboard.
 
@@ -71,6 +78,9 @@ def _compute_period_participant_stats(invoice) -> tuple[dict, list[dict]]:
       totals = {produced_kwh, consumed_kwh, imported_kwh, exported_kwh}
       participant_stats = [{participant_id, participant_name, total_consumed_kwh,
                             total_produced_kwh, from_zev_kwh, from_grid_kwh}, ...]
+
+    Batch callers may provide the ZEV totals and assignment windows already
+    held by their period context.
     """
     zev = invoice.zev
     ps = invoice.period_start
@@ -81,7 +91,9 @@ def _compute_period_participant_stats(invoice) -> tuple[dict, list[dict]]:
     # regardless of assignment (ADR 0013): unassigned meters still feed the
     # community pool, even though their readings are billed to nobody.
     # Attribution to participants happens per timestamp below.
-    cons_by_ts, prod_by_ts = community_totals_by_timestamp(zev, start_dt, end_dt)
+    if zev_totals_by_ts is None:
+        zev_totals_by_ts = community_totals_by_timestamp(zev, start_dt, end_dt)
+    cons_by_ts, prod_by_ts = zev_totals_by_ts
 
     totals = {"produced_kwh": Decimal("0"), "consumed_kwh": Decimal("0"),
               "imported_kwh": Decimal("0"), "exported_kwh": Decimal("0")}
@@ -99,12 +111,15 @@ def _compute_period_participant_stats(invoice) -> tuple[dict, list[dict]]:
     # period-level join would fan out every reading across every assignment
     # overlapping the period and double-count transfers. Readings in an
     # assignment gap (holder None) belong to no participant.
-    windows = AssignmentWindows.for_zev(zev, ps, pe)
+    windows = assignment_windows
+    if windows is None:
+        windows = AssignmentWindows.for_zev(zev, ps, pe)
 
     # Weight shares for community-allocated readings, keyed by UTC civil date
     # — matches participant_on/assignment_at's date granularity. Fetched once
     # regardless of whether this period has any community meter.
-    shares_by_date = eligible_participant_shares(zev, ps, pe)
+    if shares_by_date is None:
+        shares_by_date = eligible_participant_shares(zev, ps, pe)
 
     # Names are keyed off the assignment windows *and* every participant who
     # ever receives a community share — not just literal holders, since a
