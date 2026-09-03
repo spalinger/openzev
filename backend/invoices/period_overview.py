@@ -8,8 +8,7 @@ request/response layer.
 
 from datetime import date as date_type, datetime, timedelta, timezone as dt_timezone
 
-from django.db.models import Q
-
+from allocation.read_model import active_during
 from zev.models import Participant, MeteringPointAssignment
 from metering.models import MeterReading
 from .models import Invoice
@@ -31,11 +30,8 @@ def compute_period_overview(*, zev, period_start: date_type, period_end: date_ty
     period_end_exclusive_dt = datetime.combine(period_end, datetime.min.time(), tzinfo=dt_timezone.utc) + timedelta(days=1)
 
     participants = list(
-        Participant.objects.filter(
-            zev=zev,
-            valid_from__lte=period_end,
-        ).filter(
-            Q(valid_to__isnull=True) | Q(valid_to__gte=period_start)
+        active_during(
+            Participant.objects.filter(zev=zev), period_start, period_end
         ).order_by("last_name", "first_name")
     )
 
@@ -50,11 +46,12 @@ def compute_period_overview(*, zev, period_start: date_type, period_end: date_ty
 
     rows = []
     assignments_by_participant: dict = {p.id: [] for p in participants}
-    for assignment in MeteringPointAssignment.objects.filter(
-        participant_id__in=assignments_by_participant.keys(),
-        valid_from__lte=period_end,
-    ).filter(
-        Q(valid_to__isnull=True) | Q(valid_to__gte=period_start)
+    for assignment in active_during(
+        MeteringPointAssignment.objects.filter(
+            participant_id__in=assignments_by_participant.keys()
+        ),
+        period_start,
+        period_end,
     ).select_related("metering_point"):
         assignments_by_participant[assignment.participant_id].append(assignment)
 

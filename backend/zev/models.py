@@ -329,11 +329,14 @@ class MeteringPointAssignment(models.Model):
         """
         if not self.metering_point_id or not self.valid_from:
             return
+        # Deferred import: allocation.read_model imports zev/metering models.
+        from allocation.read_model import active_during
+
         existing = MeteringPointAssignment.objects.filter(metering_point=self.metering_point)
         if self.pk:
             existing = existing.exclude(pk=self.pk)
-        overlap_exists = existing.filter(valid_from__lte=(self.valid_to or date.max)).filter(
-            models.Q(valid_to__isnull=True) | models.Q(valid_to__gte=self.valid_from)
+        overlap_exists = active_during(
+            existing, self.valid_from, self.valid_to or date.max
         ).exists()
         if overlap_exists:
             raise ValidationError("A metering point can only have one active assignment at a time.")

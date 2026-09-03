@@ -22,6 +22,7 @@ from accounts.models import VatRate
 from allocation.read_model import (
     CONSUMPTION_METER_TYPES,
     PRODUCTION_METER_TYPES,
+    active_during,
     community_totals_by_timestamp,
 )
 from allocation.split import split_consumption, split_production
@@ -91,12 +92,14 @@ def _assigned_metering_points(zev, meter_types, period_start, period_end, partic
     filters = {
         "zev": zev,
         "meter_type__in": meter_types,
-        "assignments__valid_from__lte": period_end,
     }
     if participant is not None:
         filters["assignments__participant"] = participant
     if allocation_mode is not None:
         filters["assignments__allocation_mode"] = allocation_mode
+    # Overlap predicate on the assignments relation (not the row itself,
+    # so active_during() does not apply).
+    filters["assignments__valid_from__lte"] = period_end
     return MeteringPoint.objects.filter(**filters).filter(
         models.Q(assignments__valid_to__isnull=True)
         | models.Q(assignments__valid_to__gte=period_start)
@@ -1432,11 +1435,7 @@ def generate_invoices_for_zev(zev: Zev, period_start: date, period_end: date) ->
     Failures are isolated per participant (see ADR 0011) and returned in
     ``failures`` as ``{"participant_id": ..., "participant_name": ..., "error": ...}``.
     """
-    participants = zev.participants.filter(
-        valid_from__lte=period_end,
-    ).filter(
-        models.Q(valid_to__isnull=True) | models.Q(valid_to__gte=period_start)
-    )
+    participants = active_during(zev.participants, period_start, period_end)
     invoices = []
     failures = []
     for participant in participants:

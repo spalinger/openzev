@@ -14,6 +14,7 @@ from accounts.models import AppSettings
 from allocation.read_model import (
     CONSUMPTION_METER_TYPES,
     PRODUCTION_METER_TYPES,
+    active_during,
     community_totals_by_timestamp,
     eligible_participant_shares,
 )
@@ -207,12 +208,13 @@ def _compute_monthly_data(participant, zev, year: int, tr: dict) -> tuple[list[d
     # a community-only stake in the ZEV never shows up here at all (the same
     # gap fixed for the dashboards in metering/analytics.py and views.py).
     assignments = list(
-        MeteringPointAssignment.objects.filter(
-            Q(participant=participant) | Q(allocation_mode=AllocationMode.COMMUNITY),
-            metering_point__zev=zev,
-            valid_from__lte=year_end,
-        ).filter(
-            Q(valid_to__isnull=True) | Q(valid_to__gte=year_start)
+        active_during(
+            MeteringPointAssignment.objects.filter(
+                Q(participant=participant) | Q(allocation_mode=AllocationMode.COMMUNITY),
+                metering_point__zev=zev,
+            ),
+            year_start,
+            year_end,
         ).select_related("metering_point")
     )
 

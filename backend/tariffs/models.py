@@ -128,13 +128,13 @@ class Tariff(models.Model):
         # is almost certainly a mistake: a new seasonal version created without
         # closing the previous one, which would double-bill every participant.
         if self.zev_id and self.name and self.valid_from:
-            candidate_end = self.valid_to or date.max
-            overlaps = Tariff.objects.exclude(pk=self.pk).filter(
-                zev_id=self.zev_id,
-                name=self.name,
-                valid_from__lte=candidate_end,
-            ).filter(
-                models.Q(valid_to__isnull=True) | models.Q(valid_to__gte=self.valid_from)
+            # Deferred import: allocation.read_model imports zev/metering models.
+            from allocation.read_model import active_during
+
+            overlaps = active_during(
+                Tariff.objects.exclude(pk=self.pk).filter(zev_id=self.zev_id, name=self.name),
+                self.valid_from,
+                self.valid_to or date.max,
             )
             if overlaps.exists():
                 errors["valid_from"] = (

@@ -9,11 +9,13 @@ from collections import defaultdict
 from datetime import date as date_type, datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal, ROUND_HALF_UP
 
-from django.db.models import Max, Min, Q, Sum
+from django.db.models import Max, Min, Sum
 
 from allocation.errors import OverlappingAssignmentWindowsError
 from allocation.read_model import (
     CONSUMPTION_METER_TYPES,
+    active_during,
+    active_on,
     community_totals_by_timestamp,
     eligible_participant_shares,
 )
@@ -48,11 +50,10 @@ def _assignment_windows_for_readings(qs, start: date_type, end: date_type) -> As
     pre-assignment readings to the current holder.
     """
     metering_point_ids = qs.values_list("metering_point_id", flat=True).distinct()
-    rows = MeteringPointAssignment.objects.filter(
-        metering_point_id__in=metering_point_ids,
-        valid_from__lte=end,
-    ).filter(
-        Q(valid_to__isnull=True) | Q(valid_to__gte=start)
+    rows = active_during(
+        MeteringPointAssignment.objects.filter(metering_point_id__in=metering_point_ids),
+        start,
+        end,
     ).values_list(
         "metering_point_id", "valid_from", "valid_to", "participant_id",
         "allocation_mode", "id",
@@ -606,23 +607,26 @@ def compute_hourly_profile(selected_zev_id, participant_ids, start_dt, end_dt, p
     # be weight-eligible for a share, regardless of who the literal holder
     # is) — otherwise a community-only participant's meter never reaches the
     # profile at all. Two flat queries unioned in Python rather than one
-    # composite Q(...)|Q(...) filter: both conditions traverse the same
-    # ``assignments`` relation, and Django's multi-valued-join semantics for
-    # OR-ed conditions on one relation are easy to get subtly wrong.
-    _mp_window = Q(valid_to__isnull=True) | Q(valid_to__gte=ps)
-    personal_mp_ids = MeteringPointAssignment.objects.filter(
-        _mp_window,
-        metering_point__zev_id=selected_zev_id,
-        metering_point__meter_type__in=CONSUMPTION_METER_TYPES,
-        participant_id__in=participant_ids,
-        valid_from__lte=pe,
+    # composite filter: both conditions traverse the same ``assignments``
+    # relation, and Django's multi-valued-join semantics for OR-ed conditions
+    # on one relation are easy to get subtly wrong.
+    personal_mp_ids = active_during(
+        MeteringPointAssignment.objects.filter(
+            metering_point__zev_id=selected_zev_id,
+            metering_point__meter_type__in=CONSUMPTION_METER_TYPES,
+            participant_id__in=participant_ids,
+        ),
+        ps,
+        pe,
     ).values_list("metering_point_id", flat=True)
-    community_mp_ids = MeteringPointAssignment.objects.filter(
-        _mp_window,
-        metering_point__zev_id=selected_zev_id,
-        metering_point__meter_type__in=CONSUMPTION_METER_TYPES,
-        allocation_mode=AllocationMode.COMMUNITY,
-        valid_from__lte=pe,
+    community_mp_ids = active_during(
+        MeteringPointAssignment.objects.filter(
+            metering_point__zev_id=selected_zev_id,
+            metering_point__meter_type__in=CONSUMPTION_METER_TYPES,
+            allocation_mode=AllocationMode.COMMUNITY,
+        ),
+        ps,
+        pe,
     ).values_list("metering_point_id", flat=True)
     consumption_mps = MeteringPoint.objects.filter(
         id__in=set(personal_mp_ids) | set(community_mp_ids)
@@ -733,11 +737,10 @@ def compute_data_quality_status(metering_points, date_from, date_to, today):
         all_days.add(current)
         current += timedelta(days=1)
 
-    assignment_rows = MeteringPointAssignment.objects.filter(
-        metering_point__in=metering_points,
-        valid_from__lte=date_to,
-    ).filter(
-        Q(valid_to__isnull=True) | Q(valid_to__gte=date_from)
+    assignment_rows = active_during(
+        MeteringPointAssignment.objects.filter(metering_point__in=metering_points),
+        date_from,
+        date_to,
     ).values_list(
         "metering_point_id", "valid_from", "valid_to", "participant_id",
         "allocation_mode", "id",
@@ -748,11 +751,8 @@ def compute_data_quality_status(metering_points, date_from, date_to, today):
         windows_by_mp.setdefault(row[0], []).append(row)
 
     current_holders = {}
-    for assignment in MeteringPointAssignment.objects.filter(
-        metering_point__in=metering_points,
-        valid_from__lte=today,
-    ).filter(
-        Q(valid_to__isnull=True) | Q(valid_to__gte=today)
+    for assignment in active_on(
+        MeteringPointAssignment.objects.filter(metering_point__in=metering_points), today
     ).order_by("-valid_from").select_related("participant"):
         current_holders.setdefault(assignment.metering_point_id, assignment.participant.full_name)
 
