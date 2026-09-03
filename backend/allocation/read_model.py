@@ -53,18 +53,6 @@ _KINDS = {
 }
 
 
-def active_during(queryset, start: date, end: date):
-    """Rows with ``valid_from <= end`` and (``valid_to`` null or ``>= start``)."""
-    return queryset.filter(valid_from__lte=end).filter(
-        models.Q(valid_to__isnull=True) | models.Q(valid_to__gte=start)
-    )
-
-
-def active_on(queryset, day: date):
-    """Rows active on exactly ``day``."""
-    return active_during(queryset, day, day)
-
-
 def eligible_participant_shares(zev, period_start: date, period_end: date) -> dict[date, dict[uuid.UUID, Decimal]]:
     """Each eligible participant's normalized weight share, per calendar date.
 

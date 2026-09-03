@@ -6,7 +6,7 @@ dicts that views can hand straight to Response().  No HTTP or permission logic
 lives here, which makes the calculations independently unit-testable.
 """
 from collections import defaultdict
-from datetime import date as date_type, datetime, timedelta, timezone as dt_timezone
+from datetime import date as date_type, timedelta, timezone as dt_timezone
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.db.models import Max, Min, Sum
@@ -14,11 +14,10 @@ from django.db.models import Max, Min, Sum
 from allocation.errors import OverlappingAssignmentWindowsError
 from allocation.read_model import (
     CONSUMPTION_METER_TYPES,
-    active_during,
-    active_on,
     community_totals_by_timestamp,
     eligible_participant_shares,
 )
+from allocation.validity import active_during, active_on, period_window
 from allocation.split import split_consumption, split_production
 from allocation.windows import AssignmentWindows
 from zev.models import (
@@ -763,10 +762,11 @@ def compute_data_quality_status(metering_points, date_from, date_to, today):
         except OverlappingAssignmentWindowsError:
             windows = None
 
+        window_start, window_end = period_window(date_from, date_to)
         readings_ts = MeterReading.objects.filter(
             metering_point=mp,
-            timestamp__gte=datetime.combine(date_from, datetime.min.time(), tzinfo=dt_timezone.utc),
-            timestamp__lt=datetime.combine(date_to, datetime.min.time(), tzinfo=dt_timezone.utc) + timedelta(days=1),
+            timestamp__gte=window_start,
+            timestamp__lt=window_end,
         ).values_list("timestamp", flat=True)
 
         days_with_data = set()

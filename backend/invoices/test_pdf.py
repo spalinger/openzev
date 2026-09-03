@@ -549,15 +549,12 @@ class InvoicePdfQrTests(TestCase):
 
     def test_period_window_uses_utc_not_local_tz(self):
         """pdf_stats and pdf_charts must query the same UTC range as the engine."""
-        from datetime import timedelta
-
-        from .engine import _period_to_dt
+        from allocation.validity import period_window
 
         period_start = date(2026, 4, 1)
         period_end = date(2026, 6, 30)
 
-        start_dt = _period_to_dt(period_start)
-        end_dt = _period_to_dt(period_end) + timedelta(days=1)
+        start_dt, end_dt = period_window(period_start, period_end)
 
         self.assertEqual(start_dt.tzinfo, dt_timezone.utc)
         self.assertEqual(start_dt, datetime(2026, 4, 1, 0, 0, tzinfo=dt_timezone.utc))

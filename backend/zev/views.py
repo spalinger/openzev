@@ -1,6 +1,6 @@
 import logging
 import tempfile
-from datetime import date as date_type, datetime, timedelta, timezone as dt_timezone
+from datetime import date as date_type
 
 from django.conf import settings as django_settings
 from django.http import FileResponse, HttpResponse
@@ -17,6 +17,7 @@ from accounts.permissions import IsAdmin
 from accounts.throttling import ApiKeyRateThrottle, TransferArchiveThrottle
 from accounts.models import User, UserRole
 from accounts.serializers import UserSerializer
+from allocation.validity import period_window
 from metering.models import MeterReading
 from .models import Zev, Participant, MeteringPoint, MeteringPointAssignment
 from .scoping import ZevScopedQuerySetMixin
@@ -747,8 +748,7 @@ class MeteringPointViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            start_dt = datetime.combine(parsed_from, datetime.min.time(), tzinfo=dt_timezone.utc)
-            end_dt_exclusive = datetime.combine(parsed_to, datetime.min.time(), tzinfo=dt_timezone.utc) + timedelta(days=1)
+            start_dt, end_dt_exclusive = period_window(parsed_from, parsed_to)
             readings_qs = readings_qs.filter(timestamp__gte=start_dt, timestamp__lt=end_dt_exclusive)
 
         deleted_count = readings_qs.count()

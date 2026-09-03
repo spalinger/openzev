@@ -1,5 +1,6 @@
-from datetime import date as date_type, datetime, timedelta, timezone as dt_timezone
+from datetime import date as date_type, timedelta, timezone as dt_timezone
 
+from allocation.validity import period_end_exclusive_dt, period_start_dt, period_window
 from django.db import transaction
 from django.db.models import Count, Q, Sum
 from django.db.models.functions import TruncDay, TruncHour, TruncMonth
@@ -61,11 +62,11 @@ class MeterReadingViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
         trunc_fn = {"day": TruncDay, "hour": TruncHour, "month": TruncMonth}.get(bucket, TruncDay)
 
         qs = self.get_queryset().filter(metering_point_id=mp_id)
+        # Independent optional bounds: a lone date_from/date_to still filters.
         if date_from:
-            # Use explicit UTC bounds so Django doesn't shift the date into Europe/Zurich first.
-            qs = qs.filter(timestamp__gte=datetime.combine(date_type.fromisoformat(date_from), datetime.min.time(), tzinfo=dt_timezone.utc))
+            qs = qs.filter(timestamp__gte=period_start_dt(date_type.fromisoformat(date_from)))
         if date_to:
-            qs = qs.filter(timestamp__lt=datetime.combine(date_type.fromisoformat(date_to), datetime.min.time(), tzinfo=dt_timezone.utc) + timedelta(days=1))
+            qs = qs.filter(timestamp__lt=period_end_exclusive_dt(date_type.fromisoformat(date_to)))
 
         rows = (
             qs.annotate(bucket=trunc_fn("timestamp"))
@@ -112,11 +113,10 @@ class MeterReadingViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
         # ── Detail mode: one day's individual readings ─────────────────────────
         detail_date = request.query_params.get("date")
         if detail_date:
-            day_start = datetime.combine(
-                date_type.fromisoformat(detail_date), datetime.min.time(), tzinfo=dt_timezone.utc
-            )
+            day = date_type.fromisoformat(detail_date)
+            day_start, day_end = period_window(day, day)
             readings = qs.filter(
-                timestamp__gte=day_start, timestamp__lt=day_start + timedelta(days=1)
+                timestamp__gte=day_start, timestamp__lt=day_end
             ).order_by("timestamp")
             return Response([
                 {
@@ -133,10 +133,9 @@ class MeterReadingViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
         date_from = request.query_params.get("date_from")
         date_to = request.query_params.get("date_to")
         if date_from:
-            # Explicit UTC bounds — timestamp__date__ applies Europe/Zurich and would drop 23:xx UTC readings.
-            qs = qs.filter(timestamp__gte=datetime.combine(date_type.fromisoformat(date_from), datetime.min.time(), tzinfo=dt_timezone.utc))
+            qs = qs.filter(timestamp__gte=period_start_dt(date_type.fromisoformat(date_from)))
         if date_to:
-            qs = qs.filter(timestamp__lt=datetime.combine(date_type.fromisoformat(date_to), datetime.min.time(), tzinfo=dt_timezone.utc) + timedelta(days=1))
+            qs = qs.filter(timestamp__lt=period_end_exclusive_dt(date_type.fromisoformat(date_to)))
 
         rows = (
             qs.annotate(day=TruncDay("timestamp", tzinfo=dt_timezone.utc))
@@ -172,9 +171,9 @@ class MeterReadingViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
 
         qs = self.get_queryset()
         if date_from:
-            qs = qs.filter(timestamp__gte=datetime.combine(date_type.fromisoformat(date_from), datetime.min.time(), tzinfo=dt_timezone.utc))
+            qs = qs.filter(timestamp__gte=period_start_dt(date_type.fromisoformat(date_from)))
         if date_to:
-            qs = qs.filter(timestamp__lt=datetime.combine(date_type.fromisoformat(date_to), datetime.min.time(), tzinfo=dt_timezone.utc) + timedelta(days=1))
+            qs = qs.filter(timestamp__lt=period_end_exclusive_dt(date_type.fromisoformat(date_to)))
 
         if user.is_admin or user.role == "zev_owner":
             selected_zev_id = None
@@ -212,9 +211,9 @@ class MeterReadingViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
         zev_ids = Participant.objects.filter(user=user).values_list("zev_id", flat=True).distinct()
         zev_qs = MeterReading.objects.filter(metering_point__zev_id__in=zev_ids)
         if date_from:
-            zev_qs = zev_qs.filter(timestamp__gte=datetime.combine(date_type.fromisoformat(date_from), datetime.min.time(), tzinfo=dt_timezone.utc))
+            zev_qs = zev_qs.filter(timestamp__gte=period_start_dt(date_type.fromisoformat(date_from)))
         if date_to:
-            zev_qs = zev_qs.filter(timestamp__lt=datetime.combine(date_type.fromisoformat(date_to), datetime.min.time(), tzinfo=dt_timezone.utc) + timedelta(days=1))
+            zev_qs = zev_qs.filter(timestamp__lt=period_end_exclusive_dt(date_type.fromisoformat(date_to)))
 
         result = participant_dashboard_summary(qs, zev_qs, trunc_fn, user, zev_ids)
         result["bucket"] = bucket
@@ -240,8 +239,7 @@ class MeterReadingViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
 
         ps = date_type.fromisoformat(date_from)
         pe = date_type.fromisoformat(date_to)
-        start_dt = datetime.combine(ps, datetime.min.time(), tzinfo=dt_timezone.utc)
-        end_dt = datetime.combine(pe, datetime.min.time(), tzinfo=dt_timezone.utc) + timedelta(days=1)
+        start_dt, end_dt = period_window(ps, pe)
 
         zev_id = request.query_params.get("zev_id")
         participant_id = request.query_params.get("participant_id")

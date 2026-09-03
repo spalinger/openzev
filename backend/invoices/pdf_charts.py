@@ -1,6 +1,5 @@
 """Invoice PDF SVG chart builders — energy flow, comparison, and hourly profile."""
 
-from .engine import _period_to_dt
 from .pdf_stats import _compute_period_participant_stats
 
 # Shared palette — generated from design/tokens.json (single source of truth).
@@ -503,10 +502,10 @@ def _build_hourly_profile_chart_svg(invoice, tr: dict) -> str | None:
     from decimal import Decimal as _Dec
     from allocation.read_model import (
         CONSUMPTION_METER_TYPES as _CONS_METER_TYPES,
-        active_during,
         community_totals_by_timestamp,
         eligible_participant_shares,
     )
+    from allocation.validity import active_during, period_window
     from allocation.split import split_consumption
     from allocation.windows import AssignmentWindows
     from metering.models import MeterReading, ReadingDirection, ReadingResolution
@@ -517,8 +516,7 @@ def _build_hourly_profile_chart_svg(invoice, tr: dict) -> str | None:
     participant = invoice.participant
     zev = invoice.zev
 
-    start_dt = _period_to_dt(ps)
-    end_dt = _period_to_dt(pe) + _dt.timedelta(days=1)
+    start_dt, end_dt = period_window(ps, pe)
 
     # ── Participant consumption readings ────────────────────────────────────
     # A meter matters here if this participant personally holds it, OR it is

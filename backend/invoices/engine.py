@@ -22,9 +22,9 @@ from accounts.models import VatRate
 from allocation.read_model import (
     CONSUMPTION_METER_TYPES,
     PRODUCTION_METER_TYPES,
-    active_during,
     community_totals_by_timestamp,
 )
+from allocation.validity import active_during, period_window
 from allocation.split import split_consumption, split_production
 from allocation.windows import AssignmentWindows
 from zev.models import AllocationMode, Zev, Participant, MeteringPoint, MeteringPointAssignment
@@ -118,8 +118,7 @@ def _readings_in_period(metering_points, start_dt, end_dt, direction):
 def _gather_period_readings(participant, period_start, period_end) -> PeriodReadings:
     """Fetch the participant's own readings and the community-wide totals."""
     zev = participant.zev
-    start_dt = _period_to_dt(period_start)
-    end_dt = _period_to_dt(period_end) + timedelta(days=1)  # exclusive upper bound
+    start_dt, end_dt = period_window(period_start, period_end)
 
     def own_points(meter_types):
         return _assigned_metering_points(
@@ -268,10 +267,6 @@ class ItemAccumulator:
 
     def __len__(self) -> int:
         return len(self._entries)
-
-
-def _period_to_dt(d: date) -> datetime:
-    return datetime(d.year, d.month, d.day, tzinfo=tz.utc)
 
 
 CATEGORY_SORT_ORDER = {

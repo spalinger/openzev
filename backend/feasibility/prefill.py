@@ -43,7 +43,7 @@ from decimal import Decimal
 
 from django.db.models import Max, Min, Sum
 
-from allocation.read_model import active_on
+from allocation.validity import active_on
 from allocation.split import local_pool_kwh
 from metering.models import MeterReading, ReadingDirection
 from tariffs.models import BillingMode, EnergyType, Tariff, TariffCategory

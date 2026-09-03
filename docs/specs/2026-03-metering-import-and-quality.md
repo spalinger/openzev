@@ -345,8 +345,8 @@ All metering endpoints are routed under `/api/v1/metering/` via DRF routers.
 **Response:** array of `{bucket, in_kwh, out_kwh}` objects, pivoted by
 direction within each time bucket.
 
-**Date bounds:** explicit UTC start/end construction
-(`datetime.combine(..., tzinfo=utc)`) to avoid Django timezone conversion
+**Date bounds:** explicit UTC start/end construction (via
+`allocation.validity.period_window`) to avoid Django timezone conversion
 artifacts (ADR 0007).
 
 ### 5.3 Raw data
@@ -647,16 +647,18 @@ All import endpoints use `MultiPartParser` and `FormParser`.
 Per ADR 0007, all metering timestamps are stored and queried in UTC.
 
 **Query boundary construction:** date parameters (`date_from`, `date_to`) are
-converted to explicit UTC bounds:
+converted to explicit UTC bounds via `allocation.validity`:
 
 ```python
-start = datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc)
-end   = datetime.combine(date_to, datetime.min.time(), tzinfo=timezone.utc) + timedelta(days=1)
+start, end = period_window(date_from, date_to)
 # Filter: timestamp >= start AND timestamp < end
 ```
 
-This avoids Django's `__date` lookup which applies `USE_TZ` / `TIME_ZONE`
-conversion and can drop/duplicate readings near midnight boundaries.
+A lone `date_from`/`date_to` still filters one-sided
+(`period_start_dt`/`period_end_exclusive_dt`); both parameters are optional
+wherever the endpoint documents them as such. This avoids Django's `__date`
+lookup which applies `USE_TZ` / `TIME_ZONE` conversion and can
+drop/duplicate readings near midnight boundaries.
 
 **Import normalization:**
 - Timezone-aware timestamps → converted to UTC.

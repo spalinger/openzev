@@ -7,6 +7,8 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 
+from allocation.validity import active_during, active_on
+
 
 class UserRole(models.TextChoices):
     ADMIN = "admin", "Admin"
@@ -349,9 +351,6 @@ class VatRate(models.Model):
         if self.valid_to and self.valid_to < self.valid_from:
             raise ValidationError({"valid_to": "valid_to must be on or after valid_from."})
 
-        # Deferred import: allocation.read_model imports zev/metering models.
-        from allocation.read_model import active_during
-
         overlap_exists = active_during(
             VatRate.objects.exclude(pk=self.pk), self.valid_from, self.valid_to or date.max
         ).exists()
@@ -366,9 +365,6 @@ class VatRate(models.Model):
 
     @classmethod
     def active_for_day(cls, day: date):
-        # Deferred import: allocation.read_model imports zev/metering models.
-        from allocation.read_model import active_on
-
         return active_on(cls.objects, day).order_by("-valid_from", "-created_at").first()
 
     def __str__(self):

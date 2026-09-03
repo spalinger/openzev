@@ -14,10 +14,10 @@ from accounts.models import AppSettings
 from allocation.read_model import (
     CONSUMPTION_METER_TYPES,
     PRODUCTION_METER_TYPES,
-    active_during,
     community_totals_by_timestamp,
     eligible_participant_shares,
 )
+from allocation.validity import active_during
 from allocation.split import split_consumption
 from allocation.windows import AssignmentWindows
 from .pdf_render import render_pdf

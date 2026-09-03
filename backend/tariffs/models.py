@@ -4,6 +4,8 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from zev.models import Zev
 
+from allocation.validity import active_during
+
 from .periods import hhmm, parse_number_list
 from .series import SERIES_FIELDS
 
@@ -128,9 +130,6 @@ class Tariff(models.Model):
         # is almost certainly a mistake: a new seasonal version created without
         # closing the previous one, which would double-bill every participant.
         if self.zev_id and self.name and self.valid_from:
-            # Deferred import: allocation.read_model imports zev/metering models.
-            from allocation.read_model import active_during
-
             overlaps = active_during(
                 Tariff.objects.exclude(pk=self.pk).filter(zev_id=self.zev_id, name=self.name),
                 self.valid_from,

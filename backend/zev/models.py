@@ -7,6 +7,8 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.utils import timezone
 
+from allocation.validity import active_during
+
 DEFAULT_EMAIL_SUBJECT_TEMPLATE = "Invoice {invoice_number} \u2013 {zev_name}"
 DEFAULT_EMAIL_BODY_TEMPLATE = (
     "Dear {participant_name},\n\n"
@@ -329,9 +331,6 @@ class MeteringPointAssignment(models.Model):
         """
         if not self.metering_point_id or not self.valid_from:
             return
-        # Deferred import: allocation.read_model imports zev/metering models.
-        from allocation.read_model import active_during
-
         existing = MeteringPointAssignment.objects.filter(metering_point=self.metering_point)
         if self.pk:
             existing = existing.exclude(pk=self.pk)

@@ -6,9 +6,9 @@ logic can be tested and reasoned about independently of the DRF
 request/response layer.
 """
 
-from datetime import date as date_type, datetime, timedelta, timezone as dt_timezone
+from datetime import date as date_type
 
-from allocation.read_model import active_during
+from allocation.validity import active_during, period_window
 from zev.models import Participant, MeteringPointAssignment
 from metering.models import MeterReading
 from .models import Invoice
@@ -26,8 +26,7 @@ def compute_period_overview(*, zev, period_start: date_type, period_end: date_ty
     Only participants with at least one metering point assignment active
     during the period are included.
     """
-    period_start_dt = datetime.combine(period_start, datetime.min.time(), tzinfo=dt_timezone.utc)
-    period_end_exclusive_dt = datetime.combine(period_end, datetime.min.time(), tzinfo=dt_timezone.utc) + timedelta(days=1)
+    period_start_dt, period_end_exclusive_dt = period_window(period_start, period_end)
 
     participants = list(
         active_during(
