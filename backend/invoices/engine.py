@@ -733,6 +733,20 @@ DESCRIPTION_TRANSLATIONS: dict[str, dict] = {
 }
 
 
+# Billing mode -> (singular key, plural key) into DESCRIPTION_TRANSLATIONS.
+# Module-level so the per-line render below is a lookup, not a rebuilt table.
+# Only the per-metering-point variants take the community marker; the shared
+# modes already name the community cost and plain fees never carry it.
+_TIME_FEE_UNIT_KEYS = {
+    BillingMode.YEARLY_FEE: ("yearly_fee_sg", "yearly_fee_pl"),
+    BillingMode.PER_METERING_POINT_YEARLY_FEE: ("mp_yearly_sg", "mp_yearly_pl"),
+    BillingMode.PER_METERING_POINT_MONTHLY_FEE: ("mp_monthly_sg", "mp_monthly_pl"),
+    BillingMode.SHARED_MONTHLY_FEE: ("shared_monthly_sg", "shared_monthly_pl"),
+    BillingMode.SHARED_YEARLY_FEE: ("shared_yearly_sg", "shared_yearly_pl"),
+    BillingMode.MONTHLY_FEE: ("monthly_sg", "monthly_pl"),
+}
+
+
 def _build_description(
     tariff: Tariff,
     period_start: date,
@@ -757,43 +771,23 @@ def _build_description(
         pct = tariff.percentage or Decimal("0")
         # Format: remove trailing zeros (50.00 → 50, 33.50 → 33.5)
         pct_str = f"{pct:f}".rstrip("0").rstrip(".")
+        suffix = f", {marker}" if community else ""
         if base_rate is not None:
             base_str = f"{base_rate:f}".rstrip("0").rstrip(".")
-            suffix = f", {marker}" if community else ""
             return f"{tariff.name} ({pct_str}% {t['pct_of']} {base_str}/kWh{suffix})"
-        suffix = f", {marker}" if community else ""
         return f"{tariff.name} ({pct_str}%{suffix})"
 
     months = int(quantity)
 
-    if tariff.billing_mode == BillingMode.YEARLY_FEE:
-        suffix = t["yearly_fee_sg"] if months == 1 else t["yearly_fee_pl"]
-        return f"{tariff.name} ({months} {suffix})"
-
-    if tariff.billing_mode == BillingMode.PER_METERING_POINT_YEARLY_FEE:
-        suffix = t["mp_yearly_sg"] if months == 1 else t["mp_yearly_pl"]
-        if community:
-            suffix = f"{suffix}, {marker}"
-        return f"{tariff.name} ({months} {suffix})"
-
-    if tariff.billing_mode == BillingMode.PER_METERING_POINT_MONTHLY_FEE:
-        suffix = t["mp_monthly_sg"] if months == 1 else t["mp_monthly_pl"]
-        if community:
-            suffix = f"{suffix}, {marker}"
-        return f"{tariff.name} ({months} {suffix})"
-
-    # The shared modes carry no participant count in the text: the denominator
-    # is per month and can differ between the months on one line. The unit
-    # price column already shows the average share.
-    if tariff.billing_mode == BillingMode.SHARED_MONTHLY_FEE:
-        suffix = t["shared_monthly_sg"] if months == 1 else t["shared_monthly_pl"]
-        return f"{tariff.name} ({months} {suffix})"
-
-    if tariff.billing_mode == BillingMode.SHARED_YEARLY_FEE:
-        suffix = t["shared_yearly_sg"] if months == 1 else t["shared_yearly_pl"]
-        return f"{tariff.name} ({months} {suffix})"
-
-    suffix = t["monthly_sg"] if months == 1 else t["monthly_pl"]
+    sg_key, pl_key = _TIME_FEE_UNIT_KEYS.get(
+        tariff.billing_mode, ("monthly_sg", "monthly_pl")
+    )
+    suffix = t[sg_key] if months == 1 else t[pl_key]
+    if community and tariff.billing_mode in (
+        BillingMode.PER_METERING_POINT_YEARLY_FEE,
+        BillingMode.PER_METERING_POINT_MONTHLY_FEE,
+    ):
+        suffix = f"{suffix}, {marker}"
     return f"{tariff.name} ({months} {suffix})"
 
 
