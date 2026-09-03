@@ -40,7 +40,8 @@ export function AdminApiKeysPage() {
     const revokeMutation = useMutation({
         mutationFn: (id: string) => revokeAnyApiKey(id),
         onSuccess: () => {
-            void queryClient.invalidateQueries({ queryKey: ['auth', 'all-api-keys'] })
+            // Prefix-match refreshes every user/status filter variant.
+            void queryClient.invalidateQueries({ queryKey: queryKeys.auth.allApiKeysRoot })
             pushToast(t('pages.adminApiKeys.revokeSuccess'), 'success')
         },
         onError: (error) => pushToast(formatApiError(error, t('common.error')), 'error'),
