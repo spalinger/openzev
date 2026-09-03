@@ -49,7 +49,7 @@ from .transfer import (
     inspect_archive,
 )
 from audit.models import AuditActionCategory, AuditEventStatus
-from audit.mixins import AuditedUpdateMixin
+from audit.mixins import AuditedCreateDestroyMixin, AuditedUpdateMixin
 from audit.services import record_audit_event
 
 logger = logging.getLogger(__name__)
@@ -309,7 +309,7 @@ class ZevViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
         return names or None
 
 
-class ParticipantViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.ModelViewSet):
+class ParticipantViewSet(AuditedCreateDestroyMixin, AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.ModelViewSet):
     serializer_class = ParticipantSerializer
     permission_classes = [IsAuthenticated, BaseZevScopedPermission]
     zev_owner_filter = "zev__owner"
@@ -327,35 +327,17 @@ class ParticipantViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.Mo
     def get_queryset(self):
         return self.scope_queryset(Participant.objects.prefetch_related("metering_point_assignments"))
 
-    def perform_create(self, serializer):
-        participant = super().perform_create(serializer)
-        record_audit_event(
-            request=self.request,
-            action_category=AuditActionCategory.PARTICIPANT,
-            action_type="participant.create",
-            target_type="zev.Participant",
-            target=participant,
-            target_id=str(participant.pk),
-            target_display=participant.full_name,
-            summary=f"Created participant {participant.full_name}.",
-            metadata={"zev_id": str(participant.zev_id)},
-        )
+    def get_audit_create_summary(self, instance):
+        return f"Created participant {instance.full_name}."
 
-    def perform_destroy(self, instance):
-        participant_id = str(instance.pk)
-        participant_display = instance.full_name
-        zev_id = str(instance.zev_id)
-        instance.delete()
-        record_audit_event(
-            request=self.request,
-            action_category=AuditActionCategory.PARTICIPANT,
-            action_type="participant.delete",
-            target_type="zev.Participant",
-            target_id=participant_id,
-            target_display=participant_display,
-            summary=f"Deleted participant {participant_display}.",
-            metadata={"zev_id": zev_id},
-        )
+    def get_audit_destroy_summary(self, instance):
+        return f"Deleted participant {instance.full_name}."
+
+    def get_audit_create_metadata(self, instance):
+        return {"zev_id": str(instance.zev_id)}
+
+    def get_audit_destroy_metadata(self, instance):
+        return {"zev_id": str(instance.zev_id)}
 
     def _contract_pdf_access_denied(self, request, participant):
         """True when the caller may not reach this participant's contract."""
@@ -664,7 +646,7 @@ class ParticipantViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.Mo
         )
 
 
-class MeteringPointViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.ModelViewSet):
+class MeteringPointViewSet(AuditedCreateDestroyMixin, AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.ModelViewSet):
     serializer_class = MeteringPointSerializer
     permission_classes = [IsAuthenticated, MeteringPointPermission]
     zev_owner_filter = "zev__owner"
@@ -683,35 +665,17 @@ class MeteringPointViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.
     def get_queryset(self):
         return self.scope_queryset(MeteringPoint.objects.select_related("zev"))
 
-    def perform_create(self, serializer):
-        metering_point = super().perform_create(serializer)
-        record_audit_event(
-            request=self.request,
-            action_category=AuditActionCategory.METERING,
-            action_type="metering_point.create",
-            target_type="zev.MeteringPoint",
-            target=metering_point,
-            target_id=str(metering_point.pk),
-            target_display=metering_point.meter_id,
-            summary=f"Created metering point {metering_point.meter_id}.",
-            metadata={"zev_id": str(metering_point.zev_id), "meter_type": metering_point.meter_type},
-        )
+    def get_audit_create_summary(self, instance):
+        return f"Created metering point {instance.meter_id}."
 
-    def perform_destroy(self, instance):
-        meter_id = instance.meter_id
-        metering_point_id = str(instance.pk)
-        zev_id = str(instance.zev_id)
-        instance.delete()
-        record_audit_event(
-            request=self.request,
-            action_category=AuditActionCategory.METERING,
-            action_type="metering_point.delete",
-            target_type="zev.MeteringPoint",
-            target_id=metering_point_id,
-            target_display=meter_id,
-            summary=f"Deleted metering point {meter_id}.",
-            metadata={"zev_id": zev_id},
-        )
+    def get_audit_destroy_summary(self, instance):
+        return f"Deleted metering point {instance.meter_id}."
+
+    def get_audit_create_metadata(self, instance):
+        return {"zev_id": str(instance.zev_id), "meter_type": instance.meter_type}
+
+    def get_audit_destroy_metadata(self, instance):
+        return {"zev_id": str(instance.zev_id)}
 
     @action(
         detail=True,
@@ -769,7 +733,7 @@ class MeteringPointViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.
         return Response({"deleted_count": deleted_count}, status=status.HTTP_200_OK)
 
 
-class MeteringPointAssignmentViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.ModelViewSet):
+class MeteringPointAssignmentViewSet(AuditedCreateDestroyMixin, AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.ModelViewSet):
     serializer_class = MeteringPointAssignmentSerializer
     permission_classes = [IsAuthenticated, MeteringPointAssignmentPermission]
     zev_owner_filter = "metering_point__zev__owner"
@@ -802,38 +766,20 @@ class MeteringPointAssignmentViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin,
 
         return qs
 
-    def perform_create(self, serializer):
-        assignment = super().perform_create(serializer)
-        record_audit_event(
-            request=self.request,
-            action_category=AuditActionCategory.METERING,
-            action_type="metering_assignment.create",
-            target_type="zev.MeteringPointAssignment",
-            target=assignment,
-            target_id=str(assignment.pk),
-            target_display=str(assignment.pk),
-            summary=f"Created metering point assignment for {assignment.metering_point.meter_id}.",
-            metadata={
-                "metering_point_id": str(assignment.metering_point_id),
-                "participant_id": str(assignment.participant_id),
-            },
-        )
+    def get_audit_create_summary(self, instance):
+        return f"Created metering point assignment for {instance.metering_point.meter_id}."
 
-    def perform_destroy(self, instance):
-        assignment_id = str(instance.pk)
-        meter_id = instance.metering_point.meter_id
-        participant_id = str(instance.participant_id)
-        instance.delete()
-        record_audit_event(
-            request=self.request,
-            action_category=AuditActionCategory.METERING,
-            action_type="metering_assignment.delete",
-            target_type="zev.MeteringPointAssignment",
-            target_id=assignment_id,
-            target_display=assignment_id,
-            summary=f"Deleted metering point assignment for {meter_id}.",
-            metadata={"participant_id": participant_id},
-        )
+    def get_audit_destroy_summary(self, instance):
+        return f"Deleted metering point assignment for {instance.metering_point.meter_id}."
+
+    def get_audit_create_metadata(self, instance):
+        return {
+            "metering_point_id": str(instance.metering_point_id),
+            "participant_id": str(instance.participant_id),
+        }
+
+    def get_audit_destroy_metadata(self, instance):
+        return {"participant_id": str(instance.participant_id)}
 
 
 class GridOperatorListView(APIView):

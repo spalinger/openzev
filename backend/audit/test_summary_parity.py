@@ -1,8 +1,8 @@
-"""Pin the audit summary/target_display strings produced by AuditedUpdateMixin.
+"""Pin the audit summary/target_display strings produced by the audit mixins.
 
-These strings were previously built inline in each viewset's perform_update.
-They are user-visible in the audit log, so they must not drift when the
-snapshot/diff plumbing is refactored.
+These strings were previously built inline in each viewset's
+perform_create/perform_update/perform_destroy. They are user-visible in the
+audit log, so they must not drift when the audit plumbing is refactored.
 """
 from unittest import mock
 
@@ -137,3 +137,111 @@ class AuditSummaryParityTests(TestCase):
         event = self._latest("user.update", target.id)
         self.assertEqual(event.summary, f"Updated user {target.email}.")
         self.assertEqual(event.target_display, target.email)
+
+    @mock.patch("zev.tasks.warm_participant_geocode_cache_task.delay")
+    def test_participant_create_summary(self, _geocode):
+        auth(self.client, self.admin)
+        resp = self.client.post(
+            "/api/v1/zev/participants/",
+            {
+                "zev": str(self.zev.id),
+                "first_name": "New",
+                "last_name": "Member",
+                "email": "newmember@example.com",
+                "valid_from": timezone.localdate().isoformat(),
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.content)
+        participant = Participant.objects.get(id=resp.data["id"])
+        event = self._latest("participant.create", participant.id)
+        self.assertEqual(event.summary, f"Created participant {participant.full_name}.")
+        self.assertEqual(event.target_display, participant.full_name)
+        self.assertEqual(event.metadata_json, {"zev_id": str(self.zev.id)})
+
+    def test_participant_destroy_summary(self):
+        auth(self.client, self.admin)
+        participant_id = self.participant.id
+        full_name = self.participant.full_name
+        resp = self.client.delete(f"/api/v1/zev/participants/{participant_id}/")
+        self.assertEqual(resp.status_code, 204, resp.content)
+        event = self._latest("participant.delete", participant_id)
+        self.assertEqual(event.summary, f"Deleted participant {full_name}.")
+        self.assertEqual(event.target_display, full_name)
+        self.assertEqual(event.metadata_json, {"zev_id": str(self.zev.id)})
+
+    def test_metering_point_create_summary(self):
+        auth(self.client, self.admin)
+        resp = self.client.post(
+            "/api/v1/zev/metering-points/",
+            {
+                "zev": str(self.zev.id),
+                "meter_id": "CH9990000000000000000000000000020",
+                "meter_type": MeteringPointType.CONSUMPTION,
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.content)
+        point = MeteringPoint.objects.get(id=resp.data["id"])
+        event = self._latest("metering_point.create", point.id)
+        self.assertEqual(event.summary, f"Created metering point {point.meter_id}.")
+        self.assertEqual(event.target_display, point.meter_id)
+        self.assertEqual(
+            event.metadata_json,
+            {"zev_id": str(self.zev.id), "meter_type": point.meter_type},
+        )
+
+    def test_metering_point_destroy_summary(self):
+        auth(self.client, self.admin)
+        point_id = self.metering_point.id
+        meter_id = self.metering_point.meter_id
+        resp = self.client.delete(f"/api/v1/zev/metering-points/{point_id}/")
+        self.assertEqual(resp.status_code, 204, resp.content)
+        event = self._latest("metering_point.delete", point_id)
+        self.assertEqual(event.summary, f"Deleted metering point {meter_id}.")
+        self.assertEqual(event.target_display, meter_id)
+        self.assertEqual(event.metadata_json, {"zev_id": str(self.zev.id)})
+
+    def test_metering_assignment_create_summary(self):
+        point = MeteringPoint.objects.create(
+            zev=self.zev,
+            meter_id="CH9990000000000000000000000000030",
+            meter_type=MeteringPointType.CONSUMPTION,
+        )
+        auth(self.client, self.admin)
+        resp = self.client.post(
+            "/api/v1/zev/metering-point-assignments/",
+            {
+                "metering_point": str(point.id),
+                "participant": str(self.participant.id),
+                "valid_from": timezone.localdate().isoformat(),
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.content)
+        assignment = MeteringPointAssignment.objects.get(id=resp.data["id"])
+        event = self._latest("metering_assignment.create", assignment.id)
+        self.assertEqual(
+            event.summary,
+            f"Created metering point assignment for {point.meter_id}.",
+        )
+        self.assertEqual(event.target_display, str(assignment.pk))
+        self.assertEqual(
+            event.metadata_json,
+            {
+                "metering_point_id": str(point.id),
+                "participant_id": str(self.participant.id),
+            },
+        )
+
+    def test_metering_assignment_destroy_summary(self):
+        auth(self.client, self.admin)
+        assignment_id = self.assignment.id
+        meter_id = self.metering_point.meter_id
+        participant_id = str(self.participant.id)
+        resp = self.client.delete(f"/api/v1/zev/metering-point-assignments/{assignment_id}/")
+        self.assertEqual(resp.status_code, 204, resp.content)
+        event = self._latest("metering_assignment.delete", assignment_id)
+        self.assertEqual(event.summary, f"Deleted metering point assignment for {meter_id}.")
+        self.assertEqual(event.target_display, str(assignment_id))
+        self.assertEqual(event.metadata_json, {"participant_id": participant_id})

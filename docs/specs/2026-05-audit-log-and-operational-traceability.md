@@ -667,6 +667,20 @@ participant update, metering delete-readings, metering point + assignment
 updates, tariff create/update, tariff period update, user update, and the
 import-without-file failure each emit the correct audit event.
 
+### Backend — `backend/audit/test_summary_parity.py`
+
+**`AuditSummaryParityTests`**: participant, metering point, and metering point
+assignment create/delete each emit the event the hand-written blocks produced
+before `AuditedCreateDestroyMixin` replaced them — same action type, summary,
+`target_display`, and metadata (create-only extras such as `meter_type` stay
+create-only):
+
+| Test | Asserts |
+|---|---|
+| `test_participant_create_summary` / `test_participant_destroy_summary` | `participant.create`/`participant.delete` with `full_name` display and `zev_id` metadata |
+| `test_metering_point_create_summary` / `test_metering_point_destroy_summary` | `metering_point.create`/`metering_point.delete` with `meter_id` display; `meter_type` in create metadata only |
+| `test_metering_assignment_create_summary` / `test_metering_assignment_destroy_summary` | `metering_assignment.create`/`metering_assignment.delete` with `str(pk)` display; `metering_point_id` in create metadata only |
+
 ### Frontend
 
 **File:** `frontend/src/lib/api/audit.ts` (client), `frontend/src/pages/AdminAuditLogsPage.tsx` (page)
