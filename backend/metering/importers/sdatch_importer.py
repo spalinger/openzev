@@ -18,12 +18,6 @@ from metering.importers.limits import MAX_UPLOAD_BYTES, add_error, mb
 
 MAX_SDAT_BYTES = MAX_UPLOAD_BYTES
 
-# Namespaces used in SDAT-CH MeteringData documents
-NSMAP = {
-    "rsm": "urn:edigas:rsm:MeteringData:5:0",
-    "ram": "urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:32",
-}
-
 
 def _parse_ts(value: str) -> datetime:
     """Parse ISO 8601 datetime string to UTC datetime."""

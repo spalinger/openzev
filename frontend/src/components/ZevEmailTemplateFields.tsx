@@ -10,7 +10,6 @@ type ZevEmailTemplateFieldsProps = {
     bodyTemplate: string
     onSubjectTemplateChange: (value: string) => void
     onBodyTemplateChange: (value: string) => void
-    showHeader?: boolean
 }
 
 export function ZevEmailTemplateFields({
@@ -18,7 +17,6 @@ export function ZevEmailTemplateFields({
     bodyTemplate,
     onSubjectTemplateChange,
     onBodyTemplateChange,
-    showHeader = true,
 }: ZevEmailTemplateFieldsProps) {
     const { t } = useTranslation()
 
@@ -32,14 +30,12 @@ export function ZevEmailTemplateFields({
 
     return (
         <>
-            {showHeader && (
-                <header>
-                    <h3>{t('pages.zevSettings.emailTemplateTitle')}</h3>
-                    <p className="muted">
-                        {t('pages.zevSettings.emailTemplateDescription')}
-                    </p>
-                </header>
-            )}
+            <header>
+                <h3>{t('pages.zevSettings.emailTemplateTitle')}</h3>
+                <p className="muted">
+                    {t('pages.zevSettings.emailTemplateDescription')}
+                </p>
+            </header>
 
             <div className="inline-form page-stack">
                 <label>

@@ -102,8 +102,7 @@ Singleton pattern with `pk=1` enforced by `save()` plus a `singleton_enforcer = 
 - `active_for_day(day)` (classmethod) — Returns the first `VatRate` where `valid_from <= day` and (`valid_to IS NULL` or `valid_to >= day`), ordered by `-valid_from`, `-created_at`. Returns `None` if no match.
 
 **Serializers:**
-- `VatRateSerializer` — fields: `id`, `rate`, `valid_from`, `valid_to`, `created_at`, `updated_at` (id/created_at/updated_at read-only).
-- `VatRateInputSerializer` — fields: `rate`, `valid_from`, `valid_to`.
+- `VatRateSerializer` — fields: `id`, `rate`, `valid_from`, `valid_to`, `created_at`, `updated_at` (id/created_at/updated_at read-only). Used for both input and output; there is no separate input serializer.
 
 ### 4.3 Zev governance fields
 

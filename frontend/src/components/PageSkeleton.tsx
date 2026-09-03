@@ -41,10 +41,10 @@ function TableRows({ animate, withTitle }: { animate: boolean; withTitle: boolea
     )
 }
 
-function CardSkeleton({ animate, titleWidth = "30%" }: { animate: boolean; titleWidth?: string }) {
+function CardSkeleton({ animate }: { animate: boolean }) {
     return (
         <div className="card">
-            <Block animate={animate} height={18} width={titleWidth} mb={12} />
+            <Block animate={animate} height={18} width="30%" mb={12} />
             <Block animate={animate} height={14} width="100%" mb={8} />
             <Block animate={animate} height={14} width="88%" />
         </div>

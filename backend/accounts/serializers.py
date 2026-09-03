@@ -233,12 +233,6 @@ class VatRateSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at", "updated_at"]
 
 
-class VatRateInputSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = VatRate
-        fields = ["rate", "valid_from", "valid_to"]
-
-
 class ApiKeySerializer(serializers.ModelSerializer):
     """A key as it appears in the list — never including the secret."""
 

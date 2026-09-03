@@ -5,7 +5,6 @@ interface CivilDateInputProps {
     /** Plain civil date as `YYYY-MM-DD`; empty string or null clears the field. */
     value: string | null
     onChange: (iso: string | null) => void
-    clearable?: boolean
 }
 
 /**
@@ -16,14 +15,14 @@ interface CivilDateInputProps {
  * no `Date` round-trip, no timezone shift in either direction. Only the
  * visible label is formatted to the user's short date format.
  */
-export function CivilDateInput({ value, onChange, clearable = true }: CivilDateInputProps) {
+export function CivilDateInput({ value, onChange }: CivilDateInputProps) {
     const { settings } = useAppSettings()
     return (
         <DatePickerInput
-            clearable={clearable}
             valueFormat={toDayJsDateFormat(settings.date_format_short)}
             value={value || null}
             onChange={onChange}
+            clearable
         />
     )
 }
