@@ -1,6 +1,7 @@
 import { type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FormModal } from '../../components/FormModal'
+import { FormModalFooter } from '../../components/FormModalFooter'
 import { CivilDateInput } from '../../components/CivilDateInput'
 import type { MeteringPointAssignmentInput, Participant } from '../../types/api'
 
@@ -86,22 +87,12 @@ export function MeteringAssignmentFormModal({
           {t('pages.meteringPoints.assignForm.allocationModeHint')}
         </p>
 
-        <div
-          style={{
-            gridColumn: '1 / -1',
-            display: 'flex',
-            gap: '1rem',
-            justifyContent: 'flex-end',
-            marginTop: '0.5rem',
-          }}
-        >
-          <button className="button button-secondary" type="button" onClick={onClose}>
-            {t('common.cancel')}
-          </button>
-          <button className="button button-primary" type="submit" disabled={isPending}>
-            {submitLabel}
-          </button>
-        </div>
+        <FormModalFooter
+          onCancel={onClose}
+          isPending={isPending}
+          submitLabel={submitLabel}
+          compact
+        />
       </form>
     </FormModal>
   )

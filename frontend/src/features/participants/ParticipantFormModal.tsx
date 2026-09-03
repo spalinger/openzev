@@ -3,6 +3,7 @@ import { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { FormModal } from '../../components/FormModal'
+import { FormModalFooter } from '../../components/FormModalFooter'
 import { TITLE_KEYS } from '../../lib/participantTitle'
 import type { Participant, ParticipantInput } from '../../types/api'
 import {
@@ -125,14 +126,11 @@ export function ParticipantFormModal({
           </div>
         )}
 
-        <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
-          <button className="button button-secondary" type="button" onClick={onClose}>
-            {t('common.cancel')}
-          </button>
-          <button className="button button-primary" type="submit" disabled={isPending}>
-            {initialParticipant ? t('pages.participants.saveParticipant') : t('common.create')}
-          </button>
-        </div>
+        <FormModalFooter
+          onCancel={onClose}
+          isPending={isPending}
+          submitLabel={initialParticipant ? t('pages.participants.saveParticipant') : t('common.create')}
+        />
       </form>
     </FormModal>
   )

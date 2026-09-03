@@ -5,6 +5,7 @@ import { Controller, useForm, useWatch } from 'react-hook-form'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FormModal } from '../../components/FormModal'
+import { FormModalFooter } from '../../components/FormModalFooter'
 import { CivilDateInput } from '../../components/CivilDateInput'
 import type { Tariff, TariffBillingMode, TariffInput } from '../../types/api'
 import {
@@ -217,16 +218,13 @@ export function TariffFormModal({
           </div>
         )}
 
-        <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
-          <button className="button button-secondary" type="button" onClick={onClose}>
-            <FontAwesomeIcon icon={faXmark} fixedWidth />
-            {t('common.cancel')}
-          </button>
-          <button className="button button-primary" type="submit" disabled={isPending}>
-            <FontAwesomeIcon icon={faCheck} fixedWidth />
-            {initialTariff ? t('pages.tariffs.saveTariff') : t('pages.tariffs.createTariff')}
-          </button>
-        </div>
+        <FormModalFooter
+          onCancel={onClose}
+          isPending={isPending}
+          submitLabel={initialTariff ? t('pages.tariffs.saveTariff') : t('pages.tariffs.createTariff')}
+          submitIcon={<FontAwesomeIcon icon={faCheck} fixedWidth />}
+          cancelIcon={<FontAwesomeIcon icon={faXmark} fixedWidth />}
+        />
       </form>
     </FormModal>
   )
