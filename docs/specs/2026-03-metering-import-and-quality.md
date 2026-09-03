@@ -819,6 +819,12 @@ type MeteringDashboardSummary =
 | `XlsxZipLimitTests` | §4.4: XLSX ZIP with too many members or a high-ratio member is rejected before openpyxl inflates it; a non-ZIP `.xlsx` is rejected; a sheet whose width appears only after the first row is rejected (column cap holds per row) |
 | `SdatchLimitTests` | §4.4: SDAT-CH file over the size cap produces an ImportLog error without parsing; the per-row error list is capped at 50 with a truncation sentinel during the parse loop |
 
+### Backend (`metering/test_generate_metering_data.py`)
+
+| Test class | Validates |
+|---|---|
+| `GenerateMeteringDataResolutionTests` | `generate_metering_data` writes only `ReadingResolution` choices: 15-minute intervals write the 15-minute resolution (not `"QH"`), hourly intervals write hourly |
+
 ### Backend (`accounts/test_throttling.py`)
 
 | Test class | Validates |
