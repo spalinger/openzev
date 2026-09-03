@@ -121,9 +121,6 @@ export function ParticipantCardsSection({
                     })
                 }
 
-                const directAction = menuItems.length === 1 && !ownerRow ? menuItems[0] : null
-                const overflowItems = directAction ? [] : menuItems
-
                 return (
                     <article key={participant.id} className="participant-card">
                         <div className="participant-card-header">
@@ -152,24 +149,11 @@ export function ParticipantCardsSection({
                                     <FontAwesomeIcon icon={faDownload} fixedWidth />
                                     {t('pages.participants.downloadContract')}
                                 </button>
-                                {directAction && (
-                                    <button
-                                        className={`button ${directAction.danger ? 'button-danger' : 'button-secondary'} button-compact`}
-                                        type="button"
-                                        disabled={directAction.disabled}
-                                        onClick={directAction.onClick}
-                                    >
-                                        {directAction.icon}
-                                        {directAction.label}
-                                    </button>
-                                )}
-                                {overflowItems.length > 0 && (
-                                    <ActionMenu
-                                        label={t('pages.participants.moreActions')}
-                                        icon={<FontAwesomeIcon icon={faEllipsis} fixedWidth />}
-                                        items={overflowItems}
-                                    />
-                                )}
+                                <ActionMenu
+                                    label={t('pages.participants.moreActions')}
+                                    icon={<FontAwesomeIcon icon={faEllipsis} fixedWidth />}
+                                    items={menuItems}
+                                />
                             </div>
                         </div>
 

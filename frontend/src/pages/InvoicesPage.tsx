@@ -139,6 +139,9 @@ export function InvoicesPage() {
                 <InvoicesEmptyState />
             ) : (
                 <>
+                    {/* Defense-in-depth: the /invoices route is already
+                        owner/admin-only, but keep batch actions hidden from
+                        participant/guest roles even if routing changes. */}
                     {isOwnerOrAdmin && (
                         <InvoiceBatchToolbar
                             stats={batchStats}

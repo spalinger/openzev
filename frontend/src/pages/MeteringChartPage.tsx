@@ -129,7 +129,6 @@ export function MeteringChartPage() {
                 zevId: selectedZevId && isManagedScope ? selectedZevId : undefined,
                 meteringPointId: selectedMpId || undefined,
             }),
-        enabled: true,
     })
 
     const meteringPoints = (mpQuery.data ?? []).filter(

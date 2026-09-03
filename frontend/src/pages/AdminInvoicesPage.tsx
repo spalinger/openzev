@@ -184,7 +184,6 @@ export function AdminInvoicesPage() {
                             data={filteredRows}
                             columns={columns}
                             getRowId={(row) => row.id}
-                            loading={invoicesQuery.isLoading}
                             initialSorting={[{ id: 'period_sort', desc: true }]}
                             columnFilters={columnFilters}
                             onColumnFiltersChange={setColumnFilters}
