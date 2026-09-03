@@ -431,20 +431,29 @@ class ParticipantViewSet(AuditedCreateDestroyMixin, AuditedUpdateMixin, ZevScope
             self._audit_contract_download(request, participant, issue)
         return self._stream_contract_issue(participant, issue)
 
+    def _deny_non_admin(self, request, pk, *, action_suffix: str, summary: str, detail: str):
+        """Audit and reject a non-admin call to an admin-only account action."""
+        record_audit_event(
+            request=request,
+            action_category=AuditActionCategory.PARTICIPANT,
+            action_type=f"participant.{action_suffix}",
+            target_type="zev.Participant",
+            target_id=str(pk or ""),
+            target_display=str(pk or ""),
+            summary=summary,
+            status=AuditEventStatus.DENIED,
+        )
+        return Response({"detail": detail}, status=status.HTTP_403_FORBIDDEN)
+
     @action(detail=True, methods=["post"], url_path="link-account")
     def link_account(self, request, pk=None):
         if not request.user.is_admin:
-            record_audit_event(
-                request=request,
-                action_category=AuditActionCategory.PARTICIPANT,
-                action_type="participant.link_account",
-                target_type="zev.Participant",
-                target_id=str(pk or ""),
-                target_display=str(pk or ""),
+            return self._deny_non_admin(
+                request, pk,
+                action_suffix="link_account",
                 summary="Denied participant account link by non-admin.",
-                status=AuditEventStatus.DENIED,
+                detail="Only admins can link accounts.",
             )
-            return Response({"detail": "Only admins can link accounts."}, status=status.HTTP_403_FORBIDDEN)
 
         participant = self.get_object()
         user_id = request.data.get("user_id")
@@ -482,17 +491,12 @@ class ParticipantViewSet(AuditedCreateDestroyMixin, AuditedUpdateMixin, ZevScope
     @action(detail=True, methods=["post"], url_path="unlink-account")
     def unlink_account(self, request, pk=None):
         if not request.user.is_admin:
-            record_audit_event(
-                request=request,
-                action_category=AuditActionCategory.PARTICIPANT,
-                action_type="participant.unlink_account",
-                target_type="zev.Participant",
-                target_id=str(pk or ""),
-                target_display=str(pk or ""),
+            return self._deny_non_admin(
+                request, pk,
+                action_suffix="unlink_account",
                 summary="Denied participant account unlink by non-admin.",
-                status=AuditEventStatus.DENIED,
+                detail="Only admins can unlink accounts.",
             )
-            return Response({"detail": "Only admins can unlink accounts."}, status=status.HTTP_403_FORBIDDEN)
 
         participant = self.get_object()
         if participant.user is None:
@@ -524,17 +528,12 @@ class ParticipantViewSet(AuditedCreateDestroyMixin, AuditedUpdateMixin, ZevScope
     @action(detail=True, methods=["post"], url_path="create-account")
     def create_account(self, request, pk=None):
         if not request.user.is_admin:
-            record_audit_event(
-                request=request,
-                action_category=AuditActionCategory.PARTICIPANT,
-                action_type="participant.create_account",
-                target_type="zev.Participant",
-                target_id=str(pk or ""),
-                target_display=str(pk or ""),
+            return self._deny_non_admin(
+                request, pk,
+                action_suffix="create_account",
                 summary="Denied participant account creation by non-admin.",
-                status=AuditEventStatus.DENIED,
+                detail="Only admins can create participant accounts.",
             )
-            return Response({"detail": "Only admins can create participant accounts."}, status=status.HTTP_403_FORBIDDEN)
 
         participant = self.get_object()
         if participant.user is not None:
