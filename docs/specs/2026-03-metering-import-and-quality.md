@@ -217,7 +217,7 @@ substitution, quantized to 4 decimal places.
 Overwrite reports as a summary error: `"Overwrote N existing readings."`.
 
 **Meter visibility:** meters are scoped to the importing user's role:
-- `admin` → all meters (optionally filtered by ZEV).
+- `admin` → all meters.
 - `zev_owner` → only meters in owned ZEVs.
 - `participant` → no import access (blocked at view permission level).
 

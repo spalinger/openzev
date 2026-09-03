@@ -298,10 +298,8 @@ def _infer_direction_and_energy(meter_type, energy, explicit_direction=None):
     return "in", abs(energy)
 
 
-def _meter_queryset_for_user(user, zev=None):
+def _meter_queryset_for_user(user):
     qs = MeteringPoint.objects.select_related("zev")
-    if zev is not None:
-        return qs.filter(zev=zev)
     if user.is_admin:
         return qs
     if user.is_zev_owner:
@@ -342,9 +340,7 @@ def _build_day_start(raw_day, timestamp_format):
     return datetime(day_dt.year, day_dt.month, day_dt.day, tzinfo=timezone.utc)
 
 
-def _infer_log_zev(explicit_zev, touched_metering_points):
-    if explicit_zev is not None:
-        return explicit_zev
+def _infer_log_zev(touched_metering_points):
     zev_ids = {mp.zev_id for mp in touched_metering_points}
     if len(zev_ids) == 1:
         return Zev.objects.filter(id=next(iter(zev_ids))).first()
@@ -375,11 +371,30 @@ def _coerce_interval_minutes(interval_minutes):
     return interval_minutes
 
 
+def _upsert_reading(mp, ts, direction, energy, batch_id, overwrite_existing):
+    """Create the reading row, or update it when overwriting. True if created."""
+    method = (
+        MeterReading.objects.update_or_create
+        if overwrite_existing
+        else MeterReading.objects.get_or_create
+    )
+    _, created = method(
+        metering_point=mp,
+        timestamp=ts,
+        direction=direction,
+        defaults={
+            "energy_kwh": energy,
+            "import_source": ImportSource.CSV,
+            "import_batch": batch_id,
+        },
+    )
+    return created
+
+
 def preview_csv(
     file,
     user,
     *,
-    zev=None,
     column_map=None,
     timestamp_format=None,
     has_header=True,
@@ -405,7 +420,7 @@ def preview_csv(
             "errors": [{"row": None, "error": column_error}],
         }
 
-    meter_lookup = {mp.meter_id: mp for mp in _meter_queryset_for_user(user, zev=zev)}
+    meter_lookup = {mp.meter_id: mp for mp in _meter_queryset_for_user(user)}
     preview_rows = []
     existing_mps = 0
     missing_mps = 0
@@ -481,7 +496,6 @@ def import_csv(
     file,
     user,
     *,
-    zev=None,
     column_map=None,
     timestamp_format=None,
     has_header=True,
@@ -503,7 +517,6 @@ def import_csv(
 
     log = ImportLog.objects.create(
         batch_id=batch_id,
-        zev=zev,
         imported_by=user,
         source=ImportSource.CSV,
         filename=getattr(file, "name", "upload"),
@@ -519,7 +532,7 @@ def import_csv(
         log.save()
         return log
 
-    meter_lookup = {mp.meter_id: mp for mp in _meter_queryset_for_user(user, zev=zev)}
+    meter_lookup = {mp.meter_id: mp for mp in _meter_queryset_for_user(user)}
 
     imported = 0
     skipped = 0
@@ -589,46 +602,23 @@ def import_csv(
                     direction, energy = _infer_direction_and_energy(mp.meter_type, energy_raw)
                     ts = day_start + timedelta(minutes=interval_minutes * slot)
 
-                    if overwrite_existing:
-                        _, created = MeterReading.objects.update_or_create(
-                            metering_point=mp,
-                            timestamp=ts,
-                            direction=direction,
-                            defaults={
-                                "energy_kwh": energy,
-                                "import_source": ImportSource.CSV,
-                                "import_batch": batch_id,
-                            },
-                        )
-                        if created:
-                            imported += 1
-                        else:
-                            overwritten += 1
+                    created = _upsert_reading(mp, ts, direction, energy, batch_id, overwrite_existing)
+                    if created:
+                        imported += 1
+                    elif overwrite_existing:
+                        overwritten += 1
                     else:
-                        _, created = MeterReading.objects.get_or_create(
-                            metering_point=mp,
-                            timestamp=ts,
-                            direction=direction,
-                            defaults={
-                                "energy_kwh": energy,
-                                "import_source": ImportSource.CSV,
-                                "import_batch": batch_id,
+                        skipped += 1
+                        add_error(
+                            errors,
+                            {
+                                "row": row_number,
+                                "error": (
+                                    "Duplicate reading for metering_point + timestamp + direction "
+                                    f"(slot {slot + 1}/{values_count})."
+                                ),
                             },
                         )
-                        if created:
-                            imported += 1
-                        else:
-                            skipped += 1
-                            add_error(
-                                errors,
-                                {
-                                    "row": row_number,
-                                    "error": (
-                                        "Duplicate reading for metering_point + timestamp + direction "
-                                        f"(slot {slot + 1}/{values_count})."
-                                    ),
-                                },
-                            )
                 continue
 
             raw_ts = row[resolved_cols["timestamp"]]
@@ -665,48 +655,25 @@ def import_csv(
 
             direction, energy = _infer_direction_and_energy(mp.meter_type, energy_raw, explicit_direction)
 
-            if overwrite_existing:
-                _, created = MeterReading.objects.update_or_create(
-                    metering_point=mp,
-                    timestamp=ts,
-                    direction=direction,
-                    defaults={
-                        "energy_kwh": energy,
-                        "import_source": ImportSource.CSV,
-                        "import_batch": batch_id,
-                    },
-                )
-                if created:
-                    imported += 1
-                else:
-                    overwritten += 1
+            created = _upsert_reading(mp, ts, direction, energy, batch_id, overwrite_existing)
+            if created:
+                imported += 1
+            elif overwrite_existing:
+                overwritten += 1
             else:
-                _, created = MeterReading.objects.get_or_create(
-                    metering_point=mp,
-                    timestamp=ts,
-                    direction=direction,
-                    defaults={
-                        "energy_kwh": energy,
-                        "import_source": ImportSource.CSV,
-                        "import_batch": batch_id,
+                skipped += 1
+                add_error(
+                    errors,
+                    {
+                        "row": row_number,
+                        "error": "Duplicate reading for metering_point + timestamp + direction.",
                     },
                 )
-                if created:
-                    imported += 1
-                else:
-                    skipped += 1
-                    add_error(
-                        errors,
-                        {
-                            "row": row_number,
-                            "error": "Duplicate reading for metering_point + timestamp + direction.",
-                        },
-                    )
         except (KeyError, InvalidOperation, TypeError, ValueError) as exc:
             add_error(errors, {"row": row_number, "error": str(exc)})
             skipped += 1
 
-    log.zev = _infer_log_zev(zev, touched_metering_points)
+    log.zev = _infer_log_zev(touched_metering_points)
     log.rows_imported = imported + overwritten
     log.rows_skipped = skipped
     if overwritten > 0:

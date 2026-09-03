@@ -512,7 +512,6 @@ class ImportView(viewsets.ViewSet):
                 log = import_csv(
                     file,
                     request.user,
-                    zev=None,
                     column_map=column_map,
                     timestamp_format=timestamp_format,
                     has_header=has_header,
