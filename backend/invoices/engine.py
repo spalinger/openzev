@@ -340,16 +340,9 @@ def _next_month(day: date) -> date:
 
 
 def _count_intersecting_months(start: date, end: date) -> int:
-    if start > end:
-        return 0
-
-    count = 0
-    cursor = _month_start(start)
-    last_month = _month_start(end)
-    while cursor <= last_month:
-        count += 1
-        cursor = _next_month(cursor)
-    return count
+    """How many calendar months touch ``start``..``end`` (same walk as
+    ``_months_between``, which owns the cursor loop)."""
+    return sum(1 for _ in _months_between(start, end))
 
 
 def _count_billable_months(tariff: Tariff, period_start: date, period_end: date) -> int:
@@ -435,22 +428,11 @@ def _count_billable_metering_points_by_month(participant: Participant, tariff: T
         windows_by_mp.setdefault(mp_id, []).append((vf, vt, mode, pid))
 
     total_metering_points = 0
-    cursor = _month_start(overlap_start)
-    last_month = _month_start(overlap_end)
-    while cursor <= last_month:
-        next_month = _next_month(cursor)
-        month_first_day = cursor
-        month_last_day = next_month - timedelta(days=1)
-
-        month_start = max(month_first_day, overlap_start)
-        month_end = min(month_last_day, overlap_end)
-        if month_start <= month_end:
-            for mp_id in own_mp_ids:
-                owner = _last_overlapping_window(windows_by_mp.get(mp_id, []), month_start, month_end)
-                if owner is not None and owner[1] == AllocationMode.PERSONAL and owner[2] == participant.id:
-                    total_metering_points += 1
-
-        cursor = next_month
+    for _month, month_start, month_end in _months_between(overlap_start, overlap_end):
+        for mp_id in own_mp_ids:
+            owner = _last_overlapping_window(windows_by_mp.get(mp_id, []), month_start, month_end)
+            if owner is not None and owner[1] == AllocationMode.PERSONAL and owner[2] == participant.id:
+                total_metering_points += 1
 
     return total_metering_points
 
@@ -483,26 +465,15 @@ def _count_community_metering_points_by_month(zev: Zev, tariff: Tariff, period_s
         windows_by_mp.setdefault(mp_id, []).append((vf, vt, mode, pid))
 
     counts: dict[date, int] = {}
-    cursor = _month_start(overlap_start)
-    last_month = _month_start(overlap_end)
-    while cursor <= last_month:
-        next_month = _next_month(cursor)
-        month_first_day = cursor
-        month_last_day = next_month - timedelta(days=1)
-
-        month_start = max(month_first_day, overlap_start)
-        month_end = min(month_last_day, overlap_end)
-        if month_start <= month_end:
-            count = sum(
-                1
-                for mp_id, windows in windows_by_mp.items()
-                if (owner := _last_overlapping_window(windows, month_start, month_end)) is not None
-                and owner[1] == AllocationMode.COMMUNITY
-            )
-            if count:
-                counts[cursor] = count
-
-        cursor = next_month
+    for month, month_start, month_end in _months_between(overlap_start, overlap_end):
+        count = sum(
+            1
+            for _mp_id, windows in windows_by_mp.items()
+            if (owner := _last_overlapping_window(windows, month_start, month_end)) is not None
+            and owner[1] == AllocationMode.COMMUNITY
+        )
+        if count:
+            counts[month] = count
 
     return counts
 
