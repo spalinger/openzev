@@ -1012,6 +1012,37 @@ def _is_zero_chf(total: Decimal) -> bool:
     return total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) == 0
 
 
+def _price_energy(acc, tariffs, energy_type, quantity, ts, day, *, sign, bucket="default"):
+    """Price one (energy_type, quantity) at a timestamp. sign=-1 for credits."""
+    for tariff in tariffs.energy(energy_type, day):
+        price = _get_tariff_price(tariff, ts) or Decimal("0")
+        acc.add(
+            tariff=tariff,
+            quantity=quantity,
+            total=sign * (quantity * price),
+            unit="kWh",
+            bucket=bucket,
+        )
+    pct_tariffs = tariffs.percentage(energy_type, day)
+    if not pct_tariffs:
+        return
+    grid_base = sum(
+        (_get_tariff_price(t, ts) or Decimal("0"))
+        for t in tariffs.energy(EnergyType.GRID, day)
+    )
+    for tariff in pct_tariffs:
+        effective_price = grid_base * (tariff.percentage / Decimal("100"))
+        acc.add(
+            tariff=tariff,
+            quantity=quantity,
+            total=sign * (quantity * effective_price),
+            unit="kWh",
+            # base_total is a magnitude for the printed base rate, not a credit.
+            base_total=quantity * grid_base,
+            bucket=bucket,
+        )
+
+
 @transaction.atomic
 def generate_invoice(participant: Participant, period_start: date, period_end: date) -> Invoice:
     """
@@ -1077,37 +1108,10 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
 
         day = _utc_date(ts)
 
-        # Compute GRID energy base sum once per timestamp.
-        # Percentage-of-energy tariffs price any energy type as a fraction of
-        # what a participant would normally pay for grid energy.
-        grid_base_price_sum = sum(
-            (_get_tariff_price(t, ts) or Decimal("0"))
-            for t in tariffs.energy(EnergyType.GRID, day)
-        )
-
         for energy_type, quantity in ((EnergyType.LOCAL, r_local), (EnergyType.GRID, r_grid)):
             if quantity <= 0:
                 continue
-            for tariff in tariffs.energy(energy_type, day):
-                price = _get_tariff_price(tariff, ts) or Decimal("0")
-                items_accumulator.add(
-                    tariff=tariff,
-                    quantity=quantity,
-                    total=quantity * price,
-                    unit="kWh",
-                )
-
-            # Percentage-of-energy tariffs: base is always the GRID rate sum,
-            # applied to whichever energy_type the tariff is configured for.
-            for tariff in tariffs.percentage(energy_type, day):
-                effective_price = grid_base_price_sum * (tariff.percentage / Decimal("100"))
-                items_accumulator.add(
-                    tariff=tariff,
-                    quantity=quantity,
-                    total=quantity * effective_price,
-                    unit="kWh",
-                    base_total=quantity * grid_base_price_sum,
-                )
+            _price_energy(items_accumulator, tariffs, energy_type, quantity, ts, day, sign=1)
 
     exported_kwh_acc = Decimal("0")
 
@@ -1137,32 +1141,11 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
 
         day = _utc_date(ts)
 
-        grid_base_price_sum = sum(
-            (_get_tariff_price(t, ts) or Decimal("0"))
-            for t in tariffs.energy(EnergyType.GRID, day)
-        )
-
         if local_sold_kwh > 0:
-            for tariff in tariffs.energy(EnergyType.LOCAL, day):
-                price = _get_tariff_price(tariff, ts) or Decimal("0")
-                items_accumulator.add(
-                    tariff=tariff,
-                    quantity=local_sold_kwh,
-                    total=-(local_sold_kwh * price),
-                    unit="kWh",
-                    bucket="producer_credit",
-                )
-
-            for tariff in tariffs.percentage(EnergyType.LOCAL, day):
-                effective_price = grid_base_price_sum * (tariff.percentage / Decimal("100"))
-                items_accumulator.add(
-                    tariff=tariff,
-                    quantity=local_sold_kwh,
-                    total=-(local_sold_kwh * effective_price),
-                    unit="kWh",
-                    base_total=(local_sold_kwh * grid_base_price_sum),
-                    bucket="producer_credit",
-                )
+            _price_energy(
+                items_accumulator, tariffs, EnergyType.LOCAL, local_sold_kwh, ts, day,
+                sign=-1, bucket="producer_credit",
+            )
 
         if exported_kwh > 0:
             for tariff in tariffs.energy(EnergyType.FEED_IN, day):
@@ -1216,33 +1199,13 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
         local_kwh_acc += shared_local
         grid_kwh_acc += shared_grid
 
-        grid_base_price_sum = sum(
-            (_get_tariff_price(t, ts) or Decimal("0"))
-            for t in tariffs.energy(EnergyType.GRID, day)
-        )
-
         for energy_type, quantity in ((EnergyType.LOCAL, shared_local), (EnergyType.GRID, shared_grid)):
             if quantity <= 0:
                 continue
-            for tariff in tariffs.energy(energy_type, day):
-                price = _get_tariff_price(tariff, ts) or Decimal("0")
-                items_accumulator.add(
-                    tariff=tariff,
-                    quantity=quantity,
-                    total=quantity * price,
-                    unit="kWh",
-                    bucket="shared",
-                )
-            for tariff in tariffs.percentage(energy_type, day):
-                effective_price = grid_base_price_sum * (tariff.percentage / Decimal("100"))
-                items_accumulator.add(
-                    tariff=tariff,
-                    quantity=quantity,
-                    total=quantity * effective_price,
-                    unit="kWh",
-                    base_total=quantity * grid_base_price_sum,
-                    bucket="shared",
-                )
+            _price_energy(
+                items_accumulator, tariffs, energy_type, quantity, ts, day,
+                sign=1, bucket="shared",
+            )
 
     skipped_community_production_readings = 0
     skipped_community_production_kwh = Decimal("0")
@@ -1274,31 +1237,11 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
 
         exported_kwh_acc += shared_exported
 
-        grid_base_price_sum = sum(
-            (_get_tariff_price(t, ts) or Decimal("0"))
-            for t in tariffs.energy(EnergyType.GRID, day)
-        )
-
         if shared_local_sold > 0:
-            for tariff in tariffs.energy(EnergyType.LOCAL, day):
-                price = _get_tariff_price(tariff, ts) or Decimal("0")
-                items_accumulator.add(
-                    tariff=tariff,
-                    quantity=shared_local_sold,
-                    total=-(shared_local_sold * price),
-                    unit="kWh",
-                    bucket="shared_producer_credit",
-                )
-            for tariff in tariffs.percentage(EnergyType.LOCAL, day):
-                effective_price = grid_base_price_sum * (tariff.percentage / Decimal("100"))
-                items_accumulator.add(
-                    tariff=tariff,
-                    quantity=shared_local_sold,
-                    total=-(shared_local_sold * effective_price),
-                    unit="kWh",
-                    base_total=(shared_local_sold * grid_base_price_sum),
-                    bucket="shared_producer_credit",
-                )
+            _price_energy(
+                items_accumulator, tariffs, EnergyType.LOCAL, shared_local_sold, ts, day,
+                sign=-1, bucket="shared_producer_credit",
+            )
 
         if shared_exported > 0:
             for tariff in tariffs.energy(EnergyType.FEED_IN, day):
