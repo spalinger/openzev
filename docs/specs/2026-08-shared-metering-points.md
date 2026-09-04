@@ -346,10 +346,9 @@ tariff. Every `generate_invoice` in the batch receives that context, so the
 membership rows and each daily/monthly denominator are derived once for the
 whole batch. The single-invoice API path omits the context and derives
 identical values on demand, preserving the "single equals full run" invariant.
-Batch generation builds the community denominators once per ZEV-period. A
-failure in that shared build is reported once per participant in the batch
-and never escapes the task (see the tariffs-and-billing spec, "Shared-build
-failure").
+An ordinary exception in the initial shared context build is reported once
+per participant in the batch; `SoftTimeLimitExceeded` propagates and aborts
+the task (see the tariffs-and-billing spec, "Shared-build failure").
 
 ### 7.2 `SHARED_*` fee modes read their tariff's split key
 
@@ -628,7 +627,7 @@ the extended input types:
 
 The 22 shared-fee tests and 10 reconciliation tests stay green. The query-count
 suite contains 9 tests, including batch denominator and PDF-artifact sharing.
-New backend tests and performance regression tests total 56:
+The feature and performance regression coverage is listed below:
 
 ### Backend — `allocation/tests.py`
 
@@ -718,7 +717,7 @@ Fixture extended with a community meter; new (2 tests):
 | `test_community_readings_split_against_the_physical_pool` | Split math unchanged for community meters |
 | `test_community_readings_are_distinct_from_gap_readings` | Consumers can tell the two cases apart |
 
-### Backend — batch allocation performance (7 tests)
+### Backend — batch allocation performance and failure handling (9 tests)
 
 | File / test | Asserts |
 |---|---|
@@ -727,6 +726,8 @@ Fixture extended with a community meter; new (2 tests):
 | `invoices/test_allocation_query_counts.py::test_pdf_batch_fetches_zev_period_artifacts_once` | A real two-invoice batch fetches participant shares, community totals, and assignment windows once |
 | `invoices/test_batch_actions.py::test_pdf_batch_builds_one_context_per_zev_period` | All invoice PDFs for one ZEV-period reuse one PDF context |
 | `invoices/test_batch_actions.py::test_pdf_batch_does_not_retry_a_failed_period_context` | A failed shared PDF context marks the period's invoices failed without rebuilding the same context for every participant |
+| `invoices/test_batch_actions.py::test_shared_context_failure_reports_every_participant_in_the_audit_event` | A failed shared invoice context produces one failure entry per participant, creates no invoices, and records a FAILED audit event |
+| `invoices/test_batch_actions.py::test_empty_batch_does_not_build_shared_context` | A batch with no active participants returns an empty result without building shared data |
 | `invoices/test_reports.py::test_zip_builds_participant_shares_once_for_every_statement` | An annual-statement ZIP builds and reuses one yearly participant-share map and ZEV-total pair |
 | `invoices/test_reports.py::test_zip_returns_500_when_shared_participant_calculation_fails` | A failed shared yearly calculation is attempted once, renders no partial statements, and returns a generic `500` |
 
