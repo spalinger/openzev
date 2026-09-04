@@ -1025,6 +1025,7 @@ export const de = {
             deleteConfirm: 'Teilnehmer löschen',
         },
         tariffs: {
+            vatInclusiveNotice: 'Dieser ZEV rechnet nicht rückforderbare MWST in die Preise ein. Die hier angezeigten Preise sind netto; Rechnungen schlagen den aktiven MWST-Satz auf Netzstrom, Netznutzung, Abgaben und Messwesen auf.',
             import: {
                 action: 'Vom Netzbetreiber importieren',
                 title: 'Tarife vom Netzbetreiber importieren',
@@ -1697,6 +1698,11 @@ export const de = {
                         tariffSourceUrlHint: 'Wo dieser Netzbetreiber seine maschinenlesbaren Tarife publiziert (Art. 7b StromVV). Wird f\u00fcr den Tarifimport verwendet.',
                 gridConnectionPoint: 'Netzanschlusspunkt',
                 invoicePrefix: 'Rechnungspräfix',
+                vatMode: 'MWST-Behandlung',
+                vatModeNotRegistered: 'Nicht MWST-pflichtig – Preise gelten wie erfasst',
+                vatModeRegistered: 'MWST-pflichtig – MWST wird auf die Nettopreise aufgeschlagen',
+                vatModeInclusive: 'Nicht pflichtig – nicht rückforderbare MWST in die Preise einrechnen',
+                vatModeHint: 'Wählen Sie «einrechnen», wenn Sie nicht MWST-pflichtig sind, Ihr Netzbetreiber Ihnen aber MWST verrechnet, die Sie nicht zurückfordern können. Die Tarifpreise bleiben netto; die Rechnung rechnet Netzstrom, Netznutzung, Abgaben und Messwesen mit dem aktiven MWST-Satz hoch – ohne separate MWST-Zeile.',
                 vatNumber: 'MWST-Nummer',
                 bankName: 'Bankname',
                 bankIban: 'Bank-IBAN',

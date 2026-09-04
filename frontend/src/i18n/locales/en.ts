@@ -1036,6 +1036,7 @@ export const en = {
             deleteConfirm: 'Delete Participant',
         },
         tariffs: {
+            vatInclusiveNotice: 'This ZEV folds non-recoverable VAT into its prices. The prices shown here are net; invoices add the active VAT rate to grid energy, grid fees, levies and metering.',
             import: {
                 action: 'Import from grid operator',
                 title: 'Import tariffs from your grid operator',
@@ -1709,6 +1710,11 @@ export const en = {
                         tariffSourceUrlHint: 'Where this grid operator publishes its machine-readable tariffs (Art. 7b StromVV). Used by the tariff import.',
                 gridConnectionPoint: 'Grid connection point',
                 invoicePrefix: 'Invoice prefix',
+                vatMode: 'VAT treatment',
+                vatModeNotRegistered: 'Not VAT-registered — prices are final as entered',
+                vatModeRegistered: 'VAT-registered — VAT added on top of net prices',
+                vatModeInclusive: 'Not registered — fold non-recoverable VAT into prices',
+                vatModeHint: 'Choose "fold in" when you are not VAT-registered but your grid operator invoices you with VAT you cannot reclaim. Tariff prices stay net; the invoice grosses up grid energy, grid fees, levies and metering by the active VAT rate, with no separate VAT line.',
                 vatNumber: 'VAT number',
                 bankName: 'Bank name',
                 bankIban: 'Bank IBAN',
