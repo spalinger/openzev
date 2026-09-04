@@ -7,6 +7,8 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 
+from allocation.validity import active_during, active_on
+
 
 class UserRole(models.TextChoices):
     ADMIN = "admin", "Admin"
@@ -349,11 +351,8 @@ class VatRate(models.Model):
         if self.valid_to and self.valid_to < self.valid_from:
             raise ValidationError({"valid_to": "valid_to must be on or after valid_from."})
 
-        candidate_end = self.valid_to or date.max
-        overlap_exists = VatRate.objects.exclude(pk=self.pk).filter(
-            valid_from__lte=candidate_end,
-        ).filter(
-            models.Q(valid_to__isnull=True) | models.Q(valid_to__gte=self.valid_from),
+        overlap_exists = active_during(
+            VatRate.objects.exclude(pk=self.pk), self.valid_from, self.valid_to or date.max
         ).exists()
         if overlap_exists:
             raise ValidationError(
@@ -366,11 +365,7 @@ class VatRate(models.Model):
 
     @classmethod
     def active_for_day(cls, day: date):
-        return cls.objects.filter(
-            valid_from__lte=day,
-        ).filter(
-            models.Q(valid_to__isnull=True) | models.Q(valid_to__gte=day)
-        ).order_by("-valid_from", "-created_at").first()
+        return active_on(cls.objects, day).order_by("-valid_from", "-created_at").first()
 
     def __str__(self):
         valid_to = self.valid_to.isoformat() if self.valid_to else "open"

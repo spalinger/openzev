@@ -1,6 +1,6 @@
 import logging
 import tempfile
-from datetime import date as date_type, datetime, timedelta, timezone as dt_timezone
+from datetime import date as date_type
 
 from django.conf import settings as django_settings
 from django.http import FileResponse, HttpResponse
@@ -17,6 +17,7 @@ from accounts.permissions import IsAdmin
 from accounts.throttling import ApiKeyRateThrottle, TransferArchiveThrottle
 from accounts.models import User, UserRole
 from accounts.serializers import UserSerializer
+from allocation.validity import period_window
 from metering.models import MeterReading
 from .models import Zev, Participant, MeteringPoint, MeteringPointAssignment
 from .scoping import ZevScopedQuerySetMixin
@@ -48,7 +49,7 @@ from .transfer import (
     inspect_archive,
 )
 from audit.models import AuditActionCategory, AuditEventStatus
-from audit.mixins import AuditedUpdateMixin
+from audit.mixins import AuditedCreateDestroyMixin, AuditedUpdateMixin
 from audit.services import record_audit_event
 
 logger = logging.getLogger(__name__)
@@ -308,7 +309,7 @@ class ZevViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
         return names or None
 
 
-class ParticipantViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.ModelViewSet):
+class ParticipantViewSet(AuditedCreateDestroyMixin, AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.ModelViewSet):
     serializer_class = ParticipantSerializer
     permission_classes = [IsAuthenticated, BaseZevScopedPermission]
     zev_owner_filter = "zev__owner"
@@ -326,35 +327,17 @@ class ParticipantViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.Mo
     def get_queryset(self):
         return self.scope_queryset(Participant.objects.prefetch_related("metering_point_assignments"))
 
-    def perform_create(self, serializer):
-        participant = super().perform_create(serializer)
-        record_audit_event(
-            request=self.request,
-            action_category=AuditActionCategory.PARTICIPANT,
-            action_type="participant.create",
-            target_type="zev.Participant",
-            target=participant,
-            target_id=str(participant.pk),
-            target_display=participant.full_name,
-            summary=f"Created participant {participant.full_name}.",
-            metadata={"zev_id": str(participant.zev_id)},
-        )
+    def get_audit_create_summary(self, instance):
+        return f"Created participant {instance.full_name}."
 
-    def perform_destroy(self, instance):
-        participant_id = str(instance.pk)
-        participant_display = instance.full_name
-        zev_id = str(instance.zev_id)
-        instance.delete()
-        record_audit_event(
-            request=self.request,
-            action_category=AuditActionCategory.PARTICIPANT,
-            action_type="participant.delete",
-            target_type="zev.Participant",
-            target_id=participant_id,
-            target_display=participant_display,
-            summary=f"Deleted participant {participant_display}.",
-            metadata={"zev_id": zev_id},
-        )
+    def get_audit_destroy_summary(self, instance):
+        return f"Deleted participant {instance.full_name}."
+
+    def get_audit_create_metadata(self, instance):
+        return {"zev_id": str(instance.zev_id)}
+
+    def get_audit_destroy_metadata(self, instance):
+        return {"zev_id": str(instance.zev_id)}
 
     def _contract_pdf_access_denied(self, request, participant):
         """True when the caller may not reach this participant's contract."""
@@ -448,20 +431,29 @@ class ParticipantViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.Mo
             self._audit_contract_download(request, participant, issue)
         return self._stream_contract_issue(participant, issue)
 
+    def _deny_non_admin(self, request, pk, *, action_suffix: str, summary: str, detail: str):
+        """Audit and reject a non-admin call to an admin-only account action."""
+        record_audit_event(
+            request=request,
+            action_category=AuditActionCategory.PARTICIPANT,
+            action_type=f"participant.{action_suffix}",
+            target_type="zev.Participant",
+            target_id=str(pk or ""),
+            target_display=str(pk or ""),
+            summary=summary,
+            status=AuditEventStatus.DENIED,
+        )
+        return Response({"detail": detail}, status=status.HTTP_403_FORBIDDEN)
+
     @action(detail=True, methods=["post"], url_path="link-account")
     def link_account(self, request, pk=None):
         if not request.user.is_admin:
-            record_audit_event(
-                request=request,
-                action_category=AuditActionCategory.PARTICIPANT,
-                action_type="participant.link_account",
-                target_type="zev.Participant",
-                target_id=str(pk or ""),
-                target_display=str(pk or ""),
+            return self._deny_non_admin(
+                request, pk,
+                action_suffix="link_account",
                 summary="Denied participant account link by non-admin.",
-                status=AuditEventStatus.DENIED,
+                detail="Only admins can link accounts.",
             )
-            return Response({"detail": "Only admins can link accounts."}, status=status.HTTP_403_FORBIDDEN)
 
         participant = self.get_object()
         user_id = request.data.get("user_id")
@@ -499,17 +491,12 @@ class ParticipantViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.Mo
     @action(detail=True, methods=["post"], url_path="unlink-account")
     def unlink_account(self, request, pk=None):
         if not request.user.is_admin:
-            record_audit_event(
-                request=request,
-                action_category=AuditActionCategory.PARTICIPANT,
-                action_type="participant.unlink_account",
-                target_type="zev.Participant",
-                target_id=str(pk or ""),
-                target_display=str(pk or ""),
+            return self._deny_non_admin(
+                request, pk,
+                action_suffix="unlink_account",
                 summary="Denied participant account unlink by non-admin.",
-                status=AuditEventStatus.DENIED,
+                detail="Only admins can unlink accounts.",
             )
-            return Response({"detail": "Only admins can unlink accounts."}, status=status.HTTP_403_FORBIDDEN)
 
         participant = self.get_object()
         if participant.user is None:
@@ -541,17 +528,12 @@ class ParticipantViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.Mo
     @action(detail=True, methods=["post"], url_path="create-account")
     def create_account(self, request, pk=None):
         if not request.user.is_admin:
-            record_audit_event(
-                request=request,
-                action_category=AuditActionCategory.PARTICIPANT,
-                action_type="participant.create_account",
-                target_type="zev.Participant",
-                target_id=str(pk or ""),
-                target_display=str(pk or ""),
+            return self._deny_non_admin(
+                request, pk,
+                action_suffix="create_account",
                 summary="Denied participant account creation by non-admin.",
-                status=AuditEventStatus.DENIED,
+                detail="Only admins can create participant accounts.",
             )
-            return Response({"detail": "Only admins can create participant accounts."}, status=status.HTTP_403_FORBIDDEN)
 
         participant = self.get_object()
         if participant.user is not None:
@@ -663,7 +645,7 @@ class ParticipantViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.Mo
         )
 
 
-class MeteringPointViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.ModelViewSet):
+class MeteringPointViewSet(AuditedCreateDestroyMixin, AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.ModelViewSet):
     serializer_class = MeteringPointSerializer
     permission_classes = [IsAuthenticated, MeteringPointPermission]
     zev_owner_filter = "zev__owner"
@@ -682,35 +664,17 @@ class MeteringPointViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.
     def get_queryset(self):
         return self.scope_queryset(MeteringPoint.objects.select_related("zev"))
 
-    def perform_create(self, serializer):
-        metering_point = super().perform_create(serializer)
-        record_audit_event(
-            request=self.request,
-            action_category=AuditActionCategory.METERING,
-            action_type="metering_point.create",
-            target_type="zev.MeteringPoint",
-            target=metering_point,
-            target_id=str(metering_point.pk),
-            target_display=metering_point.meter_id,
-            summary=f"Created metering point {metering_point.meter_id}.",
-            metadata={"zev_id": str(metering_point.zev_id), "meter_type": metering_point.meter_type},
-        )
+    def get_audit_create_summary(self, instance):
+        return f"Created metering point {instance.meter_id}."
 
-    def perform_destroy(self, instance):
-        meter_id = instance.meter_id
-        metering_point_id = str(instance.pk)
-        zev_id = str(instance.zev_id)
-        instance.delete()
-        record_audit_event(
-            request=self.request,
-            action_category=AuditActionCategory.METERING,
-            action_type="metering_point.delete",
-            target_type="zev.MeteringPoint",
-            target_id=metering_point_id,
-            target_display=meter_id,
-            summary=f"Deleted metering point {meter_id}.",
-            metadata={"zev_id": zev_id},
-        )
+    def get_audit_destroy_summary(self, instance):
+        return f"Deleted metering point {instance.meter_id}."
+
+    def get_audit_create_metadata(self, instance):
+        return {"zev_id": str(instance.zev_id), "meter_type": instance.meter_type}
+
+    def get_audit_destroy_metadata(self, instance):
+        return {"zev_id": str(instance.zev_id)}
 
     @action(
         detail=True,
@@ -747,8 +711,7 @@ class MeteringPointViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            start_dt = datetime.combine(parsed_from, datetime.min.time(), tzinfo=dt_timezone.utc)
-            end_dt_exclusive = datetime.combine(parsed_to, datetime.min.time(), tzinfo=dt_timezone.utc) + timedelta(days=1)
+            start_dt, end_dt_exclusive = period_window(parsed_from, parsed_to)
             readings_qs = readings_qs.filter(timestamp__gte=start_dt, timestamp__lt=end_dt_exclusive)
 
         deleted_count = readings_qs.count()
@@ -769,7 +732,7 @@ class MeteringPointViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.
         return Response({"deleted_count": deleted_count}, status=status.HTTP_200_OK)
 
 
-class MeteringPointAssignmentViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.ModelViewSet):
+class MeteringPointAssignmentViewSet(AuditedCreateDestroyMixin, AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.ModelViewSet):
     serializer_class = MeteringPointAssignmentSerializer
     permission_classes = [IsAuthenticated, MeteringPointAssignmentPermission]
     zev_owner_filter = "metering_point__zev__owner"
@@ -802,38 +765,20 @@ class MeteringPointAssignmentViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin,
 
         return qs
 
-    def perform_create(self, serializer):
-        assignment = super().perform_create(serializer)
-        record_audit_event(
-            request=self.request,
-            action_category=AuditActionCategory.METERING,
-            action_type="metering_assignment.create",
-            target_type="zev.MeteringPointAssignment",
-            target=assignment,
-            target_id=str(assignment.pk),
-            target_display=str(assignment.pk),
-            summary=f"Created metering point assignment for {assignment.metering_point.meter_id}.",
-            metadata={
-                "metering_point_id": str(assignment.metering_point_id),
-                "participant_id": str(assignment.participant_id),
-            },
-        )
+    def get_audit_create_summary(self, instance):
+        return f"Created metering point assignment for {instance.metering_point.meter_id}."
 
-    def perform_destroy(self, instance):
-        assignment_id = str(instance.pk)
-        meter_id = instance.metering_point.meter_id
-        participant_id = str(instance.participant_id)
-        instance.delete()
-        record_audit_event(
-            request=self.request,
-            action_category=AuditActionCategory.METERING,
-            action_type="metering_assignment.delete",
-            target_type="zev.MeteringPointAssignment",
-            target_id=assignment_id,
-            target_display=assignment_id,
-            summary=f"Deleted metering point assignment for {meter_id}.",
-            metadata={"participant_id": participant_id},
-        )
+    def get_audit_destroy_summary(self, instance):
+        return f"Deleted metering point assignment for {instance.metering_point.meter_id}."
+
+    def get_audit_create_metadata(self, instance):
+        return {
+            "metering_point_id": str(instance.metering_point_id),
+            "participant_id": str(instance.participant_id),
+        }
+
+    def get_audit_destroy_metadata(self, instance):
+        return {"participant_id": str(instance.participant_id)}
 
 
 class GridOperatorListView(APIView):

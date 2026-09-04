@@ -10,10 +10,9 @@ from allocation.read_model import (
     eligible_participant_shares,
     iter_allocated_readings,
 )
+from allocation.validity import period_window
 from allocation.windows import AssignmentWindows
 from metering.analytics import _participant_names
-
-from .engine import _period_to_dt
 
 
 def _build_savings_data(invoice, tr: dict) -> dict | None:
@@ -76,8 +75,7 @@ def _compute_period_participant_stats(invoice) -> tuple[dict, list[dict]]:
     zev = invoice.zev
     ps = invoice.period_start
     pe = invoice.period_end
-    start_dt = _period_to_dt(ps)
-    end_dt = _period_to_dt(pe) + _dt.timedelta(days=1)
+    start_dt, end_dt = period_window(ps, pe)
 
     # Physical per-timestamp community totals — every meter in the ZEV
     # regardless of assignment (ADR 0013): unassigned meters still feed the

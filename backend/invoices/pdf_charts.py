@@ -1,6 +1,5 @@
 """Invoice PDF SVG chart builders — energy flow, comparison, and hourly profile."""
 
-from .engine import _period_to_dt
 from .pdf_stats import _compute_period_participant_stats
 
 # Shared palette — generated from design/tokens.json (single source of truth).
@@ -501,12 +500,12 @@ def _build_hourly_profile_chart_svg(invoice, tr: dict) -> str | None:
     import datetime as _dt
 
     from decimal import Decimal as _Dec
-    from django.db import models as _dj
     from allocation.read_model import (
         CONSUMPTION_METER_TYPES as _CONS_METER_TYPES,
         community_totals_by_timestamp,
         eligible_participant_shares,
     )
+    from allocation.validity import active_during, period_window
     from allocation.split import split_consumption
     from allocation.windows import AssignmentWindows
     from metering.models import MeterReading, ReadingDirection, ReadingResolution
@@ -517,8 +516,7 @@ def _build_hourly_profile_chart_svg(invoice, tr: dict) -> str | None:
     participant = invoice.participant
     zev = invoice.zev
 
-    start_dt = _period_to_dt(ps)
-    end_dt = _period_to_dt(pe) + _dt.timedelta(days=1)
+    start_dt, end_dt = period_window(ps, pe)
 
     # ── Participant consumption readings ────────────────────────────────────
     # A meter matters here if this participant personally holds it, OR it is
@@ -526,20 +524,23 @@ def _build_hourly_profile_chart_svg(invoice, tr: dict) -> str | None:
     # literal holder is) — otherwise a community-only stake never reaches the
     # chart. Two flat queries unioned in Python, matching the same fix in
     # metering.analytics.compute_hourly_profile (shared metering points, issue 387).
-    _mp_window = _dj.Q(valid_to__isnull=True) | _dj.Q(valid_to__gte=ps)
-    personal_mp_ids = _MPA.objects.filter(
-        _mp_window,
-        metering_point__zev=zev,
-        metering_point__meter_type__in=_CONS_METER_TYPES,
-        participant=participant,
-        valid_from__lte=pe,
+    personal_mp_ids = active_during(
+        _MPA.objects.filter(
+            metering_point__zev=zev,
+            metering_point__meter_type__in=_CONS_METER_TYPES,
+            participant=participant,
+        ),
+        ps,
+        pe,
     ).values_list("metering_point_id", flat=True)
-    community_mp_ids = _MPA.objects.filter(
-        _mp_window,
-        metering_point__zev=zev,
-        metering_point__meter_type__in=_CONS_METER_TYPES,
-        allocation_mode=AllocationMode.COMMUNITY,
-        valid_from__lte=pe,
+    community_mp_ids = active_during(
+        _MPA.objects.filter(
+            metering_point__zev=zev,
+            metering_point__meter_type__in=_CONS_METER_TYPES,
+            allocation_mode=AllocationMode.COMMUNITY,
+        ),
+        ps,
+        pe,
     ).values_list("metering_point_id", flat=True)
     consumption_mps = _MP.objects.filter(id__in=set(personal_mp_ids) | set(community_mp_ids))
     participant_readings = list(

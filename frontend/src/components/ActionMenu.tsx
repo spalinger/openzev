@@ -14,11 +14,10 @@ export interface ActionMenuItem {
 interface ActionMenuProps {
     label: string
     items: ActionMenuItem[]
-    buttonClassName?: string
     icon?: ReactNode
 }
 
-export function ActionMenu({ label, items, buttonClassName = 'button button-secondary button-compact', icon }: ActionMenuProps) {
+export function ActionMenu({ label, items, icon }: ActionMenuProps) {
     const availableItems = useMemo(() => items.filter((item) => !item.disabled), [items])
     const renderedItems = useMemo(() => {
         return items.map((item, index) => {
@@ -43,7 +42,7 @@ export function ActionMenu({ label, items, buttonClassName = 'button button-seco
             <Menu.Target>
                 <button
                     type="button"
-                    className={buttonClassName}
+                    className="button button-secondary button-compact"
                     disabled={availableItems.length === 0}
                     aria-haspopup="menu"
                 >

@@ -29,7 +29,7 @@ from decimal import Decimal
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from metering.models import MeterReading, ReadingDirection
+from metering.models import MeterReading, ReadingDirection, ReadingResolution
 from zev.models import MeteringPoint
 
 
@@ -157,7 +157,7 @@ class Command(BaseCommand):
             raise CommandError("Invalid date format. Use YYYY-MM-DD.")
 
         interval_min = INTERVAL_MINUTES[interval]
-        resolution = "QH" if interval_min == 15 else "hourly"
+        resolution = ReadingResolution.FIFTEEN_MIN if interval_min == 15 else ReadingResolution.HOURLY
         end_dt = start_dt + timedelta(days=days)
         delta = timedelta(minutes=interval_min)
 

@@ -7,6 +7,8 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.utils import timezone
 
+from allocation.validity import active_during
+
 DEFAULT_EMAIL_SUBJECT_TEMPLATE = "Invoice {invoice_number} \u2013 {zev_name}"
 DEFAULT_EMAIL_BODY_TEMPLATE = (
     "Dear {participant_name},\n\n"
@@ -332,8 +334,8 @@ class MeteringPointAssignment(models.Model):
         existing = MeteringPointAssignment.objects.filter(metering_point=self.metering_point)
         if self.pk:
             existing = existing.exclude(pk=self.pk)
-        overlap_exists = existing.filter(valid_from__lte=(self.valid_to or date.max)).filter(
-            models.Q(valid_to__isnull=True) | models.Q(valid_to__gte=self.valid_from)
+        overlap_exists = active_during(
+            existing, self.valid_from, self.valid_to or date.max
         ).exists()
         if overlap_exists:
             raise ValidationError("A metering point can only have one active assignment at a time.")

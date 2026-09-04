@@ -28,11 +28,6 @@ export async function fetchZevs(): Promise<Zev[]> {
   return fetchAllPages<Zev>('/zev/zevs/')
 }
 
-export async function createZev(payload: ZevInput): Promise<Zev> {
-  const { data } = await api.post<Zev>('/zev/zevs/', payload)
-  return data
-}
-
 export async function createZevWithOwner(payload: ZevWizardInput): Promise<ZevWizardResult> {
   const { data } = await api.post<ZevWizardResult>('/zev/zevs/create-with-owner/', payload)
   return data

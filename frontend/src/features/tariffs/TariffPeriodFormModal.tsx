@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { FormModal } from '../../components/FormModal'
 import { RecurrenceChips } from './RecurrenceChips'
 import { MONTH_KEYS, WEEKDAY_KEYS } from './recurrence'
+import { FormModalFooter } from '../../components/FormModalFooter'
 import type { Tariff, TariffPeriod, TariffPeriodInput } from '../../types/api'
 import {
   defaultTariffPeriodFormValues,
@@ -138,16 +139,13 @@ export function TariffPeriodFormModal({
           </div>
         )}
 
-        <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
-          <button className="button button-secondary" type="button" onClick={onClose}>
-            <FontAwesomeIcon icon={faXmark} fixedWidth />
-            {t('common.cancel')}
-          </button>
-          <button className="button button-primary" type="submit" disabled={isPending}>
-            <FontAwesomeIcon icon={faCheck} fixedWidth />
-            {initialPeriod ? t('pages.tariffs.savePeriod') : t('pages.tariffs.createPeriod')}
-          </button>
-        </div>
+        <FormModalFooter
+          onCancel={onClose}
+          isPending={isPending}
+          submitLabel={initialPeriod ? t('pages.tariffs.savePeriod') : t('pages.tariffs.createPeriod')}
+          submitIcon={<FontAwesomeIcon icon={faCheck} fixedWidth />}
+          cancelIcon={<FontAwesomeIcon icon={faXmark} fixedWidth />}
+        />
       </form>
     </FormModal>
   )

@@ -41,8 +41,9 @@ import datetime as dt
 from dataclasses import dataclass
 from decimal import Decimal
 
-from django.db.models import Max, Min, Q, Sum
+from django.db.models import Max, Min, Sum
 
+from allocation.validity import active_on
 from allocation.split import local_pool_kwh
 from metering.models import MeterReading, ReadingDirection
 from tariffs.models import BillingMode, EnergyType, Tariff, TariffCategory
@@ -90,12 +91,14 @@ def _flat_energy_price_sum(
     it restricts to those tariff categories (energy-only); without, it spans
     all of them (energy + grid fees + levies), matching the invoice engine's
     ``grid_base_price_sum``. None when no such tariff exists at all."""
-    qs = Tariff.objects.filter(
-        zev=zev,
-        energy_type=energy_type,
-        billing_mode=BillingMode.ENERGY,
-        valid_from__lte=today,
-    ).filter(Q(valid_to__isnull=True) | Q(valid_to__gte=today))
+    qs = active_on(
+        Tariff.objects.filter(
+            zev=zev,
+            energy_type=energy_type,
+            billing_mode=BillingMode.ENERGY,
+        ),
+        today,
+    )
     if categories is not None:
         qs = qs.filter(category__in=categories)
 
@@ -112,14 +115,16 @@ def _flat_energy_price_sum(
 def _percentage_of_energy_sum(
     zev: Zev, *, energy_type: str, today: dt.date, categories: list[str] | None = None
 ) -> Decimal:
-    """Total of the percentages across currently-active percentage-of-energy
-    tariffs of the given energy type (0 when there are none)."""
-    qs = Tariff.objects.filter(
-        zev=zev,
-        energy_type=energy_type,
-        billing_mode=BillingMode.PERCENTAGE_OF_ENERGY,
-        valid_from__lte=today,
-    ).filter(Q(valid_to__isnull=True) | Q(valid_to__gte=today))
+    """Summed percentages across active percentage-of-energy tariffs (0 if none)."""
+    qs = active_on(
+        Tariff.objects.filter(
+            zev=zev,
+            energy_type=energy_type,
+            billing_mode=BillingMode.PERCENTAGE_OF_ENERGY,
+        ),
+        today,
+    )
+
     if categories is not None:
         qs = qs.filter(category__in=categories)
     return sum((tariff.percentage or Decimal("0") for tariff in qs), Decimal("0"))
@@ -241,9 +246,7 @@ def _measured_self_consumption_rate(zev: Zev) -> Decimal | None:
 def build_prefill(zev: Zev) -> FeasibilityPrefill:
     today = dt.date.today()
 
-    active_participants = zev.participants.filter(valid_from__lte=today).filter(
-        Q(valid_to__isnull=True) | Q(valid_to__gte=today)
-    )
+    active_participants = active_on(zev.participants, today)
 
     participants = []
     for participant in active_participants:

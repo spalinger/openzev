@@ -65,3 +65,78 @@ class AuditedUpdateMixin:
             changes=build_diff(before, after, tracked_fields),
         )
         return instance
+
+
+class AuditedCreateDestroyMixin:
+    """Record an audit event on create and destroy.
+
+    Same attribute-driven setup as :class:`AuditedUpdateMixin`: the action
+    types derive from ``audit_action_type`` (``participant.update`` gives
+    ``participant.create``/``participant.delete``). Destroy captures
+    display/summary/metadata before the delete.
+    """
+
+    audit_action_category: str = ""
+    audit_action_type: str = ""
+    audit_target_type: str = ""
+
+    def _audit_action_prefix(self) -> str:
+        prefix, _, _ = self.audit_action_type.rpartition(".")
+        return prefix or self.audit_action_type
+
+    def get_audit_create_action_type(self) -> str:
+        return self._audit_action_prefix() + ".create"
+
+    def get_audit_destroy_action_type(self) -> str:
+        return self._audit_action_prefix() + ".delete"
+
+    def get_audit_target_display(self, instance) -> str:
+        return str(instance)
+
+    def get_audit_create_summary(self, instance) -> str:
+        return f"Created {self.get_audit_target_display(instance)}."
+
+    def get_audit_destroy_summary(self, instance) -> str:
+        return f"Deleted {self.get_audit_target_display(instance)}."
+
+    def get_audit_create_metadata(self, instance) -> dict:
+        return {}
+
+    def get_audit_destroy_metadata(self, instance) -> dict:
+        return {}
+
+    def perform_create(self, serializer):
+        # Through ``super()`` for the ZEV-scope check (see perform_update
+        # above); ``serializer.instance`` after the save, because plain
+        # DRF's perform_create returns None.
+        super().perform_create(serializer)
+        instance = serializer.instance
+        record_audit_event(
+            request=self.request,
+            action_category=self.audit_action_category,
+            action_type=self.get_audit_create_action_type(),
+            target_type=self.audit_target_type,
+            target=instance,
+            target_id=str(instance.pk),
+            target_display=self.get_audit_target_display(instance),
+            summary=self.get_audit_create_summary(instance),
+            metadata=self.get_audit_create_metadata(instance),
+        )
+        return instance
+
+    def perform_destroy(self, instance):
+        target_id = str(instance.pk)
+        target_display = self.get_audit_target_display(instance)
+        summary = self.get_audit_destroy_summary(instance)
+        metadata = self.get_audit_destroy_metadata(instance)
+        super().perform_destroy(instance)
+        record_audit_event(
+            request=self.request,
+            action_category=self.audit_action_category,
+            action_type=self.get_audit_destroy_action_type(),
+            target_type=self.audit_target_type,
+            target_id=target_id,
+            target_display=target_display,
+            summary=summary,
+            metadata=metadata,
+        )
