@@ -152,16 +152,38 @@ def send_invoice_email_task(self, invoice_id: str, recipient_email: str = None):
 def _render_pdfs(invoices) -> int:
     """Render each invoice's PDF, returning how many failed.
 
-    Failures are isolated per invoice: one participant with an address the QR
-    library rejects must not cost the rest of the period its documents. The
-    invoice still exists, and re-rendering it is a one-click repair.
+    Per-invoice render failures are isolated: one participant with an address
+    the QR library rejects must not cost the rest of the period its documents.
+    A shared period-context failure prevents every invoice in that period from
+    rendering and is not retried once per participant.
     """
-    from .pdf import save_invoice_pdf
+    from .pdf import build_invoice_pdf_period_context, save_invoice_pdf
 
     failed = 0
+    period_contexts = {}
+    failed_periods = set()
     for invoice in invoices:
+        key = (invoice.zev_id, invoice.period_start, invoice.period_end)
+        if key in failed_periods:
+            failed += 1
+            continue
+
+        if key not in period_contexts:
+            try:
+                period_contexts[key] = build_invoice_pdf_period_context(invoice)
+            except Exception:
+                failed += 1
+                failed_periods.add(key)
+                logger.exception(
+                    "PDF period context generation failed for ZEV %s, %s to %s",
+                    invoice.zev_id,
+                    invoice.period_start,
+                    invoice.period_end,
+                )
+                continue
+
         try:
-            save_invoice_pdf(invoice)
+            save_invoice_pdf(invoice, period_context=period_contexts[key])
         except Exception as exc:
             failed += 1
             logger.error("PDF generation failed for invoice %s: %s", invoice.invoice_number, exc)

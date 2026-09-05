@@ -14,18 +14,31 @@ verified to be identical on SQLite and PostgreSQL.
 """
 from datetime import date
 from decimal import Decimal
+from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 
 from accounts.models import UserRole
+from allocation.read_model import (
+    community_totals_by_timestamp,
+    eligible_participant_shares,
+)
 from allocation.windows import AssignmentWindows
 from invoices.annual_statement import ANNUAL_TRANSLATIONS, _compute_monthly_data
-from invoices.engine import generate_invoice
+from invoices.engine import (
+    _allocation_weight_sum_by_date,
+    _allocation_weight_sum_by_month,
+    _count_active_participants_by_month,
+    _participant_weight_windows,
+    generate_invoice,
+    generate_invoices_for_zev,
+)
 from invoices.pdf_charts import _build_hourly_profile_chart_svg
 from invoices.pdf_stats import _compute_period_participant_stats
 from invoices.pdf_translations import INVOICE_TRANSLATIONS
+from invoices.tasks import _render_pdfs
 from invoices.test_allocation_reconciliation import (
     PERIOD_END,
     PERIOD_START,
@@ -121,16 +134,7 @@ class AllocationQueryCountTests(_ReconciliationBase):
         )
 
     def test_weight_keyed_shared_fees_do_not_scale_queries_with_tariff_count(self):
-        """The single-fetch invariant across the *tariff* list, not just the
-        reading list.
-
-        ``_price_fixed_fees`` resolves a weight denominator per tariff (their
-        billed months differ), but the underlying ZEV membership rows do not
-        change between tariffs — so they must be fetched once per invoice, not
-        once per tariff. This was an N+1 until #465; the fixture above has no
-        weight-keyed or per-metering-point tariff, so the whole-engine bound
-        never exercised this path.
-        """
+        """Tariff-specific denominators reuse one participant-window fetch."""
         for index in range(6):
             tariff = factories.TariffFactory(
                 zev=self.zev,
@@ -144,20 +148,117 @@ class AllocationQueryCountTests(_ReconciliationBase):
             )
             self.assertEqual(tariff.split_key, SplitKey.WEIGHT)
 
-        with CaptureQueriesContext(connection) as ctx:
+        with (
+            CaptureQueriesContext(connection) as ctx,
+            mock.patch(
+                "invoices.engine._participant_weight_windows",
+                wraps=_participant_weight_windows,
+            ) as fetch_windows,
+        ):
             generate_invoice(self.alice, PERIOD_START, PERIOD_END)
 
+        fetch_windows.assert_called_once_with(self.zev, PERIOD_START, PERIOD_END)
         membership_fetches = [
             query for query in ctx.captured_queries
-            if 'FROM "zev_participant"' in query["sql"] and "allocation_weight" in query["sql"]
+            if 'FROM "zev_participant"' in query["sql"]
+            and "allocation_weight" in query["sql"]
         ]
-        # One for the date-granular community-energy denominator, one shared
-        # by all six weight-keyed tariffs. Six tariffs must not mean six.
-        self.assertLessEqual(
-            len(membership_fetches), 2,
-            f"expected at most 2 membership fetches, got {len(membership_fetches)} "
-            f"for 6 weight-keyed tariffs — N+1 over the tariff list",
+        self.assertEqual(
+            len(membership_fetches),
+            1,
+            f"expected exactly 1 membership fetch, got {len(membership_fetches)} "
+            "for 6 weight-keyed tariffs",
         )
+
+    def test_batch_generation_fetches_weight_windows_once_for_all_invoices(self):
+        """A batch derives each ZEV-wide membership denominator once."""
+        factories.TariffFactory(
+            zev=self.zev,
+            name="Weighted shared fee",
+            category=TariffCategory.METERING,
+            billing_mode=BillingMode.SHARED_MONTHLY_FEE,
+            energy_type=None,
+            fixed_price_chf=Decimal("10.00"),
+            valid_from=PERIOD_START,
+            split_key=SplitKey.WEIGHT,
+        )
+        factories.TariffFactory(
+            zev=self.zev,
+            name="Equal shared fee",
+            category=TariffCategory.METERING,
+            billing_mode=BillingMode.SHARED_MONTHLY_FEE,
+            energy_type=None,
+            fixed_price_chf=Decimal("10.00"),
+            valid_from=PERIOD_START,
+            split_key=SplitKey.EQUAL,
+        )
+
+        with (
+            mock.patch(
+                "invoices.engine._allocation_weight_sum_by_date",
+                wraps=_allocation_weight_sum_by_date,
+            ) as sums_by_date,
+            mock.patch(
+                "invoices.engine._allocation_weight_sum_by_month",
+                wraps=_allocation_weight_sum_by_month,
+            ) as sums_by_month,
+            mock.patch(
+                "invoices.engine._count_active_participants_by_month",
+                wraps=_count_active_participants_by_month,
+            ) as counts_by_month,
+            mock.patch(
+                "invoices.engine._participant_weight_windows",
+                wraps=_participant_weight_windows,
+            ) as fetch_windows,
+            CaptureQueriesContext(connection) as ctx,
+        ):
+            result = generate_invoices_for_zev(
+                self.zev, PERIOD_START, PERIOD_END,
+            )
+
+        self.assertEqual(len(result.invoices), 2)  # Alice + Bob
+        fetch_windows.assert_not_called()
+        self.assertEqual(sums_by_date.call_count, 1)
+        self.assertEqual(sums_by_month.call_count, 1)
+        self.assertEqual(counts_by_month.call_count, 1)
+        membership_fetches = [
+            query for query in ctx.captured_queries
+            if 'FROM "zev_participant"' in query["sql"]
+            and "allocation_weight" in query["sql"]
+        ]
+        self.assertEqual(
+            len(membership_fetches),
+            1,
+            "the whole batch must fetch participant membership exactly once",
+        )
+
+    def test_pdf_batch_fetches_zev_period_artifacts_once(self):
+        invoices = [
+            generate_invoice(participant, PERIOD_START, PERIOD_END)
+            for participant in (self.alice, self.bob)
+        ]
+
+        with (
+            mock.patch(
+                "invoices.pdf.eligible_participant_shares",
+                wraps=eligible_participant_shares,
+            ) as build_shares,
+            mock.patch(
+                "invoices.pdf.community_totals_by_timestamp",
+                wraps=community_totals_by_timestamp,
+            ) as build_totals,
+            mock.patch(
+                "invoices.pdf.AssignmentWindows.for_zev",
+                wraps=AssignmentWindows.for_zev,
+            ) as build_windows,
+            mock.patch("invoices.pdf.save_invoice_pdf"),
+        ):
+            failed = _render_pdfs(invoices)
+
+        self.assertEqual(failed, 0)
+        build_shares.assert_called_once()
+        build_totals.assert_called_once()
+        build_windows.assert_called_once()
 
     def test_pdf_stats_query_count(self):
         # 6 -> 7: eligible_participant_shares (shared metering points, #387)

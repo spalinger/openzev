@@ -23,11 +23,11 @@ from django.test import TestCase
 from accounts.models import UserRole
 from invoices.models import InvoiceItem
 from metering.models import MeterReading, ReadingDirection
-from tariffs.models import BillingMode, EnergyType, TariffCategory
+from tariffs.models import BillingMode, EnergyType, SplitKey, TariffCategory
 from testing import factories
 from zev.models import AllocationMode, MeteringPoint, MeteringPointAssignment, MeteringPointType, Zev
 
-from .engine import generate_invoice, generate_invoices_for_zev
+from .engine import InvoiceGenerationContext, generate_invoice, generate_invoices_for_zev
 
 pytestmark = pytest.mark.django_db
 
@@ -519,20 +519,65 @@ class InvoiceTotalsAndDescriptionTests(_SharedMeteringBase, TestCase):
         self.assertEqual(invoice.total_grid_kwh, Decimal("7.5000"))
 
     def test_single_participant_regeneration_equals_full_run(self):
-        """Regenerating one participant's invoice alone must yield the same
-        shared share as it would in a full run: weights are read from ZEV
-        membership, never from sibling invoices (§7.1)."""
+        """Single and batch generation produce identical invoice lines."""
         alice = self._participant("Alice Muster", weight="1")
-        self._participant("Bob Beispiel", weight="1")
+        self._participant(
+            "Bob Beispiel", valid_from=date(2026, 1, 16), weight="3",
+        )
         community_mp = self._mp(MeteringPointType.CONSUMPTION, "CH-SM-TOT-3")
         self._assign(community_mp, alice, JAN, mode=AllocationMode.COMMUNITY)
-        self._consumption(community_mp, date(2026, 1, 5), "10")
+        self._consumption(community_mp, date(2026, 1, 20), "12")
         self._grid_tariff()
+        for split_key in (SplitKey.EQUAL, SplitKey.WEIGHT):
+            factories.TariffFactory(
+                zev=self.zev,
+                name=f"{split_key.title()} shared fee",
+                category=TariffCategory.METERING,
+                billing_mode=BillingMode.SHARED_MONTHLY_FEE,
+                energy_type=None,
+                fixed_price_chf=Decimal("100.00"),
+                valid_from=date(2026, 1, 15),
+                split_key=split_key,
+            )
 
-        # Only Alice's invoice is generated — Bob's is never created.
-        alice_invoice = generate_invoice(alice, JAN, JAN_END)
+        def item_signature(invoice):
+            return sorted(
+                (
+                    item.item_type,
+                    item.tariff_category,
+                    item.description,
+                    item.quantity_kwh,
+                    item.unit,
+                    item.unit_price_chf,
+                    item.total_chf,
+                )
+                for item in invoice.items.all()
+            )
 
-        self.assertEqual(alice_invoice.total_grid_kwh, Decimal("5.0000"))
+        single_items = item_signature(generate_invoice(alice, JAN, JAN_END))
+        batch = generate_invoices_for_zev(self.zev, JAN, JAN_END)
+        batch_alice = next(
+            invoice for invoice in batch.invoices if invoice.participant_id == alice.id
+        )
+
+        self.assertEqual(batch.failures, [])
+        self.assertEqual(item_signature(batch_alice), single_items)
+
+    def test_generation_context_rejects_a_different_scope(self):
+        alice = self._participant("Alice Muster")
+        context = InvoiceGenerationContext.build(self.zev, JAN, JAN_END)
+        other_zev = factories.ZevFactory(owner=self.owner)
+        outsider = factories.ParticipantFactory(zev=other_zev, valid_from=JAN)
+
+        with self.assertRaisesRegex(ValueError, "does not match invoice scope"):
+            generate_invoice(outsider, JAN, JAN_END, generation_context=context)
+        with self.assertRaisesRegex(ValueError, "does not match invoice scope"):
+            generate_invoice(
+                alice,
+                date(2026, 2, 1),
+                date(2026, 2, 28),
+                generation_context=context,
+            )
 
     def test_shared_line_description_carries_the_community_marker(self):
         markers = {

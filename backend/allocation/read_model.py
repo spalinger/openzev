@@ -39,6 +39,7 @@ from .split import (
     split_consumption,
     split_production,
 )
+from .validity import active_during
 from .windows import AssignmentWindows
 
 CONSUMPTION_METER_TYPES = [MeteringPointType.CONSUMPTION, MeteringPointType.BIDIRECTIONAL]
@@ -52,8 +53,17 @@ _KINDS = {
     PRODUCTION: (PRODUCTION_METER_TYPES, ReadingDirection.OUT),
 }
 
+ParticipantShareWindow = tuple[uuid.UUID, date, date | None, Decimal]
+ParticipantSharesByDate = dict[date, dict[uuid.UUID, Decimal]]
 
-def eligible_participant_shares(zev, period_start: date, period_end: date) -> dict[date, dict[uuid.UUID, Decimal]]:
+
+def eligible_participant_shares(
+    zev,
+    period_start: date,
+    period_end: date,
+    *,
+    windows: list[ParticipantShareWindow] | None = None,
+) -> ParticipantSharesByDate:
     """Each eligible participant's normalized weight share, per calendar date.
 
     ``date -> {participant_id: share}``, the shares for one date summing to 1.
@@ -71,11 +81,14 @@ def eligible_participant_shares(zev, period_start: date, period_end: date) -> di
     granularity matches ``AssignmentWindows.participant_on`` and the reading
     attribution the rest of this module already uses.
     """
-    windows = list(
-        Participant.objects.filter(zev=zev).values_list("id", "valid_from", "valid_to", "allocation_weight")
-    )
+    if windows is None:
+        windows = list(
+            active_during(
+                Participant.objects.filter(zev=zev), period_start, period_end,
+            ).values_list("id", "valid_from", "valid_to", "allocation_weight")
+        )
 
-    shares: dict[date, dict[uuid.UUID, Decimal]] = {}
+    shares: ParticipantSharesByDate = {}
     cursor = period_start
     while cursor <= period_end:
         eligible = [

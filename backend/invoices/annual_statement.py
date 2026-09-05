@@ -14,6 +14,7 @@ from accounts.models import AppSettings
 from allocation.read_model import (
     CONSUMPTION_METER_TYPES,
     PRODUCTION_METER_TYPES,
+    ParticipantSharesByDate,
     community_totals_by_timestamp,
     eligible_participant_shares,
 )
@@ -186,11 +187,21 @@ ANNUAL_TRANSLATIONS: dict[str, dict[str, str]] = {
 }
 
 
-def _compute_monthly_data(participant, zev, year: int, tr: dict) -> tuple[list[dict], dict]:
+def _compute_monthly_data(
+    participant,
+    zev,
+    year: int,
+    tr: dict,
+    *,
+    shares_by_date: ParticipantSharesByDate | None = None,
+    zev_totals_by_ts: tuple[dict, dict] | None = None,
+) -> tuple[list[dict], dict]:
     """Compute monthly consumption/production with per-timestamp local-pool allocation.
 
     Mirrors the billing engine and dashboard: the local-pool split is computed at
     each 15-min timestamp, then aggregated into monthly buckets for display.
+    Batch callers may provide the ZEV-wide timestamp totals to avoid rebuilding
+    the same maps for every participant.
 
     Returns (monthly_rows, totals_dict).
     """
@@ -231,9 +242,11 @@ def _compute_monthly_data(participant, zev, year: int, tr: dict) -> tuple[list[d
     # Every metering point of the ZEV feeds the pool regardless of assignment
     # or is_active, matching the engine, PDF stats, and the dashboards. Shared
     # read-model helper: one definition of the pool across all consumers.
-    zev_consumption_by_ts, zev_production_by_ts = community_totals_by_timestamp(
-        zev, year_start_dt, year_end_dt
-    )
+    if zev_totals_by_ts is None:
+        zev_totals_by_ts = community_totals_by_timestamp(
+            zev, year_start_dt, year_end_dt,
+        )
+    zev_consumption_by_ts, zev_production_by_ts = zev_totals_by_ts
 
     # ── Participant consumption per timestamp ───────────────────────────────
     participant_consumption_rows = (
@@ -272,7 +285,8 @@ def _compute_monthly_data(participant, zev, year: int, tr: dict) -> tuple[list[d
         (a.metering_point_id, a.valid_from, a.valid_to, a.participant_id, a.allocation_mode, a.id)
         for a in assignments
     )
-    shares_by_date = eligible_participant_shares(zev, year_start, year_end)
+    if shares_by_date is None:
+        shares_by_date = eligible_participant_shares(zev, year_start, year_end)
 
     def _participant_share(metering_point_id, ts) -> Decimal:
         """This participant's share of a reading at (mp, ts): 1 for a
@@ -500,13 +514,27 @@ def _build_monthly_chart_svg(monthly_data: list[dict], tr: dict) -> str | None:
     return "\n".join(svg_parts)
 
 
-def generate_annual_statement_pdf(participant, zev, year: int) -> bytes:
-    """Generate the annual statement PDF for a participant."""
+def generate_annual_statement_pdf(
+    participant,
+    zev,
+    year: int,
+    *,
+    shares_by_date: ParticipantSharesByDate | None = None,
+    zev_totals_by_ts: tuple[dict, dict] | None = None,
+) -> bytes:
+    """Generate an annual statement, reusing optional ZEV-wide batch data."""
     lang = zev.invoice_language or "de"
     tr = ANNUAL_TRANSLATIONS.get(lang, ANNUAL_TRANSLATIONS["de"])
     app_settings = AppSettings.load()
 
-    monthly_data, totals = _compute_monthly_data(participant, zev, year, tr)
+    monthly_data, totals = _compute_monthly_data(
+        participant,
+        zev,
+        year,
+        tr,
+        shares_by_date=shares_by_date,
+        zev_totals_by_ts=zev_totals_by_ts,
+    )
 
     # Invoices for this year
     year_start = date(year, 1, 1)

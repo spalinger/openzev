@@ -337,6 +337,19 @@ all weights 1, the month sums equal headcounts and the current equal-split
 behaviour is the special case. This keeps "single-participant regeneration
 equals a full run" intact.
 
+All three denominator helpers accept the ZEV's participant windows
+(`(valid_from, valid_to, allocation_weight)` tuples) as an optional argument.
+`generate_invoices_for_zev` builds one `InvoiceGenerationContext` from its
+participant query: the date-granular weight sums are computed immediately,
+while weight sums and headcounts for fixed fees are cached on first use per
+tariff. Every `generate_invoice` in the batch receives that context, so the
+membership rows and each daily/monthly denominator are derived once for the
+whole batch. The single-invoice API path omits the context and derives
+identical values on demand, preserving the "single equals full run" invariant.
+An ordinary exception in the initial shared context build is reported once
+per participant in the batch; `SoftTimeLimitExceeded` propagates and aborts
+the task (see the tariffs-and-billing spec, "Shared-build failure").
+
 ### 7.2 `SHARED_*` fee modes read their tariff's split key
 
 The `_price_fixed_fees` shared branch keeps its structure — per billed month,
@@ -513,6 +526,16 @@ read-model contract. `invoices/test_allocation_query_counts.py` pins
 per-consumer query counts — a new shared fetch that breaks the single-fetch
 invariant goes red there.
 
+`eligible_participant_shares` also accepts preloaded participant windows.
+Invoice PDF batches build one `InvoicePdfPeriodContext` per ZEV and period;
+it holds the daily share map and ZEV-wide participant statistics reused by
+every invoice's hourly-profile and energy-flow charts, respectively.
+Annual-statement ZIPs derive the same share map once from their already-loaded
+participant list and pass it to every statement. Single-document paths compute
+a fresh context on demand. These caches live only for one batch call—there is
+no process-global state that could survive a participant validity or weight
+edit.
+
 ## 8. Frontend
 
 ### 8.1 Metering points
@@ -602,9 +625,9 @@ the extended input types:
 
 ## 10. Test plan
 
-Existing suites: the 22 shared-fee tests and 6 query-count tests stay green
-**unmodified**; the 10 reconciliation tests keep their existing assertions with
-a community meter added to their shared fixture (§7.7). New backend tests (46):
+The 22 shared-fee tests and 10 reconciliation tests stay green. The query-count
+suite contains 9 tests, including batch denominator and PDF-artifact sharing.
+The feature and performance regression coverage is listed below:
 
 ### Backend — `allocation/tests.py`
 
@@ -664,29 +687,16 @@ a community meter added to their shared fixture (§7.7). New backend tests (46):
 | `test_tiny_weight_bills_almost_nothing` | Negligible-weight member (0.0001 of 1.0001) |
 | `test_an_indivisible_weighted_share_leaves_the_rappen_shortfall` | Rounding convention |
 
-### Backend — `invoices/test_shared_metering.py` (new file)
+### Backend — `invoices/test_shared_metering.py` (6 classes, 25 tests)
 
-**`SharedMeteringEngineTests`** (17 tests):
-
-| Test | Asserts |
+| Class | Tests |
 |---|---|
-| `test_shared_consumption_is_billed_to_every_member_by_weight` | Golden values incl. levies |
-| `test_the_holder_pays_their_share_like_everyone_else` | No holder special case |
-| `test_sole_participant_carries_the_shared_meter_alone` | N=1 |
-| `test_shared_energy_conservation_within_rounding` | Σ shares vs. full amount, < 1 rappen |
-| `test_shared_production_credits_every_member_symmetrically` | Symmetric split |
-| `test_shared_meter_part_of_period_only_shares_that_window` | Time-bounded sharing |
-| `test_mixed_window_meter_bills_personally_then_shares` | **§7.3 both halves:** a meter personal in month 1 and community in month 2 bills the holder in full for month 1 and only a weighted share for month 2 — no lost readings, no double billing |
-| `test_community_readings_are_not_counted_as_skipped` | §7.3: skip counters exclude community energy |
-| `test_per_metering_point_fee_splits_shared_meters_and_excludes_holder` | §7.5 both halves |
-| `test_inactive_shared_meter_bills_nobody` | `is_active` mirroring |
-| `test_joiner_does_not_pay_for_community_energy_before_join_date` | Date-granular numerator |
-| `test_leaver_does_not_pay_for_community_energy_after_leave_date` | Date-granular numerator |
-| `test_weighted_energy_and_fee_use_their_respective_time_granularity` | Energy by date, fees by month |
-| `test_community_production_uses_same_eligibility_rule` | Production follows consumption weights/eligibility |
-| `test_invoice_kwh_totals_include_shared_energy` | §7.4 totals |
-| `test_shared_line_description_carries_the_community_marker` | All four locales |
-| `test_single_participant_regeneration_equals_full_run` | ZEV-data-only shares |
+| `SharedConsumptionSplitTests` (4) | `test_shared_consumption_is_billed_to_every_member_by_weight`, `test_the_holder_pays_their_share_like_everyone_else`, `test_sole_participant_carries_the_shared_meter_alone`, `test_shared_energy_conservation_within_rounding` |
+| `SharedProductionSplitTests` (2) | `test_shared_production_credits_every_member_symmetrically`, `test_community_production_uses_same_eligibility_rule` |
+| `MixedWindowAndTimingTests` (5) | `test_shared_meter_part_of_period_only_shares_that_window`, `test_mixed_window_meter_bills_personally_then_shares`, `test_community_readings_are_not_counted_as_skipped`, `test_joiner_does_not_pay_for_community_energy_before_join_date`, `test_leaver_does_not_pay_for_community_energy_after_leave_date` |
+| `PerMeteringPointCommunityFeeTests` (8) | `test_per_metering_point_fee_splits_shared_meters_and_excludes_holder`, `test_deactivating_a_shared_meter_does_not_change_the_fee`, `test_ending_the_assignment_is_what_stops_the_shared_fee`, `test_weighted_energy_and_fee_use_their_respective_time_granularity`, `test_mid_month_mode_switch_bills_the_month_once_on_the_last_side`, `test_mid_month_mode_switch_back_bills_the_month_once_personally`, `test_month_boundary_mode_switch_still_bills_both_months`, `test_holder_change_mid_month_bills_the_month_once` |
+| `InvoiceTotalsAndDescriptionTests` (4) | `test_invoice_kwh_totals_include_shared_energy`, `test_single_participant_regeneration_equals_full_run`, `test_generation_context_rejects_a_different_scope`, `test_shared_line_description_carries_the_community_marker` |
+| `CommunityFeeTariffClampTests` (2) | `test_community_meter_fee_is_fully_recovered_when_the_tariff_starts_mid_month`, `test_a_member_inside_the_billed_window_still_shares_the_community_fee` |
 
 ### Backend — `invoices/test_allocation_reconciliation.py`
 
@@ -706,6 +716,20 @@ Fixture extended with a community meter; new (2 tests):
 | `test_community_readings_carry_mode_and_literal_holder` | `iter_allocated_readings` contract: holder_id + `allocation_mode == "community"` |
 | `test_community_readings_split_against_the_physical_pool` | Split math unchanged for community meters |
 | `test_community_readings_are_distinct_from_gap_readings` | Consumers can tell the two cases apart |
+
+### Backend — batch allocation performance and failure handling (9 tests)
+
+| File / test | Asserts |
+|---|---|
+| `allocation/test_read_model.py::test_preloaded_windows_avoid_a_participant_query` | A caller-provided share window list performs no participant query |
+| `invoices/test_allocation_query_counts.py::test_batch_generation_fetches_weight_windows_once_for_all_invoices` | One membership fetch, one daily denominator build, and one build per fixed-fee tariff/key for the whole invoice batch |
+| `invoices/test_allocation_query_counts.py::test_pdf_batch_fetches_zev_period_artifacts_once` | A real two-invoice batch fetches participant shares, community totals, and assignment windows once |
+| `invoices/test_batch_actions.py::test_pdf_batch_builds_one_context_per_zev_period` | All invoice PDFs for one ZEV-period reuse one PDF context |
+| `invoices/test_batch_actions.py::test_pdf_batch_does_not_retry_a_failed_period_context` | A failed shared PDF context marks the period's invoices failed without rebuilding the same context for every participant |
+| `invoices/test_batch_actions.py::test_shared_context_failure_reports_every_participant_in_the_audit_event` | A failed shared invoice context produces one failure entry per participant, creates no invoices, and records a FAILED audit event |
+| `invoices/test_batch_actions.py::test_empty_batch_does_not_build_shared_context` | A batch with no active participants returns an empty result without building shared data |
+| `invoices/test_reports.py::test_zip_builds_participant_shares_once_for_every_statement` | An annual-statement ZIP builds and reuses one yearly participant-share map and ZEV-total pair |
+| `invoices/test_reports.py::test_zip_returns_500_when_shared_participant_calculation_fails` | A failed shared yearly calculation is attempted once, renders no partial statements, and returns a generic `500` |
 
 ### Backend — `invoices/test_pdf.py`
 

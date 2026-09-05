@@ -1,5 +1,8 @@
 """Invoice PDF SVG chart builders — energy flow, comparison, and hourly profile."""
 
+from allocation.read_model import ParticipantSharesByDate
+from allocation.windows import AssignmentWindows
+
 from .pdf_stats import _compute_period_participant_stats
 
 # Shared palette — generated from design/tokens.json (single source of truth).
@@ -40,13 +43,20 @@ def _esc(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
-def _build_energy_flow_svg(invoice, tr: dict) -> str | None:
+def _build_energy_flow_svg(
+    invoice,
+    tr: dict,
+    *,
+    period_stats: tuple[dict, list[dict]] | None = None,
+) -> str | None:
     """Generate an SVG Sankey-style energy flow diagram for the invoice period.
 
     Shows producers → total production → local consumption / grid export → consumers,
     with the invoice participant highlighted and all other consumers aggregated as 'Others'.
     """
-    totals, all_stats = _compute_period_participant_stats(invoice)
+    if period_stats is None:
+        period_stats = _compute_period_participant_stats(invoice)
+    totals, all_stats = period_stats
     total_produced = totals["produced_kwh"]
 
     pid = str(invoice.participant_id)
@@ -491,9 +501,19 @@ def _build_energy_chart_svg(invoice, tr: dict) -> str | None:
     return '\n'.join(svg)
 
 
-def _build_hourly_profile_chart_svg(invoice, tr: dict) -> str | None:
+def _build_hourly_profile_chart_svg(
+    invoice,
+    tr: dict,
+    *,
+    shares_by_date: ParticipantSharesByDate | None = None,
+    zev_totals_by_ts: tuple[dict, dict] | None = None,
+    assignment_windows: AssignmentWindows | None = None,
+) -> str | None:
     """Generate an SVG stacked bar chart showing the average hourly energy profile
     (local ZEV vs grid) over the invoice period.
+
+    Batch callers may pass ZEV-wide totals and assignment windows from their
+    period context; single-invoice callers derive them here.
 
     Returns None when sub-daily metering data is not available or all values are zero.
     """
@@ -507,7 +527,6 @@ def _build_hourly_profile_chart_svg(invoice, tr: dict) -> str | None:
     )
     from allocation.validity import active_during, period_window
     from allocation.split import split_consumption
-    from allocation.windows import AssignmentWindows
     from metering.models import MeterReading, ReadingDirection, ReadingResolution
     from zev.models import AllocationMode, MeteringPoint as _MP, MeteringPointAssignment as _MPA
 
@@ -554,8 +573,11 @@ def _build_hourly_profile_chart_svg(invoice, tr: dict) -> str | None:
     if not participant_readings:
         return None
 
-    windows = AssignmentWindows.for_zev(zev, ps, pe)
-    shares_by_date = eligible_participant_shares(zev, ps, pe)
+    windows = assignment_windows
+    if windows is None:
+        windows = AssignmentWindows.for_zev(zev, ps, pe)
+    if shares_by_date is None:
+        shares_by_date = eligible_participant_shares(zev, ps, pe)
 
     # Only show chart when sub-daily data is present
     resolutions = {r.resolution for r in participant_readings}
@@ -565,7 +587,9 @@ def _build_hourly_profile_chart_svg(invoice, tr: dict) -> str | None:
     # ── ZEV-level production and consumption by timestamp ───────────────────
     # The pool covers every metering point of the ZEV regardless of assignment
     # (ADR 0013), matching the engine and the dashboards.
-    zev_cons_by_ts, zev_prod_by_ts = community_totals_by_timestamp(zev, start_dt, end_dt)
+    if zev_totals_by_ts is None:
+        zev_totals_by_ts = community_totals_by_timestamp(zev, start_dt, end_dt)
+    zev_cons_by_ts, zev_prod_by_ts = zev_totals_by_ts
 
     # ── Accumulate local/grid per local-hour-of-day ─────────────────────────
     # Decimal arithmetic end to end (the billing contract); floats only enter

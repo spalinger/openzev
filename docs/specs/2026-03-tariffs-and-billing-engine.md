@@ -527,6 +527,19 @@ FOR EACH community reading (metering points with a COMMUNITY assignment overlapp
 
 The date-granular weight sum (`allocation_weight_sum_by_date`, keyed by calendar date) mirrors `participant_on`'s granularity: a participant active for any part of a date is eligible for that date's full share, and a date with no eligible participant is absent from the map entirely (never zero), so a caller can never divide by it. With every participant's weight at the default `1`, the share is `1 / headcount` — the equal split that would also result from omitting the weight feature.
 
+For a full `generate_invoices_for_zev` run, this map is built once from the
+batch's participant rows and stored in `InvoiceGenerationContext`; every
+participant invoice reads the same map. Direct single-invoice generation
+builds it on demand and produces the same totals.
+
+**Shared-build failure.** `generate_invoices_for_zev` builds the
+`InvoiceGenerationContext` once, before the per-participant loop. If that
+build fails, the batch creates no invoices, records one failure entry per
+participant in scope (all carrying the same error), and returns normally so
+the Celery task writes its FAILED audit event (ADR 0011). The build is not
+retried per participant. `SoftTimeLimitExceeded` is never swallowed. An
+empty participant list returns an empty result without building the context.
+
 Community production is allocated with the **same eligibility rule and weights as consumption** — an explicit decision, not a technical necessity; a future meter-specific allocation rule could override it. The local-sold credit accumulates under `bucket="shared_producer_credit"` (kept distinct from `bucket="shared"` so a consumption charge and a production credit under the same local-energy tariff render as two separate lines, mirroring how personal energy already separates `producer_credit` from the default consumption bucket); the feed-in credit uses `bucket="shared"`.
 
 Shared kWh accumulate into the same `total_local_kwh` / `total_grid_kwh` / `total_feed_in_kwh` invoice totals as personal energy — there is no separate "community" total on the `Invoice` model.
@@ -784,9 +797,13 @@ point*, which always allocates by weight (§1.1 of the feature spec). A
 per-assignment split key is a documented follow-up, out of scope.
 
 Both weight-split paths (this one and §4.6.3) resolve their denominator per
-tariff but share **one** fetch of the ZEV's participant membership rows per
-invoice: the billed months differ between tariffs, the membership does not, so
-querying per tariff would be an N+1 over the ZEV's tariff list.
+tariff. In a full ZEV run, `InvoiceGenerationContext` caches each tariff's
+weight denominator and headcount after its first use, so the whole batch
+fetches membership once and derives each denominator once. Direct
+single-invoice generation creates a fresh call-scoped context and keeps the
+same lazy calculation without sharing it beyond that invoice. A supplied
+context records its ZEV and period and is rejected if those do not match the
+invoice being generated.
 
 #### 4.6.5 `is_active` is not a billing input
 

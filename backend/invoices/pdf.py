@@ -5,9 +5,18 @@ converted to PDF. Optionally embeds a Swiss QR-Rechnung.
 """
 import io
 import logging
+from dataclasses import dataclass
 from datetime import date
+from uuid import UUID
 
 from accounts.models import AppSettings
+from allocation.read_model import (
+    ParticipantSharesByDate,
+    community_totals_by_timestamp,
+    eligible_participant_shares,
+)
+from allocation.validity import period_window
+from allocation.windows import AssignmentWindows
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.template import Context, Template
@@ -22,12 +31,56 @@ from .pdf_charts import (
     _build_hourly_profile_chart_svg,
 )
 from .pdf_render import render_pdf
-from .pdf_stats import _build_energy_summary, _build_savings_data
+from .pdf_stats import (
+    _build_energy_summary,
+    _build_savings_data,
+    _compute_period_participant_stats,
+)
 from .pdf_translations import INVOICE_TRANSLATIONS
 
 logger = logging.getLogger(__name__)
 
 TEMPLATE_NAME = "invoices/invoice_pdf.html"
+
+
+@dataclass(frozen=True)
+class InvoicePdfPeriodContext:
+    """ZEV-period data shared by every invoice PDF in a batch."""
+
+    scope: tuple[UUID, date, date]
+    shares_by_date: ParticipantSharesByDate
+    participant_stats: tuple[dict, list[dict]]
+    zev_totals_by_ts: tuple[dict, dict]
+    assignment_windows: AssignmentWindows
+
+    def validate_for(self, invoice) -> None:
+        if self.scope != (invoice.zev_id, invoice.period_start, invoice.period_end):
+            raise ValueError("PDF period context does not match invoice scope.")
+
+
+def build_invoice_pdf_period_context(invoice) -> InvoicePdfPeriodContext:
+    shares_by_date = eligible_participant_shares(
+        invoice.zev, invoice.period_start, invoice.period_end,
+    )
+    start_dt, end_dt = period_window(invoice.period_start, invoice.period_end)
+    zev_totals_by_ts = community_totals_by_timestamp(
+        invoice.zev, start_dt, end_dt,
+    )
+    assignment_windows = AssignmentWindows.for_zev(
+        invoice.zev, invoice.period_start, invoice.period_end,
+    )
+    return InvoicePdfPeriodContext(
+        scope=(invoice.zev_id, invoice.period_start, invoice.period_end),
+        shares_by_date=shares_by_date,
+        participant_stats=_compute_period_participant_stats(
+            invoice,
+            shares_by_date=shares_by_date,
+            zev_totals_by_ts=zev_totals_by_ts,
+            assignment_windows=assignment_windows,
+        ),
+        zev_totals_by_ts=zev_totals_by_ts,
+        assignment_windows=assignment_windows,
+    )
 
 
 # Kept as an alias so existing callers (annual_statement, tasks,
@@ -161,7 +214,16 @@ def _build_qr_svg(invoice) -> str | None:
         return None
 
 
-def _build_template_context(invoice) -> dict:
+def _build_template_context(
+    invoice,
+    *,
+    period_context: InvoicePdfPeriodContext | None = None,
+) -> dict:
+    if period_context is None:
+        period_context = build_invoice_pdf_period_context(invoice)
+    else:
+        period_context.validate_for(invoice)
+
     qr_svg = _build_qr_svg(invoice)
     items = list(invoice.items.all())
     app_settings = AppSettings.load()
@@ -237,8 +299,18 @@ def _build_template_context(invoice) -> dict:
             and not _normalize_text(invoice.notes)
         ),
         "energy_chart_svg": _build_energy_chart_svg(invoice, tr),
-        "energy_flow_svg": _build_energy_flow_svg(invoice, tr),
-        "hourly_profile_chart_svg": _build_hourly_profile_chart_svg(invoice, tr),
+        "energy_flow_svg": _build_energy_flow_svg(
+            invoice,
+            tr,
+            period_stats=period_context.participant_stats,
+        ),
+        "hourly_profile_chart_svg": _build_hourly_profile_chart_svg(
+            invoice,
+            tr,
+            shares_by_date=period_context.shares_by_date,
+            zev_totals_by_ts=period_context.zev_totals_by_ts,
+            assignment_windows=period_context.assignment_windows,
+        ),
         "savings_data": savings_data,
         "energy_summary": energy_summary,
         "tr": tr,
@@ -301,7 +373,11 @@ def _render_template(template_name: str, context: dict) -> str:
     return render_to_string(template_name, context)
 
 
-def generate_pdf(invoice) -> bytes:
+def generate_pdf(
+    invoice,
+    *,
+    period_context: InvoicePdfPeriodContext | None = None,
+) -> bytes:
     """Render the invoice to PDF bytes.
 
     The inline-QR layout reserves the 106 mm payment slip in the bottom margin
@@ -314,7 +390,7 @@ def generate_pdf(invoice) -> bytes:
     the dedicated payment page, which always places a single slip on its own
     final page regardless of body length.
     """
-    context = _build_template_context(invoice)
+    context = _build_template_context(invoice, period_context=period_context)
     html_string = _render_template(TEMPLATE_NAME, context)
     pdf_bytes = render_pdf(html_string)
 
@@ -331,9 +407,13 @@ def generate_pdf(invoice) -> bytes:
     return pdf_bytes
 
 
-def save_invoice_pdf(invoice) -> None:
+def save_invoice_pdf(
+    invoice,
+    *,
+    period_context: InvoicePdfPeriodContext | None = None,
+) -> None:
     """Generate PDF and attach it to the Invoice model."""
-    pdf_bytes = generate_pdf(invoice)
+    pdf_bytes = generate_pdf(invoice, period_context=period_context)
     filename = f"invoice_{invoice.invoice_number}.pdf"
     invoice.pdf_file.save(filename, ContentFile(pdf_bytes), save=True)
     logger.info("Saved PDF for invoice %s", invoice.invoice_number)

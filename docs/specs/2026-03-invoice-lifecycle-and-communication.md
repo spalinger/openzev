@@ -249,7 +249,7 @@ The three download endpoints below are consumed from the **/reports** route (`fr
 | Method | URL | Permission | Frontend usage |
 |---|---|---|---|
 | `GET` | `/invoices/invoices/annual-statement/` | Authenticated (participant sees own, admin/owner ZEV-scoped) | Participant "My annual statement" card: `downloadAnnualStatement({year})` (no `zev_id`, backend scopes by participant) |
-| `GET` | `/invoices/invoices/annual-statements-zip/` | `IsZevOwnerOrAdmin` | Admin/owner "Annual statements" card: `downloadAllAnnualStatements({year, zev_id})` — ZIP of all participants for the selected ZEV |
+| `GET` | `/invoices/invoices/annual-statements-zip/` | `IsZevOwnerOrAdmin` | Admin/owner "Annual statements" card: `downloadAllAnnualStatements({year, zev_id})` — ZIP of all eligible participants for the selected ZEV; shared-data setup failure returns a generic `500` |
 | `GET` | `/invoices/invoices/financial-summary/` | Authenticated (optional `zev_id` / `participant_id`) | Both roles: `downloadFinancialSummary({year, zev_id?})` — `zev_id` supplied for admin/owner, omitted for participant |
 
 Role branches mirror the former dashboard behavior.
@@ -463,6 +463,21 @@ Admin-only endpoints manage the global `EmailTemplate` overrides (§3.5) for the
 3. Convert HTML → PDF via WeasyPrint through `render_pdf()` in `invoices/pdf_render.py`, which emits **PDF/A-3b** (`PDF_VARIANT = "pdf/a-3b"`) — a long-term archival format suitable for Swiss GeBüV retention, with WeasyPrint adding the XMP identification, sRGB OutputIntent, and font subsets. The same helper renders contract, annual statement, and financial summary PDFs. Because template content is admin-editable, the WeasyPrint fetcher is restricted to `data:` URIs (`ALLOWED_URL_PROTOCOLS` in `pdf_render.py`) — templates embed images as data URIs and cannot make the renderer read local files or request remote URLs.
 4. Save PDF to `invoice.pdf_file` (`invoices/pdf/invoice_{number}.pdf`).
 
+`_render_pdfs()` groups invoices by `(zev_id, period_start, period_end)` and
+builds one `InvoicePdfPeriodContext` per group. The context holds the daily
+participant-share map, ZEV-wide participant statistics, timestamp totals and
+assignment windows used by the hourly-profile and energy-flow charts, so a
+batch derives them once rather than once per invoice. A single PDF render
+builds a fresh context on demand. The context records its ZEV and period and
+is rejected if used for another invoice scope. If a shared context cannot be
+built, every invoice in that ZEV-period is counted as failed and the same
+failing computation is not retried for each participant; failures while
+rendering an individual invoice remain isolated to that invoice.
+
+The annual-statement ZIP similarly builds its yearly participant shares and
+ZEV timestamp totals once before rendering. Shared setup failure returns a
+generic `500`; failure in one participant's render omits only that statement.
+
 ### 8.2 Template context
 
 The invoice PDF template receives:
@@ -657,7 +672,8 @@ Strips legacy period suffixes from `description` on serialization.
 | `test_engine_edge_cases.py` | `InvoiceVatRateSelectionTests` | VAT rate active at period_end, zero VAT when no vat_number |
 | `test_email_formatting.py` | `InvoiceEmailFormattingTests` | §7.1–7.2: date format in email body, custom ZEV templates, auto-transition to sent |
 | `test_email_task.py` | 5 function-based tests | §7.2: missing invoice no-ops, no recipient skips with failed log, success records sent log and transitions status, failure marks log failed and retries, draft stays draft after send |
-| `test_batch_actions.py` | `TestInvoiceBatchActions`, `TestBulkGenerationTasks`, `TestBulkGenerationIsolatesPerParticipantFailures`, `TestInvoiceRetryEmailAction` | §5.4: approve-all approves only period drafts, send-all queues only approved invoices with recipient, cross-owner ZEV rejection, download-pdfs 404/ZIP; §5.2: generate-all / generate-pdfs-all queue background tasks, one locked invoice does not abort the batch, a failure after number issuance reuses the rolled-back invoice number (gapless, collision-free), and the audit event reports the partial outcome; §7.3: retry-email rejects sent logs and other invoices' logs, queues failed recipient |
+| `test_batch_actions.py` | `TestInvoiceBatchActions`, `TestBulkGenerationTasks`, `TestBulkGenerationIsolatesPerParticipantFailures`, `TestInvoiceRetryEmailAction` | §5.4: approve-all approves only period drafts, send-all queues only approved invoices with recipient, cross-owner ZEV rejection, download-pdfs 404/ZIP; §5.2: generate-all / generate-pdfs-all queue background tasks, one locked invoice does not abort the batch, a failure after number issuance reuses the rolled-back invoice number (gapless and collision-free), the audit event reports the partial outcome, one PDF context is built per ZEV-period batch, a failed shared context is not retried per invoice, and a failed shared invoice-build is reported once per participant with a FAILED audit event; §7.3: retry-email rejects sent logs and other invoices' logs, queues failed recipient |
+| `test_reports.py` | `AnnualStatementTests`, `AnnualStatementsZipTests`, `FinancialSummaryTests` | §5.4: report permissions and scoping, annual-statement ZIP contents and participant validity filtering, one yearly participant-share and timestamp-total computation per ZIP, and a generic `500` when that shared computation fails |
 | `test_invoice_numbering.py` | `TestNumberingIsScopedToTheZev`, `TestDuplicatesWithinOneZevAreStillRejected` | §4.1: two ZEVs on the default `INV` prefix both bill and each counts from 1; a duplicate number within one ZEV is refused at the database level (`bulk_create` bypasses `save()`) |
 | `test_serializers.py` | `InvoiceDescriptionSerializationTests` | §8.9: period suffix stripping in serializer |
 | `test_template_context.py` | `BuildSampleInvoiceContextTests`, `BuildSampleContractContextTests`, `BuildSampleAnnualStatementContextTests` | §5.7 preview: sample context required keys, invoice number/totals, `grouped_items` structure, formatted dates, annual-statement monthly data and chart |

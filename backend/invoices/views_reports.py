@@ -13,9 +13,12 @@ spelled out in each handler rather than folded into a parameterised helper.
 """
 
 import io
+import logging
 import zipfile
-from datetime import MAXYEAR, MINYEAR
+from datetime import MAXYEAR, MINYEAR, date
 
+from allocation.read_model import community_totals_by_timestamp, eligible_participant_shares
+from allocation.validity import active_during, period_window
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse
 from rest_framework import status
@@ -29,6 +32,9 @@ from zev.models import Participant, Zev
 
 from .annual_statement import generate_annual_statement_pdf
 from .financial_summary import generate_financial_summary_pdf
+
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_year(year_raw: str | None) -> tuple[int | None, Response | None]:
@@ -166,9 +172,10 @@ class AnnualStatementsZipView(APIView):
         if error:
             return error
 
+        year_start = date(year, 1, 1)
+        year_end = date(year, 12, 31)
         participants = list(
-            zev.participants.filter(valid_from__year__lte=year)
-            .exclude(valid_to__year__lt=year)
+            active_during(zev.participants, year_start, year_end)
             .order_by("last_name", "first_name")
         )
 
@@ -179,10 +186,41 @@ class AnnualStatementsZipView(APIView):
             )
 
         buf = io.BytesIO()
+        share_windows = [
+            (p.id, p.valid_from, p.valid_to, p.allocation_weight)
+            for p in participants
+        ]
+        try:
+            shares_by_date = eligible_participant_shares(
+                zev,
+                year_start,
+                year_end,
+                windows=share_windows,
+            )
+            year_start_dt, year_end_dt = period_window(year_start, year_end)
+            zev_totals_by_ts = community_totals_by_timestamp(
+                zev, year_start_dt, year_end_dt,
+            )
+        except Exception:
+            logger.exception(
+                "Annual-statement shared-data calculation failed for ZEV %s and year %s",
+                zev.id,
+                year,
+            )
+            return Response(
+                {"error": "Could not generate annual statements."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
             for participant in participants:
                 try:
-                    pdf_bytes = generate_annual_statement_pdf(participant, zev, year)
+                    pdf_bytes = generate_annual_statement_pdf(
+                        participant,
+                        zev,
+                        year,
+                        shares_by_date=shares_by_date,
+                        zev_totals_by_ts=zev_totals_by_ts,
+                    )
                     safe_name = f"{participant.last_name}_{participant.first_name}".replace(" ", "_")
                     zf.writestr(f"annual-statement-{year}-{safe_name}.pdf", pdf_bytes)
                 except Exception:

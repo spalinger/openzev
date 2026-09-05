@@ -208,6 +208,109 @@ class TestBulkGenerationTasks:
         save_pdf.assert_called_once()
         assert save_pdf.call_args[0][0].pk == invoice.pk
 
+    def test_pdf_batch_builds_one_context_per_zev_period(self):
+        from invoices.pdf import _build_template_context
+        from invoices.tasks import _render_pdfs
+
+        owner = OwnerFactory()
+        zev = ZevFactory(owner=owner)
+        invoices = [
+            _invoice(ParticipantFactory(zev=zev)),
+            _invoice(ParticipantFactory(zev=zev)),
+        ]
+        shares_by_date = {}
+        period_stats = ({}, [])
+        zev_totals_by_ts = ({}, {})
+        assignment_windows = mock.sentinel.assignment_windows
+
+        with (
+            mock.patch(
+                "invoices.pdf.eligible_participant_shares",
+                return_value=shares_by_date,
+            ) as build_shares,
+            mock.patch(
+                "invoices.pdf.community_totals_by_timestamp",
+                return_value=zev_totals_by_ts,
+            ) as build_totals,
+            mock.patch(
+                "invoices.pdf.AssignmentWindows.for_zev",
+                return_value=assignment_windows,
+            ) as build_windows,
+            mock.patch(
+                "invoices.pdf._compute_period_participant_stats",
+                return_value=period_stats,
+            ) as build_stats,
+            mock.patch("invoices.pdf.save_invoice_pdf") as save_pdf,
+        ):
+            failed = _render_pdfs(invoices)
+
+        assert failed == 0
+        build_shares.assert_called_once_with(
+            zev, date(2026, 1, 1), date(2026, 1, 31),
+        )
+        build_totals.assert_called_once()
+        build_windows.assert_called_once_with(
+            zev, date(2026, 1, 1), date(2026, 1, 31),
+        )
+        build_stats.assert_called_once_with(
+            invoices[0],
+            shares_by_date=shares_by_date,
+            zev_totals_by_ts=zev_totals_by_ts,
+            assignment_windows=assignment_windows,
+        )
+        assert save_pdf.call_count == 2
+        contexts = [call.kwargs["period_context"] for call in save_pdf.call_args_list]
+        assert contexts[0] is contexts[1]
+        assert contexts[0].shares_by_date is shares_by_date
+        assert contexts[0].participant_stats is period_stats
+        assert contexts[0].zev_totals_by_ts is zev_totals_by_ts
+        assert contexts[0].assignment_windows is assignment_windows
+
+        other_period = _invoice(
+            ParticipantFactory(zev=zev),
+            period_start=date(2026, 2, 1),
+            period_end=date(2026, 2, 28),
+        )
+        with pytest.raises(ValueError, match="does not match invoice scope"):
+            _build_template_context(other_period, period_context=contexts[0])
+
+    def test_pdf_batch_does_not_retry_a_failed_period_context(self):
+        from invoices.tasks import _render_pdfs
+
+        owner = OwnerFactory()
+        zev = ZevFactory(owner=owner)
+        invoices = [
+            _invoice(ParticipantFactory(zev=zev)),
+            _invoice(ParticipantFactory(zev=zev)),
+        ]
+        other_period = _invoice(
+            ParticipantFactory(zev=zev),
+            period_start=date(2026, 2, 1),
+            period_end=date(2026, 2, 28),
+        )
+
+        with (
+            mock.patch(
+                "invoices.pdf.build_invoice_pdf_period_context",
+                side_effect=[
+                    ValueError("invalid shared data"),
+                    mock.sentinel.other_period_context,
+                ],
+            ) as build_context,
+            mock.patch("invoices.pdf.save_invoice_pdf") as save_pdf,
+        ):
+            failed = _render_pdfs([*invoices, other_period])
+
+        assert failed == 2
+        assert build_context.call_args_list == [
+            mock.call(invoices[0]),
+            mock.call(other_period),
+        ]
+        save_pdf.assert_called_once_with(
+            other_period,
+            period_context=mock.sentinel.other_period_context,
+        )
+
 
 class TestPdfsAreProducedWithTheInvoice:
     """A PDF is part of producing an invoice, not a later step the operator has
@@ -362,6 +465,50 @@ class TestBulkGenerationIsolatesPerParticipantFailures:
         assert len(event.metadata_json["failures"]) == 1
         assert event.metadata_json["failures"][0]["participant_id"] == str(blocked.id)
         assert "1 participant(s) failed" in event.summary
+
+    def test_shared_context_failure_reports_every_participant_in_the_audit_event(self):
+        """A failure in the once-per-batch shared setup must look exactly like N
+        individual failures to the caller and to the audit trail (ADR 0011): no
+        invoice is created, every participant gets a failure entry, and the task
+        still writes a FAILED audit event instead of crashing before it."""
+        from audit.models import AuditEvent, AuditEventStatus
+        from invoices.models import Invoice
+        from invoices.tasks import generate_zev_invoices_task
+
+        owner = OwnerFactory()
+        zev = ZevFactory(owner=owner)
+        first = ParticipantFactory(zev=zev)
+        second = ParticipantFactory(zev=zev)
+
+        with mock.patch(
+            "invoices.engine.InvoiceGenerationContext.build",
+            side_effect=RuntimeError("boom: shared build"),
+        ) as build:
+            generate_zev_invoices_task(str(zev.id), "2026-01-01", "2026-01-31")
+
+        build.assert_called_once()
+        assert Invoice.objects.filter(zev=zev).count() == 0
+
+        event = AuditEvent.objects.filter(action_type="invoice.generate_all").latest("created_at")
+        assert event.status == AuditEventStatus.FAILED
+        assert event.metadata_json["invoice_count"] == 0
+        assert {f["participant_id"] for f in event.metadata_json["failures"]} == {str(first.id), str(second.id)}
+        assert all(f["error"] == "boom: shared build" for f in event.metadata_json["failures"])
+        assert "2 participant(s) failed" in event.summary
+
+    def test_empty_batch_does_not_build_shared_context(self):
+        """No participants -> no shared build, empty result (unchanged from main)."""
+        from invoices.engine import generate_invoices_for_zev
+
+        owner = OwnerFactory()
+        zev = ZevFactory(owner=owner)
+
+        with mock.patch("invoices.engine.InvoiceGenerationContext.build") as build:
+            result = generate_invoices_for_zev(zev, date(2026, 1, 1), date(2026, 1, 31))
+
+        build.assert_not_called()
+        assert result.invoices == []
+        assert result.failures == []
 
     def test_failed_participant_gives_its_invoice_number_back(self):
         """A failure *after* ``next_invoice_number()`` must give its number back.

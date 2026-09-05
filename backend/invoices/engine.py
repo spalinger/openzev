@@ -9,9 +9,11 @@ Algorithm:
 5. Build invoice totals and line items.
 """
 import logging
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone as tz, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Iterable, NamedTuple
+from uuid import UUID
 
 from django.db import models, transaction
 from django.utils import timezone
@@ -47,6 +49,45 @@ logger = logging.getLogger(__name__)
 # ─── Gathering ────────────────────────────────────────────────────────────────
 
 
+ParticipantWeightWindow = tuple[date, date | None, Decimal]
+
+
+@dataclass
+class InvoiceGenerationContext:
+    """Community-wide denominators shared by one ZEV-period batch."""
+
+    scope: tuple[UUID, date, date]
+    weight_windows: list[ParticipantWeightWindow]
+    weight_sum_by_date: dict[date, Decimal]
+    weight_sums_by_tariff: dict[UUID, dict[date, Decimal]] = field(default_factory=dict)
+    participant_counts_by_tariff: dict[UUID, dict[date, int]] = field(default_factory=dict)
+
+    @classmethod
+    def build(
+        cls,
+        zev: Zev,
+        period_start: date,
+        period_end: date,
+        *,
+        windows: list[ParticipantWeightWindow] | None = None,
+    ) -> "InvoiceGenerationContext":
+        if windows is None:
+            windows = _participant_weight_windows(zev, period_start, period_end)
+        return cls(
+            scope=(zev.pk, period_start, period_end),
+            weight_windows=windows,
+            weight_sum_by_date=_allocation_weight_sum_by_date(
+                zev, period_start, period_end, windows=windows,
+            ),
+        )
+
+    def validate_for(
+        self, participant: Participant, period_start: date, period_end: date,
+    ) -> None:
+        if self.scope != (participant.zev_id, period_start, period_end):
+            raise ValueError("Invoice generation context does not match invoice scope.")
+
+
 class PeriodReadings(NamedTuple):
     """Everything the pricing loops need to read, fetched once per invoice.
 
@@ -62,8 +103,7 @@ class PeriodReadings(NamedTuple):
     denominator for the invoice period, used to turn a community reading's
     price into this participant's share. There is deliberately no month-
     granular twin here: the fixed-fee denominators are clamped to each
-    tariff's own validity, so they are built inside ``_price_fixed_fees``
-    from one shared membership fetch rather than precomputed per invoice.
+    tariff's own validity and cached per tariff by ``InvoiceGenerationContext``.
     """
 
     participant_consumption: models.QuerySet
@@ -116,7 +156,12 @@ def _readings_in_period(metering_points, start_dt, end_dt, direction):
     )
 
 
-def _gather_period_readings(participant, period_start, period_end) -> PeriodReadings:
+def _gather_period_readings(
+    participant,
+    period_start,
+    period_end,
+    generation_context: InvoiceGenerationContext,
+) -> PeriodReadings:
     """Fetch the participant's own readings and the community-wide totals."""
     zev = participant.zev
     start_dt, end_dt = period_window(period_start, period_end)
@@ -151,7 +196,7 @@ def _gather_period_readings(participant, period_start, period_end) -> PeriodRead
             community_points(PRODUCTION_METER_TYPES), start_dt, end_dt, ReadingDirection.OUT),
         zev_consumption_by_ts=zev_consumption_by_ts,
         zev_production_by_ts=zev_production_by_ts,
-        weight_sum_by_date=_allocation_weight_sum_by_date(zev, period_start, period_end),
+        weight_sum_by_date=generation_context.weight_sum_by_date,
         # ZEV-wide, not participant-scoped: the personal loops must be able to
         # resolve *any* window at a reading's timestamp — another
         # participant's, or a community one — to tell a true gap apart from
@@ -579,7 +624,11 @@ def _billable_months(tariff: Tariff, period_start: date, period_end: date):
     )
 
 
-def _count_active_participants_by_month(zev: Zev, tariff: Tariff, period_start: date, period_end: date) -> dict[date, int]:
+def _count_active_participants_by_month(
+    zev: Zev, tariff: Tariff, period_start: date, period_end: date,
+    *,
+    windows: list[ParticipantWeightWindow] | None = None,
+) -> dict[date, int]:
     """How many participants each billed month is shared between.
 
     Keyed by the first day of the month. A month with nobody active is absent
@@ -596,11 +645,8 @@ def _count_active_participants_by_month(zev: Zev, tariff: Tariff, period_start: 
     exist, so generating one participant's invoice on its own yields the same
     share as a full run.
     """
-    # Single fetch, then month-by-month in Python — same shape as the
-    # per-metering-point count above.
-    windows = list(
-        Participant.objects.filter(zev=zev).values_list("valid_from", "valid_to")
-    )
+    if windows is None:
+        windows = _participant_weight_windows(zev, period_start, period_end)
 
     counts: dict[date, int] = {}
     for month, billed_from, billed_to in _billable_months(tariff, period_start, period_end):
@@ -609,7 +655,7 @@ def _count_active_participants_by_month(zev: Zev, tariff: Tariff, period_start: 
         # month's denominator — they receive no invoice, and counting them
         # would leave the community short.
         active = sum(
-            1 for valid_from, valid_to in windows
+            1 for valid_from, valid_to, _weight in windows
             if _overlaps(valid_from, valid_to, billed_from, billed_to)
         )
         if active:
@@ -618,16 +664,16 @@ def _count_active_participants_by_month(zev: Zev, tariff: Tariff, period_start: 
     return counts
 
 
-def _participant_weight_windows(zev: Zev) -> list[tuple[date, date | None, Decimal]]:
-    """``(valid_from, valid_to, allocation_weight)`` for every participant of ``zev``.
-
-    Fetched once and resolved in Python by the weight-sum helpers below —
-    the same "single fetch, then Python" shape the rest of this module uses.
-    Callers pricing several tariffs in one invoice should fetch once and pass
-    the result down rather than re-querying per tariff.
-    """
+def _participant_weight_windows(
+    zev: Zev,
+    period_start: date,
+    period_end: date,
+) -> list[ParticipantWeightWindow]:
+    """Weight windows for participants overlapping the inclusive period."""
     return list(
-        Participant.objects.filter(zev=zev).values_list("valid_from", "valid_to", "allocation_weight")
+        active_during(
+            Participant.objects.filter(zev=zev), period_start, period_end,
+        ).values_list("valid_from", "valid_to", "allocation_weight")
     )
 
 
@@ -637,7 +683,7 @@ def _allocation_weight_sum_by_month(
     period_end: date,
     tariff: Tariff | None = None,
     *,
-    windows: list | None = None,
+    windows: list[ParticipantWeightWindow] | None = None,
 ) -> dict[date, Decimal]:
     """Sum of ``Participant.allocation_weight`` active in each billed month.
 
@@ -662,7 +708,7 @@ def _allocation_weight_sum_by_month(
     zero, so a caller cannot divide by it.
     """
     if windows is None:
-        windows = _participant_weight_windows(zev)
+        windows = _participant_weight_windows(zev, period_start, period_end)
 
     months = (
         _billable_months(tariff, period_start, period_end)
@@ -683,7 +729,13 @@ def _allocation_weight_sum_by_month(
     return sums
 
 
-def _allocation_weight_sum_by_date(zev: Zev, period_start: date, period_end: date) -> dict[date, Decimal]:
+def _allocation_weight_sum_by_date(
+    zev: Zev,
+    period_start: date,
+    period_end: date,
+    *,
+    windows: list[ParticipantWeightWindow] | None = None,
+) -> dict[date, Decimal]:
     """Sum of ``Participant.allocation_weight`` active on each calendar date.
 
     Date-granular, matching ``participant_on``: feeds shared energy, levies
@@ -691,9 +743,8 @@ def _allocation_weight_sum_by_date(zev: Zev, period_start: date, period_end: dat
     date rather than at the start of the month. A date with no eligible
     participant is absent, not zero.
     """
-    windows = list(
-        Participant.objects.filter(zev=zev).values_list("valid_from", "valid_to", "allocation_weight")
-    )
+    if windows is None:
+        windows = _participant_weight_windows(zev, period_start, period_end)
 
     sums: dict[date, Decimal] = {}
     cursor = period_start
@@ -882,7 +933,11 @@ def _build_sort_order(tariff: Tariff) -> int:
     return category_rank + energy_rank + mode_rank
 
 
-def _price_fixed_fees(participant, tariffs, period_start, period_end, accumulator) -> None:
+def _price_fixed_fees(
+    participant, tariffs, period_start, period_end, accumulator,
+    *,
+    generation_context: InvoiceGenerationContext,
+) -> None:
     """Charge the tariffs that bill by time rather than by energy.
 
     Counted once per invoice, not once per reading: a fee applies to every
@@ -900,20 +955,34 @@ def _price_fixed_fees(participant, tariffs, period_start, period_end, accumulato
     share — ``split_key`` plays no part here, since a community meter's cost
     always allocates by weight.
 
-    Both weight-split paths share one fetch of the ZEV's participant windows,
-    resolved per tariff in Python: the denominator's *months* are
-    tariff-specific but the underlying membership rows are not, so querying
-    per tariff would be an N+1 over the ZEV's tariff list.
+    The call-scoped ``InvoiceGenerationContext`` caches each tariff's
+    community-wide denominator on first use.
     """
-    weight_windows: list | None = None
-
     def weight_sums_for(tariff: Tariff) -> dict[date, Decimal]:
-        nonlocal weight_windows
-        if weight_windows is None:
-            weight_windows = _participant_weight_windows(participant.zev)
-        return _allocation_weight_sum_by_month(
-            participant.zev, period_start, period_end, tariff, windows=weight_windows,
-        )
+        if tariff.pk not in generation_context.weight_sums_by_tariff:
+            generation_context.weight_sums_by_tariff[tariff.pk] = (
+                _allocation_weight_sum_by_month(
+                    participant.zev,
+                    period_start,
+                    period_end,
+                    tariff,
+                    windows=generation_context.weight_windows,
+                )
+            )
+        return generation_context.weight_sums_by_tariff[tariff.pk]
+
+    def participant_counts_for(tariff: Tariff) -> dict[date, int]:
+        if tariff.pk not in generation_context.participant_counts_by_tariff:
+            generation_context.participant_counts_by_tariff[tariff.pk] = (
+                _count_active_participants_by_month(
+                    participant.zev,
+                    tariff,
+                    period_start,
+                    period_end,
+                    windows=generation_context.weight_windows,
+                )
+            )
+        return generation_context.participant_counts_by_tariff[tariff.pk]
 
     for tariff in tariffs:
         if tariff.billing_mode in _ENERGY_BILLING_MODES:
@@ -986,8 +1055,7 @@ def _price_fixed_fees(participant, tariffs, period_start, period_end, accumulato
                 shares = weight_sums_for(tariff)
                 numerator = participant.allocation_weight
             else:
-                shares = _count_active_participants_by_month(
-                    participant.zev, tariff, period_start, period_end)
+                shares = participant_counts_for(tariff)
                 numerator = Decimal("1")
             total = Decimal("0")
             charged_months = 0
@@ -1186,17 +1254,34 @@ def _price_energy(acc, tariffs, energy_type, quantity, ts, day, *, sign, bucket=
 
 
 @transaction.atomic
-def generate_invoice(participant: Participant, period_start: date, period_end: date) -> Invoice:
+def generate_invoice(
+    participant: Participant,
+    period_start: date,
+    period_end: date,
+    generation_context: InvoiceGenerationContext | None = None,
+) -> Invoice:
     """
     Generate (or regenerate) an invoice for a participant for the given period.
     Existing DRAFT invoice for the same period will be replaced.
     Raises ValueError if a non-draft, non-cancelled invoice already exists.
+
+    Batch callers pass an ``InvoiceGenerationContext`` with precomputed
+    ZEV-period denominators. The single-invoice path omits it and derives the
+    same values on demand.
     """
     zev = participant.zev
 
+    if generation_context is not None:
+        generation_context.validate_for(participant, period_start, period_end)
     _discard_replaceable_invoices(participant, period_start, period_end)
+    if generation_context is None:
+        generation_context = InvoiceGenerationContext.build(
+            zev, period_start, period_end,
+        )
 
-    readings = _gather_period_readings(participant, period_start, period_end)
+    readings = _gather_period_readings(
+        participant, period_start, period_end, generation_context=generation_context,
+    )
     zev_consumption_by_ts = readings.zev_consumption_by_ts
     zev_production_by_ts = readings.zev_production_by_ts
 
@@ -1400,7 +1485,10 @@ def generate_invoice(participant: Participant, period_start: date, period_end: d
                     period=period,
                 )
 
-    _price_fixed_fees(participant, tariffs_list, period_start, period_end, items_accumulator)
+    _price_fixed_fees(
+        participant, tariffs_list, period_start, period_end, items_accumulator,
+        generation_context=generation_context,
+    )
 
     if skipped_consumption_readings or skipped_production_readings or \
        skipped_community_consumption_readings or skipped_community_production_readings:
@@ -1496,13 +1584,48 @@ def generate_invoices_for_zev(zev: Zev, period_start: date, period_end: date) ->
 
     Failures are isolated per participant (see ADR 0011) and returned in
     ``failures`` as ``{"participant_id": ..., "participant_name": ..., "error": ...}``.
+    A failure in the once-per-batch shared setup is reported as one such
+    entry per participant, so the task's FAILED audit event is still written.
     """
-    participants = active_during(zev.participants, period_start, period_end)
+    participants = list(active_during(
+        zev.participants,
+        period_start,
+        period_end,
+    ))
+    if not participants:
+        return BulkGenerationResult([], [])
+    weight_windows = [
+        (p.valid_from, p.valid_to, p.allocation_weight) for p in participants
+    ]
+    # Shared setup is built once per ZEV-period. If it fails, nobody in the
+    # batch can be billed — report that once per participant so the caller
+    # and the audit trail see the same shape as N individual failures
+    # (ADR 0011), instead of letting the exception escape the batch.
+    try:
+        generation_context = InvoiceGenerationContext.build(
+            zev, period_start, period_end, windows=weight_windows,
+        )
+    except SoftTimeLimitExceeded:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "Shared invoice context build failed for ZEV %s, %s to %s",
+            zev.pk, period_start, period_end,
+        )
+        failures = [{
+            "participant_id": str(participant.id),
+            "participant_name": participant.full_name,
+            "error": str(exc),
+        } for participant in participants]
+        return BulkGenerationResult([], failures)
     invoices = []
     failures = []
     for participant in participants:
         try:
-            invoices.append(generate_invoice(participant, period_start, period_end))
+            invoices.append(generate_invoice(
+                participant, period_start, period_end,
+                generation_context=generation_context,
+            ))
         except SoftTimeLimitExceeded:
             # A soft time limit must abort the whole run, not be recorded as one
             # participant's failure; swallowing it would let the loop run into the
