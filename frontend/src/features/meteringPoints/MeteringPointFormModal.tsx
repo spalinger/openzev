@@ -36,7 +36,10 @@ export function MeteringPointFormModal({
           <span>{t('pages.meteringPoints.form.meterId')}</span>
           <input
             value={form.meter_id}
-            onChange={(event) => setForm((previous) => ({ ...previous, meter_id: event.target.value }))}
+            onChange={(event) => {
+              const value = event.target.value
+              setForm((previous) => ({ ...previous, meter_id: value }))
+            }}
             required
           />
         </label>
@@ -45,9 +48,10 @@ export function MeteringPointFormModal({
           <span>{t('pages.meteringPoints.form.meterType')}</span>
           <select
             value={form.meter_type}
-            onChange={(event) =>
-              setForm((previous) => ({ ...previous, meter_type: event.target.value as MeteringPointInput['meter_type'] }))
-            }
+            onChange={(event) => {
+              const value = event.target.value as MeteringPointInput['meter_type']
+              setForm((previous) => ({ ...previous, meter_type: value }))
+            }}
           >
             {METER_TYPE_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
@@ -60,7 +64,10 @@ export function MeteringPointFormModal({
         <div style={{ gridColumn: '1 / -1' }}>
           <Switch
             checked={form.is_active}
-            onChange={(event) => setForm((previous) => ({ ...previous, is_active: event.currentTarget.checked }))}
+            onChange={(event) => {
+              const checked = event.currentTarget.checked
+              setForm((previous) => ({ ...previous, is_active: checked }))
+            }}
             label={t('pages.meteringPoints.form.active')}
             description={t('pages.meteringPoints.form.activeHint')}
           />
@@ -70,7 +77,10 @@ export function MeteringPointFormModal({
           <span>{t('pages.meteringPoints.form.location')}</span>
           <input
             value={form.location_description ?? ''}
-            onChange={(event) => setForm((previous) => ({ ...previous, location_description: event.target.value }))}
+            onChange={(event) => {
+              const value = event.target.value
+              setForm((previous) => ({ ...previous, location_description: value }))
+            }}
           />
         </label>
 

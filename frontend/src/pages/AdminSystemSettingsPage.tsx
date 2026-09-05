@@ -573,9 +573,10 @@ export function AdminSystemSettingsPage() {
                     <Switch
                         name="enabled"
                         checked={oauthForm.enabled}
-                        onChange={(event) =>
-                            setOauthForm((previous) => ({ ...previous, enabled: event.currentTarget.checked }))
-                        }
+                        onChange={(event) => {
+                            const checked = event.currentTarget.checked
+                            setOauthForm((previous) => ({ ...previous, enabled: checked }))
+                        }}
                         label={t('adminOAuth.fieldEnabled')}
                     />
 

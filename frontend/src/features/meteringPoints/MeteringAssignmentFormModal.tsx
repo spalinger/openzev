@@ -37,7 +37,10 @@ export function MeteringAssignmentFormModal({
           <span>{t('pages.meteringPoints.assignForm.participant')}</span>
           <select
             value={form.participant}
-            onChange={(event) => setForm((previous) => ({ ...previous, participant: event.target.value }))}
+            onChange={(event) => {
+              const value = event.target.value
+              setForm((previous) => ({ ...previous, participant: value }))
+            }}
             required
           >
             <option value="">{t('pages.meteringPoints.assignForm.selectParticipant')}</option>
@@ -72,12 +75,13 @@ export function MeteringAssignmentFormModal({
           <span>{t('pages.meteringPoints.assignForm.allocationMode')}</span>
           <select
             value={form.allocation_mode}
-            onChange={(event) =>
+            onChange={(event) => {
+              const value = event.target.value as MeteringPointAssignmentInput['allocation_mode']
               setForm((previous) => ({
                 ...previous,
-                allocation_mode: event.target.value as MeteringPointAssignmentInput['allocation_mode'],
+                allocation_mode: value,
               }))
-            }
+            }}
           >
             <option value="personal">{t('pages.meteringPoints.assignForm.allocationModePersonal')}</option>
             <option value="community">{t('pages.meteringPoints.assignForm.allocationModeCommunity')}</option>
