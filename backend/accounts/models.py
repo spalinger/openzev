@@ -35,6 +35,18 @@ class User(AbstractUser):
         default=UserRole.PARTICIPANT,
     )
     must_change_password = models.BooleanField(default=False)
+    # The community opened by default for this user. Owners and admins who
+    # manage several communities can switch between them; this records the one
+    # to land on, so the default does not depend on the order the list happens
+    # to be collated in. ``None`` means "first managed community by name".
+    preferred_zev = models.ForeignKey(
+        "zev.Zev",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Default community (ZEV) opened for this user.",
+    )
     objects = OpenZevUserManager()
 
     @property

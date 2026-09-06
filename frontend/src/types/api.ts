@@ -13,6 +13,8 @@ export interface User {
     last_name: string
     role: UserRole
     must_change_password: boolean
+    /** Account-level default community (ZEV id), always present; null = first managed by name. */
+    preferred_zev: string | null
     /** Participants only: name of their community (from /auth/me). */
     zev_name?: string | null
     /** Participants only: number of held memberships (from /auth/me). */

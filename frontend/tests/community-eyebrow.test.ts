@@ -106,6 +106,7 @@ function mockOwner() {
             last_name: '',
             role: 'zev_owner',
             must_change_password: false,
+            preferred_zev: null,
         },
     })
     mockManagedZev.mockReturnValue({
@@ -132,6 +133,7 @@ function mockAdmin() {
             last_name: '',
             role: 'admin',
             must_change_password: false,
+            preferred_zev: null,
         },
     })
     mockManagedZev.mockReturnValue({
@@ -160,6 +162,7 @@ function mockParticipant(zevCount = 1) {
             zev_name: 'Member ZEV',
             zev_count: zevCount,
             must_change_password: false,
+            preferred_zev: null,
         },
     })
     mockManagedZev.mockReturnValue({
