@@ -576,6 +576,7 @@ The invoice PDF template receives:
 | Key | Description |
 |---|---|
 | `invoice` | Invoice model instance |
+| `vat_rate_percent` | `invoice.vat_rate × 100` as a `Decimal`; formatted to one decimal place in the VAT label |
 | `grouped_items` | Items grouped by `TariffCategory` (energy → grid_fees → levies → metering), each with category subtotal |
 | `zev` | ZEV model instance |
 | `owner_participant` | Participant record of the ZEV owner (for creditor address) |
@@ -592,6 +593,9 @@ The invoice PDF template receives:
 | `tr` | Translation dictionary for the ZEV's `invoice_language`; `notes_question` is pre-formatted with `DEFAULT_FROM_EMAIL` |
 | `status_display` | Localized status label from `tr["status_values"]`; falls back to the raw status value |
 | `formatted_dates` | `invoice_date`, `period_start`, `period_end`, `due_date` formatted per `AppSettings.date_format_short` |
+
+Custom templates must use `vat_rate_percent` for the VAT label or be reset to
+the default. Stored PDFs keep the old label until regenerated.
 
 ### 8.3 Localization
 
@@ -784,6 +788,7 @@ Strips legacy period suffixes from `description` on serialization.
 | `TranslationParityTests` | §8.3: all four locales have identical, non-empty translation keys and identical `status_values` keys |
 | `PaletteConsistencyTests` | Chart color constants in `pdf_charts.py` match the CSS variables in the default template |
 | `StatusTranslationTests` | §8.2: `status_display` is localized from `tr["status_values"]` in the template context |
+| `InvoicePdfVatLabelTests` | §8.2: percent conversion, zero-rate omission, and sample preview rendering |
 
 ### Frontend
 
