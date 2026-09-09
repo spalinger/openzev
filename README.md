@@ -267,6 +267,8 @@ python manage.py createsuperuser
 
 ### 2) Frontend
 
+Requires Node.js >=24.15 and <25; the repository pins 24.20.0 in `.node-version`.
+
 ```bash
 cd frontend
 cp .env.example .env

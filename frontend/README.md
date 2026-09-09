@@ -14,6 +14,8 @@ this file covers frontend-only development.
 
 ## Local development
 
+Requires Node.js >=24.15 and <25; the repository pins 24.20.0 in the root `.node-version`.
+
 ```bash
 npm install
 cp .env.example .env   # set VITE_API_BASE_URL (see root README)

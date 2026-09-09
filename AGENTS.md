@@ -16,6 +16,7 @@ This file gives coding agents the minimum project-specific context needed to wor
 - Frontend: React, TypeScript, TanStack Query, Vite
 - Async jobs: Celery + Redis
 - DB: PostgreSQL
+- Frontend commands and tests require Node.js >=24.15 and <25; activate the version pinned in the root `.node-version` and verify with `node --version` before running them
 
 ## Local Development Commands
 
