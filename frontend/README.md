@@ -14,6 +14,8 @@ this file covers frontend-only development.
 
 ## Local development
 
+Use the Node version pinned in `.node-version` (currently 24.20.0).
+
 ```bash
 npm install
 cp .env.example .env   # set VITE_API_BASE_URL (see root README)

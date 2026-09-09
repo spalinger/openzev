@@ -16,6 +16,7 @@ This file gives coding agents the minimum project-specific context needed to wor
 - Frontend: React, TypeScript, TanStack Query, Vite
 - Async jobs: Celery + Redis
 - DB: PostgreSQL
+- Use the Node version pinned in `.node-version` (currently 24.20.0) for frontend commands and tests; verify with `node --version` before running them
 
 ## Local Development Commands
 
