@@ -14,7 +14,7 @@ this file covers frontend-only development.
 
 ## Local development
 
-Requires Node.js >=24.15 and <25; the repository pins 24.20.0 in the root `.node-version`.
+Use the Node version pinned in `.node-version` (currently 24.20.0).
 
 ```bash
 npm install
