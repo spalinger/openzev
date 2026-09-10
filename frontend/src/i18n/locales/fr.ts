@@ -2074,8 +2074,8 @@ export const fr = {
                 semi_annual: 'Semestriel',
                 annual: 'Annuel',
             },
-            setupIncomplete: 'Configuration incomplète',
-            setupIncompleteHint: 'Les paramètres de facturation sont incomplets : aucun IBAN valide n\'est configuré, les factures QR ne peuvent donc pas encore être émises.',
+            ibanWarning: 'IBAN manquant ou invalide',
+            ibanWarningHint: 'Ajoutez un IBAN valide dans les paramètres de facturation du RCP pour émettre des factures QR payables.',
             ownerModal: {
                 title: 'Définir la personne responsable du RCP',
                 intro: 'Sélectionner la personne responsable pour {{name}}.',

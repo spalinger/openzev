@@ -2085,8 +2085,8 @@ export const en = {
                 semi_annual: 'Semi-Annual',
                 annual: 'Annual',
             },
-            setupIncomplete: 'Setup incomplete',
-            setupIncompleteHint: 'Billing settings are incomplete: no valid IBAN is configured, so QR invoices cannot be issued yet.',
+            ibanWarning: 'Missing or invalid IBAN',
+            ibanWarningHint: 'Add a valid IBAN in the ZEV billing settings to issue payable QR invoices.',
             ownerModal: {
                 title: 'Set responsible person for ZEV',
                 intro: 'Select the responsible person for {{name}}.',
