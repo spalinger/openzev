@@ -13,6 +13,7 @@ import {
 import type { FeasibilitySensitivityPoint } from '../../types/api'
 import { ANNOTATION_COLOR, AXIS_COLOR, CHART_GRIDLINE, CHART_INK, DIVERGING_POSITIVE, NEGATIVE_COLOR } from '../../lib/chartTokens'
 import { CHART_AXIS_TICK, CHART_TOOLTIP_STYLE, CHF_Y_AXIS_LABEL, chartAxisLabel } from '../../lib/chartTheme'
+import { formatChf, formatNumber, formatPercent } from '../../lib/numbers'
 
 // Blue/red diverging pair — validated colorblind-safe (worst adjacent CVD deltaE
 // 29.9, normal-vision 38.2; see dataviz skill's validate_palette.js). Green/red
@@ -33,9 +34,9 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
     const point = payload[0]
     return (
         <div style={CHART_TOOLTIP_STYLE}>
-            <p style={{ margin: 0, fontWeight: 600 }}>{point.payload.ratePct.toFixed(0)}% {t('pages.feasibility.chart.selfConsumptionShort')}</p>
+            <p style={{ margin: 0, fontWeight: 600 }}>{formatPercent(point.payload.ratePct, { maxDecimals: 0 })} {t('pages.feasibility.chart.selfConsumptionShort')}</p>
             <p style={{ margin: 0, color: point.value < 0 ? NEGATIVE_COLOR : LINE_COLOR }}>
-                CHF {point.value.toFixed(2)}
+                {formatChf(point.value)}
             </p>
         </div>
     )
@@ -62,13 +63,13 @@ export function FeasibilitySensitivityChart({ sensitivity, currentRatePct, curre
                         dataKey="ratePct"
                         type="number"
                         domain={[0, 100]}
-                        tickFormatter={(v: number) => `${v.toFixed(0)}%`}
+                        tickFormatter={(v: number) => formatPercent(v, { maxDecimals: 0 })}
                         stroke={AXIS_COLOR}
                         tick={CHART_AXIS_TICK}
                         label={chartAxisLabel(t('pages.feasibility.chart.selfConsumptionAxis'))}
                     />
                     <YAxis
-                        tickFormatter={(v: number) => v.toFixed(0)}
+                        tickFormatter={(v: number) => formatNumber(v, { maxDecimals: 0 })}
                         stroke={AXIS_COLOR}
                         tick={CHART_AXIS_TICK}
                         label={CHF_Y_AXIS_LABEL}
@@ -80,7 +81,7 @@ export function FeasibilitySensitivityChart({ sensitivity, currentRatePct, curre
                             x={breakEvenRatePct}
                             stroke={ANNOTATION_COLOR}
                             strokeDasharray="4 3"
-                            label={{ value: t('pages.feasibility.chart.breakEvenLabel', { rate: breakEvenRatePct.toFixed(0) }), position: 'top', fontSize: 11, fill: ANNOTATION_COLOR }}
+                            label={{ value: t('pages.feasibility.chart.breakEvenLabel', { rate: formatNumber(breakEvenRatePct, { maxDecimals: 0 }) }), position: 'top', fontSize: 11, fill: ANNOTATION_COLOR }}
                         />
                     )}
                     <Line type="monotone" dataKey="value" stroke={LINE_COLOR} strokeWidth={2} dot={false} isAnimationActive={false} />

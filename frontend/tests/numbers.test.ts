@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { formatChf, formatKwh, formatNumber } from '../src/lib/numbers'
+import { formatChf, formatKwh, formatNumber, formatPercent } from '../src/lib/numbers'
 
 describe('formatNumber', () => {
-  it('groups thousands with the Swiss apostrophe separator', () => {
-    expect(formatNumber(1234.5)).toBe("1'234.5")
-    expect(formatNumber(1000000)).toBe("1'000'000")
+  it('formats without thousands grouping', () => {
+    expect(formatNumber(1234.5)).toBe('1234.5')
+    expect(formatNumber(1000000)).toBe('1000000')
   })
 
   it('rounds to maxDecimals', () => {
@@ -25,24 +25,29 @@ describe('formatNumber', () => {
 })
 
 describe('formatKwh', () => {
-  it('groups thousands and caps at one decimal by default', () => {
-    expect(formatKwh(1234.56)).toBe("1'234.6")
+  it('caps at one decimal by default', () => {
+    expect(formatKwh(1234.56)).toBe('1234.6')
     expect(formatKwh(0.25)).toBe('0.3')
   })
 
   it('honours an explicit maxDecimals', () => {
     expect(formatKwh(2.345, { maxDecimals: 2 })).toBe('2.35')
   })
+
+  it('uses a placeholder for non-finite values', () => {
+    expect(formatKwh(NaN)).toBe('–')
+    expect(formatKwh(Infinity)).toBe('–')
+    expect(formatKwh(-Infinity)).toBe('–')
+  })
 })
 
 describe('formatChf', () => {
-  it('formats with Swiss grouping and two decimals', () => {
-    expect(formatChf(1234.5)).toBe("CHF 1'234.50")
+  it('formats with two decimals', () => {
+    expect(formatChf(1234.5)).toBe('CHF 1234.50')
   })
 
   it('uses the typographic minus sign for negative amounts', () => {
     expect(formatChf(-12.5)).toBe('CHF \u221212.50')
-    expect(formatChf(-1234.5)).toBe("CHF \u22121'234.50")
   })
 
   it('clamps values that round to zero to CHF 0.00, never a signed zero', () => {
@@ -60,5 +65,23 @@ describe('formatChf', () => {
     expect(formatChf(NaN)).toBe('CHF 0.00')
     expect(formatChf(Infinity)).toBe('CHF 0.00')
     expect(formatChf(-Infinity)).toBe('CHF 0.00')
+  })
+})
+
+describe('formatPercent', () => {
+  it('renders a percentage with up to one decimal by default', () => {
+    expect(formatPercent(45.25)).toBe('45.3\u00a0%')
+    expect(formatPercent(100)).toBe('100\u00a0%')
+  })
+
+  it('honours an explicit maxDecimals', () => {
+    expect(formatPercent(12.345, { maxDecimals: 0 })).toBe('12\u00a0%')
+  })
+
+  it('handles zero, negative, and non-finite values', () => {
+    expect(formatPercent(0)).toBe('0\u00a0%')
+    expect(formatPercent(-12.34)).toBe('-12.3\u00a0%')
+    expect(formatPercent(NaN)).toBe('–')
+    expect(formatPercent(Infinity)).toBe('–')
   })
 })

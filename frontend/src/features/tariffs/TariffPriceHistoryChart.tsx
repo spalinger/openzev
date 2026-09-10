@@ -16,6 +16,8 @@ import { formatUtcIsoDate, todayLocalIso } from '../../lib/dates'
 import type { AppSettings, TariffSeries } from '../../types/api'
 import { buildPriceHistory, type BandKey, type PriceUnit } from './priceHistory'
 import { AXIS_COLOR, CHART_GRID, CHART_GRIDLINE, CONS_COLORS, FLOW_LOCAL_CONS, NEGATIVE_COLOR } from '../../lib/chartTokens'
+import { CHART_AXIS_TICK, CHART_TOOLTIP_STYLE } from '../../lib/chartTheme'
+import { formatNumber } from '../../lib/numbers'
 
 // Blue (consumer series) and amber (chart grid accent) are the colourblind-safe
 // pair from the shared palette and carry the two bands that actually co-occur
@@ -64,6 +66,7 @@ export function TariffPriceHistoryChart({ series, allSeries, settings }: Props) 
     if (data.length < 2) return null
 
     const decimals = decimalsFor(history.unit)
+    const axisDecimals = decimals === 5 ? 3 : 2
     const unitLabel = history.unit === 'chf_per_kwh'
         ? t('pages.tariffs.chfPerKwh')
         : history.unit === 'chf'
@@ -107,13 +110,13 @@ export function TariffPriceHistoryChart({ series, allSeries, settings }: Props) 
                             formatShortDate(formatUtcIsoDate(new Date(value)), settings)
                         }
                         stroke={AXIS_COLOR}
-                        fontSize={11}
+                        tick={CHART_AXIS_TICK}
                         minTickGap={40}
                     />
                     <YAxis
                         stroke={AXIS_COLOR}
-                        fontSize={11}
-                        tickFormatter={(value: number) => value.toFixed(decimals === 5 ? 3 : 2)}
+                        tick={CHART_AXIS_TICK}
+                        tickFormatter={(value: number) => formatNumber(value, { minDecimals: axisDecimals, maxDecimals: axisDecimals })}
                         width={56}
                     />
                     <Tooltip
@@ -123,11 +126,11 @@ export function TariffPriceHistoryChart({ series, allSeries, settings }: Props) 
                         formatter={(value, name) => [
                             value === null || value === undefined
                                 ? t('pages.tariffs.priceHistory.noPrice')
-                                : `${Number(value).toFixed(decimals)} ${unitLabel}`,
+                                : `${formatNumber(Number(value), { minDecimals: decimals, maxDecimals: decimals })} ${unitLabel}`,
                             history.bandLabels[name as BandKey]
                                 ?? t(`pages.tariffs.priceHistory.bands.${name}` as Parameters<typeof t>[0], { defaultValue: String(name) }),
                         ]}
-                        contentStyle={{ fontSize: '0.82rem', borderRadius: 6 }}
+                        contentStyle={CHART_TOOLTIP_STYLE}
                     />
                     {history.bands.length > 1 && (
                         <Legend wrapperStyle={{ fontSize: '0.72rem' }} />

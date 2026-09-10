@@ -13,6 +13,7 @@ import {
 import type { FeasibilityFairPriceRange, FeasibilityPriceSensitivityPoint } from '../../types/api'
 import { ANNOTATION_COLOR, AXIS_COLOR, CHART_GRIDLINE, CHART_MUTED, CONS_COLORS, PROD_COLORS } from '../../lib/chartTokens'
 import { CHART_AXIS_TICK, CHART_TOOLTIP_STYLE, CHF_Y_AXIS_LABEL, ChartLegendSwatch, chartAxisLabel } from '../../lib/chartTheme'
+import { formatChf, formatNumber, formatPercent } from '../../lib/numbers'
 
 // Categorical pair (two distinct parties, not a polarity) — validated
 // colorblind-safe (worst adjacent CVD deltaE 30.3, normal-vision 33.3).
@@ -43,10 +44,10 @@ function CustomTooltip({
     return (
         <div style={CHART_TOOLTIP_STYLE}>
             <p style={{ margin: 0, fontWeight: 600 }}>
-                {point.pricePct.toFixed(0)}% ({point.priceChf.toFixed(3)} CHF/kWh)
+                {formatPercent(point.pricePct, { maxDecimals: 0 })} ({formatNumber(point.priceChf, { minDecimals: 3, maxDecimals: 3 })} CHF/kWh)
             </p>
-            <p style={{ margin: 0, color: PRODUCER_COLOR }}>{t('pages.feasibility.chart.producerGain')}: CHF {point.producerGain.toFixed(2)}</p>
-            <p style={{ margin: 0, color: CONSUMER_COLOR }}>{t('pages.feasibility.chart.consumerSavingsShort')}: CHF {point.consumerSavings.toFixed(2)}</p>
+            <p style={{ margin: 0, color: PRODUCER_COLOR }}>{t('pages.feasibility.chart.producerGain')}: {formatChf(point.producerGain)}</p>
+            <p style={{ margin: 0, color: CONSUMER_COLOR }}>{t('pages.feasibility.chart.consumerSavingsShort')}: {formatChf(point.consumerSavings)}</p>
         </div>
     )
 }
@@ -92,13 +93,13 @@ export function FeasibilityPriceSensitivityChart({
                         dataKey="pricePct"
                         type="number"
                         domain={[0, 100]}
-                        tickFormatter={(v: number) => `${v.toFixed(0)}%`}
+                        tickFormatter={(v: number) => formatPercent(v, { maxDecimals: 0 })}
                         stroke={AXIS_COLOR}
                         tick={CHART_AXIS_TICK}
                         label={chartAxisLabel(t('pages.feasibility.chart.internalPriceAxis'))}
                     />
                     <YAxis
-                        tickFormatter={(v: number) => v.toFixed(0)}
+                        tickFormatter={(v: number) => formatNumber(v, { maxDecimals: 0 })}
                         stroke={AXIS_COLOR}
                         tick={CHART_AXIS_TICK}
                         label={CHF_Y_AXIS_LABEL}

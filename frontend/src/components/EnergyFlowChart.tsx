@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { CHART_GRID, CHART_INK, CHART_MUTED, CONS_COLORS, FLOW_GRID_EXP, FLOW_LOCAL_CONS, OTHERS_COLOR, PROD_COLORS } from '../lib/chartTokens'
+import { formatKwh, formatPercent } from '../lib/numbers'
 
 interface EnergyFlowChartProps {
     totals: {
@@ -179,7 +180,7 @@ export function EnergyFlowChart({ totals, participantStats, highlightParticipant
                 value: localCons,
                 color: FLOW_LOCAL_CONS,
                 col: 2,
-                pct: `${selfConsumptionPct.toFixed(1)}%`,
+                pct: formatPercent(selfConsumptionPct),
             })
         }
         if (gridExport > 0) {
@@ -189,7 +190,7 @@ export function EnergyFlowChart({ totals, participantStats, highlightParticipant
                 value: gridExport,
                 color: FLOW_GRID_EXP,
                 col: 2,
-                pct: `${exportPct.toFixed(1)}%`,
+                pct: formatPercent(exportPct),
             })
         }
 
@@ -364,7 +365,7 @@ export function EnergyFlowChart({ totals, participantStats, highlightParticipant
                             onMouseEnter={() => setHoverLink(lk.id)}
                             onMouseLeave={() => setHoverLink(null)}
                         >
-                            <title>{`${src.label} → ${tgt.label}: ${lk.value.toFixed(1)} kWh`}</title>
+                            <title>{`${src.label} → ${tgt.label}: ${formatKwh(lk.value)} kWh`}</title>
                         </path>
                         {lk.th >= 10 && hit && (
                             <text
@@ -377,7 +378,7 @@ export function EnergyFlowChart({ totals, participantStats, highlightParticipant
                                 fillOpacity={0.85}
                                 style={{ pointerEvents: 'none' }}
                             >
-                                {lk.value.toFixed(1)} kWh
+                                {formatKwh(lk.value)} kWh
                             </text>
                         )}
                     </g>
@@ -404,21 +405,21 @@ export function EnergyFlowChart({ totals, participantStats, highlightParticipant
                         {isLeft && (
                             <>
                                 <text className="sankey-participant-label" x={x - 8} y={n.y + n.h / 2 - 6} textAnchor="end" dominantBaseline="central" fontSize={11} fill={CHART_INK}>{n.label}</text>
-                                <text x={x - 8} y={n.y + n.h / 2 + 7} textAnchor="end" dominantBaseline="central" fontSize={10} fill={CHART_MUTED}>{n.value.toFixed(1)} kWh</text>
+                                <text x={x - 8} y={n.y + n.h / 2 + 7} textAnchor="end" dominantBaseline="central" fontSize={10} fill={CHART_MUTED}>{formatKwh(n.value)} kWh</text>
                             </>
                         )}
 
                         {isRight && (
                             <>
                                 <text className="sankey-participant-label" x={x + BAR_W + 8} y={n.y + n.h / 2 - 6} textAnchor="start" dominantBaseline="central" fontSize={11} fill={CHART_INK}>{n.label}</text>
-                                <text x={x + BAR_W + 8} y={n.y + n.h / 2 + 7} textAnchor="start" dominantBaseline="central" fontSize={10} fill={CHART_MUTED}>{n.value.toFixed(1)} kWh</text>
+                                <text x={x + BAR_W + 8} y={n.y + n.h / 2 + 7} textAnchor="start" dominantBaseline="central" fontSize={10} fill={CHART_MUTED}>{formatKwh(n.value)} kWh</text>
                             </>
                         )}
 
                         {isMid && (
                             <>
                                 <text x={x + BAR_W / 2} y={n.y + n.h + 14} textAnchor="middle" fontSize={10} fill={CHART_INK}>{n.label}</text>
-                                <text x={x + BAR_W / 2} y={n.y + n.h + 26} textAnchor="middle" fontSize={9} fill={CHART_MUTED}>{n.value.toFixed(1)} kWh</text>
+                                <text x={x + BAR_W / 2} y={n.y + n.h + 26} textAnchor="middle" fontSize={9} fill={CHART_MUTED}>{formatKwh(n.value)} kWh</text>
                                 {n.pct && (
                                     <text x={x + BAR_W / 2} y={n.y + n.h + 38} textAnchor="middle" fontSize={10} fontWeight={600} fill={n.color}>{n.pct}</text>
                                 )}

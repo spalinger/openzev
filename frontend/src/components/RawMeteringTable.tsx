@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { CHART_LOCAL, FLOW_LOCAL_CONS } from '../lib/chartTokens'
+import { CHART_AXIS_TICK } from '../lib/chartTheme'
+import { formatNumber } from '../lib/numbers'
 import { Fragment, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
@@ -89,8 +91,8 @@ function pivotByInterval(readings: RawMeteringReading[]): IntervalRow[] {
     return Array.from(map.values()).sort((a, b) => a.ts.localeCompare(b.ts))
 }
 
-function kwh(value: number | null): string {
-    return value === null ? '–' : value.toFixed(4)
+function kwh(value: number | null | undefined): string {
+    return value == null ? '–' : formatNumber(value, { minDecimals: 4, maxDecimals: 4 })
 }
 
 /**
@@ -199,7 +201,7 @@ function SparkTooltip({
             <strong>{label}</strong>
             {payload.map((entry) => (
                 <div key={entry.name} style={{ color: entry.color }}>
-                    {entry.name}: {entry.value.toFixed(4)} kWh
+                    {entry.name}: {kwh(entry.value)} kWh
                 </div>
             ))}
         </div>
@@ -235,7 +237,7 @@ function DaySparkline({
                     </defs>
                     <XAxis
                         dataKey="time"
-                        tick={{ fontSize: 10 }}
+                        tick={CHART_AXIS_TICK}
                         tickLine={false}
                         axisLine={false}
                         interval={15}
@@ -459,14 +461,14 @@ export function RawMeteringTable({
                                             className="raw-metering-num"
                                             style={{ background: `linear-gradient(to right, var(--brand-pale) ${inBarPct}%, transparent ${inBarPct}%)` }}
                                         >
-                                            {day.in_kwh.toFixed(4)}
+                                            {kwh(day.in_kwh)}
                                         </td>
                                         {hasOut && (
                                             <td
                                                 className="raw-metering-num"
                                                 style={{ background: `linear-gradient(to right, var(--brand-pale) ${outBarPct}%, transparent ${outBarPct}%)` }}
                                             >
-                                                {day.out_kwh.toFixed(4)}
+                                                {kwh(day.out_kwh)}
                                             </td>
                                         )}
                                         <td className="raw-metering-num">{day.readings_count}</td>

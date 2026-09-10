@@ -34,9 +34,11 @@ import {
 } from '../lib/billingPeriod'
 import { formatShortDate, useAppSettings } from '../lib/appSettings'
 import { daysInPeriod, formatUtcIsoDate } from '../lib/dates'
+import { formatKwh } from '../lib/numbers'
 import { formatMeteringBucketLabel, meteringPointOptionLabel, outReadingLabelKey } from '../lib/meteringLabels'
 import type { AppSettings, ChartDataPoint, DataQualitySeverity, MeteringPoint, MeteringPointDataQuality } from '../types/api'
-import { CHART_GRID, CONS_COLORS, NEGATIVE_COLOR, PROD_COLORS } from '../lib/chartTokens'
+import { AXIS_COLOR, CHART_GRID, CHART_GRIDLINE, CONS_COLORS, NEGATIVE_COLOR, PROD_COLORS } from '../lib/chartTokens'
+import { CHART_AXIS_TICK, CHART_TOOLTIP_STYLE } from '../lib/chartTheme'
 
 // ── Custom Tooltip ────────────────────────────────────────────────────────────
 
@@ -56,19 +58,12 @@ function CustomTooltip({
     if (!active || !payload?.length || !label) return null
     return (
         <div
-            style={{
-                background: 'var(--surface-card)',
-                border: '1px solid var(--border-default)',
-                borderRadius: 6,
-                padding: '0.6rem 0.9rem',
-                fontSize: '0.85rem',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-            }}
+            style={CHART_TOOLTIP_STYLE}
         >
             <p style={{ margin: '0 0 4px', fontWeight: 600 }}>{formatMeteringBucketLabel(label, resolution, settings)}</p>
             {payload.map((entry) => (
                 <p key={entry.name} style={{ margin: '2px 0', color: entry.color }}>
-                    {entry.name}: <strong>{entry.value.toFixed(3)} kWh</strong>
+                    {entry.name}: <strong>{formatKwh(entry.value, { maxDecimals: 3 })} kWh</strong>
                 </p>
             ))}
         </div>
@@ -667,17 +662,17 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
                                     )}
                                     <StatCard
                                         label={t('pages.meteringData.stats.totalConsumption')}
-                                        value={`${totalIn.toFixed(2)} kWh`}
+                                        value={`${formatKwh(totalIn, { maxDecimals: 2 })} kWh`}
                                     />
                                     {peakIn && (
                                         <>
                                             <StatCard
                                                 label={t('pages.meteringData.stats.averageConsumption')}
-                                                value={`${averageIn.toFixed(2)} kWh`}
+                                                value={`${formatKwh(averageIn, { maxDecimals: 2 })} kWh`}
                                             />
                                             <StatCard
                                                 label={t('pages.meteringData.stats.peakConsumption')}
-                                                value={`${peakIn.in_kwh.toFixed(2)} kWh`}
+                                                value={`${formatKwh(peakIn.in_kwh, { maxDecimals: 2 })} kWh`}
                                                 hint={formatMeteringBucketLabel(peakIn.bucket, bucket, settings)}
                                             />
                                         </>
@@ -685,7 +680,7 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
                                     {hasOut && (
                                         <StatCard
                                             label={t(outReadingLabelKey(selectedMp?.meter_type, 'pages.meteringData.stats.totalProduction', 'pages.meteringData.stats.totalFeedIn'))}
-                                            value={`${totalOut.toFixed(2)} kWh`}
+                                            value={`${formatKwh(totalOut, { maxDecimals: 2 })} kWh`}
                                         />
                                     )}
                                     <StatCard
@@ -715,20 +710,23 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
                                                 margin={{ top: 8, right: 16, left: 0, bottom: 8 }}
                                                 barCategoryGap="20%"
                                             >
-                                                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                                <CartesianGrid stroke={CHART_GRIDLINE} strokeDasharray="3 3" vertical={false} />
                                                 <XAxis
                                                     dataKey="bucket"
                                                     tickFormatter={tickFormatter}
-                                                    tick={{ fontSize: 11 }}
+                                                    tick={CHART_AXIS_TICK}
+                                                    stroke={AXIS_COLOR}
                                                     tickLine={false}
                                                     interval="preserveStartEnd"
                                                 />
                                                 <YAxis
                                                     unit=" kWh"
-                                                    tick={{ fontSize: 11 }}
+                                                    tick={CHART_AXIS_TICK}
+                                                    stroke={AXIS_COLOR}
                                                     tickLine={false}
                                                     axisLine={false}
                                                     width={72}
+                                                    tickFormatter={(v: number) => formatKwh(v)}
                                                 />
                                                 <Tooltip
                                                     content={<CustomTooltip resolution={bucket} settings={settings} />}

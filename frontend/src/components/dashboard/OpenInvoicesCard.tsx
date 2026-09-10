@@ -9,6 +9,7 @@ import { OPEN_INVOICE_STATUSES } from '../../features/invoices/invoiceStatus'
 import { fetchInvoices } from '../../lib/api/invoices'
 import { queryKeys } from '../../lib/api/queryKeys'
 import { formatIsoDate } from '../../lib/dates'
+import { formatNumber } from '../../lib/numbers'
 import { useManagedZev } from '../../lib/managedZev'
 import { PageSkeleton } from '../PageSkeleton'
 
@@ -64,7 +65,7 @@ export function OpenInvoicesCard() {
                             {t('pages.dashboard.openInvoices.outstanding', {
                                 openCount: openInvoices.length,
                                 overdueCount,
-                                amount: sumTotalChf(openInvoices).toFixed(2),
+                                amount: formatNumber(sumTotalChf(openInvoices), { minDecimals: 2, maxDecimals: 2 }),
                             })}
                         </span>
                         <Link
