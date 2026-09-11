@@ -98,9 +98,27 @@ These specs describe the current major product capabilities and should be update
 - `2026-08-contract-pdf-redesign.md`
 - `2026-08-ui-redesign-pdf-style.md`
 
-## Frontend reference specs
+## Completed feature specs
 
-These specs capture reusable UI and interaction patterns and should be consulted
-for future frontend cleanup and standardization work:
+Shipped capabilities with their own implementation spec. Update the linked spec
+when the capability changes; do not treat them as baselines:
 
-- `2026-04-frontend-management-page-design.md`
+- `2026-08-shared-metering-points.md`
+- `2026-09-vse-tariff-import.md`
+- `2026-09-tariff-overview-pdf.md`
+- `2026-09-participant-invoice-access.md`
+
+| Change area | Completed spec to update |
+|---|---|
+| Community-allocated metering points, allocation weights, and weighted shared fees | `2026-08-shared-metering-points.md` |
+| Grid-operator tariff import (VSE/AES) | `2026-09-vse-tariff-import.md` |
+| Tariff overview PDF | `2026-09-tariff-overview-pdf.md` |
+| Passwordless participant invoice access (QR + magic link) | `2026-09-participant-invoice-access.md` |
+
+## Drafts
+
+- `2026-06-leg-billing-model.md` (Draft)
+
+## Archived
+
+- `2026-05-audit-log-implementation-tracker.md` — historical notes only; canonical doc is the audit-log baseline above.

@@ -64,17 +64,17 @@ PVshare Cockpit is a closed, subscription-based SaaS (CHF ~30/participant/year) 
 
 | PVshare feature | OpenZEV status | Roadmap action |
 |---|---|---|
-| LEG (Lokale Elektrizitätsgemeinschaft) support | Not supported | Added as `idea` — regulatory, new 2026 law |
-| Demand tariff (Leistungstarif) | Not supported | Added as `idea` — needed for CKW/similar grids |
-| Participant self-service onboarding via email auto-link | Admin invite only | Added as `idea` |
-| Invoice run reject + auto-recalculate workflow | Approve/cancel only | Added as `idea` |
-| Vacant unit auto-billing to ZEV responsible | Not explicit | Added as `idea` |
-| Proactive status-check page for ZEV owners | Data quality badges only | Added as `idea` |
-| Guided vZEV founding wizard with document templates | Setup wizard partial | Added as `idea` |
-| vZEV profit/feasibility calculator | `shipped` | Multi-participant calculator with prefill from real ZEV data — see Invoicing & Billing |
-| BFE reference market price auto-fetch (feed-in rate) | Manual tariff entry | Added as `idea` |
-| CO₂ savings display in participant statistics | Not present | Added as `idea` |
-| Partner / third-party billing access model | Not present | Added as `idea` |
+| LEG (Lokale Elektrizitätsgemeinschaft) support | Planned — billing-model spec exists | Invoicing & Billing — LEG billing model (high) |
+| Demand tariff (Leistungstarif) | Not supported | Metering & Data Quality — demand tariff (high), #529 |
+| Participant self-service onboarding via email auto-link | Partial — QR/magic-link access shipped | Participants & Community — email auto-link (medium) |
+| Invoice run reject + auto-recalculate workflow | Approve/cancel only | Invoicing & Billing (medium) |
+| Vacant unit auto-billing to ZEV responsible | Not explicit | Invoicing & Billing (medium) |
+| Proactive status-check page for ZEV owners | Partial — readiness/attention cockpit shipped | Participant Self-Service — status-check page (medium) |
+| Guided vZEV founding wizard with document templates | Setup wizard partial | Participants & Community (medium) |
+| vZEV profit/feasibility calculator | Shipped | See Invoicing & Billing |
+| BFE reference market price auto-fetch | Not supported; manual entry | Metering & Data Quality — BFE reference price (low); VSE importer does not fetch it |
+| CO₂ savings display in participant statistics | Not present | Participant Self-Service (low) |
+| Partner / third-party billing access model | Not present | Participants & Community (low) |
 
 ---
 
@@ -107,7 +107,8 @@ PVshare Cockpit is a closed, subscription-based SaaS (CHF ~30/participant/year) 
 | Per-ZEV customizable email subject/body templates with 6 interpolation variables | `shipped` | — | [spec](specs/2026-03-invoice-lifecycle-and-communication.md) |
 | Timestamp-level energy allocation billing engine (local vs. grid split) | `shipped` | — | [spec](specs/2026-03-tariffs-and-billing-engine.md) |
 | Producer credit allocation (local-consumption credit + feed-in compensation) | `shipped` | — | [spec](specs/2026-03-tariffs-and-billing-engine.md) |
-| Six billing modes (energy, % of grid, monthly fee, yearly fee, per-meter monthly/yearly) | `shipped` | — | [spec](specs/2026-03-tariffs-and-billing-engine.md) |
+| Eight billing modes (six base + two shared community-fee modes) | `shipped` | — | [spec](specs/2026-03-tariffs-and-billing-engine.md) |
+| Per-band invoice lines for multi-band tariffs (`Zev.itemize_tariff_bands`, off by default) | `shipped` | — | [release notes 1.9.0](release-notes/1.9.0.md) |
 | Time-band pricing with time-of-day, weekday, and month windows | `shipped` | — | HT/NT plus seasonal bands (#527) and three-or-more bands per tariff (#528) — [spec](specs/2026-03-tariffs-and-billing-engine.md) |
 | Four tariff categories (energy, grid fees, levies, metering) | `shipped` | — | [spec](specs/2026-03-tariffs-and-billing-engine.md) |
 | Tariff-only JSON export/import (tariff preset) | `removed` | — | Superseded by whole-ZEV transfer — [spec](specs/2026-08-zev-transfer-archive.md), [guide](user-guide/17-zev-transfer.md) |
@@ -115,7 +116,13 @@ PVshare Cockpit is a closed, subscription-based SaaS (CHF ~30/participant/year) 
 | VAT application with validity-windowed VAT rate table | `shipped` | — | [spec](specs/2026-03-tariffs-and-billing-engine.md) |
 | Annual financial report for tax purposes | `shipped` | — | — |
 | Period overview with strict daily completeness checking | `shipped` | — | [spec](specs/2026-03-invoice-lifecycle-and-communication.md) |
-| Contract PDF (multi-language, tariff rates, metering points, billing interval) | `shipped` | — | — |
+| Invoice readiness + attention cockpit | `shipped` | — | [spec](specs/2026-03-invoice-lifecycle-and-communication.md) §5.6a |
+| Tariff overview PDF | `shipped` | — | [spec](specs/2026-09-tariff-overview-pdf.md), #566 |
+| Invoice PDF status tracking (`Generating…` / `Failed`, self-refreshing list) | `shipped` | — | [release notes 1.11.0](release-notes/1.11.0.md) |
+| ZEV `vat_mode` (not registered / registered / inclusive) | `shipped` | — | [ADR 0016](adr/0016-vat-mode-inclusive.md) |
+| Whole-ZEV transfer archive (export / inspect / import) | `shipped` | — | [spec](specs/2026-08-zev-transfer-archive.md), [guide](user-guide/17-zev-transfer.md) |
+| Async annual-statement ZIP export | `shipped` | — | [ADR 0017](adr/0017-async-export-jobs.md) |
+| Contract PDF redesign, versioned issuance (`POST` issues, `GET` streams latest) | `shipped` | — | [spec](specs/2026-08-contract-pdf-redesign.md) |
 | vZEV feasibility / profitability calculator (aggregate or per-participant, energy-flow topology, self-consumption & internal-price sensitivity, payback/ROI/NPV, prefill of a real ZEV's participants, measured self-consumption, and all-in tariffs) | `shipped` | — | [guide](user-guide/13-feasibility-calculator.md) |
 | Scheduled invoice auto-generation (cron-triggered, per-ZEV billing interval) | `idea` | `medium` | Would remove the manual "generate all" step each month |
 | Payment reference number (QRR / SCOR) on the invoice QR bill | `idea` | `medium` | Needed for automated bank reconciliation; the QR bill already ships, the structured reference does not — #536 |
@@ -144,6 +151,7 @@ PVshare Cockpit is a closed, subscription-based SaaS (CHF ~30/participant/year) 
 | Chart data endpoint (aggregated energy by direction, bucketed day/hour/month) | `shipped` | — | — |
 | Data quality status (green/yellow/red gap detection with gap spans) | `shipped` | — | [spec](specs/2026-03-metering-import-and-quality.md) |
 | Energy flow Sankey chart (ZEV-level production/consumption overview) | `shipped` | — | — |
+| Metering screens rebuilt around problem-finding (whole-ZEV total, raw-data warnings for missing energy, negative values, and duplicate timestamps, severity filters) | `shipped` | — | [release notes 1.12.0](release-notes/1.12.0.md) |
 | Data completeness alerts — notify ZEV owner when metering gap detected | `idea` | `high` | Proactive; prevents invoice blocking surprises |
 | Flag holder-less readings in data-quality status | `shipped` | — | PR #396; unassigned readings surfaced per metering point |
 | Automated SDAT-CH polling / scheduled import from VNB | `idea` | `medium` | Removes manual upload step for SDAT customers |
@@ -167,11 +175,12 @@ PVshare Cockpit is a closed, subscription-based SaaS (CHF ~30/participant/year) 
 | Participant invitation (reset password + email with temporary credentials) | `shipped` | — | — |
 | Participant account linking / unlinking | `shipped` | — | [spec](specs/2026-03-metering-point-management.md) |
 | Auto-create user account on participant creation | `shipped` | — | — |
-| Participant contract PDF (metering points, tariffs, billing interval, notes) | `shipped` | — | Versioned contract snapshots on download (PR #443) |
+| Participant contract PDF (metering points, tariffs, billing interval, notes) | `shipped` | — | Versioned contract snapshots on download (PR #443); [spec](specs/2026-08-contract-pdf-redesign.md) |
 | Participant status indicator | `shipped` | — | — |
 | Participant location map (OpenStreetMap building outlines, geocoded from address) | `shipped` | — | [ADR 0012](adr/0012-participant-geocoding-via-nominatim.md) |
 | `MeteringPoint` CRUD (consumption, production, bidirectional types) | `shipped` | — | [spec](specs/2026-03-metering-point-management.md) |
 | Assignment-only validity model (`MeteringPointAssignment` with date range) | `shipped` | — | [ADR 0009](adr/0009-remove-direct-meteringpoint-participant-fk.md) |
+| Community-allocated metering points (common-area meter split by `allocation_weight`) | `shipped` | — | [spec](specs/2026-08-shared-metering-points.md), #387 |
 | `MeteringPointAssignment` CRUD with overlap/containment validation | `shipped` | — | [spec](specs/2026-03-metering-point-management.md) |
 | Bulk participant import from CSV | `idea` | `medium` | Useful when onboarding large ZEVs; reduces manual data entry |
 | Participant move between ZEVs | `idea` | `low` | Complex; requires data migration of assignments and readings |
@@ -209,6 +218,7 @@ PVshare Cockpit is a closed, subscription-based SaaS (CHF ~30/participant/year) 
 
 | Feature | Status | Priority | Notes / Spec |
 |---|---|---|---|
+| Navigation regroup (task-based sidebar, Setup/Platform hubs, tab URLs with aliases) | `shipped` | — | [release notes 1.12.0](release-notes/1.12.0.md) |
 | JWT authentication (SimpleJWT; email or username login) | `shipped` | — | [spec](specs/2026-03-community-and-access.md) |
 | Role hierarchy: `admin`, `zev_owner`, `participant`, `guest` | `shipped` | — | [spec](specs/2026-03-community-and-access.md) |
 | ZEV-scoped permission classes enforced at object level | `shipped` | — | [ADR 0003](adr/0003-role-and-zev-scope-enforcement.md) |
@@ -258,7 +268,8 @@ PVshare Cockpit is a closed, subscription-based SaaS (CHF ~30/participant/year) 
 | Participant dashboard (own energy split: local vs. grid, daily timeline, key totals) | `shipped` | — | — |
 | Average consumption chart | `shipped` | — | — |
 | Own metering point data view and energy charts | `shipped` | — | — |
-| Own invoice list and read access (status, amounts, PDF download) | `shipped` | — | — |
+| Own invoice list and read access (status, amounts, PDF download), incl. My-invoices page (`/me/invoices`) | `shipped` | — | — |
+| Passwordless participant invoice access (QR + magic link) | `shipped` | — | [spec](specs/2026-09-participant-invoice-access.md), #589 |
 | Contract PDF self-download | `shipped` | — | — |
 | Profile self-management (name, email) | `shipped` | — | — |
 | Password self-service (initial set + change) | `shipped` | — | — |
@@ -284,12 +295,13 @@ PVshare Cockpit is a closed, subscription-based SaaS (CHF ~30/participant/year) 
 | Automated release pipeline with SBOM attachment | `shipped` | — | — |
 | 4-locale i18n (English, German, French, Italian) across all frontend text | `shipped` | — | — |
 | Frontend management page design system (documented conventions, shared components) | `shipped` | — | [spec](specs/2026-04-frontend-management-page-design.md) |
+| UI redesign + print parity | `shipped` | — | [spec](specs/2026-08-ui-redesign-pdf-style.md), [ADR 0014](adr/0014-print-parity-and-ui-tokens.md) |
 | Backend test suite (pytest, per-app test modules) | `shipped` | — | — |
 | Production database backup / restore guidance | `idea` | `high` | No documented procedure; critical for production deployments |
 | Helm chart maturity (resource limits, liveness probes, secrets management) | `idea` | `medium` | Current chart is functional but minimal |
 | Observability — structured application logging and metrics endpoint | `idea` | `medium` | No Prometheus metrics or structured log format today |
 | End-to-end test suite (Playwright or similar) | `idea` | `medium` | Playwright is used for automated user-guide screenshots; no interactive end-to-end coverage of user flows yet |
 | Frontend component-level unit tests | `shipped` | — | `npm run test:unit` (Vitest) covers API helpers, reducers and page-level logic |
-| Rate limiting on sensitive API endpoints | `shipped` | — | Auth endpoints throttled per IP; import endpoints throttled 60/h/user; transfer archive endpoints throttled 20/h/user; API key auth counts against budget |
+| Rate limiting on sensitive API endpoints | `shipped` | — | Auth per IP, imports + transfer-import per user, invoice links per IP/link, API keys budgeted — `DEFAULT_THROTTLE_RATES` in `backend/config/settings.py` |
 | Automated security dependency scanning (Dependabot / Snyk) | `idea` | `low` | Renovate is configured for updates; no security-focused CVE scanning |
 | Multi-region or multi-instance deployment guidance | `deferred` | — | Single-instance model assumed; stateful session and Celery design would need review |

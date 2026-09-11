@@ -1,12 +1,12 @@
 # Feature Spec: Shared metering points with cost-allocation weights
 
 - Spec ID: SPEC-2026-08-shared-metering-points
-- Status: Approved
+- Status: Completed
 - Scope: Major
 - Type: Feature
 - Owners: spalinger
 - Created: 2026-08-05
-- Target Release: TBD
+- Target Release: 1.8.0
 - Related Issues: [#387 Shared metering points: bill each participant their share of a common-area meter](https://github.com/splattner/openzev/issues/387)
 - Related ADRs: [ADR 0013](../adr/0013-shared-allocation-service.md), [ADR 0002](../adr/0002-invoice-allocation-model.md)
 - Impacted Areas: backend | frontend | docs
