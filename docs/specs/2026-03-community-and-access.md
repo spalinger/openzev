@@ -65,6 +65,7 @@ Extends `AbstractUser` (Django `accounts.models`).
 | `role` | `CharField(20)` choices `UserRole` | `admin`, `zev_owner`, `participant`, `guest` (default `participant`) |
 | `must_change_password` | `BooleanField` (default `False`) | Set `True` on admin-created or invitation-created accounts |
 | `is_active` | `BooleanField` | `False` until email verification for self-registered users |
+| `preferred_zev` | `ForeignKey('zev.Zev')`, null, `SET_NULL` | Account-level default community: owners/admins with several communities land here on login. `None` = first managed by name. Set by the frontend via `/auth/me/` |
 
 **Computed properties:**
 
@@ -407,17 +408,22 @@ Validates old password, sets new password, clears `must_change_password`.
 
 **Endpoint:** `GET | PATCH /api/v1/auth/me/` (IsAuthenticated)
 
-- GET → returns `UserSerializer` of current user. For participants the
-  response additionally carries `zev_name: string` — the name of the
-  community of their self-service membership
+- GET → returns `UserSerializer` of current user (including `preferred_zev`,
+  always present, `null` when unset).
+  For participants the response additionally carries `zev_name: string` — the
+  name of the community of their self-service membership
   (`zev.services.own_participant_for_user`, the model's default surname
   ordering; the same record the annual-statement and financial-summary
   downloads serve) — plus `zev_count: number`, the number of held
   memberships. `zev_name` is absent when the participant has no membership
   (`zev_count` is then `0`); admins/owners never get either field.
-- PATCH → partial update of own profile fields (name, email). Role change
-  validation: admin cannot change own role; non-admin cannot change role at
-  all. The response is shaped like GET (including `zev_name`).
+- PATCH → partial update of own profile fields (name, email, `preferred_zev`).
+  Role change validation: admin cannot change own role; non-admin cannot
+  change role at all. The response is shaped like GET (including
+  `zev_name`/`zev_count` where applicable).
+- `preferred_zev` accepts a ZEV UUID or `null`. Only communities the user
+  manages are accepted: owners may only name their own ZEVs, participants/
+  guests cannot set a preference at all (`400` otherwise).
 
 ### 5.7 Impersonation
 
@@ -773,8 +779,18 @@ documented in `2026-03-invoice-lifecycle-and-communication.md` §5.6a.
 - `zev_owner` → only owned ZEVs. One ZEV: pin it (`isSelectable = false`).
   Two or more: switch among them (`isSelectable = true`).
 - `participant` / `guest` → empty list, no selection.
-- Persists selected ZEV ID in `localStorage` key `openzev.selectedZevId`.
-- Auto-fallback: if stored ID is no longer valid, select first available ZEV.
+- The selection is server-authoritative: the account's `User.preferred_zev`
+  (saved on every switch) follows the user across browsers. No browser
+  storage is used, so one account's choice cannot leak into another session.
+- Resolution order: the session's explicit pick (if still managed) → the
+  account's `preferred_zev` (if still managed) → the first managed ZEV by
+  name. The pick resets on every account change; until the user switches,
+  the server preference wins.
+- Switches apply optimistically; `AuthProvider.updatePreferredZev`
+  serializes the `PATCH /auth/me/` saves per user so the latest choice wins,
+  and session transitions prevent queued saves from dispatching and ignore
+  late in-flight responses. A failed save keeps the local selection
+  for the rest of the session.
 
 ---
 
@@ -900,12 +916,18 @@ All API endpoints return 401 for unauthenticated requests.
 ### 13.1 UserSerializer
 
 **Fields:** `id`, `username`, `email`, `first_name`, `last_name`, `role`,
-`must_change_password`, `is_active`, `date_joined`.
+`must_change_password`, `is_active`, `date_joined`, `preferred_zev` (ZEV
+UUID or `null`; always present in responses, `null` when unset — the
+frontend types it as required-nullable).
 **Read-only:** `id`, `date_joined`.
 
 **Role-change validation:**
 - Admin cannot change own role (from admin to anything else).
 - Non-admin cannot change any role at all.
+
+**`preferred_zev` validation:** owners may only set one of their own ZEVs as
+the default; participants and guests cannot set one at all; admins may set
+any ZEV. `null` clears the preference.
 
 ### 13.2 UserCreateSerializer
 
@@ -1093,6 +1115,13 @@ lists the test classes per module (test counts are the `test_*` methods).
   (42 rows; home/energy split, hub tabs, aliases, and deep links included).
   `frontend/tests/route-aliases.test.ts` — legacy alias redirects preserve
   query and params (the §9.2 matrix is the frozen contract).
+- `frontend/tests/managed-zev-selection.test.ts` (27 tests) — the §9.4
+  resolution order (explicit pick → account preference → first managed),
+  optimistic switches, failed-save tolerance, and account-switch isolation
+  (no cross-account leakage). `frontend/tests/auth-preferred-zev.test.ts`
+  (3 tests) — serialized `updatePreferredZev` saves (latest wins), logout
+  invalidation of late responses, and cancellation of queued dispatches
+  across session transitions.
 
 ---
 

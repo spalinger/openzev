@@ -30,6 +30,7 @@ function mockUser(role: UserRole, extra: Record<string, unknown> = {}) {
             last_name: '',
             role,
             must_change_password: false,
+            preferred_zev: null,
             ...extra,
         },
     })

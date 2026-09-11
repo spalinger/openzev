@@ -76,6 +76,7 @@ function mockOwner() {
             last_name: '',
             role: 'zev_owner',
             must_change_password: false,
+            preferred_zev: null,
         },
     })
 }
@@ -94,6 +95,7 @@ function mockAdmin() {
             last_name: '',
             role: 'admin',
             must_change_password: false,
+            preferred_zev: null,
         },
     })
 }

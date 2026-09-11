@@ -6,7 +6,7 @@ import type { Page } from '@playwright/test'
 // the unit suite without invoking the screenshot runner or a demo server.
 vi.mock('@playwright/test', async () => ({ expect: (await import('vitest')).expect }))
 
-import { API_BASE, getAdminToken } from '../screenshots/helpers'
+import { API_BASE, DEMO_ZEV_NAME, getAdminToken, pinDemoZev } from '../screenshots/helpers'
 
 function mockPage(cookieValues: Array<string | undefined>, status = 200) {
   const cookies = vi.fn()
@@ -47,5 +47,40 @@ describe('screenshot authentication', () => {
     const { page, post } = mockPage([undefined, undefined])
     await expect(getAdminToken(page)).rejects.toThrow('openzev_access cookie missing after login')
     expect(post).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('screenshot demo ZEV pinning', () => {
+  function mockPinPage(zevName: string | null) {
+    const cookies = vi.fn().mockResolvedValue([{ name: 'openzev_access', value: 'saved-access' }])
+    const get = vi.fn().mockResolvedValue({
+      ok: () => true,
+      status: () => 200,
+      json: async () => (zevName === null ? { results: [] } : { results: [{ id: 'zev-1', name: zevName }] }),
+    })
+    const patch = vi.fn().mockResolvedValue({ ok: () => true, status: () => 200 })
+    const addInitScript = vi.fn()
+    const page = {
+      context: () => ({ cookies }),
+      request: { get, patch },
+      addInitScript,
+    } as unknown as Page
+    return { page, get, patch, addInitScript }
+  }
+
+  it('persists the demo ZEV via the server-side preference, not browser storage', async () => {
+    const { page, patch, addInitScript } = mockPinPage(DEMO_ZEV_NAME)
+    await expect(pinDemoZev(page)).resolves.toBe(true)
+    expect(patch).toHaveBeenCalledExactlyOnceWith(`${API_BASE}/auth/me/`, {
+      headers: { Authorization: 'Bearer saved-access' },
+      data: { preferred_zev: 'zev-1' },
+    })
+    expect(addInitScript).not.toHaveBeenCalled()
+  })
+
+  it('returns false without persisting when the demo ZEV is missing', async () => {
+    const { page, patch } = mockPinPage(null)
+    await expect(pinDemoZev(page)).resolves.toBe(false)
+    expect(patch).not.toHaveBeenCalled()
   })
 })

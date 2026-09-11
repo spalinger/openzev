@@ -108,7 +108,9 @@ export async function deleteUser(userId: number): Promise<void> {
   await api.delete(`/auth/users/${userId}/`)
 }
 
-export async function updateProfile(payload: Partial<Pick<User, 'email' | 'first_name' | 'last_name'>>): Promise<User> {
+export async function updateProfile(
+  payload: Partial<Pick<User, 'email' | 'first_name' | 'last_name' | 'preferred_zev'>>,
+): Promise<User> {
   const { data } = await api.patch<User>('/auth/me/', payload)
   return data
 }

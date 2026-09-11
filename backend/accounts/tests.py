@@ -1176,3 +1176,87 @@ class OAuthTokenCleanupTaskTests(TestCase):
 		self.assertTrue(OAuthState.objects.filter(pk=fresh_state.pk).exists())
 		self.assertFalse(OAuthExchangeCode.objects.filter(pk=expired_code.pk).exists())
 		self.assertTrue(OAuthExchangeCode.objects.filter(pk=fresh_code.pk).exists())
+
+
+class PreferredZevApiTests(TestCase):
+	"""``User.preferred_zev`` is the account-level default community: owners and
+	admins persist it via ``/auth/me/`` and the response carries it, so the
+	frontend's managed-ZEV selection no longer has to depend on name ordering
+	(which is database-collation dependent). Only communities the user manages
+	are acceptable — for an owner that means their own ZEVs."""
+
+	def setUp(self):
+		self.client = APIClient()
+		from testing.helpers import authenticate
+
+		self.owner = User.objects.create_user(
+			username="pref_owner", password="pass1234", role=UserRole.ZEV_OWNER
+		)
+		self.other_owner = User.objects.create_user(
+			username="pref_other_owner", password="pass1234", role=UserRole.ZEV_OWNER
+		)
+		self.admin = User.objects.create_user(
+			username="pref_admin", password="pass1234", role=UserRole.ADMIN
+		)
+		self.participant = User.objects.create_user(
+			username="pref_participant", password="pass1234", role=UserRole.PARTICIPANT
+		)
+		self.zev = Zev.objects.create(name="Preferred ZEV", owner=self.owner)
+		self.other_zev = Zev.objects.create(name="Somebody Else's ZEV", owner=self.other_owner)
+		authenticate(self.client, self.owner)
+
+	def _me(self):
+		return self.client.get("/api/v1/auth/me/")
+
+	def _set_preferred(self, zev_id):
+		return self.client.patch(
+			"/api/v1/auth/me/", {"preferred_zev": zev_id}, format="json"
+		)
+
+	def test_me_reports_no_preferred_zev_by_default(self):
+		resp = self._me()
+		self.assertEqual(resp.status_code, 200)
+		self.assertIsNone(resp.data["preferred_zev"])
+
+	def test_owner_sets_one_of_their_own_communities(self):
+		resp = self._set_preferred(str(self.zev.id))
+		self.assertEqual(resp.status_code, 200, resp.content)
+		self.assertEqual(resp.data["preferred_zev"], self.zev.id)
+		self.owner.refresh_from_db()
+		self.assertEqual(self.owner.preferred_zev_id, self.zev.id)
+
+	def test_owner_cannot_prefer_someone_elses_community(self):
+		resp = self._set_preferred(str(self.other_zev.id))
+		self.assertEqual(resp.status_code, 400)
+		self.assertIn("preferred_zev", resp.data)
+		self.owner.refresh_from_db()
+		self.assertIsNone(self.owner.preferred_zev)
+
+	def test_unknown_zev_is_rejected(self):
+		resp = self._set_preferred("00000000-0000-0000-0000-000000000000")
+		self.assertEqual(resp.status_code, 400)
+
+	def test_clearing_the_preference_returns_to_first_by_name(self):
+		self._set_preferred(str(self.zev.id))
+		resp = self._set_preferred(None)
+		self.assertEqual(resp.status_code, 200)
+		self.assertIsNone(resp.data["preferred_zev"])
+		self.owner.refresh_from_db()
+		self.assertIsNone(self.owner.preferred_zev)
+
+	def test_participant_cannot_set_a_default_community(self):
+		from testing.helpers import authenticate
+
+		authenticate(self.client, self.participant)
+		resp = self._set_preferred(str(self.zev.id))
+		self.assertEqual(resp.status_code, 400)
+		self.assertIn("preferred_zev", resp.data)
+
+	def test_admin_can_prefer_any_community(self):
+		from testing.helpers import authenticate
+
+		authenticate(self.client, self.admin)
+		resp = self._set_preferred(str(self.other_zev.id))
+		self.assertEqual(resp.status_code, 200, resp.content)
+		self.admin.refresh_from_db()
+		self.assertEqual(self.admin.preferred_zev_id, self.other_zev.id)

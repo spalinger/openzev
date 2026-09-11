@@ -95,13 +95,19 @@ export async function resolveDemoZevId(page: Page): Promise<string | null> {
  * Pin the global ZEV selection to the demo ZEV before any navigation so the
  * dashboard, metering charts, tariff and assign-modal captures render seeded
  * data instead of an arbitrary empty tenant.
+ *
+ * The selection is a server-side account preference (User.preferred_zev), so
+ * persist it via PATCH /auth/me/ with the admin token.
  */
 export async function pinDemoZev(page: Page): Promise<boolean> {
   const zevId = await resolveDemoZevId(page)
   if (!zevId) return false
-  await page.addInitScript((selectedZevId: string) => {
-    localStorage.setItem('openzev.selectedZevId', selectedZevId)
-  }, zevId)
+  const adminToken = await getAdminToken(page)
+  const resp = await page.request.patch(`${API_BASE}/auth/me/`, {
+    headers: { Authorization: `Bearer ${adminToken}` },
+    data: { preferred_zev: zevId },
+  })
+  expect(resp.ok(), `Saving preferred ZEV failed (${resp.status()})`).toBeTruthy()
   return true
 }
 

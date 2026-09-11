@@ -40,6 +40,26 @@ describe('resolveManagedSelection — admin', () => {
         expect(resolution.selection).toBe('z1')
         expect(resolution.isAllowedId('deleted-zev')).toBe(false)
     })
+
+    it('uses the account preference instead of the first-by-name ZEV', () => {
+        const resolution = resolveManagedSelection({
+            role: 'admin',
+            managedZevs: [zev('z1'), zev('z2')],
+            currentId: '',
+            preferredZevId: 'z2',
+        })
+        expect(resolution.selection).toBe('z2')
+    })
+
+    it('ignores a preference for a ZEV that is no longer managed', () => {
+        const resolution = resolveManagedSelection({
+            role: 'admin',
+            managedZevs: [zev('z1')],
+            currentId: '',
+            preferredZevId: 'transferred-away',
+        })
+        expect(resolution.selection).toBe('z1')
+    })
 })
 
 describe('resolveManagedSelection — zev_owner', () => {
@@ -94,6 +114,26 @@ describe('resolveManagedSelection — zev_owner', () => {
         expect(resolution.selection).toBe('own2')
     })
 
+    it('prefers the explicit in-session pick over the account preference', () => {
+        const resolution = resolveManagedSelection({
+            role: 'zev_owner',
+            managedZevs: [zev('own1'), zev('own2')],
+            currentId: 'own2',
+            preferredZevId: 'own1',
+        })
+        expect(resolution.selection).toBe('own2')
+    })
+
+    it('lands on the account preference when nothing is picked yet', () => {
+        const resolution = resolveManagedSelection({
+            role: 'zev_owner',
+            managedZevs: [zev('own1'), zev('own2')],
+            currentId: '',
+            preferredZevId: 'own2',
+        })
+        expect(resolution.selection).toBe('own2')
+    })
+
     it('falls back to the first owned ZEV when the stored id is stale', () => {
         const resolution = resolveManagedSelection({
             role: 'zev_owner',
@@ -133,16 +173,16 @@ describe('resolveManagedSelection — missing data', () => {
 })
 
 /**
- * Provider-level coverage for the localStorage wiring that the pure helper
- * cannot exercise: the restored selection must survive the loading phase and
- * not be raced by the reconcile effect (cold cache), and a stale stored ID
- * must be healed back to the first managed ZEV.
+ * Provider-level coverage the pure helper cannot exercise: preference-first
+ * selection, optimistic picks, failed-save tolerance, and account-switch
+ * isolation (no cross-account leakage; no browser storage is consulted).
  */
 
 const authState = vi.hoisted(() => ({ current: null as User | null }))
+const updatePreferredZev = vi.hoisted(() => vi.fn<(zevId: string | null) => Promise<void>>())
 
 vi.mock('../src/lib/auth', () => ({
-    useAuth: () => ({ user: authState.current }),
+    useAuth: () => ({ user: authState.current, updatePreferredZev }),
 }))
 
 vi.mock('../src/lib/api/zev', () => ({
@@ -167,6 +207,18 @@ const userWithRole = (role: UserRole): User => ({
     last_name: 'One',
     role,
     must_change_password: false,
+    preferred_zev: null,
+})
+
+const adminUser = (id: number, preferredZev: string | null): User => ({
+    id,
+    username: `admin${id}`,
+    email: `admin${id}@example.com`,
+    first_name: 'Admin',
+    last_name: `${id}`,
+    role: 'admin',
+    must_change_password: false,
+    preferred_zev: preferredZev,
 })
 
 describe('ManagedZevProvider selection persistence', () => {
@@ -175,10 +227,11 @@ describe('ManagedZevProvider selection persistence', () => {
     let resolveFetch: ((value: Zev[]) => void) | undefined
 
     beforeEach(() => {
-        localStorage.clear()
         authState.current = null
         resolveFetch = undefined
         vi.mocked(fetchZevs).mockReset()
+        vi.mocked(updatePreferredZev).mockReset()
+        vi.mocked(updatePreferredZev).mockResolvedValue(undefined)
         container = document.createElement('div')
         document.body.appendChild(container)
         root = createRoot(container)
@@ -202,17 +255,20 @@ describe('ManagedZevProvider selection persistence', () => {
             return null
         }
 
-        act(() => {
-            root.render(
-                createElement(
-                    QueryClientProvider,
-                    { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
-                    createElement(ManagedZevProvider, null, createElement(Harness)),
-                ),
-            )
-        })
+        function render() {
+            act(() => {
+                root.render(
+                    createElement(
+                        QueryClientProvider,
+                        { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
+                        createElement(ManagedZevProvider, null, createElement(Harness)),
+                    ),
+                )
+            })
+        }
 
-        return latest
+        render()
+        return { latest, rerender: render }
     }
 
     function deferFetch() {
@@ -234,58 +290,171 @@ describe('ManagedZevProvider selection persistence', () => {
         })
     }
 
-    it('restores the persisted selection once the list has loaded (cold cache)', async () => {
-        localStorage.setItem('openzev.selectedZevId', 'own2')
-        authState.current = userWithRole('zev_owner')
+    it('selects nothing while the list is loading, then lands on the account preference', async () => {
+        authState.current = { ...userWithRole('zev_owner'), preferred_zev: 'own2' }
         deferFetch()
 
-        const latest = renderProvider()
+        const { latest } = renderProvider()
 
-        // While the list is loading, the restored ID must not be erased.
-        expect(latest.current?.selectedZevId).toBe('own2')
+        expect(latest.current?.selectedZevId).toBe('')
 
         await resolveTwoZevs()
 
         expect(latest.current?.managedZevs.map((z) => z.id)).toEqual(['own1', 'own2'])
         expect(latest.current?.selectedZevId).toBe('own2')
-        expect(localStorage.getItem('openzev.selectedZevId')).toBe('own2')
     })
 
-    it('heals a stale stored ID back to the first managed ZEV and rewrites localStorage', async () => {
-        localStorage.setItem('openzev.selectedZevId', 'transferred-away')
+    it('falls back to the first managed ZEV without an account preference', async () => {
         authState.current = userWithRole('zev_owner')
         deferFetch()
 
-        const latest = renderProvider()
+        const { latest } = renderProvider()
 
         await resolveTwoZevs()
 
         expect(latest.current?.selectedZevId).toBe('own1')
-        expect(localStorage.getItem('openzev.selectedZevId')).toBe('own1')
     })
 
-    it('keeps a still-valid restored ID instead of re-pinning to the first entry', async () => {
-        localStorage.setItem('openzev.selectedZevId', 'own2')
-        authState.current = userWithRole('zev_owner')
+    it('ignores an account preference for a ZEV that is no longer managed', async () => {
+        authState.current = { ...userWithRole('zev_owner'), preferred_zev: 'transferred-away' }
         deferFetch()
 
-        const latest = renderProvider()
+        const { latest } = renderProvider()
 
         await resolveTwoZevs()
 
-        expect(latest.current?.managedZevs.map((z) => z.id)).toEqual(['own1', 'own2'])
+        expect(latest.current?.selectedZevId).toBe('own1')
+    })
+
+    it('keeps an explicit pick instead of re-pinning to the first entry', async () => {
+        authState.current = userWithRole('zev_owner')
+        deferFetch()
+
+        const { latest } = renderProvider()
+
+        await resolveTwoZevs()
+
+        act(() => {
+            latest.current?.setSelectedZevId('own2')
+        })
+
         expect(latest.current?.selectedZevId).toBe('own2')
         expect(latest.current?.isSelectable).toBe(true)
     })
 
-    it('clears the selection and removes the stored key for a non-managing role', async () => {
-        localStorage.setItem('openzev.selectedZevId', 'own1')
+    it('prefers the explicit pick even when the account preference differs', async () => {
+        authState.current = { ...userWithRole('zev_owner'), preferred_zev: 'own1' }
+        deferFetch()
+
+        const { latest } = renderProvider()
+
+        await resolveTwoZevs()
+
+        act(() => {
+            latest.current?.setSelectedZevId('own2')
+        })
+
+        expect(latest.current?.selectedZevId).toBe('own2')
+    })
+
+    it('persists a user-initiated switch as the account preference', async () => {
+        authState.current = userWithRole('zev_owner')
+        deferFetch()
+
+        const { latest } = renderProvider()
+
+        await resolveTwoZevs()
+
+        expect(latest.current?.selectedZevId).toBe('own1')
+
+        act(() => {
+            latest.current?.setSelectedZevId('own2')
+        })
+
+        expect(vi.mocked(updatePreferredZev)).toHaveBeenCalledWith('own2')
+        expect(latest.current?.selectedZevId).toBe('own2')
+    })
+
+    it('does not persist a switch to a ZEV the user no longer manages', async () => {
+        authState.current = userWithRole('zev_owner')
+        deferFetch()
+
+        const { latest } = renderProvider()
+
+        await resolveTwoZevs()
+
+        act(() => {
+            latest.current?.setSelectedZevId('transferred-away')
+        })
+
+        expect(vi.mocked(updatePreferredZev)).not.toHaveBeenCalled()
+        expect(latest.current?.selectedZevId).toBe('own1')
+    })
+
+    it('a failed preference save leaves the local selection usable', async () => {
+        authState.current = userWithRole('zev_owner')
+        deferFetch()
+
+        const { latest } = renderProvider()
+
+        await resolveTwoZevs()
+
+        vi.mocked(updatePreferredZev).mockRejectedValueOnce(new Error('network down'))
+        act(() => {
+            latest.current?.setSelectedZevId('own2')
+        })
+
+        expect(vi.mocked(updatePreferredZev)).toHaveBeenCalledWith('own2')
+        expect(latest.current?.selectedZevId).toBe('own2')
+    })
+
+    it('an account switch drops the previous pick and honors the new preference', async () => {
+        authState.current = adminUser(1, 'own1')
+        deferFetch()
+
+        const { latest, rerender } = renderProvider()
+
+        await resolveTwoZevs()
+
+        expect(latest.current?.selectedZevId).toBe('own1')
+
+        act(() => {
+            latest.current?.setSelectedZevId('own2')
+        })
+
+        expect(latest.current?.selectedZevId).toBe('own2')
+
+        // A second user on the same browser must land on their own preference.
+        authState.current = adminUser(2, 'own1')
+        rerender()
+        await resolveTwoZevs()
+
+        expect(latest.current?.selectedZevId).toBe('own1')
+    })
+
+    it('an account switch without a preference falls back to the first managed ZEV', async () => {
+        authState.current = adminUser(1, 'own2')
+        deferFetch()
+
+        const { latest, rerender } = renderProvider()
+
+        await resolveTwoZevs()
+
+        expect(latest.current?.selectedZevId).toBe('own2')
+
+        authState.current = adminUser(2, null)
+        rerender()
+        await resolveTwoZevs()
+
+        expect(latest.current?.selectedZevId).toBe('own1')
+    })
+
+    it('clears the selection for a non-managing role', async () => {
         authState.current = userWithRole('participant')
 
-        const latest = renderProvider()
+        const { latest } = renderProvider()
 
         expect(latest.current?.selectedZevId).toBe('')
         expect(latest.current?.isSelectable).toBe(false)
-        expect(localStorage.getItem('openzev.selectedZevId')).toBeNull()
     })
 })

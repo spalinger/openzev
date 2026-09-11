@@ -46,6 +46,7 @@ function mockSession(role: UserRole, impersonating = false, managedZevCount = 2)
             last_name: 'User',
             role,
             must_change_password: false,
+            preferred_zev: null,
             ...(impersonating ? { impersonated_by: { id: 1, username: 'admin' } } : {}),
         },
         logout: vi.fn(),

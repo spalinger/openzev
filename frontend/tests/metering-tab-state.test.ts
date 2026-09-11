@@ -28,6 +28,7 @@ vi.mock('../src/lib/auth', () => ({
             last_name: '',
             role: 'zev_owner',
             must_change_password: false,
+            preferred_zev: null,
         },
     }),
 }))

@@ -85,6 +85,7 @@ function mockRole(role: UserRole) {
             last_name: '',
             role,
             must_change_password: false,
+            preferred_zev: null,
         },
     })
 }

@@ -33,7 +33,7 @@ function badgeFor(status: string | null | undefined): string {
 export function BillingEmailsPage() {
     const { t } = useTranslation()
     const { settings } = useAppSettings()
-    const { selectedZevId } = useManagedZev()
+    const { selectedZevId, isLoading: managedZevLoading } = useManagedZev()
     const { pushToast } = useToast()
     const queryClient = useQueryClient()
     const [filter, setFilter] = useState<EmailFilter>('all')
@@ -97,6 +97,7 @@ export function BillingEmailsPage() {
         }
     }
 
+    if (managedZevLoading) return <PageSkeleton variant="tableRows" />
     if (!selectedZevId) {
         return <div className="card">{t('pages.dashboard.selectZev')}</div>
     }

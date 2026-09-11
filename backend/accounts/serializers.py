@@ -7,9 +7,18 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from urllib.parse import urlparse
 from .jwt_utils import add_custom_claims
 from .models import ApiKey, AppSettings, FeatureFlag, OAuthProvider, SocialAccount, User, UserRole, VatRate
+from zev.models import Zev
 
 
 class UserSerializer(serializers.ModelSerializer):
+    # UUID primary key of the default community, or null. Exposed read-write
+    # so the frontend can persist the community a user lands on.
+    preferred_zev = serializers.PrimaryKeyRelatedField(
+        queryset=Zev.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+
     def validate_role(self, value):
         request = self.context.get("request")
         if not request or not self.instance:
@@ -26,11 +35,32 @@ class UserSerializer(serializers.ModelSerializer):
 
         return value
 
+    def validate_preferred_zev(self, value):
+        """A default community must be one the user manages.
+
+        The preference is meaningless for roles without a community switcher
+        (participant, guest), and an owner must not point their default at a
+        community they do not own. Admins may set any community.
+        """
+        user = self.instance
+        if value is None or user is None:
+            return value
+        if not user.is_zev_owner:
+            raise serializers.ValidationError(
+                "Only ZEV owners and admins can set a default community."
+            )
+        if not user.is_admin and value.owner_id != user.pk:
+            raise serializers.ValidationError(
+                "You can only set one of your own communities as the default."
+            )
+        return value
+
     class Meta:
         model = User
         fields = [
             "id", "username", "email", "first_name", "last_name",
             "role", "must_change_password", "is_active", "date_joined",
+            "preferred_zev",
         ]
         read_only_fields = ["id", "date_joined"]
 
