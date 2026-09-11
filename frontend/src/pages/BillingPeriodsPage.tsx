@@ -17,13 +17,14 @@ type AttentionQuery = { data?: AttentionItem[]; isLoading: boolean; isError: boo
 export function BillingPeriodsPage({ attentionQuery }: { attentionQuery?: AttentionQuery } = {}) {
     const { t } = useTranslation()
     const { settings } = useAppSettings()
-    const { selectedZevId } = useManagedZev()
+    const { selectedZevId, isLoading: managedZevLoading } = useManagedZev()
     const periodsQuery = useQuery({
         queryKey: queryKeys.invoices.readinessList(selectedZevId || undefined),
         queryFn: () => fetchReadinessList(selectedZevId!),
         enabled: !!selectedZevId,
     })
 
+    if (managedZevLoading) return <PageSkeleton variant="cardList" />
     if (!selectedZevId) return <div className="card">{t('pages.dashboard.selectZev')}</div>
 
     const { open, current, completed, community } = groupPeriodCards(

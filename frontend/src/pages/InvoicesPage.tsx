@@ -14,6 +14,7 @@ import {
     usePdfWatch,
 } from '../features/invoices/pdfWatch'
 import { PeriodSelector } from '../components/PeriodSelector'
+import { PageSkeleton } from '../components/PageSkeleton'
 import {
     firstAlignedBillingPeriod,
     getPreviousBillingPeriod,
@@ -31,7 +32,7 @@ import { useManagedZev } from '../lib/managedZev'
  */
 export function InvoicesPage({ embedded = false }: { embedded?: boolean }) {
     const { t } = useTranslation()
-    const { selectedZevId, selectedZev } = useManagedZev()
+    const { selectedZevId, selectedZev, isLoading: managedZevLoading } = useManagedZev()
     const { user } = useAuth()
     const [searchParams, setSearchParams] = useSearchParams()
 
@@ -160,6 +161,7 @@ export function InvoicesPage({ embedded = false }: { embedded?: boolean }) {
         { key: 'pdfs', label: t('pages.invoices.batch.summaryPdfs'), value: stats.pdfCount },
     ]
 
+    if (managedZevLoading) return <PageSkeleton variant="tableRows" />
     if (!selectedZevId) {
         return (
             <div className="card">{t('pages.invoices.selectZev')}</div>
