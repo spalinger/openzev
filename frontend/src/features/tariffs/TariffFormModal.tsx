@@ -1,9 +1,9 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faCheck, faXmark } from '@fortawesome/free-solid-svg-icons'
+import { faCheck, faPlus, faXmark } from '@fortawesome/free-solid-svg-icons'
 import { useQuery } from '@tanstack/react-query'
 import { Controller, useForm, useWatch } from 'react-hook-form'
-import { useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FormModal } from '../../components/FormModal'
 import { FormModalFooter } from '../../components/FormModalFooter'
@@ -11,7 +11,8 @@ import { CivilDateInput } from '../../components/CivilDateInput'
 import { fetchDynamicTariffSources } from '../../lib/api/tariffs'
 import { queryKeys } from '../../lib/api/queryKeys'
 import type { Tariff, TariffBillingMode, TariffInput } from '../../types/api'
-import { dynamicSourceOptions, impliedEnergyType } from './dynamicSources'
+import { aggregatedTariffTypes, dynamicSourceOptions, impliedEnergyType } from './dynamicSources'
+import { DynamicSourceFormModal } from './DynamicSourceFormModal'
 import {
   defaultTariffFormValues,
   mapTariffFormValuesToInput,
@@ -52,6 +53,7 @@ export function TariffFormModal({
   isPending = false,
 }: TariffFormModalProps) {
   const { t } = useTranslation()
+  const [showSourceModal, setShowSourceModal] = useState(false)
 
   const form = useForm<TariffFormValues>({
     resolver: zodResolver(tariffFormSchema),
@@ -87,6 +89,10 @@ export function TariffFormModal({
   })
   const sourcesData = sourcesQuery.data
   const availableSources = dynamicSourceOptions(sourcesData ?? [], isVersion ? initialTariff?.energy_type : undefined)
+  const selectedSourceAggregatedTypes = useMemo(() => {
+    const source = sourcesData?.find((candidate) => candidate.id === dynamicSourceId)
+    return source ? aggregatedTariffTypes(source.tariff_type) : []
+  }, [sourcesData, dynamicSourceId])
 
   useEffect(() => {
     form.reset(initialTariff ? mapTariffToFormValues(initialTariff) : defaultTariffFormValues)
@@ -186,20 +192,43 @@ export function TariffFormModal({
         {/* Only a plain energy tariff can be dynamic — a percentage-of-energy
             or fixed-fee tariff has nothing a fetched series could price. */}
         {billingMode === 'energy' && (
-          <label style={{ gridColumn: '1 / -1' }}>
-            <span>{t('pages.tariffs.form.dynamicSource')}</span>
-            <select {...form.register('dynamic_source')} disabled={sourcesQuery.isLoading}>
-              <option value="">{t('pages.tariffs.form.dynamicSourceNone')}</option>
-              {availableSources.map((source) => (
-                <option key={source.id} value={source.id}>{source.label}</option>
-              ))}
-            </select>
-            <small className="muted">
-              {dynamicSourceId
-                ? t('pages.tariffs.form.dynamicSourceHintActive')
-                : t('pages.tariffs.form.dynamicSourceHint')}
-            </small>
-          </label>
+          <div style={{ gridColumn: '1 / -1', display: 'grid', gap: '0.5rem' }}>
+            <label>
+              <span>{t('pages.tariffs.form.dynamicSource')}</span>
+              <select {...form.register('dynamic_source')} disabled={sourcesQuery.isLoading}>
+                <option value="">{t('pages.tariffs.form.dynamicSourceNone')}</option>
+                {availableSources.map((source) => (
+                  <option key={source.id} value={source.id}>{source.label}</option>
+                ))}
+              </select>
+              <small className="muted">
+                {dynamicSourceId
+                  ? t('pages.tariffs.form.dynamicSourceHintActive')
+                  : t('pages.tariffs.form.dynamicSourceHint')}
+              </small>
+            </label>
+            {selectedSourceAggregatedTypes.length > 0 && (
+              <div className="warning-banner">
+                {t('pages.dynamicSources.form.doubleCountingWarning', {
+                  components: selectedSourceAggregatedTypes
+                    .map((type) => t(`pages.dynamicSources.types.${type}` as Parameters<typeof t>[0]))
+                    .join(', '),
+                })}
+              </div>
+            )}
+            {!isVersion && (
+              <div>
+                <button
+                  className="button button-secondary button-compact"
+                  type="button"
+                  onClick={() => setShowSourceModal(true)}
+                >
+                  <FontAwesomeIcon icon={faPlus} fixedWidth />
+                  {t('pages.tariffs.form.createDynamicSource')}
+                </button>
+              </div>
+            )}
+          </div>
         )}
 
         {billingMode === 'percentage_of_energy' ? (
@@ -278,6 +307,14 @@ export function TariffFormModal({
           cancelIcon={<FontAwesomeIcon icon={faXmark} fixedWidth />}
         />
       </form>
+      <DynamicSourceFormModal
+        isOpen={showSourceModal}
+        onClose={() => setShowSourceModal(false)}
+        onSaved={(source) => {
+          form.setValue('dynamic_source', source.id, { shouldValidate: true })
+          form.setValue('energy_type', impliedEnergyType(source), { shouldValidate: true })
+        }}
+      />
     </FormModal>
   )
 }

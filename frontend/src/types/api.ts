@@ -456,7 +456,11 @@ export interface TariffInput {
  * already combines `electricity` + `grid` — billing it beside a separate grid
  * fee or levy tariff double-counts, see `docs/specs/2026-09-dynamic-tariffs.md` §3.3.
  */
-export type DynamicTariffType = 'electricity' | 'grid' | 'integrated' | 'regional_fees' | 'feed_in'
+export type DynamicTariffType =
+    | 'electricity' | 'grid' | 'metering' | 'national_fees' | 'regional_fees'
+    | 'dso' | 'dso_complete' | 'integrated' | 'integrated_complete' | 'feed_in' | 'refund'
+
+export type DynamicApiVersion = 'v1_0_5' | 'v2_0_0'
 
 /**
  * A shared price series, fetched from one operator endpoint. Global, not
@@ -467,7 +471,7 @@ export interface DynamicTariffSource {
     id: string
     label: string
     url: string
-    adapter: 'vse_v1' | 'groupe_e' | 'bkw'
+    api_version: DynamicApiVersion
     tariff_type: DynamicTariffType
     tariff_name: string
     last_fetch_status: 'pending' | 'ok' | 'failed'
@@ -477,6 +481,59 @@ export interface DynamicTariffSource {
     /** Extent of the stored series; null before anything has been fetched. */
     covers_from: string | null
     covers_to: string | null
+    point_count: number
+    linked_tariff_count: number
+    linked_zev_count: number
+    supports_backfill: boolean
+    created_at: string
+    updated_at: string
+}
+
+export interface DynamicTariffSourceInput {
+    label: string
+    url: string
+    api_version: DynamicApiVersion
+    tariff_type: DynamicTariffType
+    tariff_name?: string
+}
+
+export interface DynamicSourceDiscovery {
+    api_version: DynamicApiVersion
+    version_detected: boolean
+    components_discovered: boolean
+    components: Array<{
+        tariff_type: DynamicTariffType
+        tariff_name: string
+    }>
+}
+
+export interface DynamicPricePoint {
+    valid_from: string
+    valid_to: string
+    price_chf_per_kwh: string
+}
+
+export interface DynamicPriceHistory {
+    source: string
+    date_from: string
+    date_to: string
+    stats: {
+        point_count: number
+        minimum_chf_per_kwh: string | null
+        maximum_chf_per_kwh: string | null
+        average_chf_per_kwh: string | null
+        negative_count: number
+        gap_count: number
+    }
+    gaps: Array<{ from: string; to: string }>
+    points: DynamicPricePoint[]
+}
+
+export interface DynamicSourceFetchResult {
+    task_id: string
+    correlation_id: string
+    backfill: boolean
+    queued_at: string
 }
 
 /**

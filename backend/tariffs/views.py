@@ -1,26 +1,56 @@
 from functools import partial
+from datetime import timedelta
+import logging
+from uuid import uuid4
 
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError as DRFValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError as DRFValidationError
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.db import transaction
+from django.db.models import Avg, Count, IntegerField, Max, Min, OuterRef, Q, Subquery
+from django.db.models.deletion import ProtectedError
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from accounts.permissions import IsZevOwnerOrAdmin
-from .dynamic.models import DynamicTariffSource
+from .dynamic.fetch import coverage_gaps
+from .dynamic.discovery import discover_endpoint
+from .dynamic.locking import dynamic_source_lock
+from .dynamic.models import DynamicPricePoint, DynamicTariffSource
+from .dynamic.services import (
+    clear_source_points,
+    create_or_reuse_source,
+    recheck_source_capabilities,
+    source_has_billing_evidence,
+    tariff_has_dynamic_billing_evidence,
+    utc_day_window,
+)
+from .importers.remote import TariffFetchError
+from .dynamic.vse_v1 import DynamicTariffResponseError
 from .models import Tariff, TariffPeriod
 from zev.scoping import ZevScopedQuerySetMixin
-from .serializers import DynamicTariffSourceSerializer, TariffSerializer, TariffPeriodSerializer
+from .serializers import (
+    DynamicPriceHistoryQuerySerializer,
+    DynamicSourceConfirmationSerializer,
+    DynamicSourceFetchSerializer,
+    DynamicSourceDiscoverySerializer,
+    DynamicTariffSourceSerializer,
+    DynamicTariffSourceWriteSerializer,
+    TariffPeriodSerializer,
+    TariffSerializer,
+)
 from .series import active_version, find_gaps, plan_new_version, series_key, sort_versions
-from audit.models import AuditActionCategory
+from .tasks import fetch_dynamic_prices
+from audit.models import AuditActionCategory, AuditEventStatus
 from audit.mixins import AuditedUpdateMixin
 from audit.services import record_audit_event
 
 
 # Every audit event in this module is a tariff event; bind the category once.
 _record_tariff_event = partial(record_audit_event, action_category=AuditActionCategory.TARIFF)
+logger = logging.getLogger(__name__)
 
 
 def _parse_required_date(raw, field: str):
@@ -105,6 +135,23 @@ class TariffViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.ModelVi
         )
 
     def perform_destroy(self, instance):
+        # A dynamic tariff's link is the only thing that ties an issued
+        # invoice back to the fetched prices behind it (invoice items store
+        # rendered amounts, not a tariff FK). Deleting the tariff would
+        # sever that without deleting a single DynamicPricePoint — the same
+        # evidence the source-level clear/delete guards exist to protect,
+        # lost through a different door.
+        if instance.dynamic_source_id and tariff_has_dynamic_billing_evidence(
+            zev_id=instance.zev_id, valid_from=instance.valid_from,
+            valid_to=instance.valid_to, dynamic_source_id=instance.dynamic_source_id,
+        ):
+            raise DRFValidationError({
+                "detail": (
+                    "This tariff priced a non-cancelled invoice from its dynamic source. "
+                    "Deleting it would sever the only link back to the fetched prices "
+                    "behind that invoice."
+                )
+            })
         tariff_id = str(instance.pk)
         name = instance.name
         zev_id = str(instance.zev_id)
@@ -395,16 +442,408 @@ class TariffPeriodViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.M
 
 
 class DynamicTariffSourceViewSet(viewsets.ReadOnlyModelViewSet):
-    """Every configured dynamic price source, for the tariff form's picker.
+    """Manage global shared sources and inspect the prices they materialize."""
 
-    Not ZEV-scoped: a source is global (ADR 0018), not owned by any one
-    community, and carries nothing more sensitive than a public operator URL
-    and public prices — so any owner or admin may read the list. Creation
-    happens only through the VSE importer's get-or-create
-    (``importers.planner._get_or_create_dynamic_source``) or via Django admin;
-    this endpoint is read-only.
-    """
-
-    queryset = DynamicTariffSource.objects.all()
     serializer_class = DynamicTariffSourceSerializer
     permission_classes = [IsAuthenticated, IsZevOwnerOrAdmin]
+
+    def get_queryset(self):
+        point_counts = (
+            DynamicPricePoint.objects.filter(source_id=OuterRef("pk"))
+            .order_by()
+            .values("source_id")
+            .annotate(total=Count("pk"))
+            .values("total")
+        )
+        tariff_counts = (
+            Tariff.objects.filter(dynamic_source_id=OuterRef("pk"))
+            .order_by()
+            .values("dynamic_source_id")
+            .annotate(total=Count("pk"))
+            .values("total")
+        )
+        zev_counts = (
+            Tariff.objects.filter(dynamic_source_id=OuterRef("pk"))
+            .order_by()
+            .values("dynamic_source_id")
+            .annotate(total=Count("zev_id", distinct=True))
+            .values("total")
+        )
+        return DynamicTariffSource.objects.annotate(
+            point_count=Coalesce(Subquery(point_counts), 0, output_field=IntegerField()),
+            linked_tariff_count=Coalesce(
+                Subquery(tariff_counts), 0, output_field=IntegerField()
+            ),
+            linked_zev_count=Coalesce(
+                Subquery(zev_counts), 0, output_field=IntegerField()
+            ),
+        )
+
+    def _require_admin(self, request):
+        if not request.user.is_admin:
+            raise PermissionDenied("Only administrators can operate shared price sources.")
+
+    def _require_source_reader(self, request, source):
+        if request.user.is_admin:
+            return
+        if not source.tariffs.filter(zev__owner=request.user).exists():
+            raise PermissionDenied(
+                "This price history is only available through a tariff in your ZEV."
+            )
+
+    def create(self, request, *args, **kwargs):
+        serializer = DynamicTariffSourceWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            source, created, warnings = create_or_reuse_source(**serializer.validated_data)
+        except (TariffFetchError, DynamicTariffResponseError) as exc:
+            raise DRFValidationError({"url": [str(exc)]}) from exc
+
+        if created:
+            _record_tariff_event(
+                request=request,
+                action_type="tariff.dynamic_source_create",
+                target_type="tariffs.DynamicTariffSource",
+                target=source,
+                target_id=str(source.pk),
+                target_display=source.label,
+                summary=f"Created dynamic tariff source {source.label}.",
+                metadata={
+                    "api_version": source.api_version,
+                    "tariff_type": source.tariff_type,
+                    "warnings": warnings,
+                },
+            )
+        source = self.get_queryset().get(pk=source.pk)
+        return Response(
+            {
+                **DynamicTariffSourceSerializer(source, context={"request": request}).data,
+                # Units the endpoint publishes but this source cannot bill —
+                # a demand charge, a fixed fee riding beside the requested
+                # energy component. Empty when the source was reused rather
+                # than freshly probed.
+                "warnings": warnings,
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"], url_path="discover")
+    def discover(self, request):
+        serializer = DynamicSourceDiscoverySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            result = discover_endpoint(**serializer.validated_data)
+        except (TariffFetchError, DynamicTariffResponseError) as exc:
+            raise DRFValidationError({"url": [str(exc)]}) from exc
+        return Response({
+            "api_version": result.api_version,
+            "version_detected": result.version_detected,
+            "components_discovered": result.components_discovered,
+            "components": [
+                {"tariff_type": item.tariff_type, "tariff_name": item.tariff_name}
+                for item in result.components
+            ],
+        })
+
+    @action(detail=True, methods=["post"], url_path="recheck")
+    def recheck(self, request, pk=None):
+        """Re-probe this source's own endpoint to correct discovered capabilities.
+
+        ``supports_range`` in particular can be under-detected at creation
+        time (see ``recheck_source_capabilities``), and identity fields
+        cannot be edited afterwards — so without this, a wrongly-negative
+        detection had no way back except deleting and recreating the source.
+        """
+        self._require_admin(request)
+        source = self.get_object()
+        before_supports_range = source.supports_range
+        with dynamic_source_lock(source.pk) as acquired:
+            if not acquired:
+                return Response(
+                    {"detail": "This source is currently being fetched. Try again shortly."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            try:
+                source, warnings = recheck_source_capabilities(source)
+            except (TariffFetchError, DynamicTariffResponseError) as exc:
+                raise DRFValidationError({"url": [str(exc)]}) from exc
+
+        _record_tariff_event(
+            request=request,
+            action_type="tariff.dynamic_source_recheck",
+            target_type="tariffs.DynamicTariffSource",
+            target=source,
+            target_id=str(source.pk),
+            target_display=source.label,
+            summary=(
+                f"Re-checked capabilities for {source.label}: "
+                f"supports_range {before_supports_range} → {source.supports_range}."
+            ),
+            metadata={
+                "request_mode": source.request_mode,
+                "supports_range": source.supports_range,
+                "warnings": warnings,
+            },
+        )
+        source = self.get_queryset().get(pk=source.pk)
+        return Response({
+            **DynamicTariffSourceSerializer(source, context={"request": request}).data,
+            "warnings": warnings,
+        })
+
+    def partial_update(self, request, *args, **kwargs):
+        self._require_admin(request)
+        source = self.get_object()
+        before = {
+            field: getattr(source, field)
+            for field in ("label", "url", "api_version", "tariff_type", "tariff_name")
+        }
+        serializer = DynamicTariffSourceWriteSerializer(
+            source, data=request.data, partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        after = {field: getattr(source, field) for field in before}
+        changes = {
+            field: {"before": before[field], "after": after[field]}
+            for field in before
+            if before[field] != after[field]
+        }
+        _record_tariff_event(
+            request=request,
+            action_type="tariff.dynamic_source_update",
+            target_type="tariffs.DynamicTariffSource",
+            target=source,
+            target_id=str(source.pk),
+            target_display=source.label,
+            summary=f"Updated dynamic tariff source {source.label}.",
+            changes=changes,
+        )
+        source = self.get_queryset().get(pk=source.pk)
+        return Response(DynamicTariffSourceSerializer(source).data)
+
+    @action(detail=True, methods=["get"], url_path="prices")
+    def prices(self, request, pk=None):
+        source = self.get_object()
+        self._require_source_reader(request, source)
+        query = DynamicPriceHistoryQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+
+        date_to = query.validated_data.get("date_to", timezone.localdate())
+        date_from = query.validated_data.get("date_from", date_to - timedelta(days=6))
+        if date_from > date_to:
+            raise DRFValidationError({"date_to": ["date_to must be on or after date_from."]})
+        if (date_to - date_from).days >= 31:
+            raise DRFValidationError({"date_to": ["Price history is limited to 31 days."]})
+
+        window_start, window_end = utc_day_window(date_from, date_to)
+        points = source.points.filter(
+            valid_to__gt=window_start, valid_from__lt=window_end
+        ).order_by("valid_from")
+        aggregates = points.aggregate(
+            count=Count("pk"),
+            minimum=Min("price_chf_per_kwh"),
+            maximum=Max("price_chf_per_kwh"),
+            average=Avg("price_chf_per_kwh"),
+            negative_count=Count("pk", filter=Q(price_chf_per_kwh__lt=0)),
+        )
+        gaps = coverage_gaps(source, window_start, window_end)
+        return Response({
+            "source": str(source.pk),
+            "date_from": date_from.isoformat(),
+            "date_to": date_to.isoformat(),
+            "stats": {
+                "point_count": aggregates["count"],
+                "minimum_chf_per_kwh": (
+                    str(aggregates["minimum"]) if aggregates["minimum"] is not None else None
+                ),
+                "maximum_chf_per_kwh": (
+                    str(aggregates["maximum"]) if aggregates["maximum"] is not None else None
+                ),
+                "average_chf_per_kwh": (
+                    str(aggregates["average"]) if aggregates["average"] is not None else None
+                ),
+                "negative_count": aggregates["negative_count"],
+                "gap_count": len(gaps),
+            },
+            "gaps": [
+                {"from": gap_start.isoformat(), "to": gap_end.isoformat()}
+                for gap_start, gap_end in gaps
+            ],
+            "points": [
+                {
+                    "valid_from": point.valid_from.isoformat(),
+                    "valid_to": point.valid_to.isoformat(),
+                    "price_chf_per_kwh": str(point.price_chf_per_kwh),
+                }
+                for point in points
+            ],
+        })
+
+    def _confirmed_payload(self, request, source):
+        """Validate a destructive request, refusing a mistyped label.
+
+        The label has to be read off the row being destroyed and typed back,
+        which is what makes picking the wrong source out of a list hard.
+        """
+        serializer = DynamicSourceConfirmationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        expected = source.label.strip()
+        if serializer.validated_data["confirmation"].strip() != expected:
+            raise DRFValidationError({
+                "confirmation": [f'Type "{expected}" exactly to confirm.']
+            })
+        return serializer.validated_data
+
+    def destroy(self, request, *args, **kwargs):
+        """Remove a source nothing uses any more, and the prices it fetched.
+
+        Only when no tariff links to it: ``Tariff.dynamic_source`` is PROTECT,
+        so the database would refuse anyway, but a 409 naming what still uses
+        it is more useful than an integrity error. An unlinked source cannot
+        have contributed to any invoice either — ``source_has_billing_evidence``
+        reasons entirely over linked tariffs — so this needs no second
+        evidence check beyond that one condition.
+        """
+        self._require_admin(request)
+        source = self.get_object()
+        payload = self._confirmed_payload(request, source)
+
+        in_use = Response(
+            {
+                "detail": (
+                    "This source still prices at least one tariff. Repoint or remove "
+                    "those tariffs first."
+                )
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
+        linked = source.tariffs.count()
+        if linked:
+            zevs = source.tariffs.values("zev_id").distinct().count()
+            in_use.data["detail"] = (
+                f"This source still prices {linked} tariff(s) in {zevs} community/ies. "
+                "Repoint or remove those tariffs first."
+            )
+            return in_use
+
+        with dynamic_source_lock(source.pk) as acquired:
+            if not acquired:
+                return Response(
+                    {"detail": "This source is currently being fetched. Try again shortly."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            # Counted inside the lock so the number written to the audit trail
+            # is the number actually destroyed.
+            deleted_points = source.points.count()
+            source_id = str(source.pk)
+            label = source.label
+            try:
+                source.delete()
+            except ProtectedError:
+                # A tariff was linked between the count above and here. Rare,
+                # but the database — not that check — is what decides, and an
+                # unhandled integrity error would surface as a 500.
+                return in_use
+
+        _record_tariff_event(
+            request=request,
+            action_type="tariff.dynamic_source_delete",
+            target_type="tariffs.DynamicTariffSource",
+            target_id=source_id,
+            target_display=label,
+            summary=f"Deleted dynamic tariff source {label} and {deleted_points} price point(s).",
+            reason=payload["reason"],
+            metadata={"deleted_points": deleted_points},
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @prices.mapping.delete
+    def clear_prices(self, request, pk=None):
+        self._require_admin(request)
+        source = self.get_object()
+        payload = self._confirmed_payload(request, source)
+
+        with dynamic_source_lock(source.pk) as acquired:
+            if not acquired:
+                return Response(
+                    {"detail": "This source is currently being fetched. Try again shortly."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            if source_has_billing_evidence(source):
+                return Response(
+                    {
+                        "detail": (
+                            "Fetched prices cannot be cleared because a non-cancelled invoice "
+                            "overlaps a linked tariff."
+                        )
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+            deleted = clear_source_points(source)
+
+        _record_tariff_event(
+            request=request,
+            action_type="tariff.dynamic_source_clear",
+            target_type="tariffs.DynamicTariffSource",
+            target=source,
+            target_id=str(source.pk),
+            target_display=source.label,
+            summary=f"Cleared {deleted} price point(s) from {source.label}.",
+            reason=payload["reason"],
+            metadata={"deleted_points": deleted},
+        )
+        return Response({"deleted_points": deleted})
+
+    @action(detail=True, methods=["post"], url_path="fetch")
+    def fetch(self, request, pk=None):
+        self._require_admin(request)
+        source = self.get_object()
+        serializer = DynamicSourceFetchSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        backfill = serializer.validated_data["backfill"]
+        correlation_id = str(uuid4())
+        try:
+            task = fetch_dynamic_prices.delay(
+                str(source.pk), backfill=backfill, correlation_id=correlation_id
+            )
+        except Exception:
+            logger.exception("Could not queue a fetch for dynamic tariff source %s", source.pk)
+            _record_tariff_event(
+                request=request,
+                action_type="tariff.dynamic_fetch",
+                target_type="tariffs.DynamicTariffSource",
+                target=source,
+                target_id=str(source.pk),
+                target_display=source.label,
+                status=AuditEventStatus.FAILED,
+                correlation_id=correlation_id,
+                summary=f"Could not queue a dynamic tariff fetch for {source.label}.",
+                metadata={"backfill": backfill},
+            )
+            return Response(
+                {"detail": "The fetch could not be queued. Try again shortly."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        _record_tariff_event(
+            request=request,
+            action_type="tariff.dynamic_fetch",
+            target_type="tariffs.DynamicTariffSource",
+            target=source,
+            target_id=str(source.pk),
+            target_display=source.label,
+            status=AuditEventStatus.QUEUED,
+            correlation_id=correlation_id,
+            summary=f"Queued a dynamic tariff fetch for {source.label}.",
+            metadata={"backfill": backfill, "task_id": task.id},
+        )
+        return Response(
+            {
+                "task_id": task.id,
+                "correlation_id": correlation_id,
+                "backfill": backfill,
+                "queued_at": timezone.now().isoformat(),
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )

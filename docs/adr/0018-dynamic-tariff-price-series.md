@@ -14,7 +14,8 @@ When #530 was first written the blocker was that the standard defined the dynami
 price as a bare URL with no response schema. That is no longer true:
 SmartGridready publishes a VSE-compatible JSON Schema and OpenAPI template
 (v1.0.5, 2026-05-28; v2.0.0 final 2026-09-01 for 2027) derived from the VSE
-document *HDN-CH 2025*, and both operators we probed implement the v1 envelope.
+document *HDN-CH 2025*. V1.0.5 and v2.0.0 are structurally different and both
+are supported through versioned parsers.
 
 Two facts measured against those live endpoints on 2026-09-11 shaped this
 decision more than the schema did:
@@ -37,15 +38,43 @@ not a contract.
 
 **1. The fetched price series is billing evidence, not a cache.**
 
-Prices are stored permanently in `DynamicPricePoint`, and a source still
-referenced by a tariff cannot be deleted (`on_delete=PROTECT`). We do not treat
-the operator as the system of record and re-fetch on demand.
+Prices are retained in `DynamicPricePoint`, and a source still referenced by a
+tariff cannot be deleted (`on_delete=PROTECT`). We do not treat the operator as
+the system of record and re-fetch on demand.
 
 The reason is retention, not performance. Groupe E drops history after about
 nine months and BKW keeps none at all, so an interval nobody stored on the day is
 gone from every source including the operator. An invoice issued last March has
 to stay re-derivable for as long as the invoice exists, and nothing outside
 OpenZEV can supply those numbers again.
+
+An administrator may explicitly clear one source's points to recover from a
+wrong endpoint or product configuration, or delete a source nothing links to
+any more, but only after typing the source's own label back — a free-text
+reason is recorded when one is sent, but is not demanded: a reason box in
+front of an irreversible action invites a keystroke rather than a thought,
+where the label has to be read off the row being destroyed. Both are refused
+while no fetch is running, and clearing is refused when no non-cancelled
+invoice overlaps a tariff linked to that source (deleting needs no separate
+check: `on_delete=PROTECT` already means nothing links to the source at that
+point). Drafts count as invoice evidence because their stored totals would
+otherwise outlive their inputs.
+
+The same evidence check also guards the *tariff* side of the link, not only
+the source side: invoice items store rendered amounts rather than a tariff
+FK, so a tariff's `dynamic_source` field is the only thing tying an issued
+invoice back to the prices that priced it. Deleting a billed dynamic tariff,
+or repointing/clearing its `dynamic_source`, would sever that link without
+touching a single `DynamicPricePoint` — the same evidence loss through a
+different door — so both are refused under the same overlap rule.
+
+`request_mode`/`query_tariff_type`/`supports_range` are discovered once, at
+creation, from a probe that can under-detect (a transient blip, or an
+endpoint with nothing published at that exact moment). Because identity
+fields are immutable afterwards, a wrongly-negative `supports_range` had no
+way back except deleting and recreating the source; an admin-only re-probe
+action corrects the discovered fields in place without touching identity or
+stored points.
 
 **2. Sources are shared globally, not scoped per ZEV.**
 
@@ -82,6 +111,19 @@ most days, 92 when the clocks go forward and 100 when they go back; anything tha
 counted to 96 would declare a complete day incomplete twice a year and refuse to
 bill it.
 
+**5. Configuration names protocol versions, not VNB implementations.**
+
+`DynamicTariffSource.api_version` is either VSE v1.0.5 or v2.0.0. Creation
+fetches the URL first, detects the response version and available billable
+components, then probes whether standard filtering and time ranges are
+supported. Exact-URL endpoints and small query-enum deviations are represented
+as discovered capabilities, not as provider-specific adapters. This keeps the
+model and UI open to any conforming VNB without a code release per provider.
+
+V2 embeds `tariff_name` in its response, so the wizard can present it. V1 has
+no product catalogue in the response contract; its product name remains an
+optional manual input when an endpoint requires one.
+
 ## Consequences
 
 Positive:
@@ -100,8 +142,9 @@ Negative, and accepted:
   use. The row holds a public URL and public prices, so the exposure is a
   configuration label rather than tenant data — but it is a genuine break from
   the strict per-ZEV scoping everywhere else in this codebase.
-- Storage grows by ~35 000 rows per source-year and is never pruned. At Swiss
-  ZEV scale that is small; it is still unbounded growth by design.
+- Storage grows by ~35 000 rows per source-year and is never automatically
+  pruned. At Swiss ZEV scale that is small; it is still unbounded growth by
+  default.
 - The transfer archive carries the *link* (by natural key) but not the series, so
   an imported community starts with an empty source and refills on the next
   fetch — and for an operator that serves no history, only forward from then.

@@ -1,5 +1,10 @@
 import type {
+  DynamicPriceHistory,
+  DynamicSourceFetchResult,
+  DynamicSourceDiscovery,
+  DynamicApiVersion,
   DynamicTariffSource,
+  DynamicTariffSourceInput,
   Tariff,
   TariffInput,
   TariffPeriod,
@@ -74,10 +79,96 @@ export async function deleteTariffPeriod(id: string): Promise<void> {
 /**
  * Every configured dynamic price source — global, not scoped to a ZEV, so
  * this is what a tariff form's "use a dynamic source" picker reads from.
- * Read-only: a source is created only by the VSE importer or by an admin.
  */
 export async function fetchDynamicTariffSources(): Promise<DynamicTariffSource[]> {
   return fetchAllPages<DynamicTariffSource>('/tariffs/dynamic-sources/')
+}
+
+/**
+ * `warnings` names units the probed endpoint publishes but cannot bill (a
+ * demand charge, a fixed fee riding beside the requested energy component) —
+ * empty when an existing source was reused rather than freshly probed.
+ */
+export async function createDynamicTariffSource(
+  payload: DynamicTariffSourceInput,
+): Promise<DynamicTariffSource & { warnings: string[] }> {
+  const { data } = await api.post<DynamicTariffSource & { warnings: string[] }>(
+    '/tariffs/dynamic-sources/', payload,
+  )
+  return data
+}
+
+export async function discoverDynamicTariffSource(
+  url: string,
+  apiVersion?: DynamicApiVersion,
+): Promise<DynamicSourceDiscovery> {
+  const { data } = await api.post<DynamicSourceDiscovery>('/tariffs/dynamic-sources/discover/', {
+    url,
+    ...(apiVersion ? { api_version: apiVersion } : {}),
+  })
+  return data
+}
+
+export async function updateDynamicTariffSource(
+  id: string,
+  payload: Partial<DynamicTariffSourceInput>,
+): Promise<DynamicTariffSource> {
+  const { data } = await api.patch<DynamicTariffSource>(`/tariffs/dynamic-sources/${id}/`, payload)
+  return data
+}
+
+export async function fetchDynamicPriceHistory(
+  id: string,
+  dateFrom?: string,
+  dateTo?: string,
+): Promise<DynamicPriceHistory> {
+  const { data } = await api.get<DynamicPriceHistory>(`/tariffs/dynamic-sources/${id}/prices/`, {
+    params: { date_from: dateFrom, date_to: dateTo },
+  })
+  return data
+}
+
+export async function queueDynamicSourceFetch(id: string, backfill = false): Promise<DynamicSourceFetchResult> {
+  const { data } = await api.post<DynamicSourceFetchResult>(`/tariffs/dynamic-sources/${id}/fetch/`, { backfill })
+  return data
+}
+
+/**
+ * Re-probe this source's own endpoint to correct discovered capabilities
+ * (notably `supports_backfill`) without touching its identity. The initial
+ * probe can under-detect range support on a transient blip; identity fields
+ * cannot be edited afterwards, so without this a wrongly-negative detection
+ * had no way back except deleting and recreating the source.
+ */
+export async function recheckDynamicTariffSource(
+  id: string,
+): Promise<DynamicTariffSource & { warnings: string[] }> {
+  const { data } = await api.post<DynamicTariffSource & { warnings: string[] }>(
+    `/tariffs/dynamic-sources/${id}/recheck/`,
+  )
+  return data
+}
+
+/**
+ * Delete the fetched prices but keep the source itself, so it refills on the
+ * next fetch. `confirmation` is the source's own label, typed back.
+ */
+export async function clearDynamicSourcePrices(
+  id: string,
+  confirmation: string,
+): Promise<{ deleted_points: number }> {
+  const { data } = await api.delete<{ deleted_points: number }>(`/tariffs/dynamic-sources/${id}/prices/`, {
+    data: { confirmation },
+  })
+  return data
+}
+
+/**
+ * Remove the source itself, and with it every price it fetched. The server
+ * refuses while any tariff still links to it.
+ */
+export async function deleteDynamicTariffSource(id: string, confirmation: string): Promise<void> {
+  await api.delete(`/tariffs/dynamic-sources/${id}/`, { data: { confirmation } })
 }
 
 /**

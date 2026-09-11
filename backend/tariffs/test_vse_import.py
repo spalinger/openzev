@@ -750,7 +750,13 @@ class PlanningTests(TestCase):
             tariffForm="dynamic", prices={"dynamic": {"url": "https://api.example.ch/v1/tariffs"}},
         )))
 
-        with mock.patch("tariffs.importers.planner.fetch_window", return_value=([], [])) as probe:
+        with mock.patch(
+            "tariffs.importers.planner.probe_source_configuration",
+            return_value=mock.Mock(
+                api_version="v1_0_5", request_mode="standard",
+                query_tariff_type="grid", supports_range=True, warnings=[],
+            ),
+        ) as probe:
             report, created = apply_import(
                 zev=self.zev, document=parsed, selections=[Selection(parsed.candidates[0].key)],
                 source_url="https://example.ch/t.json", imported_on=date(2026, 9, 2),
@@ -766,13 +772,67 @@ class PlanningTests(TestCase):
         self.assertEqual(source.tariff_type, "grid")
         self.assertEqual(source.tariff_name, "")
 
+    def test_the_probe_auto_detects_the_api_version_rather_than_assuming_v1(self):
+        # The VSE tariff document names a tariffType (electricity/grid/
+        # regional_fees), never a protocol version, and both v1.0.5 and
+        # v2.0.0 define that vocabulary — so a document must be able to link
+        # to either generation of endpoint.
+        from tariffs.dynamic.models import DynamicTariffSource
+
+        parsed = parse_document(document(entry(
+            tariffForm="dynamic", prices={"dynamic": {"url": "https://api.example.ch/v2/tariffs"}},
+        )))
+
+        with mock.patch(
+            "tariffs.importers.planner.probe_source_configuration",
+            return_value=mock.Mock(
+                api_version="v2_0_0", request_mode="standard",
+                query_tariff_type="grid", supports_range=True, warnings=[],
+            ),
+        ) as probe:
+            _report, created = apply_import(
+                zev=self.zev, document=parsed, selections=[Selection(parsed.candidates[0].key)],
+                source_url="https://example.ch/t.json", imported_on=date(2026, 9, 2),
+            )
+
+        self.assertNotIn("api_version", probe.call_args.kwargs)
+        source = DynamicTariffSource.objects.get(pk=created[0].dynamic_source_id)
+        self.assertEqual(source.api_version, "v2_0_0")
+
+    def test_a_new_dynamic_source_reports_units_it_cannot_bill(self):
+        parsed = parse_document(document(entry(
+            tariffForm="dynamic", prices={"dynamic": {"url": "https://api.example.ch/v1/tariffs"}},
+        )))
+        warning = "The grid series also publishes a fixed charge (CHF_m) which is not billed here."
+
+        with mock.patch(
+            "tariffs.importers.planner.probe_source_configuration",
+            return_value=mock.Mock(
+                api_version="v1_0_5", request_mode="standard",
+                query_tariff_type="grid", supports_range=True, warnings=[warning],
+            ),
+        ):
+            report, created = apply_import(
+                zev=self.zev, document=parsed, selections=[Selection(parsed.candidates[0].key)],
+                source_url="https://example.ch/t.json", imported_on=date(2026, 9, 2),
+            )
+
+        self.assertEqual(len(created), 1)
+        self.assertEqual(report.created[0]["dynamic_source_warnings"], [warning])
+
     def test_a_new_dynamic_source_queues_one_backfill_after_commit(self):
         parsed = parse_document(document(entry(
             tariffForm="dynamic", prices={"dynamic": {"url": "https://api.example.ch/v1/tariffs"}},
         )))
 
         with (
-            mock.patch("tariffs.importers.planner.fetch_window", return_value=([], [])),
+            mock.patch(
+                "tariffs.importers.planner.probe_source_configuration",
+                return_value=mock.Mock(
+                    api_version="v1_0_5", request_mode="standard",
+                    query_tariff_type="grid", supports_range=True,
+                ),
+            ),
             mock.patch("tariffs.importers.planner.fetch_dynamic_prices.delay") as delay,
             self.captureOnCommitCallbacks(execute=True),
         ):
@@ -789,7 +849,13 @@ class PlanningTests(TestCase):
         )))
 
         with (
-            mock.patch("tariffs.importers.planner.fetch_window", return_value=([], [])),
+            mock.patch(
+                "tariffs.importers.planner.probe_source_configuration",
+                return_value=mock.Mock(
+                    api_version="v1_0_5", request_mode="standard",
+                    query_tariff_type="grid", supports_range=True,
+                ),
+            ),
             mock.patch("tariffs.importers.planner._create", side_effect=DjangoValidationError("invalid")),
             mock.patch("tariffs.importers.planner.fetch_dynamic_prices.delay") as delay,
             self.captureOnCommitCallbacks(execute=True),
@@ -809,7 +875,13 @@ class PlanningTests(TestCase):
         parsed = parse_document(document(entry(
             tariffForm="dynamic", prices={"dynamic": {"url": "https://api.example.ch/v1/tariffs"}},
         )))
-        with mock.patch("tariffs.importers.planner.fetch_window", return_value=([], [])):
+        with mock.patch(
+            "tariffs.importers.planner.probe_source_configuration",
+            return_value=mock.Mock(
+                api_version="v1_0_5", request_mode="standard",
+                query_tariff_type="grid", supports_range=True,
+            ),
+        ):
             apply_import(
                 zev=self.zev, document=parsed, selections=[Selection(parsed.candidates[0].key)],
                 source_url="https://example.ch/t.json", imported_on=date(2026, 9, 2),
@@ -822,7 +894,7 @@ class PlanningTests(TestCase):
             tariffForm="dynamic", prices={"dynamic": {"url": "https://api.example.ch/v1/tariffs"}},
         )))
         with (
-            mock.patch("tariffs.importers.planner.fetch_window") as probe,
+            mock.patch("tariffs.importers.planner.probe_source_configuration") as probe,
             mock.patch("tariffs.importers.planner.fetch_dynamic_prices.delay") as delay,
             self.captureOnCommitCallbacks(execute=True),
         ):
@@ -845,7 +917,7 @@ class PlanningTests(TestCase):
         )))
 
         with mock.patch(
-            "tariffs.importers.planner.fetch_window",
+            "tariffs.importers.planner.probe_source_configuration",
             side_effect=TariffFetchError("The operator's server answered HTTP 410."),
         ):
             report, created = apply_import(

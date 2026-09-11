@@ -22,8 +22,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.core.exceptions import ValidationError as DjangoValidationError
 
-from tariffs.dynamic.adapters import DynamicAdapter
-from tariffs.dynamic.fetch import fetch_window
+from tariffs.dynamic.discovery import probe_source_configuration
 from tariffs.dynamic.models import DynamicTariffSource
 from tariffs.models import Tariff, TariffPeriod
 from tariffs.series import SERIES_FIELDS, plan_new_version
@@ -250,7 +249,7 @@ def _notes_with_provenance(candidate: Candidate, source_url: str, imported_on: d
     return f"{candidate.notes}\n{origin} (imported {imported_on.isoformat()})".strip()
 
 
-def _get_or_create_dynamic_source(candidate: Candidate) -> tuple[DynamicTariffSource, bool]:
+def _get_or_create_dynamic_source(candidate: Candidate) -> tuple[DynamicTariffSource, bool, list[str]]:
     """Find or create the price source a dynamic candidate names.
 
     Sources are shared globally (ADR 0018), so another ZEV already on this
@@ -265,6 +264,17 @@ def _get_or_create_dynamic_source(candidate: Candidate) -> tuple[DynamicTariffSo
     to a source that cannot be fetched would be worse than not creating it.
     An already-known source is trusted without a fresh probe: it is already
     being fetched on schedule.
+
+    The probe does not pin an API version: the VSE tariff document names a
+    ``tariffType`` (electricity/grid/regional_fees), never a protocol
+    version, and both v1.0.5 and v2.0.0 define that vocabulary. Auto-detecting
+    lets a document point at either generation of endpoint, the same way the
+    manual two-step wizard does; ``discover_endpoint`` still fails clearly if
+    the response cannot be read as either.
+
+    Returns the resolved source, whether it was newly created, and any
+    "priced but unbillable unit" warnings the probe found for it — empty for
+    a reused source, since nothing was probed.
     """
     natural_key = {
         "url": candidate.dynamic_url,
@@ -273,12 +283,14 @@ def _get_or_create_dynamic_source(candidate: Candidate) -> tuple[DynamicTariffSo
     }
     existing = DynamicTariffSource.objects.filter(**natural_key).first()
     if existing is not None:
-        return existing, False
+        return existing, False, []
 
-    probe = DynamicTariffSource(adapter=DynamicAdapter.VSE_V1, **natural_key)
     try:
-        fetch_window(probe, window=None)
-    except TariffFetchError as exc:
+        capabilities = probe_source_configuration(
+            candidate.dynamic_url,
+            tariff_type=candidate.dynamic_tariff_type,
+        )
+    except (TariffFetchError, ValueError) as exc:
         raise ValueError(
             f"Could not fetch the dynamic price at {candidate.dynamic_url}: {exc}"
         ) from exc
@@ -286,11 +298,14 @@ def _get_or_create_dynamic_source(candidate: Candidate) -> tuple[DynamicTariffSo
     source, created = DynamicTariffSource.objects.get_or_create(
         **natural_key,
         defaults={
-            "adapter": DynamicAdapter.VSE_V1,
+            "api_version": capabilities.api_version,
+            "request_mode": capabilities.request_mode,
+            "query_tariff_type": capabilities.query_tariff_type,
+            "supports_range": capabilities.supports_range,
             "label": f"{candidate.source_tariff_name} — {candidate.dynamic_tariff_type}",
         },
     )
-    return source, created
+    return source, created, (capabilities.warnings if created else [])
 
 
 def _create(
@@ -415,9 +430,12 @@ def apply_import(*, zev, document: ParsedDocument, selections: list[Selection], 
         # database savepoint open while it happens.
         dynamic_source = None
         dynamic_source_created = False
+        dynamic_source_warnings: list[str] = []
         if candidate.dynamic_url:
             try:
-                dynamic_source, dynamic_source_created = _get_or_create_dynamic_source(candidate)
+                dynamic_source, dynamic_source_created, dynamic_source_warnings = (
+                    _get_or_create_dynamic_source(candidate)
+                )
             except ValueError as exc:
                 report.errors.append({"name": candidate.name, "error": str(exc)})
                 continue
@@ -452,6 +470,11 @@ def apply_import(*, zev, document: ParsedDocument, selections: list[Selection], 
             "valid_from": tariff.valid_from.isoformat(),
             "valid_to": tariff.valid_to.isoformat() if tariff.valid_to else None,
             "dynamic": tariff.dynamic_source_id is not None,
+            # Units the newly probed source publishes but cannot bill (a
+            # demand charge, a fixed fee riding beside the requested energy
+            # component) — empty when the source was reused, since nothing
+            # was probed for this import.
+            "dynamic_source_warnings": dynamic_source_warnings,
         })
 
     return report, created
