@@ -14,6 +14,7 @@ import {
   type ImportEntryError,
 } from '../../lib/api/zevTransfer'
 import { useToast } from '../../lib/toast'
+import type { ZevArchiveImportResult } from '../../types/api'
 import { TransferSectionPicker } from './TransferSectionPicker'
 import { DEFAULT_SECTIONS, type TransferSectionName } from './transferSections'
 
@@ -34,6 +35,7 @@ export function ZevImportModal({ isOpen, onClose, onImported }: ZevImportModalPr
   const [fatalError, setFatalError] = useState<string | null>(null)
   const [entryErrors, setEntryErrors] = useState<ImportEntryError[]>([])
   const [totalErrors, setTotalErrors] = useState(0)
+  const [imported, setImported] = useState<ZevArchiveImportResult | null>(null)
 
   const sectionsQuery = useQuery({
     queryKey: queryKeys.zev.transferSections(),
@@ -54,11 +56,14 @@ export function ZevImportModal({ isOpen, onClose, onImported }: ZevImportModalPr
     setFatalError(null)
     setEntryErrors([])
     setTotalErrors(0)
+    setImported(null)
   }
 
   function close() {
+    const zevId = imported?.zev_id
     reset()
-    onClose()
+    if (zevId) onImported(zevId)
+    else onClose()
   }
 
   const inspectMutation = useMutation({
@@ -82,6 +87,10 @@ export function ZevImportModal({ isOpen, onClose, onImported }: ZevImportModalPr
     mutationFn: () => importZevArchive(file as File, selected, name),
     onSuccess: (result) => {
       pushToast(t('zevTransfer.importSuccess', { name: result.zev_name }), 'success')
+      if (result.warnings?.length) {
+        setImported(result)
+        return
+      }
       const zevId = result.zev_id
       reset()
       onImported(zevId)
@@ -114,6 +123,20 @@ export function ZevImportModal({ isOpen, onClose, onImported }: ZevImportModalPr
   }
 
   const busy = inspectMutation.isPending || importMutation.isPending
+
+  if (imported) {
+    return (
+      <FormModal isOpen={isOpen} title={t('zevTransfer.importTitle')} onClose={close} maxWidth="640px">
+        <div className="page-stack">
+          <p>{t('zevTransfer.importSuccess', { name: imported.zev_name })}</p>
+          {imported.warnings.map((warning) => (
+            <div className="warning-banner" key={warning}>{warning}</div>
+          ))}
+          <button type="button" className="button button-primary" onClick={close}>{t('common.close')}</button>
+        </div>
+      </FormModal>
+    )
+  }
 
   return (
     <FormModal isOpen={isOpen} title={t('zevTransfer.importTitle')} onClose={close} maxWidth="640px">

@@ -7,29 +7,40 @@ from datetime import datetime, timedelta, timezone
 from django.db import transaction
 from django.utils import timezone as djtimezone
 
-from invoices.models import Invoice, InvoiceStatus
+from allocation.validity import period_start_dt, period_end_exclusive_dt
+from invoices.models import InvoiceDynamicSourceEvidence, InvoiceStatus
 
 from .discovery import probe_source_configuration
-from .fetch import store_points
+from .adapters import DynamicApiVersion
+from .storage import PriceSeriesConflict, store_points
 from .models import DynamicTariffSource, FetchStatus
+from .evidence import lock_sources
 
 
-def create_or_reuse_source(*, label, url, api_version, tariff_type, tariff_name):
+def create_or_reuse_source(
+    *, label, url, api_version, tariff_type, tariff_name, enabled=True
+):
     """Probe and create a source, or return the existing natural-key match.
 
     Returns ``(source, created, warnings)``. ``warnings`` names priced units
     the probe found but cannot bill (a demand charge, a fixed monthly fee
     riding alongside the requested energy component, ...) — the same
     warnings ``vse_v1``/``vse_v2`` already compute so nothing is silently
-    dropped; a reused source returns none because nothing was probed.
+    dropped. An exact existing key skips probing. A blank v2 request must
+    resolve the product first and retains probe warnings even on reuse.
     """
 
     natural_key = {
         "url": url,
+        "api_version": api_version,
         "tariff_type": tariff_type,
         "tariff_name": tariff_name,
     }
-    existing = DynamicTariffSource.objects.filter(**natural_key).first()
+    # A blank v2 choice means "discover the default", not a reusable identity.
+    existing = (
+        DynamicTariffSource.objects.filter(**natural_key).first()
+        if api_version != DynamicApiVersion.V2_0_0 or tariff_name else None
+    )
     if existing is not None:
         return existing, False, []
 
@@ -41,53 +52,55 @@ def create_or_reuse_source(*, label, url, api_version, tariff_type, tariff_name)
     )
     now = djtimezone.now()
 
+    natural_key["tariff_name"] = capabilities.tariff_name or tariff_name
+
     with transaction.atomic():
         source, created = DynamicTariffSource.objects.get_or_create(
             **natural_key,
             defaults={
                 "label": label,
-                "api_version": capabilities.api_version,
                 "request_mode": capabilities.request_mode,
                 "query_tariff_type": capabilities.query_tariff_type,
                 "supports_range": capabilities.supports_range,
+                "enabled": enabled,
             },
         )
         if created:
             # Local import avoids a service/task import cycle.
             from ..tasks import fetch_dynamic_prices
 
-            store_points(source, capabilities.points)
-            DynamicTariffSource.objects.filter(pk=source.pk).update(
-                last_fetch_status=FetchStatus.OK,
-                last_fetch_at=now,
-                last_success_at=now,
-                last_fetch_error="",
-            )
-            transaction.on_commit(
-                lambda source_id=str(source.pk): fetch_dynamic_prices.delay(
-                    source_id, backfill=True
-                ),
-                robust=True,
-            )
+            initialise_source_from_probe(source, capabilities, now=now)
+            if source.enabled:
+                transaction.on_commit(
+                    lambda source_id=str(source.pk): fetch_dynamic_prices.delay(
+                        source_id, backfill=True
+                    ),
+                    robust=True,
+                )
 
     source.refresh_from_db()
-    return source, created, (capabilities.warnings if created else [])
+    return source, created, capabilities.warnings
+
+
+def initialise_source_from_probe(source, capabilities, *, now=None):
+    """Store probe points and mark the source as successfully fetched.
+
+    The caller owns the surrounding transaction.
+    """
+    now = now or djtimezone.now()
+    store_points(source, capabilities.points)
+    DynamicTariffSource.objects.filter(pk=source.pk).update(
+        last_fetch_status=FetchStatus.OK,
+        last_fetch_at=now,
+        last_success_at=now,
+        last_fetch_error="",
+        recovery_from=None,
+    )
+    source.refresh_from_db()
 
 
 def recheck_source_capabilities(source: DynamicTariffSource) -> tuple[DynamicTariffSource, list[str]]:
-    """Re-probe an existing source's own identity to correct capabilities.
-
-    ``request_mode``/``query_tariff_type``/``supports_range`` are discovered
-    once, at creation, and never revisited automatically. That first probe
-    can under-detect: the range check asks for a narrow window around one
-    sample interval, and a transient blip or an endpoint with nothing
-    published at that exact moment makes an endpoint that genuinely supports
-    range queries look like it does not. Because a source's identity fields
-    (url/api_version/tariff_type/tariff_name) are immutable after creation —
-    on purpose, so two price series can never mix — a wrongly-negative
-    ``supports_range`` had no way back except deleting and recreating the
-    source. This keeps the identity and only updates what discovery found.
-    """
+    """Re-probe request capabilities without changing identity or the explicit 404 setting."""
     capabilities = probe_source_configuration(
         source.url,
         api_version=source.api_version,
@@ -104,55 +117,38 @@ def recheck_source_capabilities(source: DynamicTariffSource) -> tuple[DynamicTar
 
 
 def tariff_has_dynamic_billing_evidence(*, zev_id, valid_from, valid_to, dynamic_source_id) -> bool:
-    """Conservatively detect invoices that may have been priced through this
-    one tariff's dynamic link, by validity-window overlap.
-
-    Invoice items intentionally store rendered monetary values rather than a
-    tariff FK, so overlap between the tariff's validity window and an invoice
-    period is the strongest evidence relationship available. Draft invoices
-    count too: leaving their totals behind after deleting their inputs would
-    be misleading.
-
-    This is called both per-source (``source_has_billing_evidence``, over
-    every *currently* linked tariff) and per-tariff, before a mutation that
-    would remove the link itself — deleting the tariff, or repointing its
-    ``dynamic_source`` — because once the link is gone, the source-level
-    check can no longer see it: ``source.tariffs`` only reflects tariffs that
-    still point at it *right now*, not every tariff that ever did.
-    """
+    """Conservative workflow guard over frozen evidence overlapping this tariff window."""
     if not dynamic_source_id:
         return False
-    invoices = Invoice.objects.filter(
-        zev_id=zev_id,
-        period_end__gte=valid_from,
-    ).exclude(status=InvoiceStatus.CANCELLED)
+    # Evidence follows UTC billing dates, not the history chart's local dates.
+    start = period_start_dt(valid_from)
+    evidence = InvoiceDynamicSourceEvidence.objects.filter(
+        source_id=dynamic_source_id, invoice__zev_id=zev_id, evidence_to__gt=start,
+    ).exclude(invoice__status=InvoiceStatus.CANCELLED)
     if valid_to is not None:
-        invoices = invoices.filter(period_start__lte=valid_to)
-    return invoices.exists()
+        end = period_end_exclusive_dt(valid_to)
+        evidence = evidence.filter(evidence_from__lt=end)
+    return evidence.exists()
 
 
 def source_has_billing_evidence(source: DynamicTariffSource) -> bool:
     """Conservatively detect invoices whose calculation may use this source."""
 
-    return any(
-        tariff_has_dynamic_billing_evidence(
-            zev_id=zev_id, valid_from=valid_from, valid_to=valid_to,
-            dynamic_source_id=source.pk,
-        )
-        for zev_id, valid_from, valid_to in source.tariffs.values_list(
-            "zev_id", "valid_from", "valid_to"
-        )
-    )
+    return source.invoice_evidence.exclude(invoice__status=InvoiceStatus.CANCELLED).exists()
 
 
 def clear_source_points(source: DynamicTariffSource) -> int:
     """Delete an unprotected source's points and reset its materialized state."""
 
     with transaction.atomic():
+        lock_sources([source.pk])
+        if source_has_billing_evidence(source):
+            raise PriceSeriesConflict("Fetched prices cannot be cleared because an invoice retains this source as evidence.")
         deleted, _details = source.points.all().delete()
         DynamicTariffSource.objects.filter(pk=source.pk).update(
             covers_from=None,
             covers_to=None,
+            recovery_from=None,
             last_fetch_status=FetchStatus.PENDING,
             last_fetch_at=None,
             last_success_at=None,
@@ -161,7 +157,7 @@ def clear_source_points(source: DynamicTariffSource) -> int:
     return deleted
 
 
-def utc_day_window(date_from, date_to):
+def local_civil_day_window(date_from, date_to):
     """Inclusive civil dates, read in the app's local timezone, as a
     half-open UTC datetime window.
 

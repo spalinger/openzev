@@ -32,6 +32,7 @@ from allocation.split import split_consumption, split_production
 from allocation.windows import AssignmentWindows
 from zev.models import AllocationMode, Zev, Participant, MeteringPoint, MeteringPointAssignment, VatMode
 from tariffs.dynamic.models import DynamicPricePoint
+from tariffs.dynamic.evidence import lock_sources, record_invoice_evidence
 from tariffs.models import BillingMode, EnergyType, PeriodType, SplitKey, Tariff, TariffCategory, TariffPeriod
 from tariffs.periods import months_of, weekdays_of
 from metering.models import MeterReading, ReadingDirection
@@ -63,15 +64,17 @@ class InvoiceGenerationContext:
     weight_sum_by_date: dict[date, Decimal]
     weight_sums_by_tariff: dict[UUID, dict[date, Decimal]] = field(default_factory=dict)
     participant_counts_by_tariff: dict[UUID, dict[date, int]] = field(default_factory=dict)
-    # Keyed by DynamicTariffSource id. A batch run shares one context across
-    # every participant in the ZEV-period, so this is what makes a 20-person
-    # batch load each dynamic series once instead of twenty times.
+    # Valid only while the current invoice holds the source locks.
     _dynamic_series_cache: "dict[UUID, _DynamicSeries]" = field(default_factory=dict, repr=False)
 
     def dynamic_series(self, source_id: UUID) -> "_DynamicSeries":
         series = self._dynamic_series_cache.get(source_id)
         if series is None:
-            series = self._dynamic_series_cache[source_id] = _DynamicSeries.load(source_id)
+            _zev_id, period_start, period_end = self.scope
+            start, end = period_window(period_start, period_end)
+            series = self._dynamic_series_cache[source_id] = _DynamicSeries.load(
+                source_id, start=start, end=end
+            )
         return series
 
     @classmethod
@@ -255,14 +258,74 @@ def _discard_replaceable_invoices(participant, period_start, period_end) -> None
 # ─── Pricing state ────────────────────────────────────────────────────────────
 
 
-class DynamicPriceGapError(ValueError):
-    """A dynamic tariff has no fetched price at some timestamp being billed.
+class DynamicTariffError(ValueError):
+    """A tariff configuration cannot safely price an invoice."""
 
-    Billing zero, or falling back to whatever price happened to be adjacent,
-    would silently produce a wrong invoice — this is the one case in the
-    engine that refuses to generate rather than degrade. See
-    docs/specs/2026-09-dynamic-tariffs.md §9.
+    code = "invalid_dynamic_tariff"
+
+    def __init__(self, *, tariff: Tariff, message: str):
+        self.tariff_id = tariff.pk
+        self.tariff_name = tariff.name
+        self.source_id = tariff.dynamic_source_id
+        super().__init__(message)
+
+    def as_dict(self) -> dict:
+        return {
+            "code": self.code, "error": str(self),
+            "tariff_id": str(self.tariff_id), "tariff_name": self.tariff_name,
+            "source_id": str(self.source_id),
+        }
+
+
+class DynamicPriceGapError(DynamicTariffError):
+    """A missing price must abort billing, never silently price energy at zero."""
+
+    code = "dynamic_price_gap"
+
+    def __init__(self, *, tariff: Tariff, missing_at: datetime):
+        self.missing_at = missing_at
+        super().__init__(tariff=tariff, message=(
+            f'"{tariff.name}" has no dynamic price at {missing_at.isoformat()}: '
+            "the fetched series does not cover this reading. Refresh the source, "
+            "or wait for the gap to fill, before generating this invoice."
+        ))
+
+    def as_dict(self) -> dict:
+        return {**super().as_dict(), "missing_at": self.missing_at.isoformat()}
+
+
+def _validate_dynamic_tariff(tariff):
+    errors = tariff._dynamic_source_errors()
+    if errors:
+        raise DynamicTariffError(tariff=tariff, message=" ".join(errors.values()))
+
+
+def preflight_dynamic_prices(zev, period_start, period_end):
+    """Refuse known configuration/coverage failures before queueing a batch.
+
+    This is the same conservative full-window check as readiness. Invoice
+    generation still validates under source locks; preflight cannot reserve
+    prices across the wait for a worker.
     """
+    from tariffs.dynamic.fetch import coverage_gaps
+
+    tariffs = active_during(
+        Tariff.objects.filter(zev=zev, dynamic_source__isnull=False),
+        period_start, period_end,
+    ).select_related("dynamic_source")
+    checked = set()
+    for tariff in tariffs:
+        _validate_dynamic_tariff(tariff)
+        start, end = period_window(
+            max(period_start, tariff.valid_from),
+            min(period_end, tariff.valid_to or period_end),
+        )
+        key = (tariff.dynamic_source_id, start, end)
+        if key not in checked:
+            gaps = coverage_gaps(tariff.dynamic_source, start, end)
+            if gaps:
+                raise DynamicPriceGapError(tariff=tariff, missing_at=gaps[0][0])
+            checked.add(key)
 
 
 class _DynamicSeries:
@@ -279,10 +342,21 @@ class _DynamicSeries:
         self._starts = [valid_from for valid_from, _valid_to, _price in points]
 
     @classmethod
-    def load(cls, source_id: UUID) -> "_DynamicSeries":
-        rows = DynamicPricePoint.objects.filter(source_id=source_id).order_by(
-            "valid_from"
-        ).values_list("valid_from", "valid_to", "price_chf_per_kwh")
+    def load(
+        cls,
+        source_id: UUID,
+        *,
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> "_DynamicSeries":
+        rows = DynamicPricePoint.objects.filter(source_id=source_id)
+        if start is not None and end is not None:
+            rows = rows.filter(valid_from__lt=end, valid_to__gt=start)
+        elif start is not None or end is not None:
+            raise ValueError("start and end must be provided together.")
+        rows = rows.order_by("valid_from").values_list(
+            "valid_from", "valid_to", "price_chf_per_kwh"
+        )
         return cls(list(rows))
 
     def price_at(self, ts: datetime) -> Decimal | None:
@@ -338,7 +412,7 @@ class TariffResolver:
         """The price at ``ts``, and the band that set it for a static tariff.
 
         This is the one funnel every pricing call site reads from, static or
-        dynamic — see ``_get_tariff_price``/``_resolve_tariff_band`` below for
+        dynamic — see ``_resolve_tariff_band`` below for
         why a static tariff's resolution must stay in exactly one place. A
         dynamic tariff never has a period to report: a 15-minute series would
         turn one line into thousands if it itemised per reading.
@@ -357,11 +431,7 @@ class TariffResolver:
                 )
             price = self._context.dynamic_series(tariff.dynamic_source_id).price_at(ts)
             if price is None:
-                raise DynamicPriceGapError(
-                    f'"{tariff.name}" has no dynamic price at {ts.isoformat()}: the fetched '
-                    "series does not cover this reading. Refresh the source, or wait for the "
-                    "gap to fill, before generating this invoice."
-                )
+                raise DynamicPriceGapError(tariff=tariff, missing_at=ts)
             return price, None
         period = _resolve_tariff_band(tariff, ts)
         return (period.price_chf_per_kwh if period is not None else Decimal("0")), period
@@ -452,19 +522,12 @@ def _tariff_is_active(tariff: Tariff, day: date) -> bool:
     return tariff.valid_from <= day and (tariff.valid_to is None or tariff.valid_to >= day)
 
 
-def _get_tariff_price(tariff: Tariff, ts: datetime) -> Decimal | None:
-    """Find the applicable price for a given tariff and timestamp."""
-    period = _resolve_tariff_band(tariff, ts)
-    return period.price_chf_per_kwh if period is not None else None
-
-
 def _resolve_tariff_band(tariff: Tariff, ts: datetime):
     """The band that prices ``tariff`` at ``ts``, or None when it has none.
 
-    Split out of ``_get_tariff_price`` so a caller that itemises bands can key
-    a line by the band that priced it. The resolution order is the pricing
-    rule itself and must stay in one place: two copies would drift and bill
-    one thing while printing another.
+    This is the live static-price seam: ``TariffResolver`` uses the returned
+    band both for its value and for invoice-line itemisation. The resolution
+    order therefore stays in one place.
     """
     periods = list(tariff.periods.all())
     if not periods:
@@ -894,6 +957,7 @@ DESCRIPTION_TRANSLATIONS: dict[str, dict] = {
         "shared_yearly_pl": "monatliche Raten der Jahresgebühr, Gemeinschaftskosten anteilig",
         "pct_of": "von CHF",
         "community_marker": "Gemeinschaftsanteil",
+        "dynamic_effective_rate": "verbrauchsgewichteter dynamischer Durchschnittspreis",
     },
     "fr": {
         "yearly_fee_sg": "mensualité de la redevance annuelle",
@@ -910,6 +974,7 @@ DESCRIPTION_TRANSLATIONS: dict[str, dict] = {
         "shared_yearly_pl": "mensualités de la redevance annuelle, quote-part des frais communs",
         "pct_of": "de CHF",
         "community_marker": "Part communautaire",
+        "dynamic_effective_rate": "prix dynamique moyen pondéré par la consommation",
     },
     "it": {
         "yearly_fee_sg": "rata mensile della tariffa annuale",
@@ -926,6 +991,7 @@ DESCRIPTION_TRANSLATIONS: dict[str, dict] = {
         "shared_yearly_pl": "rate mensili della tariffa annuale, quota dei costi comuni",
         "pct_of": "di CHF",
         "community_marker": "Quota comunitaria",
+        "dynamic_effective_rate": "prezzo dinamico medio ponderato per il consumo",
     },
     "en": {
         "yearly_fee_sg": "monthly installment of annual fee",
@@ -942,6 +1008,7 @@ DESCRIPTION_TRANSLATIONS: dict[str, dict] = {
         "shared_yearly_pl": "monthly installments of annual fee, share of community costs",
         "pct_of": "of CHF",
         "community_marker": "Community share",
+        "dynamic_effective_rate": "consumption-weighted dynamic average rate",
     },
 }
 
@@ -992,7 +1059,10 @@ def _build_description(
         # carry their own brackets ("HT (Hochtarif)"), and nesting them inside
         # another pair reads as a typo. The community marker keeps its
         # parentheses, so a line can carry both without ambiguity.
-        named = f"{tariff.name} – {band}" if band else tariff.name
+        if tariff.dynamic_source_id:
+            named = f"{tariff.name} – {t['dynamic_effective_rate']}"
+        else:
+            named = f"{tariff.name} – {band}" if band else tariff.name
         return f"{named} ({marker})" if community else named
     if tariff.billing_mode == BillingMode.PERCENTAGE_OF_ENERGY:
         pct = tariff.percentage or Decimal("0")
@@ -1392,6 +1462,19 @@ def generate_invoice(
     tariffs_list = list(
         Tariff.objects.filter(zev=zev).prefetch_related("periods")
     )
+    dynamic_tariffs = [
+        tariff for tariff in tariffs_list
+        if tariff.dynamic_source_id
+        and _overlaps(tariff.valid_from, tariff.valid_to, period_start, period_end)
+    ]
+    sources = lock_sources({tariff.dynamic_source_id for tariff in dynamic_tariffs})
+    sources_by_id = {source.pk: source for source in sources}
+    for tariff in dynamic_tariffs:
+        tariff.dynamic_source = sources_by_id[tariff.dynamic_source_id]
+        _validate_dynamic_tariff(tariff)
+    # A previous participant may have rolled back, or maintenance may have run
+    # between invoices. Never reuse prices after releasing their source locks.
+    generation_context._dynamic_series_cache.clear()
     tariffs = TariffResolver(tariffs_list, generation_context)
     # ─── 7. Per-reading HT/NT-aware pricing with timestamp allocation ─────
     local_kwh_acc = Decimal("0")
@@ -1667,6 +1750,7 @@ def generate_invoice(
             sort_order=_build_sort_order(tariff),
         ))
     InvoiceItem.objects.bulk_create(items)
+    record_invoice_evidence(invoice, dynamic_tariffs)
 
     logger.info("Generated invoice %s for %s: %s CHF", invoice_number, participant.full_name, total_chf)
     return invoice
@@ -1748,9 +1832,12 @@ def generate_invoices_for_zev(zev: Zev, period_start: date, period_end: date) ->
                     "Could not re-sync invoice counter after failure for participant %s",
                     participant.full_name,
                 )
-            failures.append({
+            failure = {
                 "participant_id": str(participant.id),
                 "participant_name": participant.full_name,
                 "error": str(exc),
-            })
+            }
+            if isinstance(exc, DynamicTariffError):
+                failure.update(exc.as_dict())
+            failures.append(failure)
     return BulkGenerationResult(invoices, failures)

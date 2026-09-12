@@ -1,4 +1,5 @@
 import type { TransferSection, TransferSectionName } from '../../features/zev/transferSections'
+import type { ZevArchiveImportResult } from '../../types/api'
 import { api } from './client'
 
 export type ArchiveManifest = {
@@ -8,13 +9,6 @@ export type ArchiveManifest = {
   sections: TransferSectionName[]
   counts: Record<string, number>
   source_zev: { id: string; name: string }
-}
-
-type ImportResult = {
-  zev_id: string
-  zev_name: string
-  sections: TransferSectionName[]
-  counts: Record<string, number>
 }
 
 export type ImportEntryError = {
@@ -61,14 +55,14 @@ export async function importZevArchive(
   file: File,
   sections: TransferSectionName[],
   name: string,
-): Promise<ImportResult> {
+): Promise<ZevArchiveImportResult> {
   const body = new FormData()
   body.append('file', file)
   body.append('sections', sections.join(','))
   if (name.trim()) {
     body.append('name', name.trim())
   }
-  const { data } = await api.post<ImportResult>('/zev/zevs/import-archive/', body)
+  const { data } = await api.post<ZevArchiveImportResult>('/zev/zevs/import-archive/', body)
   return data
 }
 

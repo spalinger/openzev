@@ -54,6 +54,23 @@ describe('DynamicSourceFormModal discovery wizard', () => {
     apiMock.restore()
   })
 
+  it('requires the expected product for an empty v2 endpoint', async () => {
+    apiMock.onPost('/tariffs/dynamic-sources/discover/').reply(200, {
+      api_version: 'v2_0_0', version_detected: false, components_discovered: false,
+      components: [{ tariff_type: 'grid', tariff_name: '', aggregated_tariff_types: [] }],
+    })
+    const inputs = container.querySelectorAll<HTMLInputElement>('input')
+    await act(async () => {
+      setInput(inputs[0], 'Example prices')
+      setInput(inputs[1], 'https://prices.example.test/tariffs')
+      container.querySelector<HTMLFormElement>('form')!.requestSubmit()
+    })
+    await vi.waitFor(() => expect(container.textContent).toContain('pages.dynamicSources.form.v2TariffNameHint'))
+    const product = Array.from(container.querySelectorAll('input')).find((input) => input.value === '')!
+    expect(product.required).toBe(true)
+    expect(product.checkValidity()).toBe(false)
+  })
+
   it('asks for name and URL first, then renders discovered components', async () => {
     expect(container.textContent).toContain('pages.dynamicSources.discovery.step')
     const versionOptions = Array.from(container.querySelectorAll('option')).map((option) => option.value)
@@ -66,8 +83,8 @@ describe('DynamicSourceFormModal discovery wizard', () => {
       version_detected: true,
       components_discovered: true,
       components: [
-        { tariff_type: 'grid', tariff_name: 'standard' },
-        { tariff_type: 'feed_in', tariff_name: 'solar' },
+        { tariff_type: 'grid', tariff_name: 'standard', aggregated_tariff_types: [] },
+        { tariff_type: 'feed_in', tariff_name: 'solar', aggregated_tariff_types: [] },
       ],
     })
     const inputs = container.querySelectorAll<HTMLInputElement>('input')

@@ -20,7 +20,7 @@ from .serializers import (
     GenerateZevInvoicesSerializer
 )
 from . import access_tokens
-from .engine import generate_invoice
+from .engine import DynamicTariffError, generate_invoice, preflight_dynamic_prices
 from .pdf import save_invoice_pdf
 from .tasks import (
     generate_invoice_pdf_task,
@@ -235,6 +235,8 @@ class InvoiceViewSet(
                     {"error": f"Allocation error during invoice generation: {exc}"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+            if isinstance(exc, DynamicTariffError):
+                return Response(exc.as_dict(), status=status.HTTP_409_CONFLICT)
             return Response(
                 {"error": "Invoice generation failed. The invoice may already exist in a non-regenerable state."},
                 status=status.HTTP_409_CONFLICT,
@@ -294,6 +296,11 @@ class InvoiceViewSet(
 
         period_start = s.validated_data["period_start"]
         period_end = s.validated_data["period_end"]
+        try:
+            preflight_dynamic_prices(zev, period_start, period_end)
+        except DynamicTariffError as exc:
+            return Response(exc.as_dict(), status=status.HTTP_409_CONFLICT)
+
         participant_count = Participant.objects.filter(zev=zev).count()
 
         generate_zev_invoices_task.delay(str(zev.id), str(period_start), str(period_end))

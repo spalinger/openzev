@@ -136,6 +136,13 @@ A row exists only when an admin has customized the template via the admin API (�
 
 ### 4.1 States
 
+Dynamic invoice generation freezes source/window provenance in
+`InvoiceDynamicSourceEvidence` (migration `invoices/0017`). Source foreign keys
+are protected, invoice deletion cascades to its evidence, and cancellation
+releases point protection while retaining provenance. Generation and price
+maintenance share source-row locks. See dynamic tariff spec §4.4 and ADR 0019
+for the schema and concurrency guarantees.
+
 | State | Meaning |
 |---|---|
 | `draft` | Generated but not finalized; may be regenerated or deleted |
@@ -209,9 +216,17 @@ All invoice endpoints are routed under `/api/v1/invoices/invoices/` via a DRF `G
 
 | Method | URL | Permission | Payload | Response |
 |---|---|---|---|---|
-| `POST` | `/invoices/generate/` | `IsZevOwnerOrAdmin` | `{participant_id, period_start, period_end}` | `201` with invoice JSON; `400` with the underlying error if the allocation fails (`AllocationError`, e.g. overlapping assignment windows); `409` if locked |
-| `POST` | `/invoices/generate-all/` | `IsZevOwnerOrAdmin` | `{zev_id, period_start, period_end}` | `202` with `{detail, queued: true, participant_count}` — generation runs asynchronously via Celery (`generate_zev_invoices_task`); per-participant failures (e.g. locked invoices) are isolated — the batch continues, and the audit event (`source = celery`) reports generated/failed counts plus per-participant errors |
+| `POST` | `/invoices/generate/` | `IsZevOwnerOrAdmin` | `{participant_id, period_start, period_end}` | `201` with invoice JSON; `400` with the underlying error if allocation fails (`AllocationError`, e.g. overlapping assignment windows); `409` if locked, or a structured `{code: "dynamic_price_gap", tariff_id, tariff_name, source_id, missing_at, error}` when a fetched series does not cover a reading; invalid source configurations return `409` with `code: "invalid_dynamic_tariff"`, tariff/source ids, tariff name and error |
+| `POST` | `/invoices/generate-all/` | `IsZevOwnerOrAdmin` | `{zev_id, period_start, period_end}` | `409` with the same structured dynamic gap/configuration error as single generation when the synchronous coverage/configuration preflight fails; otherwise `202` with `{detail, queued: true, participant_count}` — generation runs asynchronously via Celery (`generate_zev_invoices_task`); per-participant failures (e.g. locked invoices) are isolated — the batch continues, and the audit event (`source = celery`) reports generated/failed counts plus per-participant errors |
 | `POST` | `/invoices/generate-pdfs-all/` | `IsZevOwnerOrAdmin` | `{zev_id, period_start, period_end}` | `202` with `{detail, queued: true, invoice_count}` — PDF rendering runs asynchronously via Celery (`generate_zev_pdfs_task`) |
+
+Bulk preflight runs after ZEV authorization and requires full stored coverage
+for each applicable dynamic tariff/window, like readiness. It prevents known
+gaps from being queued; it cannot prevent a source changing while the task
+waits. Workers validate again under source locks. Later per-participant
+failures remain in the audit event. Both frontend generation actions render
+structured gaps with a localized timestamp and invalid configurations with a
+localized instruction to check the product and energy type.
 
 Validation: `period_start` must be before `period_end`. On creation the engine also sets `due_date = generation date + Zev.payment_term_days` (per-ZEV, default 30, min 1; see the admin-governance spec §4.3).
 

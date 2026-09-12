@@ -30,9 +30,10 @@ import {
     sendAllInvoices,
     sendInvoiceEmail,
 } from '../../lib/api/invoices'
-import { formatApiError } from '../../lib/api/errors'
+import { apiErrorPayload, dynamicPriceGapPayload, formatApiError } from '../../lib/api/errors'
 import { queryKeys } from '../../lib/api/queryKeys'
 import { downloadBlob } from '../../lib/downloadBlob'
+import { formatDateTime, useAppSettings } from '../../lib/appSettings'
 import { useToast } from '../../lib/toast'
 import { getLatestEmailLog } from './emailLogs'
 import type { ActionMenuItem } from '../../components/ActionMenu'
@@ -72,6 +73,7 @@ export function useInvoiceActions({
     const navigate = useNavigate()
     const queryClient = useQueryClient()
     const { pushToast } = useToast()
+    const { settings } = useAppSettings()
 
     // ── Email polling state ──────────────────────────────────────────────
     const [pollingInvoiceId, setPollingInvoiceId] = useState<string | null>(null)
@@ -104,6 +106,21 @@ export function useInvoiceActions({
         void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.attention(selectedZevId) })
     }, [queryClient, selectedZevId])
 
+    const showGenerationError = (error: unknown, fallback: string) => {
+        const gap = dynamicPriceGapPayload(error)
+        if (gap) {
+            pushToast(t('pages.invoices.messages.dynamicPriceGap', {
+                tariff: gap.tariff_name,
+                timestamp: formatDateTime(gap.missing_at, settings),
+            }), 'error')
+        } else {
+            const payload = apiErrorPayload(error)
+            pushToast(payload?.code === 'invalid_dynamic_tariff'
+                ? t('pages.invoices.messages.invalidDynamicTariff', { tariff: payload.tariff_name })
+                : formatApiError(error, fallback), 'error')
+        }
+    }
+
     // ── Single invoice mutations ──────────────────────────────────────────────
 
     const generateMutation = useMutation({
@@ -116,7 +133,7 @@ export function useInvoiceActions({
             onPdfQueued()
             invalidateCockpit()
         },
-        onError: (error) => pushToast(formatApiError(error, t('pages.invoices.messages.generateFailed')), 'error'),
+        onError: (error) => showGenerationError(error, t('pages.invoices.messages.generateFailed')),
     })
 
     const pdfMutation = useMutation({
@@ -199,7 +216,7 @@ export function useInvoiceActions({
             onPdfQueued()
             invalidateCockpit()
         },
-        onError: (error) => pushToast(formatApiError(error, t('pages.invoices.batch.generateAllFailed')), 'error'),
+        onError: (error) => showGenerationError(error, t('pages.invoices.batch.generateAllFailed')),
     })
 
     const approveAllMutation = useMutation({

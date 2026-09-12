@@ -16,6 +16,9 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date
 from accounts.permissions import IsZevOwnerOrAdmin
 from .dynamic.fetch import coverage_gaps
+from .dynamic.storage import PriceSeriesConflict
+from .dynamic.evidence import lock_sources
+from .dynamic.components import aggregated_tariff_types
 from .dynamic.discovery import discover_endpoint
 from .dynamic.locking import dynamic_source_lock
 from .dynamic.models import DynamicPricePoint, DynamicTariffSource
@@ -23,13 +26,12 @@ from .dynamic.services import (
     clear_source_points,
     create_or_reuse_source,
     recheck_source_capabilities,
-    source_has_billing_evidence,
     tariff_has_dynamic_billing_evidence,
-    utc_day_window,
+    local_civil_day_window,
 )
 from .importers.remote import TariffFetchError
 from .dynamic.vse_v1 import DynamicTariffResponseError
-from .models import Tariff, TariffPeriod
+from .models import BillingMode, EnergyType, Tariff, TariffPeriod
 from zev.scoping import ZevScopedQuerySetMixin
 from .serializers import (
     DynamicPriceHistoryQuerySerializer,
@@ -78,6 +80,13 @@ def _copy_or_replace_periods(source, target, periods_data) -> None:
     Prices live on ``TariffPeriod``, not on the tariff, so a copy that skipped
     the bands would produce a version priced at nothing.
     """
+    if target.dynamic_source_id:
+        if periods_data:
+            raise DRFValidationError(
+                "A tariff priced from a fetched series cannot carry price bands."
+            )
+        return
+
     if periods_data is None:
         TariffPeriod.objects.bulk_create([
             TariffPeriod(
@@ -121,6 +130,22 @@ class TariffViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.ModelVi
     def get_queryset(self):
         return self.scope_queryset(Tariff.objects.all())
 
+    def list(self, request, *args, **kwargs):
+        from invoices.tariff_pricing import prepare_tariff_display_summaries
+
+        queryset = self.filter_queryset(self.get_queryset()).prefetch_related("periods")
+        page = self.paginate_queryset(queryset)
+        tariffs = list(page if page is not None else queryset)
+        # Percentage bases may refer to grid versions outside this page.
+        grids = list(self.get_queryset().filter(
+            zev_id__in={tariff.zev_id for tariff in tariffs
+                        if tariff.billing_mode == BillingMode.PERCENTAGE_OF_ENERGY},
+            billing_mode=BillingMode.ENERGY, energy_type=EnergyType.GRID,
+        ).exclude(pk__in=[tariff.pk for tariff in tariffs]).prefetch_related("periods"))
+        prepare_tariff_display_summaries([*tariffs, *grids], as_of=timezone.localdate())
+        data = self.get_serializer(tariffs, many=True).data
+        return self.get_paginated_response(data) if page is not None else Response(data)
+
     def perform_create(self, serializer):
         tariff = super().perform_create(serializer)
         _record_tariff_event(
@@ -135,12 +160,8 @@ class TariffViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.ModelVi
         )
 
     def perform_destroy(self, instance):
-        # A dynamic tariff's link is the only thing that ties an issued
-        # invoice back to the fetched prices behind it (invoice items store
-        # rendered amounts, not a tariff FK). Deleting the tariff would
-        # sever that without deleting a single DynamicPricePoint — the same
-        # evidence the source-level clear/delete guards exist to protect,
-        # lost through a different door.
+        # Preserve the billed-tariff workflow guard; frozen provenance is
+        # retained independently of the tariff row.
         if instance.dynamic_source_id and tariff_has_dynamic_billing_evidence(
             zev_id=instance.zev_id, valid_from=instance.valid_from,
             valid_to=instance.valid_to, dynamic_source_id=instance.dynamic_source_id,
@@ -148,8 +169,7 @@ class TariffViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.ModelVi
             raise DRFValidationError({
                 "detail": (
                     "This tariff priced a non-cancelled invoice from its dynamic source. "
-                    "Deleting it would sever the only link back to the fetched prices "
-                    "behind that invoice."
+                    "End its validity instead of deleting it."
                 )
             })
         tariff_id = str(instance.pk)
@@ -180,11 +200,17 @@ class TariffViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.ModelVi
         today = timezone.localdate()
         # ``?zev_id=`` is applied by ``scope_queryset`` for every ZEV-scoped
         # viewset, so this action no longer filters it a second time.
-        tariffs = self.get_queryset().prefetch_related('periods')
+        tariffs = list(self.get_queryset().prefetch_related('periods'))
 
         grouped: dict[tuple, list] = {}
         for tariff in tariffs:
             grouped.setdefault(series_key(tariff), []).append(tariff)
+
+        # Batch both direct summaries and percentage bases: historical bases
+        # need their own date, without a price query for every tariff version.
+        from invoices.tariff_pricing import prepare_tariff_display_summaries
+
+        prepare_tariff_display_summaries(tariffs, as_of=today)
 
         payload = []
         for versions in grouped.values():
@@ -257,6 +283,7 @@ class TariffViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.ModelVi
                 notes=source.notes,
                 valid_from=valid_from,
                 valid_to=window.valid_to,
+                dynamic_source=source.dynamic_source,
             )
             _apply_price_overrides(new_version, request.data)
             new_version.save()
@@ -321,6 +348,7 @@ class TariffViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.ModelVi
                 notes=source.notes,
                 valid_from=valid_from,
                 valid_to=source.valid_to,
+                dynamic_source=source.dynamic_source,
             )
             _apply_price_overrides(copy, request.data)
             copy.save()
@@ -496,7 +524,7 @@ class DynamicTariffSourceViewSet(viewsets.ReadOnlyModelViewSet):
         serializer.is_valid(raise_exception=True)
         try:
             source, created, warnings = create_or_reuse_source(**serializer.validated_data)
-        except (TariffFetchError, DynamicTariffResponseError) as exc:
+        except (TariffFetchError, DynamicTariffResponseError, PriceSeriesConflict) as exc:
             raise DRFValidationError({"url": [str(exc)]}) from exc
 
         if created:
@@ -540,7 +568,13 @@ class DynamicTariffSourceViewSet(viewsets.ReadOnlyModelViewSet):
             "version_detected": result.version_detected,
             "components_discovered": result.components_discovered,
             "components": [
-                {"tariff_type": item.tariff_type, "tariff_name": item.tariff_name}
+                {
+                    "tariff_type": item.tariff_type,
+                    "tariff_name": item.tariff_name,
+                    "aggregated_tariff_types": list(aggregated_tariff_types(
+                        result.api_version, item.tariff_type
+                    )),
+                }
                 for item in result.components
             ],
         })
@@ -596,7 +630,9 @@ class DynamicTariffSourceViewSet(viewsets.ReadOnlyModelViewSet):
         source = self.get_object()
         before = {
             field: getattr(source, field)
-            for field in ("label", "url", "api_version", "tariff_type", "tariff_name")
+            for field in (
+                "label", "url", "api_version", "tariff_type", "tariff_name", "enabled"
+            )
         }
         serializer = DynamicTariffSourceWriteSerializer(
             source, data=request.data, partial=True
@@ -636,7 +672,7 @@ class DynamicTariffSourceViewSet(viewsets.ReadOnlyModelViewSet):
         if (date_to - date_from).days >= 31:
             raise DRFValidationError({"date_to": ["Price history is limited to 31 days."]})
 
-        window_start, window_end = utc_day_window(date_from, date_to)
+        window_start, window_end = local_civil_day_window(date_from, date_to)
         points = source.points.filter(
             valid_to__gt=window_start, valid_from__lt=window_end
         ).order_by("valid_from")
@@ -696,15 +732,7 @@ class DynamicTariffSourceViewSet(viewsets.ReadOnlyModelViewSet):
         return serializer.validated_data
 
     def destroy(self, request, *args, **kwargs):
-        """Remove a source nothing uses any more, and the prices it fetched.
-
-        Only when no tariff links to it: ``Tariff.dynamic_source`` is PROTECT,
-        so the database would refuse anyway, but a 409 naming what still uses
-        it is more useful than an integrity error. An unlinked source cannot
-        have contributed to any invoice either — ``source_has_billing_evidence``
-        reasons entirely over linked tariffs — so this needs no second
-        evidence check beyond that one condition.
-        """
+        """Remove an unused source; tariff and invoice provenance FKs protect it."""
         self._require_admin(request)
         source = self.get_object()
         payload = self._confirmed_payload(request, source)
@@ -712,8 +740,9 @@ class DynamicTariffSourceViewSet(viewsets.ReadOnlyModelViewSet):
         in_use = Response(
             {
                 "detail": (
-                    "This source still prices at least one tariff. Repoint or remove "
-                    "those tariffs first."
+                    "This source is retained by a tariff or an invoice's price evidence, "
+                    "including cancelled invoices. Disable automatic refreshes to retire it "
+                    "while keeping its provenance."
                 )
             },
             status=status.HTTP_409_CONFLICT,
@@ -739,7 +768,9 @@ class DynamicTariffSourceViewSet(viewsets.ReadOnlyModelViewSet):
             source_id = str(source.pk)
             label = source.label
             try:
-                source.delete()
+                with transaction.atomic():
+                    lock_sources([source.pk])
+                    source.delete()
             except ProtectedError:
                 # A tariff was linked between the count above and here. Rare,
                 # but the database — not that check — is what decides, and an
@@ -770,17 +801,13 @@ class DynamicTariffSourceViewSet(viewsets.ReadOnlyModelViewSet):
                     {"detail": "This source is currently being fetched. Try again shortly."},
                     status=status.HTTP_409_CONFLICT,
                 )
-            if source_has_billing_evidence(source):
+            try:
+                deleted = clear_source_points(source)
+            except PriceSeriesConflict as exc:
                 return Response(
-                    {
-                        "detail": (
-                            "Fetched prices cannot be cleared because a non-cancelled invoice "
-                            "overlaps a linked tariff."
-                        )
-                    },
+                    {"detail": str(exc)},
                     status=status.HTTP_409_CONFLICT,
                 )
-            deleted = clear_source_points(source)
 
         _record_tariff_event(
             request=request,

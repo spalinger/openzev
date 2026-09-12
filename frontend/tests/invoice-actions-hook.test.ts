@@ -25,6 +25,11 @@ vi.mock('../src/lib/toast', () => ({
   useToast: () => ({ pushToast }),
 }))
 
+vi.mock('../src/lib/appSettings', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../src/lib/appSettings')>(),
+  useAppSettings: () => ({ settings: { date_time_format: 'dd.MM.yyyy HH:mm' } }),
+}))
+
 const mockNavigate = vi.fn()
 
 vi.mock('react-router-dom', () => ({
@@ -154,6 +159,24 @@ describe('useInvoiceActions hook', () => {
     })
     container.remove()
   })
+
+  it.each(['dynamic_price_gap', 'invalid_dynamic_tariff'])(
+    'shows structured %s failures for single and bulk generation', (code) => {
+      const { Harness, getResult } = createHarness()
+      act(() => root.render(createElement(Harness)))
+      const error = { isAxiosError: true, response: { data: {
+        code, tariff_name: 'Grid', missing_at: '2026-05-01T00:00:00Z',
+      } } }
+      for (const mutation of [getResult()!.generateMutation, getResult()!.generateAllMutation]) {
+        const instance = mutationInstances.find((item) => item.mutate === mutation.mutate)!
+        const onError = instance.options.onError as (error: unknown) => void
+        act(() => onError(error))
+        expect(pushToast).toHaveBeenLastCalledWith(
+          `pages.invoices.messages.${code === 'dynamic_price_gap' ? 'dynamicPriceGap' : 'invalidDynamicTariff'}`, 'error',
+        )
+      }
+    },
+  )
 
   it('returns row actions and batch recommendation from hook state', () => {
     const { Harness, getResult } = createHarness()
