@@ -590,7 +590,7 @@ For each `(energy_type, quantity)` in `{(local, r_local), (grid, r_grid)}` where
 These tariffs price energy as a percentage of the **grid base price sum**.
 
 1. **Grid base price sum** = sum of `price_chf_per_kwh` at `ts` for all tariffs where `billing_mode = energy` AND `energy_type = grid` AND active at `_utc_date(ts)`.
-2. For each percentage tariff active at `_utc_date(ts)` whose `energy_type` matches:
+2. For each percentage tariff with a non-zero `percentage` active at `_utc_date(ts)` whose `energy_type` matches (zero-percent tariffs produce no line and do not resolve the grid base):
    - `effective_price = grid_base_price_sum × (tariff.percentage / 100)`
    - Accumulate: `quantity` kWh at `quantity × effective_price` CHF.
    - Also track `base_total = quantity × grid_base_price_sum` (used for description rendering).
@@ -611,7 +611,8 @@ windows are conservative, including tariffs that produced no line items.
 Invalid dynamic configurations reuse `Tariff._dynamic_source_errors()` and
 raise `DynamicTariffError` (`code=invalid_dynamic_tariff`), including legacy
 refund links. Bulk queueing checks known coverage/configuration failures
-synchronously; workers still validate under locks. See ADR 0019 and the dynamic tariff spec §4.4.
+synchronously at the reading timestamps and energy types the engine can actually
+price; workers still validate under locks. See ADR 0019 and the dynamic tariff spec §4.4.
 
 1. Resolve the price for `(tariff, ts)` from the tariff's `DynamicTariffSource`
    series (`engine.TariffResolver.price_at`) instead of from `TariffPeriod`

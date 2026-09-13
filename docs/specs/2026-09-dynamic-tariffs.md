@@ -443,17 +443,20 @@ tariff/source ids, and the first missing timestamp. The single-invoice API
 returns the same structured 409 response, allowing the frontend to direct the
 operator to refresh the named source instead of claiming an invoice collision.
 
-Before `generate-all` queues Celery, `preflight_dynamic_prices` checks source
-configuration and complete coverage of each applicable tariff/period
-intersection, using UTC billing bounds. Owner/ZEV permission checks run first.
-The first known gap returns the same structured HTTP 409, with no task queued.
-Both single and bulk frontend actions render its timestamp in the user locale.
-The preflight is conservative like readiness and cannot reserve prices while
-a task waits: a later failure is still isolated and recorded in Celery audit
-metadata, not delivered through a generation-job result API. Workers retain
-the atomic locked validation. Invalid dynamic configurations, including legacy
-refund links, use model validation messages and `code=invalid_dynamic_tariff`
-with tariff/source ids and a localized configuration-error toast.
+Before `generate-all` queues Celery, `preflight_dynamic_prices` validates every
+applicable source configuration, then checks coverage at the actual UTC reading
+timestamps and energy types the batch engine can price. This includes a dynamic
+grid source used as the base of an applicable percentage tariff, but excludes
+period gaps where no invoice would perform a price lookup. Owner/ZEV permission
+checks run first. The first known price-use gap returns the same structured HTTP
+409, with no task queued. Both single and bulk frontend actions render its
+timestamp in the user locale. Readiness remains the conservative full-window
+signal. Preflight cannot reserve prices while a task waits: a later failure is
+still isolated and recorded in Celery audit metadata, not delivered through a
+generation-job result API. Workers retain the atomic locked validation. Invalid
+dynamic configurations, including legacy refund links, use model validation
+messages and `code=invalid_dynamic_tariff` with tariff/source ids and a localized
+configuration-error toast.
 
 ### 9.3 Readiness coverage
 
@@ -769,7 +772,7 @@ accepts version 1 static archives and legacy adapter-based dynamic descriptors.
 | `tariffs/test_dynamic_fetch.py` | Chunking, UTC storage, upsert idempotency, same-price clipped overlap extension, half-open invoice evidence, partial conflict writes, resulting-set overlap checks, recovery cursors including old failed/unattempted windows, coverage gaps, windows, failure recording, tasks, source identity |
 | `tariffs/test_dynamic_tariff_link.py` | `Tariff.clean()` rules, capability validation, static→dynamic series versioning, PROTECT retention, no dynamic price bands |
 | `zev/test_transfer.py::DynamicTariffTransferTests` | Natural-key match, recreation on a fresh instance, static tariffs unaffected |
-| `invoices/test_dynamic_evidence.py` | Frozen provenance after tariff mutation/deletion; legacy-refund refusal; migration backfill, interval-overlap, and exact-URL capability preflights; PostgreSQL barriers verify concurrent clear/overwrite waits for committed evidence or proceeds after rollback; equivalent billed-resolution no-op; UTC bulk preflight permissions; bounded migration batches |
+| `invoices/test_dynamic_evidence.py` | Frozen provenance after tariff mutation/deletion; legacy-refund refusal; migration backfill, interval-overlap, and exact-URL capability preflights; PostgreSQL barriers verify concurrent clear/overwrite waits for committed evidence or proceeds after rollback; equivalent billed-resolution no-op; price-use-timestamp bulk preflight including static-only scan avoidance, unused tariff types, non-zero percentage bases, and zero-percentage exclusion; UTC permissions; bounded migration batches |
 | `invoices/test_dynamic_pricing.py` | `_DynamicSeries` bisection, `TariffResolver.price_at` (static and dynamic), the gap refusal, end-to-end `generate_invoice` (consumption, negative prices, percentage base, feed-in) |
 | `invoices/test_readiness.py::DynamicTariffPricingCoverageTests` | Full/partial/no coverage, type-masking, percentage-tariff coupling, DST, static→dynamic series versioning, and coverage checked regardless of category (a dynamic tariff filed under `grid_fees`) |
 | `invoices/test_dynamic_tariff_pricing.py` | Duration weighting, bounded/persistent-key batch summaries, historical percentage dates with one source query, flat/HT/NT/band fallback, unavailable-wins ordering, and static multi-band flags |

@@ -220,10 +220,14 @@ All invoice endpoints are routed under `/api/v1/invoices/invoices/` via a DRF `G
 | `POST` | `/invoices/generate-all/` | `IsZevOwnerOrAdmin` | `{zev_id, period_start, period_end}` | `409` with the same structured dynamic gap/configuration error as single generation when the synchronous coverage/configuration preflight fails; otherwise `202` with `{detail, queued: true, participant_count}` — generation runs asynchronously via Celery (`generate_zev_invoices_task`); per-participant failures (e.g. locked invoices) are isolated — the batch continues, and the audit event (`source = celery`) reports generated/failed counts plus per-participant errors |
 | `POST` | `/invoices/generate-pdfs-all/` | `IsZevOwnerOrAdmin` | `{zev_id, period_start, period_end}` | `202` with `{detail, queued: true, invoice_count}` — PDF rendering runs asynchronously via Celery (`generate_zev_pdfs_task`) |
 
-Bulk preflight runs after ZEV authorization and requires full stored coverage
-for each applicable dynamic tariff/window, like readiness. It prevents known
-gaps from being queued; it cannot prevent a source changing while the task
-waits. Workers validate again under source locks. Later per-participant
+Bulk preflight runs after ZEV authorization. It validates all applicable dynamic
+source configurations and requires stored coverage only at reading timestamps
+and energy types the batch engine can actually price, including dynamic grid
+prices used as non-zero percentage-tariff bases. A period with no applicable
+dynamic tariffs skips the reading scan entirely. Readiness remains the
+conservative full-window signal. Preflight prevents known price-use gaps from being queued;
+it cannot prevent a source changing while the task waits. Workers validate again
+under source locks. Later per-participant
 failures remain in the audit event. Both frontend generation actions render
 structured gaps with a localized timestamp and invalid configurations with a
 localized instruction to check the product and energy type.

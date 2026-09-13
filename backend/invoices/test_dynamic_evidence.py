@@ -20,10 +20,16 @@ from tariffs.dynamic.fetch import BilledPriceChanged, PriceSeriesConflict, store
 from tariffs.dynamic.models import DynamicTariffSource
 from tariffs.dynamic.services import clear_source_points
 from tariffs.dynamic.vse_v1 import PricePoint
-from tariffs.models import Tariff
+from tariffs.models import BillingMode, EnergyType, Tariff
 from testing import factories
 
-from .engine import DynamicTariffError, _DynamicSeries, generate_invoice
+from .engine import (
+    DynamicPriceGapError,
+    DynamicTariffError,
+    _DynamicSeries,
+    generate_invoice,
+    preflight_dynamic_prices,
+)
 
 
 def setup_billing():
@@ -239,7 +245,7 @@ def test_billed_ranges_merge_duplicates_without_protecting_gaps():
 
 
 @pytest.mark.django_db
-def test_bulk_preflight_returns_localizable_gap_and_does_not_queue(owner_client, owner_user):
+def test_bulk_preflight_checks_price_use_timestamps_not_the_full_tariff_window(owner_client, owner_user):
     participant, _tariff, source, _point = setup_billing()
     participant.zev.owner = owner_user
     participant.zev.save()
@@ -250,24 +256,134 @@ def test_bulk_preflight_returns_localizable_gap_and_does_not_queue(owner_client,
     }
     with patch("invoices.views.generate_zev_invoices_task.delay") as queue:
         response = owner_client.post("/api/v1/invoices/invoices/generate-all/", payload)
+        assert response.status_code == 202
+        queue.assert_called_once()
+
+        source.points.all().delete()
+        response = owner_client.post("/api/v1/invoices/invoices/generate-all/", payload)
         assert response.status_code == 409
         assert response.json()["code"] == "dynamic_price_gap"
         assert response.json()["source_id"] == str(source.pk)
-        queue.assert_not_called()
-        source.points.all().delete()
-        store_points(
-            source,
-            [
-                PricePoint(
-                    datetime(2026, 1, 1, tzinfo=timezone.utc),
-                    datetime(2026, 2, 1, tzinfo=timezone.utc),
-                    Decimal("0.2"),
-                )
-            ],
-        )
-        response = owner_client.post("/api/v1/invoices/invoices/generate-all/", payload)
-        assert response.status_code == 202
         queue.assert_called_once()
+
+
+@pytest.mark.django_db
+def test_bulk_preflight_skips_reading_scan_without_dynamic_tariffs():
+    participant = factories.ParticipantFactory(valid_from=date(2026, 1, 1))
+    factories.TariffFactory(
+        zev=participant.zev, energy_type=EnergyType.GRID,
+        valid_from=date(2026, 1, 1),
+    )
+
+    with patch("invoices.engine._billable_energy_types_by_timestamp") as requirements:
+        preflight_dynamic_prices(
+            participant.zev, date(2026, 1, 1), date(2026, 1, 31),
+        )
+
+    requirements.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_bulk_preflight_ignores_a_dynamic_type_no_reading_will_price(owner_client, owner_user):
+    participant, _tariff, _source, _point = setup_billing()
+    participant.zev.owner = owner_user
+    participant.zev.save()
+    unused_source = DynamicTariffSource.objects.create(
+        label="Feed-in", url="https://example.test/feed-in", tariff_type="feed_in",
+    )
+    factories.TariffFactory(
+        zev=participant.zev, dynamic_source=unused_source,
+        energy_type="feed_in", valid_from=date(2026, 1, 1),
+    )
+
+    with patch("invoices.views.generate_zev_invoices_task.delay") as queue:
+        response = owner_client.post(
+            "/api/v1/invoices/invoices/generate-all/",
+            {
+                "zev_id": str(participant.zev_id),
+                "period_start": "2026-01-01",
+                "period_end": "2026-01-31",
+            },
+        )
+
+    assert response.status_code == 202
+    queue.assert_called_once()
+
+
+@pytest.mark.django_db
+def test_bulk_preflight_checks_dynamic_grid_price_used_by_a_percentage_tariff():
+    participant = factories.ParticipantFactory(valid_from=date(2026, 1, 1))
+    consumption = factories.assignment_for(participant).metering_point
+    production = factories.assignment_for(
+        participant, meter_type=factories.MeteringPointType.PRODUCTION,
+    ).metering_point
+    source = DynamicTariffSource.objects.create(
+        label="Grid", url="https://example.test/grid", tariff_type="grid",
+    )
+    factories.TariffFactory(
+        zev=participant.zev, dynamic_source=source,
+        energy_type=EnergyType.GRID, valid_from=date(2026, 1, 1),
+    )
+    factories.TariffFactory(
+        zev=participant.zev,
+        billing_mode=BillingMode.PERCENTAGE_OF_ENERGY,
+        energy_type=EnergyType.LOCAL,
+        percentage=Decimal("10"),
+        valid_from=date(2026, 1, 1),
+    )
+    timestamp = datetime(2026, 1, 15, 10, tzinfo=timezone.utc)
+    MeterReading.objects.create(
+        metering_point=consumption, timestamp=timestamp,
+        energy_kwh=Decimal("10"), direction="in",
+    )
+    MeterReading.objects.create(
+        metering_point=production, timestamp=timestamp,
+        energy_kwh=Decimal("10"), direction="out",
+    )
+
+    with pytest.raises(DynamicPriceGapError) as error:
+        preflight_dynamic_prices(
+            participant.zev, date(2026, 1, 1), date(2026, 1, 31),
+        )
+
+    assert error.value.missing_at == timestamp
+    assert error.value.source_id == source.pk
+
+
+@pytest.mark.django_db
+def test_bulk_preflight_ignores_dynamic_grid_base_for_zero_percentage_tariff():
+    participant = factories.ParticipantFactory(valid_from=date(2026, 1, 1))
+    consumption = factories.assignment_for(participant).metering_point
+    production = factories.assignment_for(
+        participant, meter_type=factories.MeteringPointType.PRODUCTION,
+    ).metering_point
+    source = DynamicTariffSource.objects.create(
+        label="Grid", url="https://example.test/grid", tariff_type="grid",
+    )
+    factories.TariffFactory(
+        zev=participant.zev, dynamic_source=source,
+        energy_type=EnergyType.GRID, valid_from=date(2026, 1, 1),
+    )
+    factories.TariffFactory(
+        zev=participant.zev,
+        billing_mode=BillingMode.PERCENTAGE_OF_ENERGY,
+        energy_type=EnergyType.LOCAL,
+        percentage=Decimal("0"),
+        valid_from=date(2026, 1, 1),
+    )
+    timestamp = datetime(2026, 1, 15, 10, tzinfo=timezone.utc)
+    MeterReading.objects.create(
+        metering_point=consumption, timestamp=timestamp,
+        energy_kwh=Decimal("10"), direction="in",
+    )
+    MeterReading.objects.create(
+        metering_point=production, timestamp=timestamp,
+        energy_kwh=Decimal("10"), direction="out",
+    )
+
+    preflight_dynamic_prices(
+        participant.zev, date(2026, 1, 1), date(2026, 1, 31),
+    )
 
 
 @pytest.mark.django_db

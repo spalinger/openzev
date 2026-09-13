@@ -23,9 +23,12 @@ from billiard.exceptions import SoftTimeLimitExceeded
 
 from accounts.models import VatRate
 from allocation.read_model import (
+    CONSUMPTION,
     CONSUMPTION_METER_TYPES,
+    PRODUCTION,
     PRODUCTION_METER_TYPES,
     community_totals_by_timestamp,
+    iter_allocated_readings,
 )
 from allocation.validity import active_during, period_window
 from allocation.split import split_consumption, split_production
@@ -300,32 +303,109 @@ def _validate_dynamic_tariff(tariff):
         raise DynamicTariffError(tariff=tariff, message=" ".join(errors.values()))
 
 
-def preflight_dynamic_prices(zev, period_start, period_end):
-    """Refuse known configuration/coverage failures before queueing a batch.
+def _billable_energy_types_by_timestamp(zev, period_start, period_end):
+    """Energy types the batch engine can price at each reading timestamp."""
+    start, end = period_window(period_start, period_end)
+    participant_rows = list(
+        active_during(zev.participants, period_start, period_end)
+        .values_list("id", "valid_from", "valid_to", "allocation_weight")
+    )
+    participant_ids = {participant_id for participant_id, *_rest in participant_rows}
+    weight_sums = _allocation_weight_sum_by_date(
+        zev,
+        period_start,
+        period_end,
+        windows=[row[1:] for row in participant_rows],
+    )
+    windows = AssignmentWindows.for_zev(zev, period_start, period_end)
+    consumption, production = community_totals_by_timestamp(zev, start, end)
+    requirements: dict[datetime, set[str]] = {}
 
-    This is the same conservative full-window check as readiness. Invoice
-    generation still validates under source locks; preflight cannot reserve
-    prices across the wait for a worker.
-    """
-    from tariffs.dynamic.fetch import coverage_gaps
-
-    tariffs = active_during(
-        Tariff.objects.filter(zev=zev, dynamic_source__isnull=False),
-        period_start, period_end,
-    ).select_related("dynamic_source")
-    checked = set()
-    for tariff in tariffs:
-        _validate_dynamic_tariff(tariff)
-        start, end = period_window(
-            max(period_start, tariff.valid_from),
-            min(period_end, tariff.valid_to or period_end),
+    for kind in (CONSUMPTION, PRODUCTION):
+        readings = iter_allocated_readings(
+            zev,
+            start,
+            end,
+            kind=kind,
+            windows=windows,
+            consumption_by_ts=consumption,
+            production_by_ts=production,
+            with_split=False,
         )
-        key = (tariff.dynamic_source_id, start, end)
-        if key not in checked:
-            gaps = coverage_gaps(tariff.dynamic_source, start, end)
-            if gaps:
-                raise DynamicPriceGapError(tariff=tariff, missing_at=gaps[0][0])
-            checked.add(key)
+        for reading in readings:
+            day = _utc_date(reading.timestamp)
+            if reading.allocation_mode == AllocationMode.PERSONAL:
+                if reading.holder_id not in participant_ids:
+                    continue
+            elif reading.allocation_mode == AllocationMode.COMMUNITY:
+                if day not in weight_sums:
+                    continue
+            else:
+                continue
+            if reading.energy_kwh <= 0:
+                continue
+
+            required = requirements.setdefault(reading.timestamp, set())
+            local_pool = min(reading.zev_consumption_kwh, reading.zev_production_kwh)
+            if local_pool > 0:
+                required.add(EnergyType.LOCAL)
+            if kind == CONSUMPTION and reading.zev_consumption_kwh > reading.zev_production_kwh:
+                required.add(EnergyType.GRID)
+            elif kind == PRODUCTION and reading.zev_production_kwh > reading.zev_consumption_kwh:
+                required.add(EnergyType.FEED_IN)
+
+    return requirements
+
+
+def preflight_dynamic_prices(zev, period_start, period_end):
+    """Refuse known configuration/price-use failures before queueing a batch.
+
+    Coverage is checked at the timestamps the batch engine can actually price,
+    matching single-invoice generation. Readiness remains the conservative
+    full-window signal. The worker still validates under source locks because
+    preflight cannot reserve prices while it waits in the queue.
+    """
+    tariffs = list(active_during(
+        Tariff.objects.filter(zev=zev), period_start, period_end,
+    ).select_related("dynamic_source"))
+    dynamic_tariffs = [tariff for tariff in tariffs if tariff.dynamic_source_id]
+    for tariff in dynamic_tariffs:
+        _validate_dynamic_tariff(tariff)
+    if not dynamic_tariffs:
+        return
+
+    requirements = _billable_energy_types_by_timestamp(zev, period_start, period_end)
+    percentage_tariffs = [
+        tariff for tariff in tariffs
+        if tariff.billing_mode == BillingMode.PERCENTAGE_OF_ENERGY
+        and tariff.energy_type in {EnergyType.LOCAL, EnergyType.GRID}
+        and tariff.percentage
+    ]
+    grid_base_required = {
+        timestamp for timestamp, energy_types in requirements.items()
+        if any(
+            tariff.energy_type in energy_types and _tariff_is_active(tariff, _utc_date(timestamp))
+            for tariff in percentage_tariffs
+        )
+    }
+    start, end = period_window(period_start, period_end)
+    series_by_source = {}
+    for tariff in dynamic_tariffs:
+        series = series_by_source.get(tariff.dynamic_source_id)
+        if series is None:
+            series = series_by_source[tariff.dynamic_source_id] = _DynamicSeries.load(
+                tariff.dynamic_source_id, start=start, end=end,
+            )
+        for timestamp, energy_types in sorted(requirements.items()):
+            if not _tariff_is_active(tariff, _utc_date(timestamp)):
+                continue
+            directly_priced = tariff.energy_type in energy_types
+            percentage_base = (
+                tariff.energy_type == EnergyType.GRID
+                and timestamp in grid_base_required
+            )
+            if (directly_priced or percentage_base) and series.price_at(timestamp) is None:
+                raise DynamicPriceGapError(tariff=tariff, missing_at=timestamp)
 
 
 class _DynamicSeries:
