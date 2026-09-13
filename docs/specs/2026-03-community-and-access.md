@@ -604,7 +604,9 @@ which nests `participants` (via `ParticipantSerializer`, many=True, read-only).
 `bank_name` is an optional informational label for the payment account, and
 `bank_iban` is optional (both allow_blank). Non-empty IBANs are
 normalized to compact uppercase form and validated with the ISO 13616 MOD-97
-checksum. When an IBAN is provided, the owner participant's address,
+checksum. The wizard and self-setup endpoint use the shared
+`has_required_iban_address()` helper for the recipient-address rule. When an
+IBAN is provided, the owner participant's address,
 postal code, and city are required because they form the creditor address on a
 QR-Rechnung. The wizard collects payment details alongside the responsible
 person's address; the step-4 review echoes the IBAN (or `–` when blank, with
@@ -1123,8 +1125,8 @@ lists the test classes per module (test counts are the `test_*` methods).
 |---|---|---|
 | `ZevPaymentTermTests` | 4 | Payment term default (30 days), range validation, API accept/reject |
 | `ParticipantEndpointRestrictionTests` | 7 | Participant cannot access ZEV/participant lists; can list own metering points; cannot create/update/delete metering points; cannot access assignments |
-| `ZevCreationWizardTests` | 4 | Non-admin cannot create ZEV; admin wizard creates ZEV + owner + participant + assignments; invalid IBAN is rejected; wizard payload persists normalized `bank_iban` + `bank_name` |
-| `ZevSelfSetupTests` | 2 | Self-setup persists `bank_iban` + `bank_name` on the created ZEV (owner participant created); an IBAN without the required owner address is rejected without creating the ZEV |
+| `ZevCreationWizardTests` | 5 | Non-admin cannot create ZEV; admin wizard creates ZEV + owner + participant + assignments; invalid IBAN and a valid IBAN without the owner address are rejected; wizard payload persists normalized `bank_iban` + `bank_name` |
+| `ZevSelfSetupTests` | 3 | Self-setup persists `bank_iban` + `bank_name` on the created ZEV (owner participant created); an IBAN without the required owner address is rejected without creating the ZEV; falsy-but-valid JSON address values reach serializer validation without being replaced as missing |
 | `ParticipantAccountLifecycleTests` | 3 | Create participant auto-creates account with initial password; update saves contact details; invitation resets password and sends email |
 | `AdminCanEditOwnerParticipantTests` | 4 | `test_admin_can_edit_the_owner_participant_address` preserves the owner role and ZEV API access; `test_profile_sync_preserves_privileged_roles` synchronizes name/email while preserving owner/admin roles and ZEV API access; `test_invitation_preserves_privileged_roles_and_promotes_guests` preserves owner/admin/participant roles, promotes linked guests, and verifies password reset/email delivery; `test_zev_owner_cannot_edit_their_own_owner_participant_record` retains the existing edit restriction |
 | `ParticipantAccountLinkingTests` | 5 | Admin can link/unlink accounts; rejects double-linking; admin can create-and-link; non-admin cannot link/create |
@@ -1158,7 +1160,7 @@ lists the test classes per module (test counts are the `test_*` methods).
 | `test_zev_id_filter.py` | 5 | 15 | `?zev_id=` narrowing on list endpoints |
 | `test_transfer.py` | 6 | 66 | Whole-ZEV archive shape, round-trip, rejected archives, schema parity, transfer endpoints |
 | `test_geocoding.py` | 4 | 19 | Building footprint cache, warm tasks, trigger-on-save |
-| `test_iban.py` | 3 | 10 | `normalize_iban`/`is_valid_iban` vectors: whitespace/case normalization, MOD-97 accept/reject, blank-means-absent |
+| `test_iban.py` | 4 | 13 | `normalize_iban`/`is_valid_iban` vectors plus shared recipient-address validation: whitespace/case normalization, MOD-97 accept/reject, blank-means-absent, and required address completeness when an IBAN is configured |
 
 ### 16.2 Frontend
 

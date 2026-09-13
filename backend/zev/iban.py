@@ -5,6 +5,7 @@ import re
 
 #: Shared by model/serializer validation so the user-facing wording stays identical.
 INVALID_IBAN_MESSAGE = "Enter a valid IBAN or leave this field empty."
+IBAN_ADDRESS_REQUIRED_MESSAGE = "An address is required when an IBAN is configured."
 
 
 def normalize_iban(value: str) -> str:
@@ -23,3 +24,17 @@ def is_valid_iban(value: str) -> bool:
         for char in rearranged
     )
     return int(numeric) % 97 == 1
+
+
+def has_required_iban_address(
+    bank_iban: str | None,
+    *,
+    address_line1: str | None,
+    postal_code: str | None,
+    city: str | None,
+) -> bool:
+    """Return whether the recipient address satisfies the configured IBAN."""
+    return not bank_iban or all(
+        value and value.strip()
+        for value in (address_line1, postal_code, city)
+    )

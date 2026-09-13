@@ -274,6 +274,32 @@ class ZevCreationWizardTests(TestCase):
 		self.assertEqual(resp.status_code, 400)
 		self.assertIn("bank_iban", resp.data)
 
+	def test_admin_wizard_rejects_iban_without_owner_address(self):
+		auth(self.client, self.admin)
+		resp = self.client.post(
+			"/api/v1/zev/zevs/create-with-owner/",
+			{
+				"name": "Incomplete IBAN ZEV",
+				"start_date": "2026-03-01",
+				"zev_type": "vzev",
+				"billing_interval": "monthly",
+				"bank_iban": "CH93 0076 2011 6238 5295 7",
+				"owner": {
+					"first_name": "Iris",
+					"last_name": "Incomplete",
+					"email": "iris.incomplete@example.com",
+				},
+				"metering_points": [
+					{"meter_id": "METER-INCOMPLETE", "meter_type": "consumption"},
+				],
+			},
+			format="json",
+		)
+
+		self.assertEqual(resp.status_code, 400, resp.data)
+		self.assertIn("owner", resp.data)
+		self.assertFalse(Zev.objects.filter(name="Incomplete IBAN ZEV").exists())
+
 	@mock.patch("zev.tasks.warm_participant_geocode_cache_task.delay")
 	def test_admin_can_create_zev_with_owner_and_metering_points(self, mock_geocode_delay):
 		auth(self.client, self.admin)
@@ -445,6 +471,28 @@ class ZevSelfSetupTests(TestCase):
 		self.assertEqual(resp.status_code, 400, resp.data)
 		self.assertIn("owner_address", resp.data)
 		self.assertFalse(Zev.objects.filter(name="Incomplete Self Setup ZEV").exists())
+
+	def test_self_setup_preserves_falsy_address_values_for_validation(self):
+		auth(self.client, self.owner)
+		resp = self.client.post(
+			"/api/v1/zev/zevs/self-setup/",
+			{
+				"name": "Numeric Postal Code ZEV",
+				"start_date": "2026-04-01",
+				"zev_type": "zev",
+				"billing_interval": "annual",
+				"bank_iban": "CH93 0076 2011 6238 5295 7",
+				"owner_address_line1": "Example 1",
+				"owner_postal_code": 0,
+				"owner_city": "Zurich",
+			},
+			format="json",
+		)
+
+		self.assertEqual(resp.status_code, 201, resp.data)
+		created_zev = Zev.objects.get(name="Numeric Postal Code ZEV")
+		owner_participant = Participant.objects.get(zev=created_zev, user=self.owner)
+		self.assertEqual(owner_participant.postal_code, "0")
 
 
 @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")

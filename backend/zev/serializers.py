@@ -6,7 +6,13 @@ from .models import Zev, Participant, MeteringPoint, MeteringPointAssignment, Va
 from accounts.models import UserRole
 from .services import create_zev_with_owner_setup, ensure_participant_account
 from .tasks import trigger_geocode_if_address_present
-from .iban import INVALID_IBAN_MESSAGE, is_valid_iban, normalize_iban
+from .iban import (
+    IBAN_ADDRESS_REQUIRED_MESSAGE,
+    INVALID_IBAN_MESSAGE,
+    has_required_iban_address,
+    is_valid_iban,
+    normalize_iban,
+)
 
 
 class BankIbanValidationMixin:
@@ -406,15 +412,14 @@ class ZevCreateWithOwnerSerializer(BankIbanValidationMixin, serializers.Serializ
             raise serializers.ValidationError(
                 {"vat_number": "Only a VAT-registered ZEV carries a VAT number."}
             )
-        if attrs.get("bank_iban"):
-            owner = attrs.get("owner", {})
-            missing = [
-                field
-                for field in ("address_line1", "postal_code", "city")
-                if not owner.get(field, "").strip()
-            ]
-            if missing:
-                raise serializers.ValidationError({"owner": "An address is required when an IBAN is configured."})
+        owner = attrs.get("owner", {})
+        if not has_required_iban_address(
+            attrs.get("bank_iban"),
+            address_line1=owner.get("address_line1"),
+            postal_code=owner.get("postal_code"),
+            city=owner.get("city"),
+        ):
+            raise serializers.ValidationError({"owner": IBAN_ADDRESS_REQUIRED_MESSAGE})
         return attrs
 
     def create(self, validated_data):

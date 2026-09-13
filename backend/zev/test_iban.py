@@ -8,7 +8,12 @@ MOD-97 checksum, and the blank-means-absent (invalid, not an error) rule.
 
 from django.test import SimpleTestCase
 
-from zev.iban import INVALID_IBAN_MESSAGE, is_valid_iban, normalize_iban
+from zev.iban import (
+    INVALID_IBAN_MESSAGE,
+    has_required_iban_address,
+    is_valid_iban,
+    normalize_iban,
+)
 
 
 class NormalizeIbanTests(SimpleTestCase):
@@ -53,3 +58,45 @@ class IsValidIbanTests(SimpleTestCase):
 class IbanMessageTests(SimpleTestCase):
     def test_shared_message_mentions_leaving_blank(self):
         self.assertIn("leave this field empty", INVALID_IBAN_MESSAGE)
+
+
+class RequiredIbanAddressTests(SimpleTestCase):
+    def test_blank_iban_does_not_require_an_address(self):
+        self.assertTrue(
+            has_required_iban_address(
+                "",
+                address_line1=None,
+                postal_code=None,
+                city=None,
+            )
+        )
+
+    def test_iban_accepts_a_complete_address(self):
+        self.assertTrue(
+            has_required_iban_address(
+                "CH9300762011623852957",
+                address_line1="Example 1",
+                postal_code="8000",
+                city="Zurich",
+            )
+        )
+
+    def test_iban_rejects_each_missing_or_blank_address_part(self):
+        complete_address = {
+            "address_line1": "Example 1",
+            "postal_code": "8000",
+            "city": "Zurich",
+        }
+        for field, value in (
+            ("address_line1", None),
+            ("postal_code", ""),
+            ("city", "   "),
+        ):
+            with self.subTest(field=field):
+                address = {**complete_address, field: value}
+                self.assertFalse(
+                    has_required_iban_address(
+                        "CH9300762011623852957",
+                        **address,
+                    )
+                )

@@ -39,6 +39,7 @@ from .permissions import (
     ZevManagementPermission,
 )
 from .grid_operators import load_grid_operators, grid_operators_for_postal_code
+from .iban import IBAN_ADDRESS_REQUIRED_MESSAGE, has_required_iban_address
 from .services import (
     create_zev_for_existing_owner,
     get_participant_onboarding_link,
@@ -118,7 +119,7 @@ class ZevViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
             if key not in {f"owner_{field}" for field in address_fields}
         }
         owner_address_serializer = SelfSetupOwnerAddressSerializer(data={
-            field: request.data.get(f"owner_{field}") or ""
+            field: request.data.get(f"owner_{field}", "")
             for field in address_fields
         })
         owner_address_serializer.is_valid(raise_exception=True)
@@ -126,13 +127,14 @@ class ZevViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
         serializer = ZevSerializer(data=zev_payload, context=self.get_serializer_context())
         serializer.is_valid(raise_exception=True)
         zev_data = {k: v for k, v in serializer.validated_data.items() if k != 'owner'}
-        if zev_data.get("bank_iban") and (
-            not participant_data["address_line1"].strip()
-            or not participant_data["postal_code"].strip()
-            or not participant_data["city"].strip()
+        if not has_required_iban_address(
+            zev_data.get("bank_iban"),
+            address_line1=participant_data["address_line1"],
+            postal_code=participant_data["postal_code"],
+            city=participant_data["city"],
         ):
             raise serializers.ValidationError({
-                "owner_address": "An address is required when an IBAN is configured.",
+                "owner_address": IBAN_ADDRESS_REQUIRED_MESSAGE,
             })
         result = create_zev_for_existing_owner(
             owner_user=user,
