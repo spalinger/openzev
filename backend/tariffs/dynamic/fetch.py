@@ -141,7 +141,11 @@ def refresh_source(source: DynamicTariffSource, *, backfill: bool = False, now: 
                 continue
             result.requests += 1
             try:
-                result.points_written += store_points(source, points)
+                result.points_written += store_points(
+                    source,
+                    points,
+                    requested_window=(window.start, window.end) if window is not None else None,
+                )
             except PriceSeriesConflict as exc:
                 refused.append(str(exc))
                 if window is not None:

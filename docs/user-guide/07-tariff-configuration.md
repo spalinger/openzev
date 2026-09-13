@@ -213,7 +213,9 @@ communities: two ZEVs on the same operator product fetch once, together.
 - **PriceIntervalConflict:** a replacement is overlapping or incomplete.
   Backfill the complete unbilled range. A complete replacement can change
   interval resolution atomically while preserving billed historical intervals.
-  A partial replacement is refused without clipping either boundary. If the
+  A partial replacement that changes a price is refused without clipping either
+  boundary. A same-priced response clipped at a fetch boundary safely extends
+  only the uncovered portion and keeps the existing stored boundary. If the
   endpoint no longer serves the complete interval, keep the old series and
   create a replacement source/version for future pricing.
 - **PriceSeriesConflict:** the run reports one or more such refusals. Independent
@@ -253,6 +255,11 @@ a long invoice transaction can delay a fetch or clear operation.
    correction while writers remain paused. Record the original rows and the
    correction. Retry `python manage.py migrate`; the preflight checks again
    before adding constraints. Resume jobs only after migration succeeds.
+
+Migration 0015 can similarly refuse an exact-URL source that incorrectly claims
+range-query support. Its error names the source UUID and URL. Verify that the
+endpoint must be fetched verbatim, set `supports_range=False` for that source,
+and retry the migration; do not change the source URL or tariff identity.
 
 Version 2 sources need an explicit operator product name, even when the
 endpoint has no published prices yet. An old blank v2 source must be disabled

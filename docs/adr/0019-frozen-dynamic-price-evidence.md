@@ -18,7 +18,7 @@ snapshot, and half-open UTC validity intersection. Its source foreign key uses
 `PROTECT`; its invoice foreign key uses `CASCADE`. Drafts protect prices;
 cancelled invoices no longer prevent price changes, but their provenance still
 retains the source row. Backfill existing invoice relationships in migration
-`invoices/0017_dynamic_source_evidence`; past relationships already removed from
+`invoices/0018_dynamic_source_evidence`; past relationships already removed from
 the database cannot be reconstructed. Both live evidence and historical
 backfill deliberately cover every applicable tariff window, even where no
 quantity was priced. Invoice items cannot reconstruct the historical tariff
@@ -40,8 +40,11 @@ whole group intact; independent groups can commit. Complete replacements of
 unbilled intervals may change resolution without clearing historical evidence.
 No replacement may clip an old interval or change an interval protected by an
 invoice. Republishing exactly the same price function over the same coverage
-at a different resolution is a no-op retaining the original rows. Evidence
-ranges are merged once before overlap checks. Enclosing transactions may roll
+at a different resolution is a no-op retaining the original rows. Stored row
+boundaries are also stable when a provider clips a same-priced interval at a
+fetch boundary: storage retains the old row and writes only uncovered incoming
+tails or gaps, instead of persisting an overlap or rewriting the old boundary.
+Evidence ranges are merged once before overlap checks. Enclosing transactions may roll
 back all groups on refusal. Non-overlap is maintained by the supported storage
 path under source locks, rather than a PostgreSQL-only exclusion constraint.
 

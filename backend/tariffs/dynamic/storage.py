@@ -37,7 +37,7 @@ def _groups(rows):
         yield group
 
 
-def _replacement(group, billed):
+def _replacement(group, billed, requested_window):
     old = {row[0]: row[1:3] for row in group if not row[3]}
     incoming = [row[:3] for row in group if row[3]]
     if not incoming:
@@ -53,7 +53,6 @@ def _replacement(group, billed):
         # Keep the original evidence rows and treat equivalent coverage as a no-op.
         return [], []
 
-    incoming_set = set(incoming)
     coverage = []
     for start, end, _price in incoming:
         if coverage and coverage[-1][1] == start:
@@ -63,26 +62,78 @@ def _replacement(group, billed):
     coverage_starts = [start for start, _end in coverage]
     # Every old interval being displaced must be covered in full. This permits
     # an unbilled resolution change without clipping an operator's boundary.
+    retained = []
+    displaced = []
     for start, (end, price) in old.items():
-        if (start, end, price) in incoming_set:
+        overlaps = [
+            row for row in incoming
+            if row[0] < end and row[1] > start
+        ]
+        relevant_start, relevant_end = start, end
+        if requested_window is not None:
+            relevant_start = max(relevant_start, requested_window[0])
+            relevant_end = min(relevant_end, requested_window[1])
+        same_price = not any(
+            incoming_price != price
+            for _incoming_start, _incoming_end, incoming_price in overlaps
+        )
+        if same_price and (
+            relevant_end <= relevant_start
+            or _coverage_contains(coverage, coverage_starts, relevant_start, relevant_end)
+        ):
+            retained.append((start, end, price))
             continue
+        displaced.append((start, end, price))
         if _overlaps_billed(start, end, billed):
             raise BilledPriceChanged(
                 f"Stored price {start.isoformat()} already priced an invoice and cannot be overwritten."
             )
-        index = bisect_right(coverage_starts, start) - 1
-        if index < 0 or coverage[index][1] < end:
+        if not _coverage_contains(coverage, coverage_starts, start, end):
             raise PriceIntervalConflict(
                 f"Price interval {start.isoformat()} overlaps stored evidence without replacing it in full. "
                 "Backfill the complete unbilled interval to adopt the new resolution."
             )
+
+    # A range endpoint may return an interval clipped to the requested window.
+    # Keep an overlapping stored interval when both sides publish the same
+    # price, and write only the genuinely new tails/gaps. This preserves old
+    # row boundaries (including billed evidence) without storing overlaps.
+    changed = _subtract_same_price_coverage(incoming, retained)
     for start, end, _price in changed:
         if old and _overlaps_billed(start, end, billed):
             raise BilledPriceChanged(
                 f"Stored price {start.isoformat()} already priced an invoice and cannot be overwritten."
             )
-    new_starts = {start for start, _end, _price in incoming}
-    return changed, [start for start in old if start not in new_starts]
+    new_starts = {start for start, _end, _price in changed}
+    return changed, [start for start, _end, _price in displaced if start not in new_starts]
+
+
+def _subtract_same_price_coverage(incoming, retained):
+    """Trim incoming intervals only where retained rows already price them."""
+    fragments = []
+    retained = sorted(retained)
+    for start, end, price in incoming:
+        cursor = start
+        for old_start, old_end, old_price in retained:
+            if old_end <= cursor:
+                continue
+            if old_start >= end:
+                break
+            if old_price != price:
+                continue
+            if cursor < old_start:
+                fragments.append((cursor, min(old_start, end), price))
+            cursor = max(cursor, old_end)
+            if cursor >= end:
+                break
+        if cursor < end:
+            fragments.append((cursor, end, price))
+    return fragments
+
+
+def _coverage_contains(coverage, coverage_starts, start, end):
+    index = bisect_right(coverage_starts, start) - 1
+    return index >= 0 and coverage[index][1] >= end
 
 
 def _merge_equal_prices(rows):
@@ -100,7 +151,7 @@ def _overlaps_billed(start, end, billed):
     return index >= 0 and billed[index][1] > start
 
 
-def store_points(source, points):
+def store_points(source, points, *, requested_window=None):
     """Commit independent valid overlap groups; report conflicts afterwards.
 
     An enclosing caller transaction can still roll all writes back on refusal.
@@ -125,7 +176,7 @@ def store_points(source, points):
         billed = billed_ranges(source)
         for group in _groups(incoming + [(*row, False) for row in old]):
             try:
-                updates, deletions = _replacement(group, billed)
+                updates, deletions = _replacement(group, billed, requested_window)
                 changed.extend(updates)
                 removed.extend(deletions)
             except PriceSeriesConflict as exc:

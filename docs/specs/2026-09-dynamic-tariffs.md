@@ -141,7 +141,7 @@ operator's grid series is filed under grid fees or levies changes no number.
 ## 4. Data model
 
 `backend/tariffs/dynamic/models.py`, migrations `tariffs/0012`–`0015`;
-invoice provenance in `invoices/models.py`, migration `invoices/0017`.
+invoice provenance in `invoices/models.py`, migration `invoices/0018`.
 
 ### 4.1 `DynamicTariffSource`
 
@@ -218,7 +218,7 @@ Unique on `(invoice, tariff_id_snapshot)`; ordered by invoice_id, source_id, id.
 Generation records each applicable dynamic tariff's intersection with the invoice
 period, conservatively including tariffs with no priced quantity. Drafts protect
 points. Cancelled invoices cease protecting points but retain source provenance
-until the invoice is deleted. Migration 0017 snapshots existing relationships;
+until the invoice is deleted. Migration 0018 snapshots existing relationships;
 relationships removed before migration cannot be recovered from current rows.
 The atomic migration writes batches of at most 1,000 evidence objects. Current
 links cannot prove which tariffs actually contributed invoice lines: historical
@@ -312,7 +312,10 @@ prices or invoice evidence. It sorts old and incoming intervals into connected
 overlap groups. Each group's proposed replacement must be non-overlapping and
 cover every displaced old interval in full. Complete unbilled resolution changes
 are accepted atomically; partial replacements and overlapping incoming intervals
-are refused without clipping. An old interval overlapping non-cancelled frozen
+that change a price are refused without clipping. A same-priced partial overlap
+keeps the stored interval boundary and writes only uncovered incoming tails or
+gaps, so a range-clipped response can extend coverage without creating overlaps
+or rewriting evidence. An old interval overlapping non-cancelled frozen
 invoice evidence cannot change price or extent, and a replacement cannot extend
 into protected evidence. Identical intervals are idempotent. A resolution
 change with exactly the same coverage and price function is also a no-op: keep
@@ -329,6 +332,8 @@ Refusals mark the source failed and are not retried by Celery. See the
 Migration 0014 refuses invalid or overlapping existing intervals and names the
 rows to reconcile before continuing; it does not repair billing evidence. See
 the [migration recovery procedure](../user-guide/07-tariff-configuration.md#if-migration-0014-refuses-existing-intervals).
+Migration 0015 likewise names legacy exact-URL sources that incorrectly claim
+range support before adding `dynamic_exact_url_no_range`.
 The database enforces positive intervals and unique `(source, valid_from)`,
 not arbitrary non-overlap. Non-overlap is a precondition of batched display
 summaries, established by migration preflight and maintained by all supported
@@ -761,10 +766,10 @@ accepts version 1 static archives and legacy adapter-based dynamic descriptors.
 |---|---|
 | `tariffs/test_dynamic_parsing.py` | v1/v2 detection and parsing; unit selection (including a missing-unit warning); empty/malformed responses; DST; generic request construction |
 | `tariffs/test_dynamic_discovery.py` | Version/product discovery; named exact-v2 verification; override and empty-response fallback; standard, exact-URL, range, and query-spelling capability detection |
-| `tariffs/test_dynamic_fetch.py` | Chunking, UTC storage, upsert idempotency, half-open invoice evidence, partial conflict writes, resulting-set overlap checks, recovery cursors including old failed/unattempted windows, coverage gaps, windows, failure recording, tasks, source identity |
+| `tariffs/test_dynamic_fetch.py` | Chunking, UTC storage, upsert idempotency, same-price clipped overlap extension, half-open invoice evidence, partial conflict writes, resulting-set overlap checks, recovery cursors including old failed/unattempted windows, coverage gaps, windows, failure recording, tasks, source identity |
 | `tariffs/test_dynamic_tariff_link.py` | `Tariff.clean()` rules, capability validation, static→dynamic series versioning, PROTECT retention, no dynamic price bands |
 | `zev/test_transfer.py::DynamicTariffTransferTests` | Natural-key match, recreation on a fresh instance, static tariffs unaffected |
-| `invoices/test_dynamic_evidence.py` | Frozen provenance after tariff mutation/deletion; legacy-refund refusal; migration backfill and overlap preflight; PostgreSQL barriers verify concurrent clear/overwrite waits for committed evidence or proceeds after rollback; equivalent billed-resolution no-op; UTC bulk preflight permissions; bounded migration batches |
+| `invoices/test_dynamic_evidence.py` | Frozen provenance after tariff mutation/deletion; legacy-refund refusal; migration backfill, interval-overlap, and exact-URL capability preflights; PostgreSQL barriers verify concurrent clear/overwrite waits for committed evidence or proceeds after rollback; equivalent billed-resolution no-op; UTC bulk preflight permissions; bounded migration batches |
 | `invoices/test_dynamic_pricing.py` | `_DynamicSeries` bisection, `TariffResolver.price_at` (static and dynamic), the gap refusal, end-to-end `generate_invoice` (consumption, negative prices, percentage base, feed-in) |
 | `invoices/test_readiness.py::DynamicTariffPricingCoverageTests` | Full/partial/no coverage, type-masking, percentage-tariff coupling, DST, static→dynamic series versioning, and coverage checked regardless of category (a dynamic tariff filed under `grid_fees`) |
 | `invoices/test_dynamic_tariff_pricing.py` | Duration weighting, bounded/persistent-key batch summaries, historical percentage dates with one source query, flat/HT/NT/band fallback, unavailable-wins ordering, and static multi-band flags |

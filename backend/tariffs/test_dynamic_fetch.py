@@ -290,6 +290,28 @@ class TestEvidenceProtection:
                 start + timedelta(minutes=15), start + timedelta(minutes=45), Decimal("0.2"),
             )])
 
+    def test_same_price_clipped_overlap_extends_without_rewriting_the_old_interval(self):
+        source = make_source()
+        start = datetime(2026, 2, 1, 10, tzinfo=UTC)
+        old = PricePoint(start, start + timedelta(minutes=30), Decimal("0.1"))
+        store_points(source, [old])
+        old_pk = source.points.get().pk
+
+        assert store_points(
+            source,
+            [PricePoint(
+                start + timedelta(minutes=15), start + timedelta(minutes=45), Decimal("0.1"),
+            )],
+            requested_window=(start + timedelta(minutes=15), start + timedelta(minutes=45)),
+        ) == 1
+
+        rows = list(source.points.values_list("pk", "valid_from", "valid_to", "price_chf_per_kwh"))
+        assert rows[0] == (old_pk, start, start + timedelta(minutes=30), Decimal("0.10000"))
+        assert [(valid_from, valid_to, price) for _pk, valid_from, valid_to, price in rows] == [
+            (start, start + timedelta(minutes=30), Decimal("0.10000")),
+            (start + timedelta(minutes=30), start + timedelta(minutes=45), Decimal("0.10000")),
+        ]
+
     def test_repeated_upserts_report_no_new_writes(self):
         source = make_source()
         assert store_points(source, [point(10, "0.1", day=3)]) == 1
@@ -535,6 +557,33 @@ class TestRefreshSource:
             refresh_source(source, backfill=True, now=datetime(2026, 6, 15, 9, tzinfo=UTC))
 
         assert len(seen) > 10
+
+    def test_a_clipped_same_price_retry_recovers_instead_of_latching_failed(self):
+        source = make_source()
+        old_start = datetime(2026, 1, 31, 23, 45, tzinfo=UTC)
+        retry_start = datetime(2026, 2, 1, 0, 0, tzinfo=UTC)
+        store_points(source, [PricePoint(
+            old_start, retry_start + timedelta(minutes=15), Decimal("0.1"),
+        )])
+        source.recovery_from = retry_start
+        source.save(update_fields=["recovery_from"])
+
+        with mock.patch(
+            "tariffs.dynamic.fetch.fetch_window",
+            return_value=([PricePoint(
+                retry_start, retry_start + timedelta(minutes=30), Decimal("0.1"),
+            )], []),
+        ):
+            result = refresh_source(source, now=datetime(2026, 2, 10, 12, tzinfo=UTC))
+
+        source.refresh_from_db()
+        assert result.points_written == 1
+        assert source.last_fetch_status == FetchStatus.OK
+        assert source.recovery_from is None
+        assert list(source.points.values_list("valid_from", "valid_to")) == [
+            (old_start, retry_start + timedelta(minutes=15)),
+            (retry_start + timedelta(minutes=15), retry_start + timedelta(minutes=30)),
+        ]
 
     def test_an_endpoint_without_range_support_is_asked_once_and_bare(self):
         source = make_source(

@@ -8,7 +8,7 @@ from importlib import import_module
 from threading import Event
 from time import monotonic, sleep
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 from django.apps import apps
@@ -77,7 +77,7 @@ def test_migration_backfills_existing_invoice_source_windows():
     participant, tariff, source, _point = setup_billing()
     invoice = generate_invoice(participant, date(2026, 1, 1), date(2026, 1, 31))
     invoice.dynamic_evidence.all().delete()
-    migration = import_module("invoices.migrations.0017_dynamic_source_evidence")
+    migration = import_module("invoices.migrations.0018_dynamic_source_evidence")
     migration.backfill_evidence(apps, SimpleNamespace(connection=connection))
     evidence = invoice.dynamic_evidence.get()
     assert evidence.source_id == source.pk
@@ -100,6 +100,27 @@ def test_migration_refuses_legacy_overlaps_without_repairing_evidence():
     overlap.delete()
     migration.reject_invalid_intervals(apps, editor)
     assert source.points.count() == 1
+
+
+def test_source_identity_migration_names_invalid_exact_url_capabilities():
+    migration = import_module("tariffs.migrations.0015_source_version_identity")
+    source_id = "253925c0-b87c-4767-a6c6-bba3634be90f"
+    queryset = Mock()
+    queryset.using.return_value = queryset
+    queryset.filter.return_value = queryset
+    queryset.values_list.return_value = [(source_id, "https://example.test/current")]
+    historical_apps = SimpleNamespace(
+        get_model=Mock(return_value=SimpleNamespace(objects=queryset)),
+    )
+    editor = SimpleNamespace(connection=SimpleNamespace(alias="migration"))
+
+    with pytest.raises(RuntimeError, match=rf"{source_id} .*example\.test/current"):
+        migration.reject_invalid_source_capabilities(historical_apps, editor)
+
+    queryset.values_list.return_value = []
+    migration.reject_invalid_source_capabilities(historical_apps, editor)
+    queryset.using.assert_called_with("migration")
+    queryset.filter.assert_called_with(request_mode="exact_url", supports_range=True)
 
 
 @pytest.mark.django_db(transaction=True)
@@ -282,7 +303,7 @@ def test_migration_flushes_full_and_final_evidence_batches():
             for i in range(1001)
         ]
     )
-    migration = import_module("invoices.migrations.0017_dynamic_source_evidence")
+    migration = import_module("invoices.migrations.0018_dynamic_source_evidence")
     migration.backfill_evidence(apps, SimpleNamespace(connection=connection))
     assert source.invoice_evidence.count() == 1001
 
