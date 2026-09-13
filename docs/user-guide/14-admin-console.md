@@ -23,22 +23,28 @@ For general role information, see [Roles and Permissions](11-roles-and-permissio
 Admins can view and manage all ZEVs in the system.
 
 1. Go to **Platform → Overview → ZEVs**
-2. The list shows all ZEVs with their name, type, owner, and status. A
-   **Setup incomplete** badge marks ZEVs with no IBAN configured — billing
+2. The list shows all ZEVs with their name, type, responsible person, and status. A
+   **Setup incomplete** badge marks ZEVs with no valid IBAN configured — billing
    cannot issue payable QR invoices for them yet.
 3. Click **Manage** on a row to enter that ZEV's working scope (selects the ZEV and opens its dashboard)
 
-### Creating a ZEV (with Owner Wizard)
+### Creating a ZEV (with Responsible Person Wizard)
 
-Admins can create a ZEV together with a new owner account in a single step:
+Admins can create a ZEV together with a new responsible-person account in one wizard:
 
 1. Click **Create New ZEV**
-2. Fill in ZEV details (name, start date, type, billing interval, etc.)
-3. Fill in the owner details (username, name, email, address)
-4. Optionally add initial metering points for the owner
+2. Fill in ZEV details (name, start date, type, billing interval, etc.).
+3. Fill in the responsible person details (name, address, email).
+   The payment section belongs with this person because the participant record
+   supplies the creditor name and address on QR-Rechnungen. Enter the optional
+   **Bank Name** and **Bank IBAN** for the account receiving participant payments.
+   Skipping the IBAN leaves the **Setup incomplete** list
+   badge and the Overview QR warning until the fields are filled under
+   ZEV Settings → Billing & payment
+4. Optionally add initial metering points for the responsible person
 5. Click **Create**
 
-The system creates the ZEV, the owner account (with a temporary password), and optionally a participant record and metering points for the owner.
+The system creates the ZEV, the responsible-person account (with a temporary password), its participant record, and the listed metering points.
 
 Admins can also create a bare ZEV (without the wizard) via the standard CRUD interface, assigning an existing user as owner.
 

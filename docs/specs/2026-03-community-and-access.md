@@ -582,6 +582,8 @@ which nests `participants` (via `ParticipantSerializer`, many=True, read-only).
   "zev_type": "vzev",
   "billing_interval": "monthly",
   "grid_operator": "...",
+  "bank_name": "...",
+  "bank_iban": "...",
   "owner": {
     "username": "",
     "title": "mr",
@@ -599,6 +601,16 @@ which nests `participants` (via `ParticipantSerializer`, many=True, read-only).
 }
 ```
 
+`bank_name` is an optional informational label for the payment account, and
+`bank_iban` is optional (both allow_blank). Non-empty IBANs are
+normalized to compact uppercase form and validated with the ISO 13616 MOD-97
+checksum. When an IBAN is provided, the owner participant's address,
+postal code, and city are required because they form the creditor address on a
+QR-Rechnung. The wizard collects payment details alongside the responsible
+person's address; the step-4 review echoes the IBAN (or `–` when blank, with
+the informational bank name in parentheses only when non-empty). A blank or
+invalid IBAN keeps the billing-settings warning until it is corrected.
+
 **Service:** `create_zev_with_owner_setup()` (atomic transaction):
 1. Generate unique username (email-local → full-name → first-name fallback, suffix if taken).
 2. Create `User` with `role=zev_owner`, `must_change_password=True`, temporary password.
@@ -613,6 +625,17 @@ which nests `participants` (via `ParticipantSerializer`, many=True, read-only).
 
 For self-registered users who have completed email verification and password
 setup. Creates a ZEV + owner Participant in one step.
+
+**Payload:** `ZevSerializer` — the same optional bank fields as the wizard,
+including `bank_name` / `bank_iban`. The verify-email create-ZEV card collects
+the owner participant's creditor address and payment details together. It
+normalizes and validates non-empty IBANs before submission and sends `""` when
+left blank. The address is sent as `owner_address_line1`,
+`owner_address_line2`, `owner_postal_code`, and `owner_city`; it is copied to
+the owner participant created by the service.
+
+The owner address fields are optional when no IBAN is supplied. A non-empty
+IBAN requires `owner_address_line1`, `owner_postal_code`, and `owner_city`.
 
 **Guards:**
 - User must be `zev_owner`.
@@ -991,6 +1014,12 @@ Composite serializer for the creation wizard. Nested:
 - `owner`: `ZevOwnerAccountSerializer` (username, name, contact details)
 - `metering_points`: `OwnerMeteringPointInputSerializer[]` (min_length=1)
 
+Optional scalar fields include `bank_iban` (max 34) and the informational
+`bank_name` (max 200), both `required=False, allow_blank=True` — the wizard
+collects them with the responsible person's details on step 2 (see §7.2).
+Self-setup goes through `ZevSerializer`
+(all model fields), so the same optional bank fields are accepted there.
+
 ### 13.6 CustomTokenObtainPairSerializer
 
 `CustomTokenObtainPairSerializer` has its own `get_token` with the same claims as helper `_make_jwt_for_user(user) -> dict` (used by `verify_email`/`set_initial_password` and `views_oauth`/`impersonation`): `role`, `email`, `full_name`, `must_change_password`.
@@ -1016,7 +1045,7 @@ interface ImpersonationTokens extends AuthTokens {
 }
 
 interface RegisterInput { username: string; email: string }
-interface SelfSetupZevInput { name: string; start_date: string; zev_type: 'zev'|'vzev'; billing_interval: string; grid_operator?: string; grid_operator_elcom_id?: number|null }
+interface SelfSetupZevInput { name: string; start_date: string; zev_type: 'zev'|'vzev'; billing_interval: string; grid_operator?: string; grid_operator_elcom_id?: number|null; bank_name?: string; bank_iban?: string; owner_address_line1?: string; owner_address_line2?: string; owner_postal_code?: string; owner_city?: string }
 
 interface Zev { id: string; name: string; owner: number; /* + many fields */ }
 interface ZevInput { name: string; start_date: string; owner?: number; zev_type: 'zev'|'vzev'; billing_interval: string; /* + optional fields */ }
@@ -1094,7 +1123,8 @@ lists the test classes per module (test counts are the `test_*` methods).
 |---|---|---|
 | `ZevPaymentTermTests` | 4 | Payment term default (30 days), range validation, API accept/reject |
 | `ParticipantEndpointRestrictionTests` | 7 | Participant cannot access ZEV/participant lists; can list own metering points; cannot create/update/delete metering points; cannot access assignments |
-| `ZevCreationWizardTests` | 2 | Non-admin cannot create ZEV; admin wizard creates ZEV + owner + participant + assignments |
+| `ZevCreationWizardTests` | 4 | Non-admin cannot create ZEV; admin wizard creates ZEV + owner + participant + assignments; invalid IBAN is rejected; wizard payload persists normalized `bank_iban` + `bank_name` |
+| `ZevSelfSetupTests` | 1 | Self-setup persists `bank_iban` + `bank_name` on the created ZEV (owner participant created) |
 | `ParticipantAccountLifecycleTests` | 3 | Create participant auto-creates account with initial password; update saves contact details; invitation resets password and sends email |
 | `AdminCanEditOwnerParticipantTests` | 4 | `test_admin_can_edit_the_owner_participant_address` preserves the owner role and ZEV API access; `test_profile_sync_preserves_privileged_roles` synchronizes name/email while preserving owner/admin roles and ZEV API access; `test_invitation_preserves_privileged_roles_and_promotes_guests` preserves owner/admin/participant roles, promotes linked guests, and verifies password reset/email delivery; `test_zev_owner_cannot_edit_their_own_owner_participant_record` retains the existing edit restriction |
 | `ParticipantAccountLinkingTests` | 5 | Admin can link/unlink accounts; rejects double-linking; admin can create-and-link; non-admin cannot link/create |
@@ -1153,6 +1183,13 @@ lists the test classes per module (test counts are the `test_*` methods).
   each impersonation edge, plus a delayed-response race: a query already in
   flight for the outgoing account must not repopulate the cache after the
   switch.
+- `frontend/tests/zev-create-wizard.test.ts` — the admin creation wizard
+  commits an edited meter when advancing, sends `bank_iban` + `bank_name` to
+  `createZevWithOwner` (echoed on the step-4 review), and sends `""` for both
+  when left blank (review shows `–`).
+- `frontend/tests/verify-email-self-setup.test.ts` — the verify-email
+  self-setup card sends `bank_iban` + `bank_name` with `createSelfSetupZev`
+  and sends `""` when left blank (no client-side required).
 
 ---
 

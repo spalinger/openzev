@@ -26,6 +26,7 @@ from .serializers import (
     ZevSerializer,
     ZevDetailSerializer,
     ZevCreateWithOwnerSerializer,
+    SelfSetupOwnerAddressSerializer,
     ParticipantSerializer,
     MeteringPointSerializer,
     MeteringPointReadingsDeleteSerializer,
@@ -106,10 +107,38 @@ class ZevViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
         if Zev.objects.filter(owner=user).exists():
             return Response({"detail": "You already have a ZEV."}, status=status.HTTP_400_BAD_REQUEST)
 
-        serializer = ZevSerializer(data=request.data, context=self.get_serializer_context())
+        address_fields = (
+            "address_line1",
+            "address_line2",
+            "postal_code",
+            "city",
+        )
+        zev_payload = {
+            key: value for key, value in request.data.items()
+            if key not in {f"owner_{field}" for field in address_fields}
+        }
+        owner_address_serializer = SelfSetupOwnerAddressSerializer(data={
+            field: request.data.get(f"owner_{field}") or ""
+            for field in address_fields
+        })
+        owner_address_serializer.is_valid(raise_exception=True)
+        participant_data = owner_address_serializer.validated_data
+        serializer = ZevSerializer(data=zev_payload, context=self.get_serializer_context())
         serializer.is_valid(raise_exception=True)
         zev_data = {k: v for k, v in serializer.validated_data.items() if k != 'owner'}
-        result = create_zev_for_existing_owner(owner_user=user, zev_data=zev_data)
+        if zev_data.get("bank_iban") and (
+            not participant_data["address_line1"].strip()
+            or not participant_data["postal_code"].strip()
+            or not participant_data["city"].strip()
+        ):
+            raise serializers.ValidationError({
+                "owner_address": "An address is required when an IBAN is configured.",
+            })
+        result = create_zev_for_existing_owner(
+            owner_user=user,
+            zev_data=zev_data,
+            participant_data=participant_data,
+        )
         return Response(result, status=status.HTTP_201_CREATED)
 
     # ── Transfer: whole-ZEV export and import ──────────────────────────────

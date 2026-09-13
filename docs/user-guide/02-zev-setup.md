@@ -59,14 +59,19 @@ New ZEV owners can register themselves and create their ZEV without admin involv
    - **Postal Code** — Postal code of the grid connection (optional); suggests
      the grid operator below from ElCom's official register
    - **Grid Operator** — Your VNB name (optional)
+   - **Payment recipient address** — Address printed as the QR-Rechnung creditor
+   - **Bank Name** — Bank holding the payment account (optional)
+   - **Bank IBAN** — Account receiving participant payments (optional; required for QR payment details)
 2. Click **Create ZEV**
 3. You are redirected to the dashboard as the owner of your new ZEV
 
 > **Note:** Self-registration creates the account with the `zev_owner` role. Each self-registered owner can create exactly one ZEV via this flow.
+>
+> The IBAN belongs to the account that receives participant payments. If you enter one, provide the payment recipient's address as well so QR-Rechnungen can be generated. Skipping it leaves invoices without payment details until you add it under **Billing & payment** in ZEV Settings.
 
-### Option B: Admin-Created ZEV (with Owner Wizard)
+### Option B: Admin-Created ZEV (with Responsible Person Wizard)
 
-Admins can create a ZEV together with a new owner account in a single step. See [Platform → Overview → ZEVs](14-admin-console.md#zev-management) for details.
+Admins can create a ZEV together with a new responsible-person account in a single wizard. See [Platform → Overview → ZEVs](14-admin-console.md#zev-management) for details.
 
 ## ZEV Settings
 
@@ -126,7 +131,7 @@ The General and Billing & payment tabs hold the settings form sections:
 | **Invoice Prefix** | Prefix for invoice numbers (default: `INV`) | No |
 | **VAT treatment** | How VAT is applied when billing participants (see below) | No |
 | **VAT Number** | Swiss UID — shown only when VAT treatment is *VAT-registered* | If registered |
-| **Bank Name** | Bank name for QR-Rechnung | No |
+| **Bank Name** | Bank holding the payment account (optional) | No |
 | **Bank IBAN** | IBAN for QR-Rechnung | No |
 
 #### Notes

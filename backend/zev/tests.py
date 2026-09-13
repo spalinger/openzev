@@ -256,6 +256,24 @@ class ZevCreationWizardTests(TestCase):
 		)
 		self.assertEqual(resp.status_code, 403)
 
+	def test_admin_wizard_rejects_invalid_iban(self):
+		auth(self.client, self.admin)
+		resp = self.client.post(
+			"/api/v1/zev/zevs/create-with-owner/",
+			{
+				"name": "Invalid IBAN ZEV",
+				"start_date": "2026-03-01",
+				"zev_type": "vzev",
+				"billing_interval": "monthly",
+				"bank_iban": "not-an-iban",
+				"owner": {"first_name": "Iris", "last_name": "Invalid", "email": "iris.invalid@example.com"},
+				"metering_points": [{"meter_id": "METER-INVALID", "meter_type": "consumption"}],
+			},
+			format="json",
+		)
+		self.assertEqual(resp.status_code, 400)
+		self.assertIn("bank_iban", resp.data)
+
 	@mock.patch("zev.tasks.warm_participant_geocode_cache_task.delay")
 	def test_admin_can_create_zev_with_owner_and_metering_points(self, mock_geocode_delay):
 		auth(self.client, self.admin)
@@ -342,6 +360,73 @@ class ZevCreationWizardTests(TestCase):
 		self.assertEqual(created_zev.postal_code, "3110")
 		owner_participant = Participant.objects.get(zev=created_zev, user=created_zev.owner)
 		self.assertEqual(owner_participant.postal_code, "8000")
+
+	@mock.patch("zev.tasks.warm_participant_geocode_cache_task.delay")
+	def test_admin_wizard_persists_bank_iban_and_bank_name(self, mock_geocode_delay):
+		auth(self.client, self.admin)
+		resp = self.client.post(
+			"/api/v1/zev/zevs/create-with-owner/",
+			{
+				"name": "IBAN Wizard ZEV",
+				"start_date": "2026-03-01",
+				"zev_type": "vzev",
+				"billing_interval": "monthly",
+				"bank_iban": "CH93 0076 2011 6238 5295 7",
+				"bank_name": "Demo Bank",
+				"owner": {
+					"first_name": "Iris",
+					"last_name": "Iban",
+					"email": "iris.iban@example.com",
+					"address_line1": "Example 1",
+					"postal_code": "8000",
+					"city": "Zurich",
+				},
+				"metering_points": [
+					{
+						"meter_id": "CH0000000000000000000000000000009",
+						"meter_type": "consumption",
+					},
+				],
+			},
+			format="json",
+		)
+
+		self.assertEqual(resp.status_code, 201, resp.data)
+		created_zev = Zev.objects.get(name="IBAN Wizard ZEV")
+		self.assertEqual(created_zev.bank_iban, "CH9300762011623852957")
+		self.assertEqual(created_zev.bank_name, "Demo Bank")
+
+
+class ZevSelfSetupTests(TestCase):
+	def setUp(self):
+		self.client = APIClient()
+		self.owner = make_user("self_setup_owner", UserRole.ZEV_OWNER)
+
+	def test_self_setup_persists_bank_iban_and_bank_name(self):
+		auth(self.client, self.owner)
+		resp = self.client.post(
+			"/api/v1/zev/zevs/self-setup/",
+			{
+				"name": "Self Setup ZEV",
+				"start_date": "2026-04-01",
+				"zev_type": "zev",
+				"billing_interval": "annual",
+				"bank_iban": "CH93 0076 2011 6238 5295 7",
+				"bank_name": "Demo Bank",
+				"owner_address_line1": "Example 1",
+				"owner_postal_code": "8000",
+				"owner_city": "Zurich",
+			},
+			format="json",
+		)
+
+		self.assertEqual(resp.status_code, 201, resp.data)
+		created_zev = Zev.objects.get(name="Self Setup ZEV")
+		self.assertEqual(created_zev.owner, self.owner)
+		self.assertEqual(created_zev.bank_iban, "CH9300762011623852957")
+		self.assertEqual(created_zev.bank_name, "Demo Bank")
+		owner_participant = Participant.objects.get(zev=created_zev, user=self.owner)
+		self.assertEqual(owner_participant.city, "Zurich")
 
 
 @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")

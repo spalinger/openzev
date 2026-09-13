@@ -6,6 +6,7 @@ from .models import Zev, Participant, MeteringPoint, MeteringPointAssignment, Va
 from accounts.models import UserRole
 from .services import create_zev_with_owner_setup, ensure_participant_account
 from .tasks import trigger_geocode_if_address_present
+from .iban import is_valid_iban, normalize_iban
 
 
 class MeteringPointSerializer(serializers.ModelSerializer):
@@ -240,6 +241,12 @@ class GridOperatorSuggestionSerializer(serializers.Serializer):
 
 
 class ZevSerializer(serializers.ModelSerializer):
+    def validate_bank_iban(self, value):
+        normalized = normalize_iban(value)
+        if normalized and not is_valid_iban(normalized):
+            raise serializers.ValidationError("Enter a valid IBAN or leave this field empty.")
+        return normalized
+
     def validate_grid_operator_elcom_id(self, value):
         """Only ids from the shipped ElCom list are accepted.
 
@@ -345,6 +352,15 @@ class ZevOwnerAccountSerializer(serializers.Serializer):
         return username
 
 
+class SelfSetupOwnerAddressSerializer(serializers.Serializer):
+    """The address copied to the participant created by self-setup."""
+
+    address_line1 = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    address_line2 = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    postal_code = serializers.CharField(required=False, allow_blank=True, max_length=10)
+    city = serializers.CharField(required=False, allow_blank=True, max_length=100)
+
+
 class OwnerMeteringPointInputSerializer(serializers.Serializer):
     meter_id = serializers.CharField(max_length=100)
     meter_type = serializers.ChoiceField(choices=MeteringPoint._meta.get_field('meter_type').choices)
@@ -371,6 +387,12 @@ class ZevCreateWithOwnerSerializer(serializers.Serializer):
     owner = ZevOwnerAccountSerializer()
     metering_points = OwnerMeteringPointInputSerializer(many=True, min_length=1)
 
+    def validate_bank_iban(self, value):
+        normalized = normalize_iban(value)
+        if normalized and not is_valid_iban(normalized):
+            raise serializers.ValidationError("Enter a valid IBAN or leave this field empty.")
+        return normalized
+
     def validate(self, attrs):
         vat_mode = attrs.get("vat_mode", VatMode.NOT_REGISTERED)
         if vat_mode == VatMode.REGISTERED and not attrs.get("vat_number"):
@@ -381,6 +403,15 @@ class ZevCreateWithOwnerSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {"vat_number": "Only a VAT-registered ZEV carries a VAT number."}
             )
+        if attrs.get("bank_iban"):
+            owner = attrs.get("owner", {})
+            missing = [
+                field
+                for field in ("address_line1", "postal_code", "city")
+                if not owner.get(field, "").strip()
+            ]
+            if missing:
+                raise serializers.ValidationError({"owner": "An address is required when an IBAN is configured."})
         return attrs
 
     def create(self, validated_data):

@@ -2,6 +2,7 @@ import { CivilDateInput } from './CivilDateInput'
 import { useTranslation } from 'react-i18next'
 import { BILLING_INTERVAL_OPTIONS, ZEV_TYPE_OPTIONS } from '../lib/options'
 import type { ZevInput } from '../types/api'
+import { normalizeIban } from '../lib/iban'
 import { GridOperatorField } from '../features/zev/GridOperatorField'
 import { GridOperatorSuggestion } from '../features/zev/GridOperatorSuggestion'
 
@@ -212,14 +213,32 @@ export function ZevGeneralSettingsFields({ form, onChange, group, zevId }: ZevGe
                             onChange={(event) => onChange({ invoice_prefix: event.target.value })}
                         />
                     </label>
-                    <label>
-                        <span>{t('pages.zevSettings.fields.bankName')}</span>
-                        <input
-                            name="bank_name"
-                            value={form.bank_name ?? ''}
-                            onChange={(event) => onChange({ bank_name: event.target.value })}
-                        />
-                    </label>
+                    <div className="grid-span-full payment-recipient-section">
+                        <strong>{t('pages.zevSettings.fields.paymentRecipientHeader')}</strong>
+                        <p className="muted">{t('pages.zevSettings.fields.paymentRecipientHint')}</p>
+                        <div className="payment-fields-grid">
+                            <label>
+                                <span>{t('pages.zevSettings.fields.bankName')}</span>
+                                <input
+                                    name="bank_name"
+                                    value={form.bank_name ?? ''}
+                                    maxLength={200}
+                                    onChange={(event) => onChange({ bank_name: event.target.value })}
+                                />
+                            </label>
+                            <label>
+                                <span>{t('pages.zevSettings.fields.bankIban')}</span>
+                                <input
+                                    name="bank_iban"
+                                    value={form.bank_iban ?? ''}
+                                    maxLength={34}
+                                    onChange={(event) => onChange({ bank_iban: event.target.value })}
+                                    onBlur={(event) => onChange({ bank_iban: normalizeIban(event.target.value) })}
+                                />
+                            </label>
+                        </div>
+                        <small className="muted">{t('pages.zevSettings.fields.bankIbanHint')}</small>
+                    </div>
                     <label className="grid-span-full">
                         <span>{t('pages.zevSettings.fields.vatMode')}</span>
                         <select
@@ -248,14 +267,6 @@ export function ZevGeneralSettingsFields({ form, onChange, group, zevId }: ZevGe
                             />
                         </label>
                     )}
-                    <label className="grid-span-full">
-                        <span>{t('pages.zevSettings.fields.bankIban')}</span>
-                        <input
-                            name="bank_iban"
-                            value={form.bank_iban ?? ''}
-                            onChange={(event) => onChange({ bank_iban: event.target.value })}
-                        />
-                    </label>
                 </div>
             </div>
 
