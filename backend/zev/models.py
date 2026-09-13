@@ -8,7 +8,7 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.utils import timezone
 
 from allocation.validity import active_during
-from .iban import is_valid_iban, normalize_iban
+from .iban import INVALID_IBAN_MESSAGE, is_valid_iban, normalize_iban
 
 DEFAULT_EMAIL_SUBJECT_TEMPLATE = "Invoice {invoice_number} \u2013 {zev_name}"
 DEFAULT_EMAIL_BODY_TEMPLATE = (
@@ -191,7 +191,7 @@ class Zev(models.Model):
         if self.bank_iban:
             self.bank_iban = normalize_iban(self.bank_iban)
             if not is_valid_iban(self.bank_iban):
-                raise ValidationError({"bank_iban": "Enter a valid IBAN or leave this field empty."})
+                raise ValidationError({"bank_iban": INVALID_IBAN_MESSAGE})
         # A VAT-registered ZEV shows its UID on every invoice and contract, so
         # the number is not optional in that mode. The other two modes are for
         # entities that have no UID, so a number stored against them is almost

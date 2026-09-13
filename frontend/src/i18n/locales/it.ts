@@ -1886,6 +1886,9 @@ export const it = {
             resetToGlobalDefault: 'Ripristina al modello predefinito globale',
             updateSuccess: 'Impostazioni RCP aggiornate.',
             updateFailed: 'Impossibile aggiornare le impostazioni RCP.',
+            validation: {
+                invalidIban: 'Inserire un IBAN valido oppure lasciare vuoto il campo.',
+            },
             tabs: {
                 general: 'Generale',
                 billingPayment: 'Fatturazione e pagamento',

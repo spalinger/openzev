@@ -2,7 +2,7 @@ import { CivilDateInput } from './CivilDateInput'
 import { useTranslation } from 'react-i18next'
 import { BILLING_INTERVAL_OPTIONS, ZEV_TYPE_OPTIONS } from '../lib/options'
 import type { ZevInput } from '../types/api'
-import { normalizeIban } from '../lib/iban'
+import { isValidIban, normalizeIban } from '../lib/iban'
 import { GridOperatorField } from '../features/zev/GridOperatorField'
 import { GridOperatorSuggestion } from '../features/zev/GridOperatorSuggestion'
 
@@ -235,6 +235,11 @@ export function ZevGeneralSettingsFields({ form, onChange, group, zevId }: ZevGe
                                     onChange={(event) => onChange({ bank_iban: event.target.value })}
                                     onBlur={(event) => onChange({ bank_iban: normalizeIban(event.target.value) })}
                                 />
+                                {(form.bank_iban ?? '').trim() !== '' && !isValidIban(form.bank_iban ?? '') && (
+                                    <small className="error-text" role="alert">
+                                        {t('pages.zevSettings.validation.invalidIban')}
+                                    </small>
+                                )}
                             </label>
                         </div>
                         <small className="muted">{t('pages.zevSettings.fields.bankIbanHint')}</small>

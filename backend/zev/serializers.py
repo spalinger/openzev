@@ -6,7 +6,21 @@ from .models import Zev, Participant, MeteringPoint, MeteringPointAssignment, Va
 from accounts.models import UserRole
 from .services import create_zev_with_owner_setup, ensure_participant_account
 from .tasks import trigger_geocode_if_address_present
-from .iban import is_valid_iban, normalize_iban
+from .iban import INVALID_IBAN_MESSAGE, is_valid_iban, normalize_iban
+
+
+class BankIbanValidationMixin:
+    """Normalize + validate `bank_iban` identically on every ZEV write path.
+
+    Blank stays allowed (no IBAN configured); a non-blank value is stored in
+    canonical compact-uppercase form and must pass the MOD-97 checksum.
+    """
+
+    def validate_bank_iban(self, value):
+        normalized = normalize_iban(value or "")
+        if normalized and not is_valid_iban(normalized):
+            raise serializers.ValidationError(INVALID_IBAN_MESSAGE)
+        return normalized
 
 
 class MeteringPointSerializer(serializers.ModelSerializer):
@@ -240,12 +254,7 @@ class GridOperatorSuggestionSerializer(serializers.Serializer):
     operators = GridOperatorSerializer(many=True)
 
 
-class ZevSerializer(serializers.ModelSerializer):
-    def validate_bank_iban(self, value):
-        normalized = normalize_iban(value)
-        if normalized and not is_valid_iban(normalized):
-            raise serializers.ValidationError("Enter a valid IBAN or leave this field empty.")
-        return normalized
+class ZevSerializer(BankIbanValidationMixin, serializers.ModelSerializer):
 
     def validate_grid_operator_elcom_id(self, value):
         """Only ids from the shipped ElCom list are accepted.
@@ -368,7 +377,7 @@ class OwnerMeteringPointInputSerializer(serializers.Serializer):
     location_description = serializers.CharField(required=False, allow_blank=True, max_length=200)
 
 
-class ZevCreateWithOwnerSerializer(serializers.Serializer):
+class ZevCreateWithOwnerSerializer(BankIbanValidationMixin, serializers.Serializer):
     name = serializers.CharField(max_length=200)
     start_date = serializers.DateField()
     zev_type = serializers.ChoiceField(choices=Zev._meta.get_field('zev_type').choices)
@@ -386,12 +395,6 @@ class ZevCreateWithOwnerSerializer(serializers.Serializer):
     notes = serializers.CharField(required=False, allow_blank=True)
     owner = ZevOwnerAccountSerializer()
     metering_points = OwnerMeteringPointInputSerializer(many=True, min_length=1)
-
-    def validate_bank_iban(self, value):
-        normalized = normalize_iban(value)
-        if normalized and not is_valid_iban(normalized):
-            raise serializers.ValidationError("Enter a valid IBAN or leave this field empty.")
-        return normalized
 
     def validate(self, attrs):
         vat_mode = attrs.get("vat_mode", VatMode.NOT_REGISTERED)

@@ -246,7 +246,7 @@ on-disk default. See `2026-08-contract-pdf-redesign.md` §5.2.
 |---|---|---|---|
 | `/api/v1/zev/zevs/{id}/` | PATCH | `IsAdmin` or `IsZevOwner` | Partial update of any Zev field including billing, email templates, contract notes |
 
-Handled by `ZevViewSet` with `ZevSerializer`. All Zev fields (billing_interval, invoice_prefix, invoice_language, payment_term_days, bank_iban, bank_name, vat_mode, vat_number, itemize_tariff_bands, email_subject_template, email_body_template, local_tariff_notes, additional_contract_notes, notes) are writable. `ZevSerializer.validate()` enforces the `vat_mode`/`vat_number` pairing and rejects non-empty IBANs that fail the ISO 13616 MOD-97 checksum.
+Handled by `ZevViewSet` with `ZevSerializer`. All Zev fields (billing_interval, invoice_prefix, invoice_language, payment_term_days, bank_iban, bank_name, vat_mode, vat_number, itemize_tariff_bands, email_subject_template, email_body_template, local_tariff_notes, additional_contract_notes, notes) are writable. `ZevSerializer.validate()` enforces the `vat_mode`/`vat_number` pairing; non-empty IBANs that fail the ISO 13616 MOD-97 checksum are rejected by the shared `BankIbanValidationMixin.validate_bank_iban` (same mixin on `ZevCreateWithOwnerSerializer`, same message as `Zev.clean()`).
 
 ---
 

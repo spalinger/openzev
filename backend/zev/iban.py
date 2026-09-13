@@ -3,6 +3,10 @@
 import re
 
 
+#: Shared by model/serializer validation so the user-facing wording stays identical.
+INVALID_IBAN_MESSAGE = "Enter a valid IBAN or leave this field empty."
+
+
 def normalize_iban(value: str) -> str:
     """Return an IBAN in the canonical compact uppercase representation."""
     return re.sub(r"\s+", "", value).upper()

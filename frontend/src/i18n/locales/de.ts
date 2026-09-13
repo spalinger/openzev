@@ -1885,6 +1885,9 @@ export const de = {
             emailTemplateDescription: 'Passen Sie den Betreff und den Text der Rechnungs-E-Mail an. Lassen Sie ein Feld leer, um den globalen Standard zu verwenden. Klicken Sie auf Zurücksetzen, um zum globalen Standard zurückzukehren.',
             updateSuccess: 'ZEV-Einstellungen aktualisiert.',
             updateFailed: 'ZEV-Einstellungen konnten nicht aktualisiert werden.',
+            validation: {
+                invalidIban: 'Geben Sie eine gültige IBAN ein oder lassen Sie das Feld leer.',
+            },
             tabs: {
                 general: 'Allgemein',
                 billingPayment: 'Abrechnung & Zahlung',

@@ -1158,6 +1158,7 @@ lists the test classes per module (test counts are the `test_*` methods).
 | `test_zev_id_filter.py` | 5 | 15 | `?zev_id=` narrowing on list endpoints |
 | `test_transfer.py` | 6 | 66 | Whole-ZEV archive shape, round-trip, rejected archives, schema parity, transfer endpoints |
 | `test_geocoding.py` | 4 | 19 | Building footprint cache, warm tasks, trigger-on-save |
+| `test_iban.py` | 3 | 10 | `normalize_iban`/`is_valid_iban` vectors: whitespace/case normalization, MOD-97 accept/reject, blank-means-absent |
 
 ### 16.2 Frontend
 

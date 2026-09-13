@@ -1897,6 +1897,9 @@ export const en = {
             resetToGlobalDefault: 'Revert to global default',
             updateSuccess: 'ZEV settings updated.',
             updateFailed: 'Failed to update ZEV settings.',
+            validation: {
+                invalidIban: 'Enter a valid IBAN or leave this field empty.',
+            },
             tabs: {
                 general: 'General',
                 billingPayment: 'Billing & payment',
