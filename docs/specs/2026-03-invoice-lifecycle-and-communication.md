@@ -137,7 +137,7 @@ A row exists only when an admin has customized the template via the admin API (ย
 ### 4.1 States
 
 Dynamic invoice generation freezes source/window provenance in
-`InvoiceDynamicSourceEvidence` (migration `invoices/0017`). Source foreign keys
+`InvoiceDynamicSourceEvidence` (migration `invoices/0018`). Source foreign keys
 are protected, invoice deletion cascades to its evidence, and cancellation
 releases point protection while retaining provenance. Generation and price
 maintenance share source-row locks. See dynamic tariff spec ยง4.4 and ADR 0019

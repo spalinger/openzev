@@ -141,7 +141,7 @@ operator's grid series is filed under grid fees or levies changes no number.
 ## 4. Data model
 
 `backend/tariffs/dynamic/models.py`, migrations `tariffs/0012`–`0015`;
-invoice provenance in `invoices/models.py`, migration `invoices/0017`.
+invoice provenance in `invoices/models.py`, migration `invoices/0018`.
 
 ### 4.1 `DynamicTariffSource`
 
@@ -218,7 +218,7 @@ Unique on `(invoice, tariff_id_snapshot)`; ordered by invoice_id, source_id, id.
 Generation records each applicable dynamic tariff's intersection with the invoice
 period, conservatively including tariffs with no priced quantity. Drafts protect
 points. Cancelled invoices cease protecting points but retain source provenance
-until the invoice is deleted. Migration 0017 snapshots existing relationships;
+until the invoice is deleted. Migration 0018 snapshots existing relationships;
 relationships removed before migration cannot be recovered from current rows.
 The atomic migration writes batches of at most 1,000 evidence objects. Current
 links cannot prove which tariffs actually contributed invoice lines: historical

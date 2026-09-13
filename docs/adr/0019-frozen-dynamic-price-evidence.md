@@ -18,7 +18,7 @@ snapshot, and half-open UTC validity intersection. Its source foreign key uses
 `PROTECT`; its invoice foreign key uses `CASCADE`. Drafts protect prices;
 cancelled invoices no longer prevent price changes, but their provenance still
 retains the source row. Backfill existing invoice relationships in migration
-`invoices/0017_dynamic_source_evidence`; past relationships already removed from
+`invoices/0018_dynamic_source_evidence`; past relationships already removed from
 the database cannot be reconstructed. Both live evidence and historical
 backfill deliberately cover every applicable tariff window, even where no
 quantity was priced. Invoice items cannot reconstruct the historical tariff

@@ -77,7 +77,7 @@ def test_migration_backfills_existing_invoice_source_windows():
     participant, tariff, source, _point = setup_billing()
     invoice = generate_invoice(participant, date(2026, 1, 1), date(2026, 1, 31))
     invoice.dynamic_evidence.all().delete()
-    migration = import_module("invoices.migrations.0017_dynamic_source_evidence")
+    migration = import_module("invoices.migrations.0018_dynamic_source_evidence")
     migration.backfill_evidence(apps, SimpleNamespace(connection=connection))
     evidence = invoice.dynamic_evidence.get()
     assert evidence.source_id == source.pk
@@ -282,7 +282,7 @@ def test_migration_flushes_full_and_final_evidence_batches():
             for i in range(1001)
         ]
     )
-    migration = import_module("invoices.migrations.0017_dynamic_source_evidence")
+    migration = import_module("invoices.migrations.0018_dynamic_source_evidence")
     migration.backfill_evidence(apps, SimpleNamespace(connection=connection))
     assert source.invoice_evidence.count() == 1001
 

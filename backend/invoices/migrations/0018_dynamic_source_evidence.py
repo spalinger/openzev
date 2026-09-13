@@ -34,7 +34,7 @@ def backfill_evidence(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("invoices", "0016_invoice_pdf_status"),
+        ("invoices", "0017_drop_participant_invitation_template"),
         ("tariffs", "0015_source_version_identity"),
     ]
 
