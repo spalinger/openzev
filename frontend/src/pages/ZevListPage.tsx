@@ -30,6 +30,7 @@ import { EmptyState } from '../components/EmptyState'
 import { PageSkeleton } from '../components/PageSkeleton'
 import { useTranslation } from 'react-i18next'
 import { todayLocalIso } from '../lib/dates'
+import { isValidIban, normalizeIban } from '../lib/iban'
 import { getDefaultZevForm, mapZevToForm } from '../lib/zevForm'
 import { copyToClipboard } from '../lib/clipboard'
 import { BILLING_INTERVAL_OPTIONS, METER_TYPE_OPTIONS, ZEV_TYPE_OPTIONS } from '../lib/options'
@@ -44,6 +45,8 @@ const defaultCreateForm = (): ZevWizardInput => ({
     zev_type: 'vzev',
     grid_operator: '',
     billing_interval: 'monthly',
+    bank_iban: '',
+    bank_name: '',
     owner: {
         title: '',
         first_name: '',
@@ -67,6 +70,17 @@ const defaultCreateForm = (): ZevWizardInput => ({
 })
 
 type WizardStep = 1 | 2 | 3 | 4 | 5
+
+let meteringPointKeySeed = 0
+
+/**
+ * Stable per-row identity for wizard metering points. Row indexes shift when an
+ * earlier row is deleted, so the active editor is tracked by key instead.
+ */
+function createMeteringPointKey(): string {
+    meteringPointKeySeed += 1
+    return `metering-point-${meteringPointKeySeed}`
+}
 
 /**
  * `embedded` drops the page header (mounted inside an admin hub tab since
@@ -109,7 +123,8 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
     const [createdZevName, setCreatedZevName] = useState<string>('')
     const [copyFeedback, setCopyFeedback] = useState<string | null>(null)
     const copyFeedbackTimeoutRef = useRef<number | null>(null)
-    const [expandedMeteringPointIndex, setExpandedMeteringPointIndex] = useState<number | null>(null)
+    const [meteringPointKeys, setMeteringPointKeys] = useState<string[]>(() => [createMeteringPointKey()])
+    const [editingMeteringPointKey, setEditingMeteringPointKey] = useState<string | null>(null)
     const [editingMeteringPointData, setEditingMeteringPointData] = useState<OwnerMeteringPointInput | null>(null)
     const [ownerTargetZev, setOwnerTargetZev] = useState<Zev | null>(null)
     const [newOwnerId, setNewOwnerId] = useState<string>('')
@@ -170,6 +185,9 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
             return
         }
         setCreateForm(defaultCreateForm())
+        setMeteringPointKeys([createMeteringPointKey()])
+        setEditingMeteringPointKey(null)
+        setEditingMeteringPointData(null)
         setWizardStep(1)
         setCreateError(null)
         setShowCreateModal(true)
@@ -200,7 +218,8 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
         setShowCreateModal(false)
         setCreateError(null)
         setWizardStep(1)
-        setExpandedMeteringPointIndex(null)
+        setMeteringPointKeys([createMeteringPointKey()])
+        setEditingMeteringPointKey(null)
         setEditingMeteringPointData(null)
         setCreatedCredentials(null)
         setCreatedZevName('')
@@ -229,21 +248,55 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
         updateMutation.mutate({ id: editingId, payload: editForm })
     }
 
-    function validateWizardStep(step: WizardStep): string | null {
+    /**
+     * Fold the open editor into the wizard form. The draft is matched by key, so
+     * deleting or reordering other rows can never redirect the edit.
+     */
+    function applyEditingMeteringPoint(form: ZevWizardInput, keys: string[]): { form: ZevWizardInput; keys: string[] } {
+        if (!editingMeteringPointData || editingMeteringPointKey === null) return { form, keys }
+        const existingIndex = keys.indexOf(editingMeteringPointKey)
+        if (existingIndex === -1) {
+            return {
+                form: { ...form, metering_points: [...form.metering_points, editingMeteringPointData] },
+                keys: [...keys, editingMeteringPointKey],
+            }
+        }
+        return {
+            form: {
+                ...form,
+                metering_points: form.metering_points.map((point, pointIndex) => (
+                    pointIndex === existingIndex ? editingMeteringPointData : point
+                )),
+            },
+            keys,
+        }
+    }
+
+    function validateWizardStep(step: WizardStep, form: ZevWizardInput = createForm): string | null {
         if (step === 1) {
-            if (!createForm.name.trim()) return t('pages.zevs.validation.zevNameRequired')
-            if (!createForm.start_date) return t('pages.zevs.validation.startDateRequired')
+            if (!form.name.trim()) return t('pages.zevs.validation.zevNameRequired')
+            if (!form.start_date) return t('pages.zevs.validation.startDateRequired')
         }
 
         if (step === 2) {
-            if (!createForm.owner.first_name.trim()) return t('pages.zevs.validation.ownerFirstNameRequired')
-            if (!createForm.owner.last_name.trim()) return t('pages.zevs.validation.ownerLastNameRequired')
-            if (!createForm.owner.email.trim()) return t('pages.zevs.validation.ownerEmailRequired')
+            if (!form.owner.first_name.trim()) return t('pages.zevs.validation.ownerFirstNameRequired')
+            if (!form.owner.last_name.trim()) return t('pages.zevs.validation.ownerLastNameRequired')
+            if (!form.owner.email.trim()) return t('pages.zevs.validation.ownerEmailRequired')
+            if (form.bank_iban?.trim() && !isValidIban(form.bank_iban)) return t('pages.zevs.validation.invalidIban')
+            if (form.bank_iban?.trim() && !form.owner.address_line1?.trim()) {
+                return t('pages.zevs.validation.ownerAddressRequiredForIban')
+            }
+            if (form.bank_iban?.trim() && !form.owner.postal_code?.trim()) {
+                return t('pages.zevs.validation.ownerPostalCodeRequiredForIban')
+            }
+            if (form.bank_iban?.trim() && !form.owner.city?.trim()) {
+                return t('pages.zevs.validation.ownerCityRequiredForIban')
+            }
         }
 
         if (step === 3) {
-            if (!createForm.metering_points.length) return t('pages.zevs.validation.meteringPointRequired')
-            if (createForm.metering_points.some((point) => !point.meter_id.trim())) {
+            if (!form.metering_points.length) return t('pages.zevs.validation.meteringPointRequired')
+            if (form.metering_points.some((point) => !point.meter_id.trim())) {
                 return t('pages.zevs.validation.meterIdRequired')
             }
         }
@@ -252,23 +305,43 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
     }
 
     function goToNextStep() {
-        const validationError = validateWizardStep(wizardStep)
+        let formForStep = createForm
+        if (wizardStep === 3) {
+            const applied = applyEditingMeteringPoint(createForm, meteringPointKeys)
+            if (applied.form !== createForm) {
+                formForStep = applied.form
+                setCreateForm(applied.form)
+                setMeteringPointKeys(applied.keys)
+            }
+        }
+        const validationError = validateWizardStep(wizardStep, formForStep)
         if (validationError) {
             setCreateError(validationError)
             return
         }
         setCreateError(null)
+        if (formForStep !== createForm) {
+            closeEditMeteringPoint()
+        }
         const nextStep = (wizardStep < 4 ? wizardStep + 1 : wizardStep) as WizardStep
         setWizardStep(nextStep)
         // Auto-open the first metering point for editing when entering step 3
-        if (nextStep === 3 && createForm.metering_points.length > 0 && expandedMeteringPointIndex === null) {
-            setEditingMeteringPointData({ ...createForm.metering_points[0] })
-            setExpandedMeteringPointIndex(0)
+        if (nextStep === 3 && formForStep.metering_points.length > 0 && editingMeteringPointKey === null) {
+            setEditingMeteringPointKey(meteringPointKeys[0] ?? null)
+            setEditingMeteringPointData({ ...formForStep.metering_points[0] })
         }
     }
 
     function goToPreviousStep() {
         setCreateError(null)
+        if (wizardStep === 3) {
+            const applied = applyEditingMeteringPoint(createForm, meteringPointKeys)
+            if (applied.form !== createForm) {
+                setCreateForm(applied.form)
+                setMeteringPointKeys(applied.keys)
+                closeEditMeteringPoint()
+            }
+        }
         setWizardStep((previous) => (previous > 1 ? (previous - 1) as WizardStep : previous))
     }
 
@@ -279,7 +352,10 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
     function handleCreateZev() {
         if (wizardStep !== 4 || createSubmittedRef.current || createMutation.isPending) return
         createSubmittedRef.current = true
-        createMutation.mutate(createForm)
+        createMutation.mutate({
+            ...createForm,
+            bank_iban: normalizeIban(createForm.bank_iban ?? ''),
+        })
     }
 
     function submitOwnerAssignment(event: FormEvent<HTMLFormElement>) {
@@ -306,23 +382,26 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
     }
 
     function addMeteringPoint() {
-        const newPoint: OwnerMeteringPointInput = {
+        commitEditingMeteringPoint()
+        setEditingMeteringPointKey(createMeteringPointKey())
+        setEditingMeteringPointData({
             meter_id: '',
             meter_type: 'consumption',
             is_active: true,
             location_description: '',
-        }
-        setEditingMeteringPointData(newPoint)
-        setExpandedMeteringPointIndex(-1)
+        })
     }
 
-    function openEditMeteringPoint(index: number) {
+    function openEditMeteringPoint(key: string) {
+        commitEditingMeteringPoint()
+        const index = meteringPointKeys.indexOf(key)
+        if (index === -1) return
+        setEditingMeteringPointKey(key)
         setEditingMeteringPointData({ ...createForm.metering_points[index] })
-        setExpandedMeteringPointIndex(index)
     }
 
     function closeEditMeteringPoint() {
-        setExpandedMeteringPointIndex(null)
+        setEditingMeteringPointKey(null)
         setEditingMeteringPointData(null)
     }
 
@@ -331,35 +410,25 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
         setEditingMeteringPointData({ ...editingMeteringPointData, ...updates })
     }
 
-    function saveMeteringPoint() {
-        if (!editingMeteringPointData) return
-        if (expandedMeteringPointIndex === -1) {
-            // Add new metering point
-            setCreateForm((previous) => ({ ...previous, metering_points: [...previous.metering_points, editingMeteringPointData] }))
-        } else if (expandedMeteringPointIndex !== null && expandedMeteringPointIndex >= 0) {
-            // Update existing metering point
-            setCreateForm((previous) => ({
-                ...previous,
-                metering_points: previous.metering_points.map((point, pointIndex) => (
-                    pointIndex === expandedMeteringPointIndex ? editingMeteringPointData : point
-                )),
-            }))
+    function commitEditingMeteringPoint() {
+        if (!editingMeteringPointData || editingMeteringPointKey === null) return
+        const applied = applyEditingMeteringPoint(createForm, meteringPointKeys)
+        if (applied.form !== createForm) {
+            setCreateForm(applied.form)
+            setMeteringPointKeys(applied.keys)
         }
-        closeEditMeteringPoint()
     }
 
-    function removeMeteringPoint(index: number) {
-        setCreateForm((previous) => {
-            if (previous.metering_points.length <= 1) return previous
-            return {
-                ...previous,
-                metering_points: previous.metering_points.filter((_, pointIndex) => pointIndex !== index),
-            }
+    function removeMeteringPoint(key: string) {
+        const applied = applyEditingMeteringPoint(createForm, meteringPointKeys)
+        const index = applied.keys.indexOf(key)
+        if (index === -1 || applied.form.metering_points.length <= 1) return
+        setCreateForm({
+            ...applied.form,
+            metering_points: applied.form.metering_points.filter((_, pointIndex) => pointIndex !== index),
         })
-        // Close accordion if we're editing the deleted point
-        if (expandedMeteringPointIndex === index) {
-            closeEditMeteringPoint()
-        }
+        setMeteringPointKeys(applied.keys.filter((existingKey) => existingKey !== key))
+        if (editingMeteringPointKey === key) closeEditMeteringPoint()
     }
 
     if (isLoading)
@@ -403,6 +472,14 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
         ?? `User ${ownerTargetZev.owner}`
         : ''
     const eligibleOwnerCandidates = ownerCandidates.filter((candidate) => String(candidate.userId) !== currentOwnerId)
+    const reviewIban = createForm.bank_iban?.trim() || '–'
+    const reviewBankName = createForm.bank_name?.trim()
+    const reviewRecipientAddress = [
+        createForm.owner.address_line1,
+        createForm.owner.address_line2,
+        [createForm.owner.postal_code, createForm.owner.city].filter((part) => part && part.trim()).join(' '),
+    ].filter((part) => part && part.trim()).join(', ')
+    const reviewBillingInterval = BILLING_INTERVAL_OPTIONS.find((option) => option.value === createForm.billing_interval)
 
     return (
         <div className="page-stack">
@@ -451,11 +528,11 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
                             </div>
                             <label>
                                 <span>{t('pages.zevs.form.name')}</span>
-                                <input value={createForm.name} onChange={(event) => setCreateForm((previous) => ({ ...previous, name: event.target.value }))} required />
+                                <input name="name" value={createForm.name} onChange={(event) => setCreateForm((previous) => ({ ...previous, name: event.target.value }))} required />
                             </label>
                             <label>
                                 <span>{t('pages.zevs.form.startDate')}</span>
-                                <input type="date" value={createForm.start_date} onChange={(event) => setCreateForm((previous) => ({ ...previous, start_date: event.target.value }))} required />
+                                <input name="start_date" type="date" value={createForm.start_date} onChange={(event) => setCreateForm((previous) => ({ ...previous, start_date: event.target.value }))} required />
                             </label>
                             <label>
                                 <span>{t('pages.zevs.form.zevType')}</span>
@@ -536,15 +613,15 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
                             </label>
                             <label>
                                 <span>{t('pages.zevs.form.firstName')}</span>
-                                <input value={createForm.owner.first_name} onChange={(event) => setCreateForm((previous) => ({ ...previous, owner: { ...previous.owner, first_name: event.target.value } }))} required />
+                                <input name="first_name" value={createForm.owner.first_name} onChange={(event) => setCreateForm((previous) => ({ ...previous, owner: { ...previous.owner, first_name: event.target.value } }))} required />
                             </label>
                             <label>
                                 <span>{t('pages.zevs.form.lastName')}</span>
-                                <input value={createForm.owner.last_name} onChange={(event) => setCreateForm((previous) => ({ ...previous, owner: { ...previous.owner, last_name: event.target.value } }))} required />
+                                <input name="last_name" value={createForm.owner.last_name} onChange={(event) => setCreateForm((previous) => ({ ...previous, owner: { ...previous.owner, last_name: event.target.value } }))} required />
                             </label>
                             <label>
                                 <span>{t('pages.zevs.form.email')}</span>
-                                <input type="email" value={createForm.owner.email} onChange={(event) => setCreateForm((previous) => ({ ...previous, owner: { ...previous.owner, email: event.target.value } }))} required />
+                                <input name="email" type="email" value={createForm.owner.email} onChange={(event) => setCreateForm((previous) => ({ ...previous, owner: { ...previous.owner, email: event.target.value } }))} required />
                             </label>
                             <label>
                                 <span>{t('pages.zevs.form.phone')}</span>
@@ -552,20 +629,46 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
                             </label>
                             <label>
                                 <span>{t('pages.zevs.form.addressLine1')}</span>
-                                <input value={createForm.owner.address_line1 ?? ''} onChange={(event) => setCreateForm((previous) => ({ ...previous, owner: { ...previous.owner, address_line1: event.target.value } }))} />
+                                <input name="address_line1" value={createForm.owner.address_line1 ?? ''} maxLength={200} onChange={(event) => setCreateForm((previous) => ({ ...previous, owner: { ...previous.owner, address_line1: event.target.value } }))} />
                             </label>
                             <label>
                                 <span>{t('pages.zevs.form.addressLine2')}</span>
-                                <input value={createForm.owner.address_line2 ?? ''} onChange={(event) => setCreateForm((previous) => ({ ...previous, owner: { ...previous.owner, address_line2: event.target.value } }))} />
+                                <input name="address_line2" value={createForm.owner.address_line2 ?? ''} maxLength={200} onChange={(event) => setCreateForm((previous) => ({ ...previous, owner: { ...previous.owner, address_line2: event.target.value } }))} />
                             </label>
                             <label>
                                 <span>{t('pages.zevs.form.postalCode')}</span>
-                                <input value={createForm.owner.postal_code ?? ''} onChange={(event) => setCreateForm((previous) => ({ ...previous, owner: { ...previous.owner, postal_code: event.target.value } }))} />
+                                <input name="postal_code" value={createForm.owner.postal_code ?? ''} maxLength={10} onChange={(event) => setCreateForm((previous) => ({ ...previous, owner: { ...previous.owner, postal_code: event.target.value } }))} />
                             </label>
                             <label>
                                 <span>{t('pages.zevs.form.city')}</span>
-                                <input value={createForm.owner.city ?? ''} onChange={(event) => setCreateForm((previous) => ({ ...previous, owner: { ...previous.owner, city: event.target.value } }))} />
+                                <input name="city" value={createForm.owner.city ?? ''} maxLength={100} onChange={(event) => setCreateForm((previous) => ({ ...previous, owner: { ...previous.owner, city: event.target.value } }))} />
                             </label>
+                            <div className="grid-span-full payment-recipient-section">
+                                <strong>{t('pages.zevs.form.paymentRecipientHeader')}</strong>
+                                <p className="muted">{t('pages.zevs.form.paymentRecipientHint')}</p>
+                                <div className="payment-fields-grid">
+                                    <label>
+                                        <span>{t('pages.zevs.form.bankName')}</span>
+                                        <input
+                                            name="bank_name"
+                                            value={createForm.bank_name ?? ''}
+                                            maxLength={200}
+                                            onChange={(event) => setCreateForm((previous) => ({ ...previous, bank_name: event.target.value }))}
+                                        />
+                                    </label>
+                                    <label>
+                                        <span>{t('pages.zevs.form.bankIban')}</span>
+                                        <input
+                                            name="bank_iban"
+                                            value={createForm.bank_iban ?? ''}
+                                            maxLength={34}
+                                            onChange={(event) => setCreateForm((previous) => ({ ...previous, bank_iban: event.target.value }))}
+                                            onBlur={(event) => setCreateForm((previous) => ({ ...previous, bank_iban: normalizeIban(event.target.value) }))}
+                                        />
+                                    </label>
+                                </div>
+                                <small className="muted">{t('pages.zevs.form.bankIbanHint')}</small>
+                            </div>
                         </>
                     )}
 
@@ -583,15 +686,16 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
                                 </button>
                             </div>
 
-                            {expandedMeteringPointIndex !== null && editingMeteringPointData && (
+                            {editingMeteringPointKey !== null && editingMeteringPointData && (
                                 <div className="card" style={{ padding: '1rem', border: '1px solid var(--border-color)' }}>
                                     <h4 style={{ marginTop: 0, marginBottom: '1rem' }}>
-                                        {expandedMeteringPointIndex === -1 ? t('pages.zevs.wizard.newMeteringPointTitle') : t('pages.zevs.wizard.editMeteringPointTitle')}
+                                        {meteringPointKeys.includes(editingMeteringPointKey) ? t('pages.zevs.wizard.editMeteringPointTitle') : t('pages.zevs.wizard.newMeteringPointTitle')}
                                     </h4>
                                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
                                         <label>
                                             <span>{t('pages.zevs.form.meterId')}</span>
                                             <input
+                                                name="meter_id"
                                                 value={editingMeteringPointData.meter_id}
                                                 onChange={(event) => updateEditingMeteringPoint({ meter_id: event.target.value })}
                                                 required
@@ -619,10 +723,6 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
                                         </label>
                                     </div>
                                     <div style={{ display: 'flex', gap: '0.75rem' }}>
-                                        <button className="button button-primary" type="button" onClick={saveMeteringPoint}>
-                                            <FontAwesomeIcon icon={faCheck} fixedWidth />
-                                            {expandedMeteringPointIndex === -1 ? t('pages.zevs.wizard.add') : t('pages.zevs.wizard.save')}
-                                        </button>
                                         <button className="button button-secondary" type="button" onClick={closeEditMeteringPoint}>
                                             <FontAwesomeIcon icon={faXmark} fixedWidth />
                                             {t('common.cancel')}
@@ -632,7 +732,7 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
                             )}
 
                             {createForm.metering_points.length > 0 && (
-                                <div className="table-card" style={{ padding: '0.5rem' }}>
+                                <div className="table-card" data-testid="wizard-metering-points-table" style={{ padding: '0.5rem' }}>
                                     <table>
                                         <thead>
                                             <tr>
@@ -643,34 +743,39 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {createForm.metering_points.map((meteringPoint, index) => (
-                                                <tr key={`${index}-${meteringPoint.meter_id}`}>
-                                                    <td>{meteringPoint.meter_id}</td>
-                                                    <td>{meteringPoint.meter_type}</td>
-                                                    <td>{meteringPoint.location_description || '-'}</td>
-                                                    <td>
-                                                        <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                                            <button
-                                                                className="button button-secondary button-compact"
-                                                                type="button"
-                                                                onClick={() => openEditMeteringPoint(index)}
-                                                            >
-                                                                <FontAwesomeIcon icon={faPen} fixedWidth />
-                                                                {t('common.edit')}
-                                                            </button>
-                                                            <button
-                                                                className="button button-danger button-compact"
-                                                                type="button"
-                                                                onClick={() => removeMeteringPoint(index)}
-                                                                disabled={createForm.metering_points.length === 1}
-                                                            >
-                                                                <FontAwesomeIcon icon={faTrash} fixedWidth />
-                                                                {t('common.delete')}
-                                                            </button>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            ))}
+                                            {meteringPointKeys.map((key, index) => {
+                                                const meteringPoint = createForm.metering_points[index]
+                                                if (!meteringPoint) return null
+                                                const meterTypeOption = METER_TYPE_OPTIONS.find((option) => option.value === meteringPoint.meter_type)
+                                                return (
+                                                    <tr key={key}>
+                                                        <td>{meteringPoint.meter_id}</td>
+                                                        <td>{t(meterTypeOption?.labelKey ?? (meteringPoint.meter_type as `pages.meteringPoints.meterTypes.${string}`))}</td>
+                                                        <td>{meteringPoint.location_description || '-'}</td>
+                                                        <td>
+                                                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                                                <button
+                                                                    className="button button-secondary button-compact"
+                                                                    type="button"
+                                                                    onClick={() => openEditMeteringPoint(key)}
+                                                                >
+                                                                    <FontAwesomeIcon icon={faPen} fixedWidth />
+                                                                    {t('common.edit')}
+                                                                </button>
+                                                                <button
+                                                                    className="button button-danger button-compact"
+                                                                    type="button"
+                                                                    onClick={() => removeMeteringPoint(key)}
+                                                                    disabled={createForm.metering_points.length === 1}
+                                                                >
+                                                                    <FontAwesomeIcon icon={faTrash} fixedWidth />
+                                                                    {t('common.delete')}
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                )
+                                            })}
                                         </tbody>
                                     </table>
                                 </div>
@@ -681,9 +786,19 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
                     {wizardStep === 4 && (
                         <div className="card grid-span-full">
                             <h3 style={{ marginTop: 0 }}>{t('pages.zevs.wizard.review')}</h3>
-                            <p><strong>{t('pages.zevs.wizard.reviewZev')}</strong> {createForm.name} ({t(`pages.zevs.zevTypes.${createForm.zev_type}` as Parameters<typeof t>[0])}) starting {formatShortDate(createForm.start_date, settings)}</p>
+                            <p><strong>{t('pages.zevs.wizard.reviewZev')}</strong> {createForm.name} ({t(`pages.zevs.zevTypes.${createForm.zev_type}` as Parameters<typeof t>[0])}) · {t('pages.zevs.wizard.reviewStarting', { date: formatShortDate(createForm.start_date, settings) })}</p>
                             <p><strong>{t('pages.zevs.wizard.reviewOwner')}</strong> {createForm.owner.first_name} {createForm.owner.last_name} ({createForm.owner.email})</p>
+                            <p><strong>{t('pages.zevs.wizard.reviewPaymentRecipient')}</strong> {createForm.owner.first_name} {createForm.owner.last_name}{reviewRecipientAddress ? ` · ${reviewRecipientAddress}` : ''}</p>
+                            <p><strong>{t('pages.zevs.wizard.reviewBillingInterval')}</strong> {t(reviewBillingInterval?.labelKey ?? 'pages.zevs.billingIntervals.monthly')}</p>
                             <p><strong>{t('pages.zevs.wizard.reviewMeteringPoints')}</strong> {createForm.metering_points.length}</p>
+                            <ul>
+                                {createForm.metering_points.map((point, index) => (
+                                    <li key={meteringPointKeys[index] ?? `${index}-${point.meter_id}`}>
+                                        {point.meter_id} · {t(METER_TYPE_OPTIONS.find((option) => option.value === point.meter_type)?.labelKey ?? point.meter_type)}
+                                    </li>
+                                ))}
+                            </ul>
+                            <p><strong>{t('pages.zevs.wizard.reviewIban')}</strong> {reviewIban}{reviewBankName ? ` (${reviewBankName})` : ''}</p>
                             <p className="muted" style={{ marginBottom: 0 }}>{t('pages.zevs.wizard.reviewHint')}</p>
                         </div>
                     )}
@@ -894,10 +1009,7 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
                                         <span className="badge badge-info">
                                             {zev.zev_type.toUpperCase()}
                                         </span>
-                                        {/* Setup completeness mirrors the readiness
-                                            contract (phase 3): an empty IBAN is
-                                            the one blank-able billing setting. */}
-                                        {!zev.bank_iban?.trim() && (
+                                        {!isValidIban(zev.bank_iban ?? '') && (
                                             <span className="badge badge-warning" title={t('pages.zevs.setupIncompleteHint')}>
                                                 {t('pages.zevs.setupIncomplete')}
                                             </span>

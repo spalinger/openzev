@@ -356,7 +356,8 @@ neither annotation nor prefetch is present (see §9.1).
 The serializers expose `last_email_log_id` alongside the status, including inherited
 detail shapes; both list annotations use `-created_at, -id` ordering. The ID
 feeds `/invoices/invoices/{id}/retry-email/{logId}/`. The setup block uses
-non-empty `bank_iban` for `settings_complete` (no new billing restriction).
+valid non-empty `bank_iban` for `settings_complete`; malformed legacy values
+remain incomplete (no new billing restriction).
 
 ### 5.7 PDF template management
 

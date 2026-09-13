@@ -2691,6 +2691,26 @@ input.recurrence-chip-input {
   gap: 1rem;
 }
 
+.payment-recipient-section {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.75rem;
+  background: var(--surface);
+}
+
+.payment-recipient-section p {
+  margin: 0;
+}
+
+.payment-fields-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
 /* Templates hub: two labelled tab rows sharing one tab strip — PDF on one
    line, Email on the next. The fixed tag column keeps both rows left-bound. */
 .template-tabs-rows {
@@ -2897,6 +2917,10 @@ input.recurrence-chip-input {
   }
 
   .kpi-row {
+    grid-template-columns: 1fr;
+  }
+
+  .payment-fields-grid {
     grid-template-columns: 1fr;
   }
 

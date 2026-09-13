@@ -6,6 +6,27 @@ from .models import Zev, Participant, MeteringPoint, MeteringPointAssignment, Va
 from accounts.models import UserRole
 from .services import create_zev_with_owner_setup, ensure_participant_account
 from .tasks import trigger_geocode_if_address_present
+from .iban import (
+    IBAN_ADDRESS_REQUIRED_MESSAGE,
+    INVALID_IBAN_MESSAGE,
+    has_required_iban_address,
+    is_valid_iban,
+    normalize_iban,
+)
+
+
+class BankIbanValidationMixin:
+    """Normalize + validate `bank_iban` identically on every ZEV write path.
+
+    Blank stays allowed (no IBAN configured); a non-blank value is stored in
+    canonical compact-uppercase form and must pass the MOD-97 checksum.
+    """
+
+    def validate_bank_iban(self, value):
+        normalized = normalize_iban(value or "")
+        if normalized and not is_valid_iban(normalized):
+            raise serializers.ValidationError(INVALID_IBAN_MESSAGE)
+        return normalized
 
 
 class MeteringPointSerializer(serializers.ModelSerializer):
@@ -239,7 +260,8 @@ class GridOperatorSuggestionSerializer(serializers.Serializer):
     operators = GridOperatorSerializer(many=True)
 
 
-class ZevSerializer(serializers.ModelSerializer):
+class ZevSerializer(BankIbanValidationMixin, serializers.ModelSerializer):
+
     def validate_grid_operator_elcom_id(self, value):
         """Only ids from the shipped ElCom list are accepted.
 
@@ -345,6 +367,15 @@ class ZevOwnerAccountSerializer(serializers.Serializer):
         return username
 
 
+class SelfSetupOwnerAddressSerializer(serializers.Serializer):
+    """The address copied to the participant created by self-setup."""
+
+    address_line1 = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    address_line2 = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    postal_code = serializers.CharField(required=False, allow_blank=True, max_length=10)
+    city = serializers.CharField(required=False, allow_blank=True, max_length=100)
+
+
 class OwnerMeteringPointInputSerializer(serializers.Serializer):
     meter_id = serializers.CharField(max_length=100)
     meter_type = serializers.ChoiceField(choices=MeteringPoint._meta.get_field('meter_type').choices)
@@ -352,7 +383,7 @@ class OwnerMeteringPointInputSerializer(serializers.Serializer):
     location_description = serializers.CharField(required=False, allow_blank=True, max_length=200)
 
 
-class ZevCreateWithOwnerSerializer(serializers.Serializer):
+class ZevCreateWithOwnerSerializer(BankIbanValidationMixin, serializers.Serializer):
     name = serializers.CharField(max_length=200)
     start_date = serializers.DateField()
     zev_type = serializers.ChoiceField(choices=Zev._meta.get_field('zev_type').choices)
@@ -381,6 +412,14 @@ class ZevCreateWithOwnerSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {"vat_number": "Only a VAT-registered ZEV carries a VAT number."}
             )
+        owner = attrs.get("owner", {})
+        if not has_required_iban_address(
+            attrs.get("bank_iban"),
+            address_line1=owner.get("address_line1"),
+            postal_code=owner.get("postal_code"),
+            city=owner.get("city"),
+        ):
+            raise serializers.ValidationError({"owner": IBAN_ADDRESS_REQUIRED_MESSAGE})
         return attrs
 
     def create(self, validated_data):

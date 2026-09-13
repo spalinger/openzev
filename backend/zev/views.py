@@ -5,7 +5,7 @@ from django.conf import settings as django_settings
 from django.db.models import Count, Max, Min
 from django.http import FileResponse, HttpResponse
 from django.utils import timezone as dj_timezone
-from rest_framework import viewsets, status
+from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
@@ -26,6 +26,7 @@ from .serializers import (
     ZevSerializer,
     ZevDetailSerializer,
     ZevCreateWithOwnerSerializer,
+    SelfSetupOwnerAddressSerializer,
     ParticipantSerializer,
     MeteringPointSerializer,
     MeteringPointReadingsDeleteSerializer,
@@ -38,6 +39,7 @@ from .permissions import (
     ZevManagementPermission,
 )
 from .grid_operators import load_grid_operators, grid_operators_for_postal_code
+from .iban import IBAN_ADDRESS_REQUIRED_MESSAGE, has_required_iban_address
 from .services import (
     create_zev_for_existing_owner,
     get_participant_onboarding_link,
@@ -106,10 +108,39 @@ class ZevViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
         if Zev.objects.filter(owner=user).exists():
             return Response({"detail": "You already have a ZEV."}, status=status.HTTP_400_BAD_REQUEST)
 
-        serializer = ZevSerializer(data=request.data, context=self.get_serializer_context())
+        address_fields = (
+            "address_line1",
+            "address_line2",
+            "postal_code",
+            "city",
+        )
+        zev_payload = {
+            key: value for key, value in request.data.items()
+            if key not in {f"owner_{field}" for field in address_fields}
+        }
+        owner_address_serializer = SelfSetupOwnerAddressSerializer(data={
+            field: request.data.get(f"owner_{field}", "")
+            for field in address_fields
+        })
+        owner_address_serializer.is_valid(raise_exception=True)
+        participant_data = owner_address_serializer.validated_data
+        serializer = ZevSerializer(data=zev_payload, context=self.get_serializer_context())
         serializer.is_valid(raise_exception=True)
         zev_data = {k: v for k, v in serializer.validated_data.items() if k != 'owner'}
-        result = create_zev_for_existing_owner(owner_user=user, zev_data=zev_data)
+        if not has_required_iban_address(
+            zev_data.get("bank_iban"),
+            address_line1=participant_data["address_line1"],
+            postal_code=participant_data["postal_code"],
+            city=participant_data["city"],
+        ):
+            raise serializers.ValidationError({
+                "owner_address": IBAN_ADDRESS_REQUIRED_MESSAGE,
+            })
+        result = create_zev_for_existing_owner(
+            owner_user=user,
+            zev_data=zev_data,
+            participant_data=participant_data,
+        )
         return Response(result, status=status.HTTP_201_CREATED)
 
     # ── Transfer: whole-ZEV export and import ──────────────────────────────

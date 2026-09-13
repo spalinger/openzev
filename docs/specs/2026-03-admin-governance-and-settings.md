@@ -115,8 +115,8 @@ Singleton pattern with `pk=1` enforced by `save()` plus a `singleton_enforcer = 
 | `invoice_counter` | PositiveIntegerField | `1` | Auto-incremented atomically via `F()` expression |
 | `invoice_language` | CharField(2) | `de` | Choices: `de`, `fr`, `it`, `en` (from `InvoiceLanguage` TextChoices). Used for PDF + contract translation lookups. |
 | `payment_term_days` | PositiveIntegerField | `30` | Days after invoice generation (issue date) until payment is due. Validators: min 1, max 365. The engine uses it to set `Invoice.due_date` at generation. |
-| `bank_iban` | CharField(34) | blank | For QR-Rechnung generation |
-| `bank_name` | CharField(200) | blank | |
+| `bank_iban` | CharField(34) | blank | For QR-Rechnung generation; model and API validation normalize whitespace/case and validate the ISO 13616 MOD-97 checksum |
+| `bank_name` | CharField(200) | blank | Informational name of the bank holding the payment account |
 | `vat_mode` | CharField(20) | `not_registered` | Choices `not_registered`, `registered`, `inclusive` (from `VatMode` TextChoices). Drives VAT handling in the billing engine — see `2026-03-tariffs-and-billing-engine.md` §4.8. |
 | `vat_number` | CharField(50) | blank | Swiss UID. `Zev.clean()` requires it when `vat_mode = registered` and forbids it otherwise. Shown on invoice/contract PDFs only when set. |
 | `itemize_tariff_bands` | BooleanField | `False` | Bill each price band of a multi-band tariff as its own invoice line at its own rate, instead of one line at the blended average — see `2026-03-tariffs-and-billing-engine.md` §4.7a. Applies to invoices generated after the change. |
@@ -246,7 +246,7 @@ on-disk default. See `2026-08-contract-pdf-redesign.md` §5.2.
 |---|---|---|---|
 | `/api/v1/zev/zevs/{id}/` | PATCH | `IsAdmin` or `IsZevOwner` | Partial update of any Zev field including billing, email templates, contract notes |
 
-Handled by `ZevViewSet` with `ZevSerializer`. All Zev fields (billing_interval, invoice_prefix, invoice_language, payment_term_days, bank_iban, bank_name, vat_mode, vat_number, itemize_tariff_bands, email_subject_template, email_body_template, local_tariff_notes, additional_contract_notes, notes) are writable. `ZevSerializer.validate()` enforces the `vat_mode`/`vat_number` pairing (number required for `registered`, forbidden otherwise).
+Handled by `ZevViewSet` with `ZevSerializer`. All Zev fields (billing_interval, invoice_prefix, invoice_language, payment_term_days, bank_iban, bank_name, vat_mode, vat_number, itemize_tariff_bands, email_subject_template, email_body_template, local_tariff_notes, additional_contract_notes, notes) are writable. `ZevSerializer.validate()` enforces the `vat_mode`/`vat_number` pairing; non-empty IBANs that fail the ISO 13616 MOD-97 checksum are rejected by the shared `BankIbanValidationMixin.validate_bank_iban` (same mixin on `ZevCreateWithOwnerSerializer`, same message as `Zev.clean()`).
 
 ---
 
@@ -354,7 +354,7 @@ The admin console is organized into four hubs with routed sections; legacy URLs 
 |---|---|---|
 | `/admin` | `AdminOverviewHubPage` | Overview hub (default tab `overview`) |
 | `/admin/overview` | `AdminOverviewHubPage tab="overview"` | KPIs dashboard (embedded `AdminDashboardPage`, see §9.3) |
-| `/admin/zevs` | `AdminOverviewHubPage tab="zevs"` | ZEV list (embedded `ZevListPage`; “Setup incomplete” badge when `bank_iban` is empty) |
+| `/admin/zevs` | `AdminOverviewHubPage tab="zevs"` | ZEV list (embedded `ZevListPage`; “Setup incomplete” badge when `bank_iban` is missing or invalid) |
 | `/admin/invoices` | `AdminOverviewHubPage tab="invoices"` | All invoices (embedded `AdminInvoicesPage`) |
 | `/admin/dynamic-sources` | `AdminOverviewHubPage tab="dynamic-sources"` | Global dynamic price-source health and operations (`AdminDynamicSourcesPanel`; see the dynamic-tariff spec §10) |
 | `/admin/audit` | `AdminOverviewHubPage tab="audit"` | Platform audit log (embedded `AuditLogsPage scope="admin"`) |

@@ -271,6 +271,12 @@ export interface SelfSetupZevInput {
     postal_code?: string
     grid_operator?: string
     grid_operator_elcom_id?: number | null
+    bank_iban?: string
+    bank_name?: string
+    owner_address_line1?: string
+    owner_address_line2?: string
+    owner_postal_code?: string
+    owner_city?: string
 }
 
 export interface ZevWizardResult {

@@ -19,6 +19,7 @@ from tariffs.dynamic.fetch import coverage_gaps
 from tariffs.dynamic.models import DynamicTariffSource
 from tariffs.models import BillingMode, EnergyType, Tariff, TariffCategory
 from zev.models import MeteringPoint, MeteringPointAssignment, Participant
+from zev.iban import is_valid_iban
 
 from .models import EmailLog, Invoice, InvoiceStatus
 
@@ -1012,7 +1013,7 @@ def first_run_setup(zev, today: date | None = None) -> dict:
     meter_count = MeteringPoint.objects.filter(zev=zev).count()
     participant_count = Participant.objects.filter(zev=zev).count()
     tariff_count = Tariff.objects.filter(zev=zev).count()
-    billing_settings_complete = bool((zev.bank_iban or "").strip())
+    billing_settings_complete = is_valid_iban(zev.bank_iban or "")
     billing_link = "/zev-settings/billing" if not billing_settings_complete else None
     if not meter_count or not participant_count:
         return {

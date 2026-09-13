@@ -6,6 +6,7 @@ import { verifyEmail, setInitialPassword } from '../lib/api/auth'
 import { createSelfSetupZev } from '../lib/api/zev'
 import { formatApiError } from '../lib/api/errors'
 import { todayLocalIso } from '../lib/dates'
+import { isValidIban, normalizeIban } from '../lib/iban'
 import type { SelfSetupZevInput } from '../types/api'
 import { GridOperatorField } from '../features/zev/GridOperatorField'
 import { GridOperatorSuggestion } from '../features/zev/GridOperatorSuggestion'
@@ -34,6 +35,12 @@ export function VerifyEmailPage() {
         zev_type: 'zev',
         billing_interval: 'annual',
         grid_operator: '',
+        bank_iban: '',
+        bank_name: '',
+        owner_address_line1: '',
+        owner_address_line2: '',
+        owner_postal_code: '',
+        owner_city: '',
     })
     const [zevLoading, setZevLoading] = useState(false)
     const [zevError, setZevError] = useState<string | null>(null)
@@ -87,9 +94,24 @@ export function VerifyEmailPage() {
         e.preventDefault()
         setZevLoading(true)
         setZevError(null)
+        if (zevForm.bank_iban?.trim() && !isValidIban(zevForm.bank_iban)) {
+            setZevError(t('auth.verify.invalidIban'))
+            setZevLoading(false)
+            return
+        }
+        if (zevForm.bank_iban?.trim() && (
+            !zevForm.owner_address_line1?.trim()
+            || !zevForm.owner_postal_code?.trim()
+            || !zevForm.owner_city?.trim()
+        )) {
+            setZevError(t('auth.verify.ownerAddressRequiredForIban'))
+            setZevLoading(false)
+            return
+        }
         try {
             await createSelfSetupZev({
                 ...zevForm,
+                bank_iban: normalizeIban(zevForm.bank_iban ?? ''),
                 grid_operator: zevForm.grid_operator || undefined,
             })
             // Refresh user in context so ProtectedRoute sees isAuthenticated
@@ -178,6 +200,7 @@ export function VerifyEmailPage() {
                     <label>
                         <span>{t('auth.verify.zevName')}</span>
                         <input
+                            name="name"
                             value={zevForm.name}
                             onChange={(e) => setZevForm((f) => ({ ...f, name: e.target.value }))}
                             required
@@ -187,6 +210,7 @@ export function VerifyEmailPage() {
                     <label>
                         <span>{t('auth.verify.zevStartDate')}</span>
                         <input
+                            name="start_date"
                             type="date"
                             value={zevForm.start_date}
                             onChange={(e) => setZevForm((f) => ({ ...f, start_date: e.target.value }))}
@@ -253,6 +277,68 @@ export function VerifyEmailPage() {
                             }}
                         />
                     )}
+                    <div className="payment-recipient-section">
+                        <strong>{t('auth.verify.paymentRecipientHeader')}</strong>
+                        <p className="muted">{t('auth.verify.paymentRecipientHint')}</p>
+                        <div className="payment-fields-grid">
+                            <label>
+                                <span>{t('auth.verify.addressLine1')}</span>
+                                <input
+                                    name="owner_address_line1"
+                                    value={zevForm.owner_address_line1 ?? ''}
+                                    maxLength={200}
+                                    onChange={(e) => setZevForm((f) => ({ ...f, owner_address_line1: e.target.value }))}
+                                />
+                            </label>
+                            <label>
+                                <span>{t('auth.verify.addressLine2')}</span>
+                                <input
+                                    name="owner_address_line2"
+                                    value={zevForm.owner_address_line2 ?? ''}
+                                    maxLength={200}
+                                    onChange={(e) => setZevForm((f) => ({ ...f, owner_address_line2: e.target.value }))}
+                                />
+                            </label>
+                            <label>
+                                <span>{t('auth.verify.postalCode')}</span>
+                                <input
+                                    name="owner_postal_code"
+                                    value={zevForm.owner_postal_code ?? ''}
+                                    maxLength={10}
+                                    onChange={(e) => setZevForm((f) => ({ ...f, owner_postal_code: e.target.value }))}
+                                />
+                            </label>
+                            <label>
+                                <span>{t('auth.verify.city')}</span>
+                                <input
+                                    name="owner_city"
+                                    value={zevForm.owner_city ?? ''}
+                                    maxLength={100}
+                                    onChange={(e) => setZevForm((f) => ({ ...f, owner_city: e.target.value }))}
+                                />
+                            </label>
+                            <label>
+                                <span>{t('auth.verify.zevBankName')}</span>
+                                <input
+                                    name="bank_name"
+                                    value={zevForm.bank_name ?? ''}
+                                    maxLength={200}
+                                    onChange={(e) => setZevForm((f) => ({ ...f, bank_name: e.target.value }))}
+                                />
+                            </label>
+                            <label>
+                                <span>{t('auth.verify.zevIban')}</span>
+                                <input
+                                    name="bank_iban"
+                                    value={zevForm.bank_iban ?? ''}
+                                    maxLength={34}
+                                    onChange={(e) => setZevForm((f) => ({ ...f, bank_iban: e.target.value }))}
+                                    onBlur={(e) => setZevForm((f) => ({ ...f, bank_iban: normalizeIban(e.target.value) }))}
+                                />
+                            </label>
+                        </div>
+                        <small className="muted">{t('auth.verify.zevIbanHint')}</small>
+                    </div>
 
                     {zevError ? <div className="error-banner">{zevError}</div> : null}
 
