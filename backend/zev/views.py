@@ -5,7 +5,7 @@ from django.conf import settings as django_settings
 from django.db.models import Count, Max, Min
 from django.http import FileResponse, HttpResponse
 from django.utils import timezone as dj_timezone
-from rest_framework import viewsets, status
+from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated

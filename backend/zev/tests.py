@@ -428,6 +428,24 @@ class ZevSelfSetupTests(TestCase):
 		owner_participant = Participant.objects.get(zev=created_zev, user=self.owner)
 		self.assertEqual(owner_participant.city, "Zurich")
 
+	def test_self_setup_rejects_iban_without_owner_address(self):
+		auth(self.client, self.owner)
+		resp = self.client.post(
+			"/api/v1/zev/zevs/self-setup/",
+			{
+				"name": "Incomplete Self Setup ZEV",
+				"start_date": "2026-04-01",
+				"zev_type": "zev",
+				"billing_interval": "annual",
+				"bank_iban": "CH93 0076 2011 6238 5295 7",
+			},
+			format="json",
+		)
+
+		self.assertEqual(resp.status_code, 400, resp.data)
+		self.assertIn("owner_address", resp.data)
+		self.assertFalse(Zev.objects.filter(name="Incomplete Self Setup ZEV").exists())
+
 
 @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
 class ParticipantAccountLifecycleTests(TestCase):
