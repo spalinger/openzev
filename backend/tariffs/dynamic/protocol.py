@@ -12,6 +12,7 @@ from .vse_v2 import BILLABLE_UNIT as V2_BILLABLE_UNIT
 from .vse_v2 import TARIFF_TYPES as V2_TARIFF_TYPES
 from .vse_v2 import parse_tariff_response as parse_v2
 
+V2_PRODUCT_REQUIRED = "Version 2 price sources require a product name. Select or enter the operator's product name."
 
 @dataclass(frozen=True, order=True)
 class DiscoveredComponent:
@@ -28,7 +29,7 @@ def possible_components(api_version: str) -> list[DiscoveredComponent]:
         tariff_types = V2_TARIFF_TYPES
     else:
         raise DynamicTariffResponseError(f"Unsupported API version {api_version!r}.")
-    return [DiscoveredComponent(tariff_type) for tariff_type in tariff_types]
+    return [DiscoveredComponent(tariff_type) for tariff_type in tariff_types if tariff_type != "refund"]
 
 
 def detect_api_version(payload: object) -> str:
@@ -69,6 +70,9 @@ def discover_components(payload: object, api_version: str) -> list[DiscoveredCom
             if not isinstance(price, dict):
                 continue
             for tariff_type in V2_TARIFF_TYPES:
+                # Storage-support refunds cannot price general exported kWh.
+                if tariff_type == "refund":
+                    continue
                 component = price.get(tariff_type)
                 if not isinstance(component, dict):
                     continue
@@ -80,9 +84,20 @@ def discover_components(payload: object, api_version: str) -> list[DiscoveredCom
     return sorted(found)
 
 
-def parse_tariff_response(payload: object, *, api_version: str, tariff_type: str):
+def parse_tariff_response(payload: object, *, api_version: str, tariff_type: str, tariff_name: str = ""):
     if api_version == DynamicApiVersion.V1_0_5:
         return parse_v1(payload, tariff_type=tariff_type)
     if api_version == DynamicApiVersion.V2_0_0:
+        if not tariff_name.strip():
+            raise DynamicTariffResponseError(V2_PRODUCT_REQUIRED)
+        if isinstance(payload, dict):
+            for row in payload.get("prices", []) if isinstance(payload.get("prices"), list) else []:
+                component = row.get(tariff_type) if isinstance(row, dict) else None
+                if isinstance(component, dict):
+                    name = component.get("tariff_name")
+                    if not isinstance(name, str) or not name.strip():
+                        raise DynamicTariffResponseError("The version 2 response omits the required product name; its product cannot be verified.")
+                    if name != tariff_name:
+                        raise DynamicTariffResponseError("The endpoint returned a different product than the configured tariff name.")
         return parse_v2(payload, tariff_type=tariff_type)
     raise DynamicTariffResponseError(f"Unsupported API version {api_version!r}.")

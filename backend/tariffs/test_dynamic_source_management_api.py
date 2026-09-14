@@ -61,8 +61,20 @@ class TestCreationAndEditing:
             "api_version": "v2_0_0",
             "version_detected": True,
             "components_discovered": True,
-            "components": [{"tariff_type": "grid", "tariff_name": "standard"}],
+            "components": [{
+                "tariff_type": "grid",
+                "tariff_name": "standard",
+                "aggregated_tariff_types": [],
+            }],
         }
+
+    def test_source_payload_serves_the_versioned_component_expansion(self, owner_client):
+        make_source(api_version="v2_0_0", tariff_type="dso", tariff_name="standard")
+        response = owner_client.get("/api/v1/tariffs/dynamic-sources/")
+
+        assert response.status_code == 200
+        row = response.json()["results"][0]
+        assert row["aggregated_tariff_types"] == ["grid", "metering", "national_fees"]
 
     def test_owner_can_probe_and_create_a_source(self, owner_client):
         point = PricePoint(
@@ -177,6 +189,23 @@ class TestCreationAndEditing:
         assert response.status_code == 200
         source.refresh_from_db()
         assert source.label == "Admin edit"
+
+    def test_admin_can_disable_scheduled_fetches(self, admin_client):
+        source = make_source()
+
+        response = admin_client.patch(
+            f"/api/v1/tariffs/dynamic-sources/{source.pk}/",
+            {"enabled": False},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["enabled"] is False
+        source.refresh_from_db()
+        assert source.enabled is False
+        event = AuditEvent.objects.get(
+            action_type="tariff.dynamic_source_update", target_id=str(source.pk)
+        )
+        assert event.changes_json["enabled"] == {"before": True, "after": False}
 
 
 class TestPriceHistory:
@@ -328,11 +357,30 @@ class TestOperations:
             zev=zev,
             period_start=date(2026, 1, 1),
             period_end=date(2026, 1, 31),
+            status="approved",
         )
 
         response = admin_client.delete(
             f"/api/v1/tariffs/dynamic-sources/{source.pk}/prices/",
             {"confirmation": source.label, "reason": "cleanup"},
+        )
+
+        assert response.status_code == 409
+
+    def test_a_draft_invoice_freezes_the_source(self, admin_client, zev):
+        source = make_source()
+        link_source(source, zev)
+        add_point(source)
+        factories.InvoiceFactory(
+            zev=zev,
+            period_start=date(2026, 1, 1),
+            period_end=date(2026, 1, 31),
+            status="draft",
+        )
+
+        response = admin_client.delete(
+            f"/api/v1/tariffs/dynamic-sources/{source.pk}/prices/",
+            {"confirmation": source.label},
         )
 
         assert response.status_code == 409
@@ -552,3 +600,87 @@ class TestDeletingASource:
 
         assert response.status_code == 409
         assert DynamicTariffSource.objects.filter(pk=source.pk).exists()
+
+
+def test_empty_v2_creation_refuses_blank_but_persists_a_discovered_product(owner_client):
+    payload = {
+        "label": "V2",
+        "url": "https://example.test/prices",
+        "api_version": "v2_0_0",
+        "tariff_type": "grid",
+    }
+    with mock.patch(
+        "tariffs.dynamic.discovery.fetch_tariff_document", return_value=({"prices": []}, "digest")
+    ):
+        response = owner_client.post("/api/v1/tariffs/dynamic-sources/", payload)
+    assert response.status_code == 400
+    assert not DynamicTariffSource.objects.exists()
+    capabilities = SourceCapabilities(
+        api_version="v2_0_0",
+        request_mode="standard",
+        query_tariff_type="grid",
+        supports_range=True,
+        points=[],
+        warnings=[],
+        tariff_name="standard",
+    )
+    with mock.patch(
+        "tariffs.dynamic.services.probe_source_configuration", return_value=capabilities
+    ):
+        response = owner_client.post("/api/v1/tariffs/dynamic-sources/", payload)
+    assert response.status_code == 201
+    assert DynamicTariffSource.objects.get().tariff_name == "standard"
+
+
+def test_disabled_source_creation_does_not_schedule_backfill(
+    owner_client, django_capture_on_commit_callbacks
+):
+    capabilities = SourceCapabilities(
+        api_version="v1_0_5",
+        request_mode="standard",
+        query_tariff_type="grid",
+        supports_range=True,
+        points=[],
+        warnings=[],
+    )
+    with (
+        mock.patch(
+            "tariffs.dynamic.services.probe_source_configuration", return_value=capabilities
+        ),
+        mock.patch("tariffs.tasks.fetch_dynamic_prices.delay") as fetch,
+        django_capture_on_commit_callbacks(execute=True),
+    ):
+        response = owner_client.post(
+            "/api/v1/tariffs/dynamic-sources/",
+            {
+                "label": "Disabled",
+                "url": "https://example.test/prices",
+                "api_version": "v1_0_5",
+                "tariff_type": "grid",
+                "enabled": False,
+            },
+        )
+    assert response.status_code == 201
+    fetch.assert_not_called()
+
+
+def test_deferred_source_save_preserves_identity():
+    source = make_source()
+    deferred = DynamicTariffSource.objects.only("label").get(pk=source.pk)
+    deferred.label = "New label"
+    deferred.save(update_fields=["label"])
+    source.refresh_from_db()
+    assert source.label == "New label"
+    assert source.tariff_name == "vario"
+
+
+def test_legacy_blank_v2_source_can_be_retired_but_not_reenabled(admin_client):
+    source = make_source(api_version="v2_0_0", tariff_name="standard")
+    DynamicTariffSource.objects.filter(pk=source.pk).update(tariff_name="")
+    url = f"/api/v1/tariffs/dynamic-sources/{source.pk}/"
+    assert admin_client.patch(url, {"enabled": False}, format="json").status_code == 200
+    response = admin_client.patch(url, {"enabled": True}, format="json")
+    assert response.status_code == 400
+    assert "tariff_name" in response.json()
+    source.refresh_from_db()
+    assert not source.enabled

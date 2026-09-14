@@ -29,7 +29,8 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.conf import settings
 from django.db import DataError, IntegrityError, transaction
 
-from invoices.models import Invoice, InvoiceItem
+from invoices.models import Invoice, InvoiceItem, InvoiceDynamicSourceEvidence
+from tariffs.dynamic.evidence import lock_sources, record_invoice_evidence
 from metering.importers.csv_importer import _parse_datetime_utc, _parse_decimal
 from metering.importers.limits import (
     MAX_REPORTED_ERRORS,
@@ -39,7 +40,9 @@ from metering.importers.limits import (
     validate_zip,
 )
 from metering.models import ImportLog, ImportSource, MeterReading, ReadingDirection, ReadingResolution
-from tariffs.dynamic.models import DynamicTariffSource
+from tariffs.dynamic.adapters import DynamicApiVersion
+from tariffs.dynamic.models import DynamicTariffSource, FetchStatus
+from tariffs.dynamic.protocol import V2_PRODUCT_REQUIRED
 from tariffs.models import Tariff, TariffPeriod
 from zev.models import MeteringPoint, MeteringPointAssignment, Participant, VatMode, Zev
 
@@ -146,6 +149,11 @@ class _Collector:
     def __init__(self):
         self.errors = []
         self.total = 0
+        self.warnings = []
+
+    def warn(self, message):
+        if message not in self.warnings:
+            self.warnings.append(message)
 
     def add(self, section, position, label, detail):
         self.total += 1
@@ -424,15 +432,15 @@ def _import_assignment(point, raw, participants_by_archive_id, collector, *, lab
     return True
 
 
-def _dynamic_source_for(raw):
+def _dynamic_source_for(raw, collector):
     """Find or create the shared price source a dynamic tariff names.
 
-    Matched on the endpoint, component and product rather than on an id: the
+    Matched on the endpoint, API version, component and product rather than on an id: the
     source is global, so the importing instance may well already have the same
     one configured for another community, and reusing it is the point.
 
     The recreated source starts with no prices — the archive does not carry the
-    series. It will fill on the next scheduled fetch, except for an operator
+    series. Enabled new sources queue a backfill after commit, except for an operator
     that serves no history, where only time can fill it.
     """
     descriptor = raw.get("dynamic_source")
@@ -444,17 +452,40 @@ def _dynamic_source_for(raw):
     # provider-neutral.
     legacy_adapter = descriptor.get("adapter")
     if legacy_adapter and "api_version" not in fields:
-        fields["api_version"] = "v1_0_5"
+        fields["api_version"] = DynamicApiVersion.V1_0_5
         fields["request_mode"] = "exact_url" if legacy_adapter == "bkw" else "standard"
         fields["supports_range"] = legacy_adapter != "bkw"
         fields["query_tariff_type"] = (
             "feed-in" if legacy_adapter == "groupe_e" and fields.get("tariff_type") == "feed_in"
             else fields.get("tariff_type", "")
         )
-    natural_key = {key: fields.pop(key) for key in ("url", "tariff_type", "tariff_name") if key in fields}
-    if len(natural_key) != 3:
-        raise ValueError("A dynamic tariff source needs a url, a tariff type and a tariff name.")
-    source, _created = DynamicTariffSource.objects.get_or_create(**natural_key, defaults=fields)
+    fields.setdefault("api_version", DynamicApiVersion.V1_0_5)
+    natural_key = {key: fields.pop(key) for key in ("url", "api_version", "tariff_type", "tariff_name") if key in fields}
+    if len(natural_key) != 4:
+        raise ValueError("A dynamic tariff source needs a url, API version, tariff type and tariff name.")
+    if natural_key["api_version"] == DynamicApiVersion.V2_0_0 and not str(natural_key["tariff_name"] or "").strip():
+        raise ValueError(V2_PRODUCT_REQUIRED)
+    existing = DynamicTariffSource.objects.filter(**natural_key).first()
+    if existing is not None:
+        mismatched = [key for key, value in fields.items() if getattr(existing, key) != value]
+        if mismatched:
+            logger.warning("Dynamic tariff source %s already exists; ignoring %s from archive.", existing.pk, ", ".join(mismatched))
+            collector.warn(f'Price source "{existing.label}" has different settings from the archive; the destination settings were kept.')
+        if not existing.enabled:
+            collector.warn(f'Price source "{existing.label}" is disabled and will not refresh automatically.')
+        elif existing.last_fetch_status == FetchStatus.FAILED:
+            collector.warn(f'Price source "{existing.label}" is failing: {existing.last_fetch_error}')
+        return existing
+    try:
+        candidate = DynamicTariffSource(**natural_key, **fields)
+        candidate.full_clean(exclude=["covers_from", "covers_to", "last_fetch_at", "last_success_at"])
+    except DjangoValidationError as exc:
+        raise ValueError(f"Invalid dynamic tariff source: {exc}") from exc
+    source, created = DynamicTariffSource.objects.get_or_create(**natural_key, defaults=fields)
+    if created and source.enabled:
+        from tariffs.tasks import fetch_dynamic_prices
+
+        transaction.on_commit(lambda: fetch_dynamic_prices.delay(str(source.pk), backfill=True), robust=True)
     return source
 
 
@@ -465,10 +496,15 @@ def _import_tariffs(archive, zev, collector):
         label = str(fields.get("name") or f"#{position}")
         try:
             with transaction.atomic():
+                dynamic_source = _dynamic_source_for(raw, collector)
+                if dynamic_source is not None and (raw.get("periods") or []):
+                    raise DjangoValidationError(
+                        "A tariff priced from a fetched series cannot carry price bands."
+                    )
                 # Tariff.save() calls full_clean() itself, so the overlap and
                 # series-coherence rules run without asking for them.
                 tariff = Tariff.objects.create(
-                    zev=zev, dynamic_source=_dynamic_source_for(raw), **fields
+                    zev=zev, dynamic_source=dynamic_source, **fields
                 )
                 for raw_period in raw.get("periods") or []:
                     period_fields = _pick(raw_period, TARIFF_PERIOD_FIELDS, position, SECTION_TARIFFS)
@@ -515,6 +551,23 @@ def _import_invoices(archive, zev, participants_by_archive_id, collector):
                     item.full_clean(exclude=["invoice"])
                     items.append(item)
                 InvoiceItem.objects.bulk_create(items)
+                if "dynamic_evidence" in raw:
+                    evidence = []
+                    for entry in raw["dynamic_evidence"]:
+                        source = _dynamic_source_for(entry, collector)
+                        row = InvoiceDynamicSourceEvidence(
+                            invoice=invoice, source=source,
+                            **{key: entry.get(key) for key in ("tariff_id_snapshot", "evidence_from", "evidence_to")},
+                        )
+                        row.full_clean()
+                        evidence.append(row)
+                    lock_sources({row.source_id for row in evidence})
+                    InvoiceDynamicSourceEvidence.objects.bulk_create(evidence)
+                else:
+                    # Legacy archives have no frozen provenance; infer it once.
+                    tariffs = list(Tariff.objects.filter(zev=zev).exclude(dynamic_source=None))
+                    lock_sources({tariff.dynamic_source_id for tariff in tariffs})
+                    record_invoice_evidence(invoice, tariffs)
         except (DjangoValidationError, ValueError, TypeError, IntegrityError) as exc:
             collector.add(SECTION_INVOICES, position, label, exc)
             continue
@@ -780,6 +833,7 @@ def _run_import(archive, manifest, sections, *, owner, name_override, collector,
         "zev_name": zev.name,
         "sections": list(sections),
         "counts": {},
+        "warnings": collector.warnings,
     }
 
     participants_by_archive_id = {}

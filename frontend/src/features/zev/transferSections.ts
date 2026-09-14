@@ -8,13 +8,8 @@
  * ticking one implies about the others.
  */
 
-export type TransferSectionName =
-  | 'zev'
-  | 'participants'
-  | 'metering_points'
-  | 'tariffs'
-  | 'readings'
-  | 'invoices'
+import type { TransferSectionName } from '../../types/api'
+export type { TransferSectionName } from '../../types/api'
 
 export type TransferSection = {
   name: TransferSectionName
