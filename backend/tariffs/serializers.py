@@ -3,7 +3,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from .dynamic.adapters import DynamicApiVersion
 from .dynamic.models import DynamicTariffSource
 from .dynamic.services import tariff_has_dynamic_billing_evidence
-from .models import BillingMode, PeriodType, Tariff, TariffPeriod
+from .models import BillingMode, EnergyType, PeriodType, Tariff, TariffPeriod
 from .periods import months_of
 
 
@@ -131,12 +131,15 @@ class TariffSerializer(serializers.ModelSerializer):
         energy_type = attrs.get("energy_type") if "energy_type" in attrs else getattr(self.instance, "energy_type", None)
         fixed_price_chf = attrs.get("fixed_price_chf") if "fixed_price_chf" in attrs else getattr(self.instance, "fixed_price_chf", None)
         percentage = attrs.get("percentage") if "percentage" in attrs else getattr(self.instance, "percentage", None)
+        dynamic_source = attrs.get("dynamic_source") if "dynamic_source" in attrs else getattr(self.instance, "dynamic_source_id", None)
 
         if billing_mode == BillingMode.ENERGY:
             if not energy_type:
                 raise serializers.ValidationError({"energy_type": "Energy tariffs require an energy type."})
             attrs["fixed_price_chf"] = None
             attrs["percentage"] = None
+            if energy_type != EnergyType.FEED_IN or not dynamic_source:
+                attrs["minimum_price_chf_per_kwh"] = None
 
         elif billing_mode == BillingMode.PERCENTAGE_OF_ENERGY:
             if not energy_type:
@@ -144,6 +147,7 @@ class TariffSerializer(serializers.ModelSerializer):
             if percentage in (None, ""):
                 raise serializers.ValidationError({"percentage": "Percentage-of-energy tariffs require a percentage value."})
             attrs["fixed_price_chf"] = None
+            attrs["minimum_price_chf_per_kwh"] = None
 
         else:
             # Fixed-fee billing modes
@@ -151,6 +155,7 @@ class TariffSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"fixed_price_chf": "Fixed-fee tariffs require a price."})
             attrs["energy_type"] = None
             attrs["percentage"] = None
+            attrs["minimum_price_chf_per_kwh"] = None
 
         return attrs
 
@@ -388,8 +393,9 @@ class DynamicPriceHistoryQuerySerializer(serializers.Serializer):
         date_to = attrs.get("date_to")
         if date_from and date_to and date_from > date_to:
             raise serializers.ValidationError({"date_to": "date_to must be on or after date_from."})
-        if date_from and date_to and (date_to - date_from).days >= 31:
-            raise serializers.ValidationError({"date_to": "Price history is limited to 31 days."})
+        # The day-count cap depends on the source's resolution — a quarterly
+        # BFE point covers ~91 days, so it belongs in the view, which has the
+        # source; this serializer only checks the shape of the query itself.
         return attrs
 
 
