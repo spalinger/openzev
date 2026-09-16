@@ -18,7 +18,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from audit.models import AuditEvent, AuditEventSource
-from testing.helpers import authenticate, make_user
+from testing.helpers import authenticate, clear_vat_rates, make_user
 
 from .api_keys import (
     KEY_NAMESPACE,
@@ -280,6 +280,8 @@ class ReadOnlyApiKeyTests(TestCase):
         _, writable_raw = create_api_key(self.admin, name="writable")
         self.client.credentials(HTTP_AUTHORIZATION=f"Api-Key {writable_raw}")
 
+        # Clear the table so the write itself is under test.
+        clear_vat_rates()
         response = self.client.post(
             "/api/v1/auth/vat-rates/",
             {"rate": "0.0770", "valid_from": "2030-01-01"},
@@ -419,6 +421,7 @@ class ApiKeyAuditTests(TestCase):
         self.api_key, self.raw_key = create_api_key(self.admin, name="nightly job")
         self.client = APIClient()
         self.client.credentials(HTTP_AUTHORIZATION=f"Api-Key {self.raw_key}")
+        clear_vat_rates()
 
     def test_an_action_taken_with_a_key_names_the_credential(self):
         response = self.client.post(

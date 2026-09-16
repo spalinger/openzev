@@ -41,7 +41,7 @@ from zev.models import (
 )
 
 
-from testing.helpers import authenticate as auth, make_user
+from testing.helpers import authenticate as auth, clear_vat_rates, make_user
 
 
 def _seed_sparse_window_readings(*, start_date, end_date, meters, sample_days=(1, 15)):
@@ -1395,11 +1395,14 @@ class SeedDemoVatRateTests(TestCase):
 	"""The demo bills real VAT figures only when VatRate rows exist; the seed
 	must install the standard Swiss history. Its contract is "install missing
 	defaults": rates an admin added or edited in a shared development database
-	are left alone, because deleting and recreating the canonical rows on top
-	of a preserved custom open-ended rate could collide with it."""
+ are left alone, because deleting and recreating the canonical rows on top
+ of a preserved custom open-ended rate could collide with it."""
 
 	def setUp(self):
 		self.command = SeedDemoCommand()
+		# The tests below exercise the demo helper itself (except the
+		# migration-seeded no-op test — see test_upsert_vat_rates_is_noop_on_migrated_rows).
+		clear_vat_rates()
 
 	def test_upsert_vat_rates_installs_the_swiss_history(self):
 		self.command._upsert_vat_rates()
@@ -1451,6 +1454,37 @@ class SeedDemoVatRateTests(TestCase):
 		self.assertEqual(custom.rate, Decimal("0.0850"))
 		self.assertEqual(VatRate.objects.count(), 2)
 		self.assertFalse(VatRate.objects.filter(valid_from=date(2024, 1, 1)).exists())
+
+	def test_upsert_vat_rates_is_noop_on_migrated_rows(self):
+		# The demo helper must leave migration-installed defaults alone:
+		# install them through the real migration function, then run the
+		# helper and assert nothing changed (values, IDs, timestamps).
+		import importlib
+		from types import SimpleNamespace
+
+		from django.db import connection
+		from django.db.migrations.executor import MigrationExecutor
+
+		migration = importlib.import_module("accounts.migrations.0015_seed_vat_rates")
+		apps = MigrationExecutor(connection).loader.project_state(
+			[("accounts", "0014_user_preferred_zev")]
+		).apps
+		migration.seed_vat_rates(apps, SimpleNamespace(connection=connection))
+		before = list(
+			VatRate.objects.order_by("id").values("id", "rate", "valid_from", "valid_to", "created_at", "updated_at")
+		)
+		self.assertEqual(len(before), 2)
+
+		self.command._upsert_vat_rates()
+
+		self.assertEqual(
+			list(
+				VatRate.objects.order_by("id").values(
+					"id", "rate", "valid_from", "valid_to", "created_at", "updated_at"
+				)
+			),
+			before,
+		)
 
 
 class SeedDemoFeatureFlagTests(TestCase):

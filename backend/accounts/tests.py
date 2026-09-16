@@ -23,6 +23,7 @@ from datetime import date, timedelta
 from django.utils import timezone
 
 from .tasks import cleanup_expired_oauth_tokens
+from testing.helpers import clear_vat_rates
 
 
 class UserModelTests(TestCase):
@@ -532,6 +533,7 @@ class VatRateSettingsTests(TestCase):
 		self.client = APIClient()
 		self.admin = User.objects.create_user(username="admin_vat", password="pass1234", role=UserRole.ADMIN)
 		self.owner = User.objects.create_user(username="owner_vat", password="pass1234", role=UserRole.ZEV_OWNER)
+		clear_vat_rates()
 
 	def test_admin_can_crud_vat_rates(self):
 		self._auth(self.client, self.admin)

@@ -1137,7 +1137,7 @@ lists the test classes per module (test counts are the `test_*` methods).
 | `SeedDemoSecondCommunityTests` | 5 | ZEV upsert is idempotent and refreshes config drift; legacy flagship name is renamed, not duplicated; other-owner legacy names untouched; each community carries the config its name implies; previous-month helper returns the complete prior month |
 | `SeedDemoSecondCommunitySeedTests` | 2 | Second community seeds a closed and an open month; re-seeding the second community is idempotent |
 | `SeedDemoQualityGapTests` | 2 | Deliberate quality gap deletes only the recent reading window; skipped when the period is too young |
-| `SeedDemoVatRateTests` | 5 | Swiss VAT history install; idempotent re-run; foreign rates untouched; admin-edited canonical row kept; overlapping custom dates preserved |
+| `SeedDemoVatRateTests` | 6 | Swiss VAT history install; idempotent re-run; foreign rates untouched; admin-edited canonical row kept; overlapping custom dates preserved; demo helper is a no-op on migration-seeded rows (class starts empty except the no-op test, which seeds via the real migration function) |
 | `SeedDemoCounterRefreshTests` | 2 | Re-seed resets the invoice counter; re-seed keeps the contract counter |
 | `SeedDemoHourlyHistoryTests` | 3 | History fills hourly up to the window; an hourly row sums the four quarter samples it replaces; skipped when the window precedes history |
 | `SeedDemoReadingResolutionTests` | 3 | Window is hourly until the fine 15-minute tail; last hourly row sums its quarter samples; short windows stay entirely 15-minute |

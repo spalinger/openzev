@@ -8,7 +8,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from testing.helpers import authenticate
+from testing.helpers import authenticate, clear_vat_rates
 
 from .api_keys import generate_key
 from .cookies import ACCESS_COOKIE, REFRESH_COOKIE
@@ -98,6 +98,7 @@ class CookieCsrfTests(TestCase):
         )
         client = APIClient()
         client.credentials(HTTP_AUTHORIZATION=f"Api-Key {full_key}")
+        clear_vat_rates()
         resp = client.post(
             "/api/v1/auth/vat-rates/",
             {"rate": "0.0810", "valid_from": "2030-01-01"},

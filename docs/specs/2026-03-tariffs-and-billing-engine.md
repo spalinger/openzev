@@ -983,6 +983,15 @@ A tariff **bears input VAT** when its category is `grid_fees`, `levies` or
 (solar) energy and the feed-in credit do not: the ZEV pays no input VAT on its
 own production, and the feed-in credit is money paid out, not a purchased cost.
 
+**Installed defaults:** migration `accounts/0015_seed_vat_rates` installs the
+dated history every installation bills against — `0.0770` for
+`2018-01-01..2023-12-31`, `0.0810` open-ended from `2024-01-01` — while
+preserving administrator-managed rows (see `2026-03-admin-governance-and-settings.md`
+§4.2). The period-end rule and the zero fallback are unchanged: a period
+crossing 2023-12-31/2024-01-01 bills wholly at the `period_end` rate, the
+generation date never selects the rate, and pre-2018 periods (no seeded rate)
+resolve to zero.
+
 Rationale and alternatives: ADR 0016.
 
 ---
@@ -1441,9 +1450,10 @@ community energy to a single participant.
 
 | Test case | Validates |
 |---|---|
-| `InvoiceVatRateSelectionTests` | `registered`: rate resolved at `period_end`, VAT line added; missing rate → 0% |
+| `InvoiceVatRateSelectionTests` | `registered`: rate resolved at `period_end`, VAT line added; missing rate → 0% (class clears the migration-installed defaults and owns its history) |
 | `TariffBearsInputVatTests` | classifier: grid energy / grid fees / levies / metering bear VAT; local energy and feed-in do not |
-| `InvoiceVatInclusiveModeTests` | `inclusive`: VAT-bearing lines grossed by `1 + rate`, `embedded_vat_chf` recorded, no VAT line; no active rate → prices unchanged; `not_registered` bills verbatim |
+| `InvoiceVatInclusiveModeTests` | `inclusive`: VAT-bearing lines grossed by `1 + rate`, `embedded_vat_chf` recorded, no VAT line; no active rate → prices unchanged; `not_registered` bills verbatim (class clears the migration-installed defaults) |
+| `InvoiceSeededVatHistoryTests` (5 tests, seeded via the real migration function) | `registered` 2023 → VAT 0.77/total 10.77 and 2024 → 0.81/10.81 on CHF 10.00 net; `inclusive` 2023/2024 gross 10.77/10.81 with embedded 0.77/0.81 and zero explicit VAT; cross-year period ending 2024 uses `0.0810` for the whole invoice; `not_registered` ignores seeds (10.00, null embedded); pre-2018 periods use the zero fallback in `registered` and `inclusive` |
 
 ### Backend (`zev/tests.py`) — VAT-mode validation
 

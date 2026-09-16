@@ -9,6 +9,7 @@ from invoices.models import InvoiceItem
 from invoices.test_helpers import make_participant, make_user, make_zev
 from metering.models import MeterReading, ReadingDirection, ReadingResolution
 from tariffs.models import BillingMode, EnergyType, Tariff, TariffCategory, TariffPeriod
+from testing.helpers import clear_vat_rates
 from zev.models import MeteringPoint, MeteringPointAssignment, MeteringPointType, VatMode
 
 
@@ -149,6 +150,7 @@ class InvoiceMathEdgeCaseTests(TestCase):
 
 class InvoiceVatRateSelectionTests(TestCase):
     def setUp(self):
+        clear_vat_rates()
         self.owner = make_user("vat_owner", UserRole.ZEV_OWNER)
         self.zev = make_zev(self.owner, "VAT ZEV")
         self.participant = make_participant(self.zev, first="Vat", last="Case")
@@ -256,6 +258,8 @@ class InvoiceVatInclusiveModeTests(TestCase):
     the VAT-bearing lines at invoice time, and no VAT line appears."""
 
     def setUp(self):
+        # This class also covers the no-active-rate case.
+        clear_vat_rates()
         self.owner = make_user("incl_owner", UserRole.ZEV_OWNER)
         self.zev = make_zev(self.owner, "Inclusive ZEV")
         self.zev.vat_mode = VatMode.INCLUSIVE
@@ -320,3 +324,157 @@ class InvoiceVatInclusiveModeTests(TestCase):
         self.assertEqual(invoice.subtotal_chf, Decimal("25.00"))
         self.assertIsNone(invoice.embedded_vat_chf)
         self.assertEqual(invoice.total_chf, Decimal("25.00"))
+
+
+class InvoiceSeededVatHistoryTests(TestCase):
+    """Real billing against the migration-installed defaults (no custom rates).
+
+    The periods under test are historical (2023, 2024, 2017) while generation
+    happens today, which proves the generation date never selects the rate —
+    only the invoice ``period_end`` does.
+    """
+
+    def setUp(self):
+        import importlib
+        from types import SimpleNamespace
+
+        from django.db import connection
+        from django.db.migrations.executor import MigrationExecutor
+
+        # Seed through the real migration function so this class stays
+        # deterministic even after transactional tests flush the database.
+        migration = importlib.import_module("accounts.migrations.0015_seed_vat_rates")
+        predecessor = MigrationExecutor(connection).loader.project_state(
+            [("accounts", "0014_user_preferred_zev")]
+        ).apps
+        clear_vat_rates()
+        migration.seed_vat_rates(predecessor, SimpleNamespace(connection=connection))
+        self.assertEqual(VatRate.objects.count(), 2)
+
+    def _setup(self, tag, valid_from, vat_mode, vat_number=""):
+        owner = make_user(f"seedvat_{tag}_owner", UserRole.ZEV_OWNER)
+        zev = make_zev(owner, f"Seed VAT {tag}")
+        zev.vat_mode = vat_mode
+        zev.vat_number = vat_number
+        zev.save(update_fields=["vat_mode", "vat_number"])
+        participant = make_participant(zev, first=f"Seed{tag}", last="Vat")
+        participant.valid_from = valid_from
+        participant.save(update_fields=["valid_from"])
+        metering_point = MeteringPoint.objects.create(
+            zev=zev,
+            meter_id=f"CH-SEEDVAT-{tag}",
+            meter_type=MeteringPointType.CONSUMPTION,
+        )
+        MeteringPointAssignment.objects.create(
+            metering_point=metering_point,
+            participant=participant,
+            valid_from=valid_from,
+        )
+        tariff = Tariff.objects.create(
+            zev=zev,
+            name="Grid energy",
+            category=TariffCategory.ENERGY,
+            billing_mode=BillingMode.ENERGY,
+            energy_type=EnergyType.GRID,
+            valid_from=valid_from,
+        )
+        TariffPeriod.objects.create(
+            tariff=tariff,
+            period_type="flat",
+            price_chf_per_kwh=Decimal("1.00000"),
+        )
+        return zev, participant, metering_point
+
+    def _reading(self, metering_point, day, kwh="10.0000"):
+        MeterReading.objects.create(
+            metering_point=metering_point,
+            timestamp=datetime(day.year, day.month, day.day, 12, 0, tzinfo=timezone.utc),
+            energy_kwh=Decimal(kwh),
+            direction=ReadingDirection.IN,
+            resolution=ReadingResolution.FIFTEEN_MIN,
+        )
+
+    def test_registered_backfill_uses_seeded_period_end_rate(self):
+        _, participant, metering_point = self._setup(
+            "reg", date(2017, 1, 1), VatMode.REGISTERED, "CHE-123.456.789"
+        )
+        self._reading(metering_point, date(2023, 1, 15))
+        invoice_2023 = generate_invoice(participant, date(2023, 1, 1), date(2023, 1, 31))
+        self._reading(metering_point, date(2024, 2, 15))
+        invoice_2024 = generate_invoice(participant, date(2024, 2, 1), date(2024, 2, 29))
+
+        self.assertEqual(invoice_2023.subtotal_chf, Decimal("10.00"))
+        self.assertEqual(invoice_2023.vat_rate, Decimal("0.0770"))
+        self.assertEqual(invoice_2023.vat_chf, Decimal("0.77"))
+        self.assertEqual(invoice_2023.total_chf, Decimal("10.77"))
+
+        self.assertEqual(invoice_2024.subtotal_chf, Decimal("10.00"))
+        self.assertEqual(invoice_2024.vat_rate, Decimal("0.0810"))
+        self.assertEqual(invoice_2024.vat_chf, Decimal("0.81"))
+        self.assertEqual(invoice_2024.total_chf, Decimal("10.81"))
+
+    def test_inclusive_backfill_uses_seeded_period_end_rate(self):
+        _, participant, metering_point = self._setup("incl", date(2017, 1, 1), VatMode.INCLUSIVE)
+        self._reading(metering_point, date(2023, 1, 15))
+        invoice_2023 = generate_invoice(participant, date(2023, 1, 1), date(2023, 1, 31))
+        self._reading(metering_point, date(2024, 2, 15))
+        invoice_2024 = generate_invoice(participant, date(2024, 2, 1), date(2024, 2, 29))
+
+        self.assertEqual(invoice_2023.subtotal_chf, Decimal("10.77"))
+        self.assertEqual(invoice_2023.embedded_vat_chf, Decimal("0.77"))
+        self.assertEqual(invoice_2023.vat_rate, Decimal("0"))
+        self.assertEqual(invoice_2023.vat_chf, Decimal("0.00"))
+        self.assertEqual(invoice_2023.total_chf, Decimal("10.77"))
+
+        self.assertEqual(invoice_2024.subtotal_chf, Decimal("10.81"))
+        self.assertEqual(invoice_2024.embedded_vat_chf, Decimal("0.81"))
+        self.assertEqual(invoice_2024.vat_rate, Decimal("0"))
+        self.assertEqual(invoice_2024.vat_chf, Decimal("0.00"))
+        self.assertEqual(invoice_2024.total_chf, Decimal("10.81"))
+
+    def test_cross_year_period_uses_end_date_rate(self):
+        _, participant, metering_point = self._setup(
+            "cross", date(2017, 1, 1), VatMode.REGISTERED, "CHE-123.456.789"
+        )
+        self._reading(metering_point, date(2023, 12, 15), kwh="5.0000")
+        self._reading(metering_point, date(2024, 1, 15), kwh="5.0000")
+
+        invoice = generate_invoice(participant, date(2023, 12, 1), date(2024, 1, 31))
+
+        # No day-weighted split: the whole invoice uses the period-end rate.
+        self.assertEqual(invoice.subtotal_chf, Decimal("10.00"))
+        self.assertEqual(invoice.vat_rate, Decimal("0.0810"))
+        self.assertEqual(invoice.vat_chf, Decimal("0.81"))
+        self.assertEqual(invoice.total_chf, Decimal("10.81"))
+
+    def test_not_registered_ignores_seeded_rates(self):
+        _, participant, metering_point = self._setup("noreg", date(2017, 1, 1), VatMode.NOT_REGISTERED)
+        self._reading(metering_point, date(2024, 2, 15))
+
+        invoice = generate_invoice(participant, date(2024, 2, 1), date(2024, 2, 29))
+
+        self.assertEqual(invoice.subtotal_chf, Decimal("10.00"))
+        self.assertEqual(invoice.vat_rate, Decimal("0"))
+        self.assertEqual(invoice.vat_chf, Decimal("0.00"))
+        self.assertIsNone(invoice.embedded_vat_chf)
+        self.assertEqual(invoice.total_chf, Decimal("10.00"))
+
+    def test_pre_2018_period_has_no_seeded_rate(self):
+        for tag, vat_mode, vat_number in (
+            ("pre2018reg", VatMode.REGISTERED, "CHE-123.456.789"),
+            ("pre2018incl", VatMode.INCLUSIVE, ""),
+        ):
+            with self.subTest(vat_mode=vat_mode):
+                _, participant, metering_point = self._setup(tag, date(2017, 1, 1), vat_mode, vat_number)
+                self._reading(metering_point, date(2017, 6, 15))
+
+                invoice = generate_invoice(participant, date(2017, 6, 1), date(2017, 6, 30))
+
+                self.assertEqual(invoice.subtotal_chf, Decimal("10.00"))
+                self.assertEqual(invoice.vat_rate, Decimal("0"))
+                self.assertEqual(invoice.vat_chf, Decimal("0.00"))
+                self.assertEqual(invoice.total_chf, Decimal("10.00"))
+                if vat_mode == VatMode.INCLUSIVE:
+                    self.assertEqual(invoice.embedded_vat_chf, Decimal("0.00"))
+                else:
+                    self.assertIsNone(invoice.embedded_vat_chf)

@@ -25,6 +25,7 @@ from invoices.test_helpers import make_participant, make_user, make_zev
 from invoices.template_context import build_sample_contract_context
 from tariffs.models import BillingMode, EnergyType, TariffPeriod
 from testing.factories import TariffFactory, assignment_for, flat_tariff
+from testing.helpers import clear_vat_rates
 from zev.models import MeteringPoint, MeteringPointAssignment, MeteringPointType, VatMode, Zev
 
 
@@ -187,6 +188,8 @@ class ContractPdfContextFieldsTests(TestCase):
     participation start, the active VAT rate and a short document id."""
 
     def setUp(self):
+        # These tests arrange their own rates (including the no-active-rate case).
+        clear_vat_rates()
         self.owner = make_user("ctx_fields_owner", UserRole.ZEV_OWNER)
         self.zev = make_zev(self.owner, "Context Fields ZEV")
         self.participant = make_participant(self.zev, first="Ctx", last="Participant")
@@ -896,6 +899,7 @@ class ContractPdfRenderingTests(TestCase):
         self.zev.invoice_language = "de"
         self.zev.payment_term_days = 30
         self.zev.save(update_fields=["vat_mode", "vat_number", "invoice_language", "payment_term_days"])
+        clear_vat_rates()
         VatRate.objects.create(rate=Decimal("0.0810"), valid_from=date(2026, 1, 1))
 
         self.owner_participant = make_participant(self.zev, user=self.owner, first="Maria", last="Muster")

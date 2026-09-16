@@ -101,6 +101,24 @@ Singleton pattern with `pk=1` enforced by `save()` plus a `singleton_enforcer = 
 **Key methods:**
 - `active_for_day(day)` (classmethod) — Returns the first `VatRate` where `valid_from <= day` and (`valid_to IS NULL` or `valid_to >= day`), ordered by `-valid_from`, `-created_at`. Returns `None` if no match.
 
+**Installed defaults (`accounts/migrations/0015_seed_vat_rates.py`):**
+- Fresh and upgraded databases receive the standard Swiss history through a
+  data migration (dependency `("accounts", "0014_user_preferred_zev")`):
+  `0.0770` for `2018-01-01..2023-12-31` and `0.0810` open-ended from
+  `2024-01-01` — the same tuples `seed_demo` installs.
+- Preservation: each candidate is processed in order and skipped entirely if
+  any stored row overlaps it (inclusive boundaries, mirroring
+  `allocation.validity.active_during`); existing rows keep their IDs,
+  values, and timestamps. Reverse is a no-op (rows are kept — there is no
+  provenance field to tell migration-owned rows from later edits), and
+  reapplying adds nothing. A partial custom history can therefore leave some
+  periods without a rate; those need manual completion. One-time step, not reconciliation: deleting a
+  default later via the admin API does not recreate it on `migrate`.
+- The migration is self-contained (stdlib + Django only) and binds every
+  read/write to `schema_editor.connection.alias`.
+- Missing rates still resolve to zero in the billing engine; pre-2018 days
+  have no seeded rate (see `2026-03-tariffs-and-billing-engine.md` §4.8).
+
 **Serializers:**
 - `VatRateSerializer` — fields: `id`, `rate`, `valid_from`, `valid_to`, `created_at`, `updated_at` (id/created_at/updated_at read-only). Used for both input and output; there is no separate input serializer.
 
@@ -626,13 +644,29 @@ Changing date formats does NOT retroactively modify already-generated PDF files 
 | `test_admin_can_update_settings` | Admin PATCH all 3 format fields → 200, `AppSettings.load()` reflects new values |
 | `test_non_admin_cannot_update_settings` | ZEV owner PATCH → 403 |
 
-**`VatRateSettingsTests`** (4 tests):
+**`VatRateSettingsTests`** (4 tests — `setUp` clears the migration-installed defaults so the class owns its VAT fixtures):
 | Test | Asserts |
 |---|---|
 | `test_admin_can_crud_vat_rates` | POST → 201, GET list → 1 result, PATCH rate → 200 with updated value, DELETE → 204 + not exists |
 | `test_non_admin_cannot_manage_vat_rates` | ZEV owner GET → 403, POST → 403 |
 | `test_vat_rate_ranges_cannot_overlap` | Pre-existing 2024–2025 rate. POST overlapping 2025-12–2026-12 → 400, error contains "overlap" |
 | `test_vat_rate_valid_to_must_be_after_valid_from` | POST with valid_to < valid_from → 400, error contains "valid_to" |
+
+**`accounts/test_vat_rate_seed.py`** (12 tests — drives the real `0015_seed_vat_rates.seed_vat_rates` against historical models):
+| Test | Asserts |
+|---|---|
+| `SeedVatRatesMigrationTests::test_forward_migration_seeds_empty_table` | Real predecessor → new migration installs exactly the two canonical tuples; runtime lookup resolves them |
+| `SeedVatRatesMigrationTests::test_reverse_and_reapply_preserve_rates` | Reverse retains rows (incl. an admin edit); reapply adds no duplicate |
+| `SeedVatRatesForwardFunctionTests::test_forward_function_is_idempotent` | Second call leaves values, IDs, and timestamps unchanged |
+| `SeedVatRatesForwardFunctionTests::test_adds_missing_non_overlapping_default` | Each single existing canonical row gains only its missing counterpart |
+| `SeedVatRatesForwardFunctionTests::test_preserves_edited_canonical_rate` | Custom `0.0850` 2024 row unchanged; only the 2018 default added |
+| `SeedVatRatesForwardFunctionTests::test_preserves_custom_overlapping_windows` | Open-ended 2025 / pre-2018 and bounded-interior customs preserved per the skip policy |
+| `SeedVatRatesForwardFunctionTests::test_preserves_non_overlapping_history` | Bounded 2017 row survives alongside both defaults |
+| `SeedVatRatesForwardFunctionTests::test_overlap_boundaries_are_inclusive` | Shared boundary days block insertion; one-day-adjacent rows do not |
+| `SeedVatRatesForwardFunctionTests::test_seed_uses_schema_editor_database_alias` | Historical queryset is routed via the supplied (sentinel) alias |
+| `SeedVatRatesForwardFunctionTests::test_seed_does_not_modify_existing_invoice` | Persisted invoice fields and line items identical before/after seeding |
+| `SeededVatLookupTests::test_lookup_boundaries_against_seeded_table` | `active_for_day` + engine rate for 2017-12-31 / 2018-01-01 / 2023-12-31 / 2024-01-01 / 2026-09-11 |
+| `SeededVatLookupTests::test_missing_rate_falls_back_to_zero` | Empty table → `None` lookup and `Decimal("0")` engine rate |
 
 **`RbacEndpointMatrixTests`** (6 tests):
 Tests cover dashboard access (`test_invoice_dashboard_is_admin_only`) confirming admin→200, owner/participant/guest→403. Plus list/create/update/delete/unauthenticated endpoint matrices that include settings-adjacent endpoints.
