@@ -1,4 +1,4 @@
-/** Swiss `de-CH` formatting (apostrophe grouping) for screen display. */
+/** Decimal formatting (`de-CH`, no thousands grouping). */
 export function formatNumber(
     value: number,
     { maxDecimals = 2, minDecimals }: { maxDecimals?: number; minDecimals?: number } = {},
@@ -6,22 +6,30 @@ export function formatNumber(
     return new Intl.NumberFormat('de-CH', {
         minimumFractionDigits: minDecimals ?? 0,
         maximumFractionDigits: Math.max(maxDecimals, minDecimals ?? 0),
-    })
-        .format(value)
-        .replace(/\u2019/g, "'")
+        useGrouping: false,
+    }).format(value)
 }
 
-/** Format kWh with Swiss grouping — screen display caps at 1 decimal. */
+/** Format kWh — up to 1 decimal by default. */
 export function formatKwh(
     value: number,
     { maxDecimals = 1 }: { maxDecimals?: number } = {},
 ): string {
+    if (!Number.isFinite(value)) return '–'
     return formatNumber(value, { maxDecimals, minDecimals: 0 })
 }
 
+/** Format a percentage — up to one decimal by default, with % appended. */
+export function formatPercent(
+    value: number,
+    { maxDecimals = 1 }: { maxDecimals?: number } = {},
+): string {
+    if (!Number.isFinite(value)) return '–'
+    return `${formatNumber(value, { maxDecimals })}\u00a0%`
+}
+
 /**
- * Format a CHF amount with Swiss grouping, 2 decimals, and the typographic
- * minus sign (U+2212).
+ * Format a CHF amount (2 decimals, typographic minus U+2212).
  *
  * The absolute value is formatted and the sign prefixed manually, so Intl
  * never emits a sign and the output is deterministic across ICU versions.

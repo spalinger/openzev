@@ -11,6 +11,7 @@ import {
 } from 'recharts'
 import { ANNOTATION_COLOR, AXIS_COLOR, CHART_GRIDLINE, DIVERGING_POSITIVE, NEGATIVE_COLOR, POSITIVE_COLOR } from '../../lib/chartTokens'
 import { CHART_AXIS_TICK, CHART_TOOLTIP_STYLE, CHF_Y_AXIS_LABEL, ChartLegendSwatch, chartAxisLabel } from '../../lib/chartTheme'
+import { formatChf, formatNumber } from '../../lib/numbers'
 
 type BarShapeProps = {
     x?: number
@@ -48,7 +49,7 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
         <div style={CHART_TOOLTIP_STYLE}>
             <p style={{ margin: 0, fontWeight: 600 }}>{t('pages.feasibility.chart.yearLabel', { year: point.payload.year })}</p>
             <p style={{ margin: 0, color: point.value < 0 ? NEGATIVE_COLOR : DIVERGING_POSITIVE }}>
-                CHF {point.value.toFixed(2)}
+                {formatChf(point.value)}
             </p>
         </div>
     )
@@ -87,7 +88,7 @@ export function FeasibilityCashflowChart({ cashflowByYear, paybackYears }: Props
                         label={chartAxisLabel(t('pages.feasibility.chart.yearAxis'))}
                     />
                     <YAxis
-                        tickFormatter={(v: number) => v.toFixed(0)}
+                        tickFormatter={(v: number) => formatNumber(v, { maxDecimals: 0 })}
                         stroke={AXIS_COLOR}
                         tick={CHART_AXIS_TICK}
                         label={CHF_Y_AXIS_LABEL}
@@ -99,7 +100,7 @@ export function FeasibilityCashflowChart({ cashflowByYear, paybackYears }: Props
                             x={paybackYears}
                             stroke={ANNOTATION_COLOR}
                             strokeDasharray="4 3"
-                            label={{ value: t('pages.feasibility.chart.paybackLabel', { years: paybackYears.toFixed(1) }), position: 'top', fontSize: 11, fill: ANNOTATION_COLOR }}
+                            label={{ value: t('pages.feasibility.chart.paybackLabel', { years: formatNumber(paybackYears, { minDecimals: 1, maxDecimals: 1 }) }), position: 'top', fontSize: 11, fill: ANNOTATION_COLOR }}
                         />
                     )}
                     <Bar dataKey="value" shape={DivergingBarShape} isAnimationActive={false} />

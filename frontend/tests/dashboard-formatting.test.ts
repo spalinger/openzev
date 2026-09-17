@@ -1,0 +1,30 @@
+import { describe, expect, it } from 'vitest'
+import {
+  dashboardKwhStat,
+  hourlyKwhTick,
+  hourlyKwhTooltipValue,
+  kwhTick,
+  kwhTooltipValue,
+} from '../src/lib/dashboardFormatting'
+
+describe('dashboard chart formatting', () => {
+  it('caps dashboard KPI and table values at up to two decimals', () => {
+    expect(dashboardKwhStat(1234.567)).toBe('1234.57 kWh')
+  })
+
+  it('uses up to two decimals for period-bucket axis ticks', () => {
+    expect(kwhTick(1234.567)).toBe('1234.57')
+  })
+
+  it('uses up to four decimals for hourly-profile axis ticks', () => {
+    expect(hourlyKwhTick(0.005)).toBe('0.005')
+  })
+
+  it('keeps period tooltip values at up to two decimals', () => {
+    expect(kwhTooltipValue(0.005)).toBe('0.01 kWh')
+  })
+
+  it('keeps hourly tooltip values at up to four decimals', () => {
+    expect(hourlyKwhTooltipValue(0.005)).toBe('0.005 kWh')
+  })
+})

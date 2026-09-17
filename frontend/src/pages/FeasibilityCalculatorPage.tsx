@@ -25,7 +25,7 @@ import {
 } from '../features/feasibility/useFeasibilityForm'
 import { calculateFeasibility, fetchFeasibilityCalculatorEnabled } from '../lib/api/feasibility'
 import { formatApiError } from '../lib/api/errors'
-import { formatChf, formatKwh } from '../lib/numbers'
+import { formatChf, formatKwh, formatNumber, formatPercent } from '../lib/numbers'
 import { queryKeys } from '../lib/api/queryKeys'
 
 const DEBOUNCE_MS = 400
@@ -142,8 +142,8 @@ function FeasibilityCalculator() {
                             <ParticipantRowsEditor form={form} />
                             <p className="muted" style={{ fontSize: '0.82rem', marginTop: '0.5rem' }}>
                                 {t('pages.feasibility.form.participantsTotal', {
-                                    production: participantTotals.production.toFixed(0),
-                                    consumption: participantTotals.consumption.toFixed(0),
+                                    production: formatKwh(participantTotals.production, { maxDecimals: 0 }),
+                                    consumption: formatKwh(participantTotals.consumption, { maxDecimals: 0 }),
                                 })}
                             </p>
                         </div>
@@ -173,7 +173,7 @@ function FeasibilityCalculator() {
                                     </div>
                                     <span className="muted" style={{ fontSize: '0.78rem' }}>
                                         {t('pages.feasibility.form.annualProductionComputed', {
-                                            value: resolveAnnualProductionKwh(watchedValues).toFixed(0),
+                                            value: formatKwh(resolveAnnualProductionKwh(watchedValues), { maxDecimals: 0 }),
                                         })}
                                     </span>
                                 </>
@@ -229,7 +229,7 @@ function FeasibilityCalculator() {
                                 <input type="number" step="any" min="0" {...form.register('internal_energy_price_pct_of_retail')} />
                                 <span className="muted" style={{ fontSize: '0.78rem' }}>
                                     {t('pages.feasibility.form.internalEnergyPriceComputed', {
-                                        value: resolveInternalEnergyPriceChf(watchedValues).toFixed(3),
+                                        value: formatNumber(resolveInternalEnergyPriceChf(watchedValues), { minDecimals: 3, maxDecimals: 3 }),
                                     })}
                                 </span>
                             </>
@@ -281,15 +281,15 @@ function FeasibilityCalculator() {
                                 <StatCard label={t('pages.feasibility.results.annualNetBenefit')} value={formatChf(Number(result.annual_net_benefit_chf))} />
                                 <StatCard
                                     label={t('pages.feasibility.results.payback')}
-                                    value={result.payback_years !== null ? t('pages.feasibility.results.years', { count: Number(result.payback_years).toFixed(1) }) : t('pages.feasibility.results.never')}
+                                    value={result.payback_years !== null ? t('pages.feasibility.results.years', { count: formatNumber(Number(result.payback_years), { minDecimals: 1, maxDecimals: 1 }) }) : t('pages.feasibility.results.never')}
                                 />
                                 <StatCard
                                     label={t('pages.feasibility.results.roi')}
-                                    value={result.roi !== null ? `${(Number(result.roi) * 100).toFixed(1)}%` : '—'}
+                                    value={result.roi !== null ? formatPercent(Number(result.roi) * 100) : '—'}
                                 />
                                 <StatCard label={t('pages.feasibility.results.npv')} value={formatChf(Number(result.npv_chf))} hint={t('pages.feasibility.results.npvHint')} />
                                 <StatCard label={t('pages.feasibility.results.selfConsumed')} value={`${formatKwh(Number(result.self_consumed_kwh), { maxDecimals: 0 })} kWh`} />
-                                <StatCard label={t('pages.feasibility.results.autarky')} value={`${(Number(result.autarky_rate) * 100).toFixed(0)}%`} />
+                                <StatCard label={t('pages.feasibility.results.autarky')} value={formatPercent(Number(result.autarky_rate) * 100, { maxDecimals: 0 })} />
                             </section>
 
                             <section className="card page-stack">

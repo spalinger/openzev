@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { fetchFeasibilityPrefill } from '../../lib/api/feasibility'
 import { formatApiError } from '../../lib/api/errors'
 import { fetchZevs } from '../../lib/api/zev'
+import { formatNumber } from '../../lib/numbers'
 import { queryKeys } from '../../lib/api/queryKeys'
 import { useToast } from '../../lib/toast'
 import type { FeasibilityPrefill } from '../../types/api'
@@ -34,7 +35,7 @@ export function PrefillFromZevCard({ onPrefillLoaded }: Props) {
             // The self-consumption rate is the single biggest driver, so call it
             // out explicitly when it came from real data rather than a guess.
             if (data.self_consumption_rate !== null) {
-                const pct = Number((Number(data.self_consumption_rate) * 100).toFixed(1))
+                const pct = formatNumber(Number(data.self_consumption_rate) * 100, { maxDecimals: 1 })
                 pushToast(t('pages.feasibility.prefill.selfConsumptionMeasured', { rate: pct }), 'info')
             }
         },

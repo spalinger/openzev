@@ -20,6 +20,9 @@ import {
 } from '../lib/api/metering'
 import { fetchInvoices, openInvoicePdf } from '../lib/api/invoices'
 import { queryKeys } from '../lib/api/queryKeys'
+import { formatKwh, formatPercent } from '../lib/numbers'
+import { dashboardKwhStat, hourlyKwhTick, hourlyKwhTooltipValue, kwhTick, kwhTooltipValue } from '../lib/dashboardFormatting'
+import { formatProductionMixTooltip } from '../lib/dashboardTooltips'
 import { formatMeteringBucketLabel } from '../lib/meteringLabels'
 import { formatShortDate, useAppSettings } from '../lib/appSettings'
 import { useAuth } from '../lib/auth'
@@ -32,7 +35,8 @@ import {
     type BillingInterval,
     getCurrentBillingPeriod,
 } from '../lib/billingPeriod'
-import { CHART_GRID, CHART_LABEL, CHART_LOCAL, FLOW_GRID_EXP, FLOW_LOCAL_CONS } from '../lib/chartTokens'
+import { AXIS_COLOR, CHART_GRIDLINE, CHART_GRID, CHART_LABEL, CHART_LOCAL, FLOW_GRID_EXP, FLOW_LOCAL_CONS } from '../lib/chartTokens'
+import { CHART_AXIS_TICK, CHART_TOOLTIP_STYLE } from '../lib/chartTheme'
 
 export function DashboardPage() {
     const { t } = useTranslation()
@@ -109,7 +113,7 @@ export function DashboardPage() {
             const locally_consumed = Math.max(0, entry.consumed_kwh - entry.imported_kwh)
             const locally_produced = Math.max(0, entry.produced_kwh - entry.exported_kwh)
             const self_consumption_rate = entry.produced_kwh > 0
-                ? parseFloat(((locally_produced / entry.produced_kwh) * 100).toFixed(1))
+                ? Math.round((locally_produced / entry.produced_kwh) * 1000) / 10
                 : null
             return { ...entry, locally_consumed, locally_produced, self_consumption_rate }
         }),
@@ -233,18 +237,18 @@ export function DashboardPage() {
                         <StatCard
                             accent
                             label={t('pages.dashboard.stats.selfConsumptionRate')}
-                            value={ownerSelfConsumption ? `${ownerSelfConsumption.pct.toFixed(1)} %` : '—'}
+                            value={ownerSelfConsumption ? formatPercent(ownerSelfConsumption.pct) : '—'}
                             hint={ownerSelfConsumption
                                 ? t('pages.dashboard.hints.selfConsumption', {
-                                    local: ownerSelfConsumption.localKwh.toFixed(0),
-                                    total: ownerSelfConsumption.producedKwh.toFixed(0),
+                                    local: formatKwh(ownerSelfConsumption.localKwh, { maxDecimals: 0 }),
+                                    total: formatKwh(ownerSelfConsumption.producedKwh, { maxDecimals: 0 }),
                                 })
                                 : undefined}
                         />
-                        <StatCard label={t('pages.dashboard.stats.producedInZev')} value={`${summary.zev_totals.produced_kwh.toFixed(2)} kWh`} />
-                        <StatCard label={t('pages.dashboard.stats.consumedInZev')} value={`${summary.zev_totals.consumed_kwh.toFixed(2)} kWh`} />
-                        <StatCard label={t('pages.dashboard.stats.importedFromGrid')} value={`${summary.zev_totals.imported_kwh.toFixed(2)} kWh`} />
-                        <StatCard label={t('pages.dashboard.stats.exportedToGrid')} value={`${summary.zev_totals.exported_kwh.toFixed(2)} kWh`} />
+                        <StatCard label={t('pages.dashboard.stats.producedInZev')} value={dashboardKwhStat(summary.zev_totals.produced_kwh)} />
+                        <StatCard label={t('pages.dashboard.stats.consumedInZev')} value={dashboardKwhStat(summary.zev_totals.consumed_kwh)} />
+                        <StatCard label={t('pages.dashboard.stats.importedFromGrid')} value={dashboardKwhStat(summary.zev_totals.imported_kwh)} />
+                        <StatCard label={t('pages.dashboard.stats.exportedToGrid')} value={dashboardKwhStat(summary.zev_totals.exported_kwh)} />
                     </section>
 
                     {summary.participant_stats.length > 0 && (
@@ -275,10 +279,10 @@ export function DashboardPage() {
                                     <p style={{ margin: '0 0 0.5rem', fontWeight: 600, fontSize: '0.875rem', color: CHART_LABEL }}>{t('pages.dashboard.consumption')}</p>
                                     <ResponsiveContainer width="100%" height={300}>
                                         <BarChart data={ownerChartData} margin={{ top: 4, right: 4, bottom: 4, left: 0 }}>
-                                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                            <XAxis dataKey="bucket" tick={{ fontSize: 10 }} tickFormatter={formatBucketLabel} />
-                                            <YAxis tick={{ fontSize: 10 }} unit=" kWh" width={60} />
-                                            <Tooltip formatter={(v) => `${Number(v).toFixed(2)} kWh`} labelFormatter={formatBucketTooltipLabel} />
+                                            <CartesianGrid stroke={CHART_GRIDLINE} strokeDasharray="3 3" vertical={false} />
+                                            <XAxis dataKey="bucket" tick={CHART_AXIS_TICK} stroke={AXIS_COLOR} tickFormatter={formatBucketLabel} />
+                                            <YAxis tick={CHART_AXIS_TICK} stroke={AXIS_COLOR} unit=" kWh" width={60} tickFormatter={kwhTick} />
+                                            <Tooltip contentStyle={CHART_TOOLTIP_STYLE} formatter={kwhTooltipValue} labelFormatter={formatBucketTooltipLabel} />
                                             <Legend />
                                             <Bar dataKey="locally_consumed" name={t('pages.dashboard.chart.fromZev')} stackId="c" fill={CHART_LOCAL} />
                                             <Bar dataKey="imported_kwh" name={t('pages.dashboard.chart.fromGrid')} stackId="c" fill={CHART_GRID} radius={[3, 3, 0, 0]} />
@@ -289,16 +293,15 @@ export function DashboardPage() {
                                     <p style={{ margin: '0 0 0.5rem', fontWeight: 600, fontSize: '0.875rem', color: CHART_LABEL }}>{t('pages.dashboard.production')}</p>
                                     <ResponsiveContainer width="100%" height={300}>
                                         <ComposedChart data={ownerChartData} margin={{ top: 4, right: 50, bottom: 4, left: 0 }}>
-                                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                            <XAxis dataKey="bucket" tick={{ fontSize: 10 }} tickFormatter={formatBucketLabel} />
-                                            <YAxis yAxisId="kwh" tick={{ fontSize: 10 }} unit=" kWh" width={60} />
-                                            <YAxis yAxisId="pct" orientation="right" tick={{ fontSize: 10 }} unit="%" width={44} domain={[0, 100]} />
+                                            <CartesianGrid stroke={CHART_GRIDLINE} strokeDasharray="3 3" vertical={false} />
+                                            <XAxis dataKey="bucket" tick={CHART_AXIS_TICK} stroke={AXIS_COLOR} tickFormatter={formatBucketLabel} />
+                                            <YAxis yAxisId="kwh" tick={CHART_AXIS_TICK} stroke={AXIS_COLOR} unit=" kWh" width={60} tickFormatter={kwhTick} />
+                                            <YAxis yAxisId="pct" orientation="right" tick={CHART_AXIS_TICK} stroke={AXIS_COLOR} unit="%" width={44} domain={[0, 100]} />
                                             <Tooltip
+                                                contentStyle={CHART_TOOLTIP_STYLE}
                                                 labelFormatter={formatBucketTooltipLabel}
-                                                formatter={(v, _name, props) =>
-                                                    props?.dataKey === 'self_consumption_rate'
-                                                        ? [`${Number(v).toFixed(1)}%`, t('pages.dashboard.chart.selfConsumedPct')]
-                                                        : [`${Number(v).toFixed(2)} kWh`, _name]
+                                                formatter={(v, name, props) =>
+                                                    formatProductionMixTooltip(v, String(name), props?.dataKey, t('pages.dashboard.chart.selfConsumedPct'))
                                                 }
                                             />
                                             <Legend />
@@ -350,10 +353,10 @@ export function DashboardPage() {
                                             }}
                                         >
                                             <td style={{ padding: '0.5rem 0.6rem' }}>{participant.participant_name || '-'}</td>
-                                            <td style={{ textAlign: 'right', padding: '0.5rem 0.6rem' }}>{participant.total_consumed_kwh.toFixed(2)} kWh</td>
-                                            <td style={{ textAlign: 'right', padding: '0.5rem 0.6rem' }}>{participant.total_produced_kwh.toFixed(2)} kWh</td>
-                                            <td style={{ textAlign: 'right', padding: '0.5rem 0.6rem' }}>{participant.from_zev_kwh.toFixed(2)} kWh</td>
-                                            <td style={{ textAlign: 'right', padding: '0.5rem 0.6rem' }}>{participant.from_grid_kwh.toFixed(2)} kWh</td>
+                                            <td style={{ textAlign: 'right', padding: '0.5rem 0.6rem' }} className="numeric">{dashboardKwhStat(participant.total_consumed_kwh)}</td>
+                                            <td style={{ textAlign: 'right', padding: '0.5rem 0.6rem' }} className="numeric">{dashboardKwhStat(participant.total_produced_kwh)}</td>
+                                            <td style={{ textAlign: 'right', padding: '0.5rem 0.6rem' }} className="numeric">{dashboardKwhStat(participant.from_zev_kwh)}</td>
+                                            <td style={{ textAlign: 'right', padding: '0.5rem 0.6rem' }} className="numeric">{dashboardKwhStat(participant.from_grid_kwh)}</td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -370,10 +373,10 @@ export function DashboardPage() {
                             <p className="muted" style={{ marginTop: 0, fontSize: '0.875rem' }}>{t('pages.dashboard.hourlyProfile.description')}</p>
                             <ResponsiveContainer width="100%" height={320}>
                                 <BarChart data={hourlyProfileData} margin={{ top: 4, right: 4, bottom: 4, left: 0 }}>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                    <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                                    <YAxis tick={{ fontSize: 11 }} unit=" kWh" width={60} />
-                                    <Tooltip formatter={(v) => `${Number(v).toFixed(4)} kWh`} />
+                                    <CartesianGrid stroke={CHART_GRIDLINE} strokeDasharray="3 3" vertical={false} />
+                                    <XAxis dataKey="label" tick={CHART_AXIS_TICK} stroke={AXIS_COLOR} />
+                                    <YAxis tick={CHART_AXIS_TICK} stroke={AXIS_COLOR} unit=" kWh" width={60} tickFormatter={hourlyKwhTick} />
+                                    <Tooltip contentStyle={CHART_TOOLTIP_STYLE} formatter={hourlyKwhTooltipValue} />
                                     <Legend />
                                     <Bar dataKey="from_zev_kwh" name={t('pages.dashboard.chart.fromZev')} stackId="c" fill={CHART_LOCAL} />
                                     <Bar dataKey="from_grid_kwh" name={t('pages.dashboard.chart.fromGrid')} stackId="c" fill={CHART_GRID} radius={[3, 3, 0, 0]} />
@@ -387,9 +390,9 @@ export function DashboardPage() {
             {summary && summary.role === 'participant' && (
                 <>
                     <section style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
-                        <StatCard label={t('pages.dashboard.participantStats.consumedFromZev')} value={`${summary.totals.consumed_from_zev_kwh.toFixed(2)} kWh`} />
-                        <StatCard label={t('pages.dashboard.participantStats.importedFromGrid')} value={`${summary.totals.imported_from_grid_kwh.toFixed(2)} kWh`} />
-                        <StatCard label={t('pages.dashboard.participantStats.totalConsumption')} value={`${summary.totals.total_consumed_kwh.toFixed(2)} kWh`} />
+                        <StatCard label={t('pages.dashboard.participantStats.consumedFromZev')} value={dashboardKwhStat(summary.totals.consumed_from_zev_kwh)} />
+                        <StatCard label={t('pages.dashboard.participantStats.importedFromGrid')} value={dashboardKwhStat(summary.totals.imported_from_grid_kwh)} />
+                        <StatCard label={t('pages.dashboard.participantStats.totalConsumption')} value={dashboardKwhStat(summary.totals.total_consumed_kwh)} />
                     </section>
 
                     {summary.zev_participant_stats.length > 0 && summary.current_participant_id && (
@@ -410,10 +413,10 @@ export function DashboardPage() {
                         ) : (
                             <ResponsiveContainer width="100%" height={320}>
                                 <BarChart data={participantTimeline} margin={{ top: 4, right: 4, bottom: 4, left: 0 }}>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                    <XAxis dataKey="bucket" tick={{ fontSize: 11 }} tickFormatter={formatBucketLabel} />
-                                    <YAxis tick={{ fontSize: 11 }} unit=" kWh" width={60} />
-                                    <Tooltip formatter={(v) => `${Number(v).toFixed(2)} kWh`} labelFormatter={formatBucketTooltipLabel} />
+                                    <CartesianGrid stroke={CHART_GRIDLINE} strokeDasharray="3 3" vertical={false} />
+                                    <XAxis dataKey="bucket" tick={CHART_AXIS_TICK} stroke={AXIS_COLOR} tickFormatter={formatBucketLabel} />
+                                    <YAxis tick={CHART_AXIS_TICK} stroke={AXIS_COLOR} unit=" kWh" width={60} tickFormatter={kwhTick} />
+                                    <Tooltip contentStyle={CHART_TOOLTIP_STYLE} formatter={kwhTooltipValue} labelFormatter={formatBucketTooltipLabel} />
                                     <Legend />
                                     <Bar dataKey="consumed_from_zev_kwh" name={t('pages.dashboard.chart.fromZev')} stackId="c" fill={CHART_LOCAL} />
                                     <Bar dataKey="imported_from_grid_kwh" name={t('pages.dashboard.chart.fromGrid')} stackId="c" fill={CHART_GRID} radius={[3, 3, 0, 0]} />
@@ -428,10 +431,10 @@ export function DashboardPage() {
                             <p className="muted" style={{ marginTop: 0, fontSize: '0.875rem' }}>{t('pages.dashboard.hourlyProfile.description')}</p>
                             <ResponsiveContainer width="100%" height={320}>
                                 <BarChart data={hourlyProfileData} margin={{ top: 4, right: 4, bottom: 4, left: 0 }}>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                    <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                                    <YAxis tick={{ fontSize: 11 }} unit=" kWh" width={60} />
-                                    <Tooltip formatter={(v) => `${Number(v).toFixed(4)} kWh`} />
+                                    <CartesianGrid stroke={CHART_GRIDLINE} strokeDasharray="3 3" vertical={false} />
+                                    <XAxis dataKey="label" tick={CHART_AXIS_TICK} stroke={AXIS_COLOR} />
+                                    <YAxis tick={CHART_AXIS_TICK} stroke={AXIS_COLOR} unit=" kWh" width={60} tickFormatter={hourlyKwhTick} />
+                                    <Tooltip contentStyle={CHART_TOOLTIP_STYLE} formatter={hourlyKwhTooltipValue} />
                                     <Legend />
                                     <Bar dataKey="from_zev_kwh" name={t('pages.dashboard.chart.fromZev')} stackId="c" fill={CHART_LOCAL} />
                                     <Bar dataKey="from_grid_kwh" name={t('pages.dashboard.chart.fromGrid')} stackId="c" fill={CHART_GRID} radius={[3, 3, 0, 0]} />
