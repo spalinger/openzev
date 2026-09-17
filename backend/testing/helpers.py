@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from accounts.models import User
+from accounts.models import User, VatRate
 from zev.models import Participant
 
 
@@ -53,3 +53,12 @@ def authenticate(client, user) -> None:
     """
     refresh = RefreshToken.for_user(user)
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+
+def clear_vat_rates() -> None:
+    """Start from an empty VAT table.
+
+    Migration 0015 installs an open-ended 8.1% default that overlaps custom
+    fixtures, so test classes owning their VAT history clear it first.
+    """
+    VatRate.objects.all().delete()
