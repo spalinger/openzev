@@ -79,11 +79,56 @@ jobs:
             - name: Install chart check dependency
               run: python -m pip install PyYAML==6.0.3
 
-            - name: Lint chart
-              run: helm lint ./charts/openzev
-
             - name: Check rendered routing and security settings
               run: python scripts/check-helm-render.py
+
+            - name: Verify insecure defaults fail closed independently
+              run: |
+                  set -euo pipefail
+                  assert_render_fails() {
+                      expected="$1"
+                      shift
+                      if helm template openzev ./charts/openzev "$@" >/tmp/openzev-invalid-render.yaml 2>/tmp/openzev-invalid-render.err; then
+                          echo "expected Helm render to fail for: ${expected}" >&2
+                          return 1
+                      fi
+                      grep -F "$expected" /tmp/openzev-invalid-render.err
+                  }
+                  assert_render_fails 'secretKey.value is the placeholder'
+                  assert_render_fails 'database.url is the local default' \
+                    --set-string secretKey.value=real-secret-for-test
+                  assert_render_fails 'frontendUrl is localhost' \
+                    --set-string secretKey.value=real-secret-for-test \
+                    --set-string database.url=postgres://user:pass@db.example:5432/openzev
+                  assert_render_fails 'debug: Invalid type' --set-string debug=false
+                  assert_render_fails 'backend.secureSslRedirect: Invalid type' --set-string backend.secureSslRedirect=false
+                  assert_render_fails 'backend.hstsSeconds: Must be greater than or equal to 0' --set backend.hstsSeconds=-1
+
+            - name: Lint chart
+              run: |
+                  helm lint ./charts/openzev --set debug=true
+                  helm template openzev ./charts/openzev --set debug=true >/dev/null
+                  helm lint ./charts/openzev \
+                    --set secretKey.existingSecret.name=openzev-django-secret \
+                    --set database.existingSecret.name=openzev-db-secret \
+                    --set frontendUrl=https://openzev.example.com \
+                    --set backend.numProxies=1
+
+            - name: Render chart with existing secrets
+              run: |
+                  helm template openzev ./charts/openzev \
+                    --set secretKey.existingSecret.name=openzev-django-secret \
+                    --set database.existingSecret.name=openzev-db-secret \
+                    --set frontendUrl=https://openzev.example.com \
+                    --set webauthn.rpId=openzev.example.com \
+                    --set webauthn.origin=https://openzev.example.com \
+                    --set backend.numProxies=1 \
+                    > /tmp/openzev-helm-render.yaml
+                  grep -A1 'name: SECURE_SSL_REDIRECT' /tmp/openzev-helm-render.yaml | grep -Fq 'value: "true"'
+                  grep -A1 'name: SECURE_HSTS_SECONDS' /tmp/openzev-helm-render.yaml | grep -Fq 'value: "31536000"'
+
+            - name: Smoke-test production nginx proxy and logs
+              run: bash scripts/test-nginx-deployment.sh
 
     backend-check-test:
         name: Backend checks and tests (${{ matrix.database }})

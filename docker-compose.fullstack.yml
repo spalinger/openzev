@@ -1,5 +1,6 @@
 # Single-container self-hosting stack. Requires backend/.env — see docs/user-guide/01-getting-started.md ("Building from source").
-# Only 8080 is published; db/valkey talk over the compose network.
+# Only the loopback-bound 8080 port is published; db/redis talk over the
+# compose network. A same-host TLS terminator is the supported outer proxy.
 services:
   app:
     build:
@@ -13,13 +14,16 @@ services:
       DATABASE_URL: postgres://openzev:openzev@db:5432/openzev
       CELERY_BROKER_URL: redis://valkey:6379/0
       CACHE_URL: redis://valkey:6379/1
-      # One trusted proxy hop: the fullstack nginx overwrites X-Forwarded-For.
+      # One trusted proxy hop: bundled nginx overwrites X-Forwarded-For
+      # and forwards X-Forwarded-Proto, so the outer terminator must send it.
       NUM_PROXIES: 1
     depends_on:
       - db
       - valkey
+    # The bundled nginx trusts the outer proxy's scheme, so only expose the
+    # application through a same-host TLS terminator.
     ports:
-      - "8080:80"
+      - "127.0.0.1:8080:8080"
     volumes:
       - backend_media:/app/media
 

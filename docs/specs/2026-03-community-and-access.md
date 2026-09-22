@@ -1053,9 +1053,15 @@ budget is refused with `429 Too Many Requests` before the view body runs. The
 test settings (`config/settings_test.py`) disable all scopes so the rest of the
 suite is not throttled.
 
-Limits are keyed by DRF's `SimpleRateThrottle.get_ident()` through `NUM_PROXIES` trusted hops. The audit log records the same hop via `config.client_ip.client_ip`, storing invalid or empty values as `NULL` for inet safety instead of DRF's raw-string bucket. The shipped nginx configurations overwrite `X-Forwarded-For`; with `NUM_PROXIES=1`, an outer proxy's address is therefore the attributed identity. Preserving the original client address requires a deliberately sanitised, append-preserving proxy chain and a matching hop count. Operator guidance is canonical in `charts/openzev/README.md` ("Reverse proxies and NUM_PROXIES").
+Limits are keyed by DRF's `SimpleRateThrottle.get_ident()` through `NUM_PROXIES` retained proxy-added `X-Forwarded-For` addresses. The audit log records the same hop via `config.client_ip.client_ip`, storing invalid or empty values as `NULL` for inet safety instead of DRF's raw-string bucket. The shipped nginx configurations overwrite `X-Forwarded-For`; with `NUM_PROXIES=1`, an outer proxy's address is therefore the attributed identity. Preserving the original client address requires a deliberately sanitized, append-preserving proxy chain and a matching hop count. Production Compose publishes the frontend only on loopback so the forwarded scheme cannot be supplied by a remote direct client. Operator guidance is canonical in `charts/openzev/README.md` ("Reverse proxies and NUM_PROXIES").
 
 Shipped values: default `0`; production-like and fullstack compose set `1` behind overwriting nginx; dev compose keeps `0`; Helm `backend.numProxies` defaults to `0` on the backend deployment only.
+
+A positive `NUM_PROXIES` also enables Django's forwarded HTTPS detection.
+Gunicorn's independent scheme inference is disabled in `backend/gunicorn.conf.py`,
+so even loopback requests cannot bypass disabled Django proxy trust.
+Transport defaults, deployment trust boundaries and log handling are detailed
+in [the production hardening spec](2026-09-production-hardening.md#6-transport-settings-and-proxy-trust).
 
 ---
 
@@ -2252,13 +2258,19 @@ lists the test classes per module (test counts are the `test_*` methods).
 | `test_impersonation.py` | 5 | 28 | Permissions, audit, cookie round-trip, stop-impersonation; parked identity binding before rotation, unavailable accounts during refresh, and invalid refresh ending only the browser session |
 | `test_throttling.py` | 4 | 15 | Per-IP 429 boundaries for all six public auth write endpoints; budgets are independent; production settings wiring and spoofed `X-Forwarded-For` regression coverage; headers neither evade the login bucket without a trusted proxy nor escape the right-most-entry bucket with one trusted hop |
 
-**`config/test_settings_guards.py`** (4 test classes, 22 tests):
+**`config/test_settings_guards.py`** (5 test classes, 24 tests):
 
 | Class | Tests | Description |
 |---|---:|---|
 | `ValidateSecretKeyTests` | 4 | Rejects empty and placeholder production keys while allowing them in development |
 | `ProductionHostsCheckTests` | 11 | Rejects unsafe hosts and frontend origins; accepts a complete production configuration; preserves distinct system-check IDs |
 | `ProductionConfigurationCheckTests` / `SeedDemoGuardTests` | 7 | Rejects empty/insecure CSRF origins, console or incomplete SMTP mail, and empty WebAuthn settings; refuses demo seeding in production |
+| `SettingsGuardsTests` | 2 | Isolated settings imports ignore forwarded HTTPS with `NUM_PROXIES=0` and trust it with `NUM_PROXIES=1` |
+
+**`config/test_transport_behavior.py`** (`TransportBehaviorTests`, 5 tests):
+HTTP redirects, trusted forwarded HTTPS with HSTS, spoofed forwarded HTTPS,
+and actual Gunicorn parsing into Django security middleware with disabled
+proxy trust and conflicting legacy scheme headers.
 
 **`zev/tests.py`** (32 test classes):
 

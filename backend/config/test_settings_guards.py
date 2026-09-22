@@ -1,5 +1,10 @@
 """Guards that keep a DEBUG=False deployment from starting insecure."""
 
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 from django.core.checks import Error
 from django.core.exceptions import ImproperlyConfigured
 from django.core.management import call_command
@@ -144,3 +149,43 @@ class SeedDemoGuardTests(TestCase):    # TestCase, not SimpleTestCase: @transact
     def test_seed_demo_refuses_in_production(self):
         with self.assertRaises(CommandError):
             call_command("seed_demo")
+
+
+def _proxy_header_in_subprocess(num_proxies):
+    """Import settings in an isolated interpreter (in-process reload leaks
+    attributes between cases depending on test order)."""
+    env = os.environ.copy()
+    env.update(
+        {
+            "DJANGO_SETTINGS_MODULE": "config.settings",
+            "DEBUG": "True",
+            "SECRET_KEY": "test-settings-guard-key",
+            "NUM_PROXIES": num_proxies,
+        }
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import django; django.setup(); "
+            "from django.conf import settings; "
+            "print(getattr(settings, 'SECURE_PROXY_SSL_HEADER', None))",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+class SettingsGuardsTests(SimpleTestCase):
+    def test_forwarded_proto_is_not_trusted_without_configured_proxy(self):
+        self.assertEqual(_proxy_header_in_subprocess("0"), "None")
+
+    def test_forwarded_proto_is_trusted_when_configured(self):
+        self.assertEqual(
+            _proxy_header_in_subprocess("1"),
+            "('HTTP_X_FORWARDED_PROTO', 'https')",
+        )

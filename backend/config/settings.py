@@ -77,6 +77,19 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
+# ── Proxy and browser transport hardening ─────────────────────────────────────
+# Trust X-Forwarded-Proto only when proxies are explicitly configured.
+NUM_PROXIES = env.int("NUM_PROXIES", default=0)
+if NUM_PROXIES < 0:
+    raise ImproperlyConfigured("NUM_PROXIES must be >= 0.")
+if NUM_PROXIES > 0:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_SSL_REDIRECT = env.bool("SECURE_SSL_REDIRECT", default=not DEBUG)
+SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", default=0 if DEBUG else 31536000)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env.bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", default=False)
+SECURE_HSTS_PRELOAD = False
+SESSION_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_HTTPONLY = False
 CSRF_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SAMESITE = "Lax"
@@ -214,13 +227,11 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 50,
 }
 
-# Trusted X-Forwarded-For hops (0 = REMOTE_ADDR only). See
+# Trusted X-Forwarded-For hops (0 = REMOTE_ADDR only; NUM_PROXIES itself is
+# defined and validated in the transport section above). See
 # charts/openzev/README.md ("Reverse proxies and NUM_PROXIES").
 # Both DRF throttling and config.client_ip read the REST_FRAMEWORK key below
 # (single source of truth); the top-level name keeps the env var discoverable.
-NUM_PROXIES = env.int("NUM_PROXIES", default=0)
-if NUM_PROXIES < 0:
-    raise ImproperlyConfigured("NUM_PROXIES must be >= 0.")
 REST_FRAMEWORK["NUM_PROXIES"] = NUM_PROXIES
 
 # ── Upload hardening volume caps ──────────────────────────────────────────────

@@ -260,7 +260,7 @@ This document tracks shipped features, active work, planned ideas, and deferred 
 | UI redesign + print parity | `shipped` | — | [spec](specs/2026-08-ui-redesign-pdf-style.md), [ADR 0014](adr/0014-print-parity-and-ui-tokens.md) |
 | Backend test suite (pytest, per-app test modules) | `shipped` | — | — |
 | Integrated backup and restore — scheduled, encrypted, verifiable backups to local/S3 with retention, whole-instance recovery from the command line, per-ZEV rollback with a safety backup | `shipped` | — | [spec](specs/2026-09-backup-and-restore.md), [ADR 0023](adr/0023-backup-archives-preserve-keys.md), [ADR 0024](adr/0024-backup-encryption-key.md), #767. Replaces the `pg_dump`-only guidance, which omits `MEDIA_ROOT`. Not built: real-object-store (S3) smoke test, Helm provisioning of a shared local destination volume |
-| Helm chart maturity (resource limits, liveness probes, secrets management) | `idea` | `medium` | Current chart is functional but minimal |
+| Helm chart maturity (resource limits, liveness probes, secrets management) | `in-progress` | `medium` | Non-root images, fail-closed secrets, resource bounds, and transport hardening; NetworkPolicy remains deployment-specific follow-up |
 | Observability — structured application logging and metrics endpoint | `idea` | `medium` | No Prometheus metrics or structured log format today |
 | End-to-end test suite (Playwright or similar) | `idea` | `medium` | Playwright is used for automated user-guide screenshots; no interactive end-to-end coverage of user flows yet |
 | Frontend component-level unit tests | `shipped` | — | `npm run test:unit` (Vitest) covers API helpers, reducers and page-level logic |

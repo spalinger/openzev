@@ -34,5 +34,14 @@ LABEL org.opencontainers.image.title="$OCI_TITLE" \
 ARG NGINX_CONF=nginx.conf
 COPY frontend/$NGINX_CONF /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
-EXPOSE 80
+# Run as UID 10001: pid in /tmp (not root-owned
+# /var/run), writable cache/log/html dirs, and error output on stderr. The
+# server-level access log in the selected nginx config overrides the inherited
+# http-level log, so the base directive is left intact.
+RUN sed -i '/^user[[:space:]]/d' /etc/nginx/nginx.conf \
+    && sed -i 's#^pid[[:space:]].*#pid /tmp/nginx.pid;#' /etc/nginx/nginx.conf \
+    && sed -i -e 's#^\(\s*\)error_log[[:space:]].*#\1error_log /dev/stderr warn;#' /etc/nginx/nginx.conf \
+    && chown -R 10001:10001 /var/cache/nginx /var/log/nginx /usr/share/nginx/html
+USER 10001:10001
+EXPOSE 8080
 CMD ["nginx", "-g", "daemon off;"]

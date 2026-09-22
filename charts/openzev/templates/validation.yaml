@@ -1,0 +1,12 @@
+{{- if not .Values.debug }}
+{{/* Fail closed: production renders need real secrets and URLs (debug=true skips these for local experiments). */}}
+{{- if and (not .Values.secretKey.existingSecret.name) (eq .Values.secretKey.value "change-me-in-production-use-a-long-random-string") }}
+{{- fail "secretKey.value is the placeholder; set secretKey.existingSecret.name or secretKey.value" }}
+{{- end }}
+{{- if and (not .Values.database.existingSecret.name) (eq .Values.database.url "postgres://openzev:openzev@db:5432/openzev") }}
+{{- fail "database.url is the local default; set database.existingSecret.name or database.url" }}
+{{- end }}
+{{- if eq .Values.frontendUrl "http://localhost:5173" }}
+{{- fail "frontendUrl is localhost; set the deployed HTTPS origin" }}
+{{- end }}
+{{- end }}
