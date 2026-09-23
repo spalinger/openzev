@@ -2327,6 +2327,7 @@ export const it = {
             noData: 'Nessun dato di misurazione per il periodo selezionato.',
             perParticipant: 'Per partecipante',
             noParticipantData: 'Nessun dato per partecipante per il periodo selezionato.',
+            showDetailsFor: 'Mostra i dettagli di {{name}}',
             col: {
                 participant: 'Partecipante',
                 consumption: 'Consumo',
