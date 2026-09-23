@@ -4,7 +4,8 @@
     "config:recommended",
     ":dependencyDashboard",
     ":semanticCommits",
-    ":automergeMinor"
+    ":automergeMinor",
+    "helpers:pinGitHubActionDigestsToSemver"
   ],
   "labels": [
     "dependencies"
@@ -13,7 +14,8 @@
   "packageRules": [
     {
       "matchManagers": ["github-actions"],
-      "groupName": "github-actions"
+      "groupName": "github-actions",
+      "automerge": false
     },
     {
       "matchManagers": ["npm"],
