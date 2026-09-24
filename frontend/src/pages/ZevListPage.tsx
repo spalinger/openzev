@@ -1063,8 +1063,8 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
                                             {zev.zev_type.toUpperCase()}
                                         </span>
                                         {!isValidIban(zev.bank_iban ?? '') && (
-                                            <span className="badge badge-warning" title={t('pages.zevs.setupIncompleteHint')}>
-                                                {t('pages.zevs.setupIncomplete')}
+                                            <span className="badge badge-warning" title={t('pages.zevs.ibanWarningHint')}>
+                                                {t('pages.zevs.ibanWarning')}
                                             </span>
                                         )}
                                         {zev.disabled_at && (

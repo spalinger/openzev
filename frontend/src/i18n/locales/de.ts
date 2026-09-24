@@ -2074,8 +2074,8 @@ export const de = {
                 semi_annual: 'Halbjährlich',
                 annual: 'Jährlich',
             },
-            setupIncomplete: 'Setup unvollständig',
-            setupIncompleteHint: 'Die Abrechnungseinstellungen sind unvollständig: Es ist keine gültige IBAN hinterlegt, daher können noch keine QR-Rechnungen ausgestellt werden.',
+            ibanWarning: 'IBAN fehlt oder ist ungültig',
+            ibanWarningHint: 'Hinterlegen Sie eine gültige IBAN in den ZEV-Abrechnungseinstellungen, um zahlbare QR-Rechnungen auszustellen.',
             ownerModal: {
                 title: 'Verantwortliche Person für ZEV festlegen',
                 intro: 'Verantwortliche Person für {{name}} auswählen.',
