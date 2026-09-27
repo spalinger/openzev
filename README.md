@@ -370,6 +370,8 @@ npm run dev
 
 Frontend dev URL: <http://localhost:5173>
 
+For `docker-compose.dev.yml` with non-default frontend ports, export `CORS_ALLOWED_ORIGINS` with your frontend origin before starting the stack. `CSRF_TRUSTED_ORIGINS` follows it unless explicitly overridden.
+
 > Cookie sessions require same-origin (or same-host reverse proxy, e.g. `VITE_API_BASE_URL=/api/v1`). Same-host different-port dev (`localhost:5173` → `localhost:8001`) works with `CORS_ALLOWED_ORIGINS`/`CSRF_TRUSTED_ORIGINS`. Truly cross-hostname (`app.example.com` → `api.example.com`) cannot be fixed by those settings alone — JS cannot read a cross-origin `csrftoken` cookie — use a same-origin reverse proxy.
 
 ### 3) Celery worker and Beat scheduler
