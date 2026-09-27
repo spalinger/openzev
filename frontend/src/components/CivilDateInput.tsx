@@ -13,6 +13,11 @@ interface CivilDateInputProps {
     clearable?: boolean
     /** Ref to the focusable trigger, e.g. to focus the field from a deep link. */
     inputRef?: Ref<HTMLButtonElement>
+    /** Disabled-ZEV owner view: value stays visible but cannot change. */
+    disabled?: boolean
+    /** Validation message and stable id for the focusable date trigger. */
+    error?: string
+    errorId?: string
 }
 
 /**
@@ -23,7 +28,7 @@ interface CivilDateInputProps {
  * no `Date` round-trip, no timezone shift in either direction. Only the
  * visible label is formatted to the user's short date format.
  */
-export function CivilDateInput({ value, onChange, minDate, maxDate, clearable = true, inputRef }: CivilDateInputProps) {
+export function CivilDateInput({ value, onChange, minDate, maxDate, clearable = true, inputRef, disabled = false, error, errorId }: CivilDateInputProps) {
     const { settings } = useAppSettings()
     return (
         <DatePickerInput
@@ -33,7 +38,10 @@ export function CivilDateInput({ value, onChange, minDate, maxDate, clearable = 
             minDate={minDate}
             maxDate={maxDate}
             clearable={clearable}
+            disabled={disabled}
             ref={inputRef}
+            error={error}
+            errorProps={errorId ? { id: errorId, className: 'field-error', role: 'alert' } : undefined}
         />
     )
 }

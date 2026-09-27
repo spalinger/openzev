@@ -89,8 +89,13 @@ Admins can create a ZEV together with a new responsible-person account in a sing
 
 ![ZEV settings](screenshots/06-zev-settings.png)
 
-Each tab has its own **Save** button, and saving on any tab saves the whole
-form.
+One save bar serves every tab: **Unsaved changes** with **Save changes** /
+**Discard changes**. Switching tabs keeps your edits. Saving checks all
+settings; if another tab has an invalid field, the page opens it and focuses
+the field. If the server rejects a field, its error appears beside the control
+and focus returns to that control once saving finishes. Your edits remain
+available to correct and retry. Switching communities asks for confirmation
+while edits are unsaved. Save or discard before navigating to another page.
 
 ### General tab
 
@@ -258,12 +263,21 @@ From the page, **Send me a sign-in link** emails a one-time link to the address 
 
 **ZEV Owners** can customize invoice email templates in **ZEV Settings → Documents & emails**:
 
+![Document and email settings](screenshots/06c-zev-documents-settings.png)
+
 - **Subject line** — Email subject sent with invoices
 - **Email body** — Message body sent with invoice PDF attachment
 
 Both fields support variable placeholders such as `{invoice_number}`, `{zev_name}`, `{participant_name}`, `{period_start}`, `{period_end}`, and `{total_chf}`. See [Email Configuration → Email Templates](10-email-configuration.md#email-templates) for the full variable reference.
 
-Leave fields blank to use the admin's global invoice-email template when one is customized, or the shipped default otherwise. If a template contains an invalid placeholder, the system falls back to defaults automatically.
+Subject and body are independent: each shows the platform text with
+**Using platform default**, or your own text with **Customized for this ZEV**.
+**Customize** starts the editor from the platform text (or blank if it cannot
+be loaded); **Use platform default** clears one field. Like any edit, both take
+effect on **Save changes** only. Text matching today's platform default still
+counts as a customization once saved.
+
+If a template contains an invalid placeholder, the system falls back to defaults automatically.
 
 For more details on email delivery, see [Email Configuration](10-email-configuration.md). For system-wide default email templates managed by admins, see [Platform → Templates → Email templates](14-admin-console.md#email-templates).
 

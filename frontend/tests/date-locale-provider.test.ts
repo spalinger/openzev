@@ -29,7 +29,10 @@ describe('CivilDateInput under DateLocaleProvider', () => {
         container.remove()
     })
 
-    const renderPicker = (onChange: (iso: string | null) => void) =>
+    const renderPicker = (
+        onChange: (iso: string | null) => void,
+        validation: { error?: string; errorId?: string } = {},
+    ) =>
         act(() => {
             root.render(
                 createElement(
@@ -41,6 +44,7 @@ describe('CivilDateInput under DateLocaleProvider', () => {
                         createElement(CivilDateInput, {
                             value: '2026-01-15',
                             onChange,
+                            ...validation,
                         }),
                     ),
                 ),
@@ -82,5 +86,16 @@ describe('CivilDateInput under DateLocaleProvider', () => {
             clearButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
         })
         expect(received.at(-1)).toBeNull()
+    })
+
+    it('puts validation semantics on the focusable date trigger', () => {
+        renderPicker(() => undefined, {
+            error: 'Enter a start date.',
+            errorId: 'start-date-error',
+        })
+        const trigger = container.querySelector<HTMLButtonElement>('button[data-dates-input]')
+        expect(trigger?.getAttribute('aria-invalid')).toBe('true')
+        expect(trigger?.getAttribute('aria-describedby')).toBe('start-date-error')
+        expect(container.querySelector('#start-date-error')?.textContent).toBe('Enter a start date.')
     })
 })

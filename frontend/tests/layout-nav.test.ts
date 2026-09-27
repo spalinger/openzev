@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react'
@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Layout } from '../src/components/Layout'
 import { fetchFeasibilityCalculatorEnabled } from '../src/lib/api/feasibility'
+import { setZevUnsavedDraftGuard } from '../src/lib/zevUnsavedGuard'
 import type { UserRole } from '../src/types/api'
 
 vi.mock('react-i18next', () => ({
@@ -72,7 +73,7 @@ function mockSession(role: UserRole, impersonating = false, managedZevCount = 2)
         managedZevs: manages ? [ZEV, SECOND_ZEV].slice(0, managedZevCount) : [],
         selectedZevId: manages ? 1 : '',
         selectedZev: manages ? ZEV : null,
-        isSelectable: role === 'admin',
+        isSelectable: role === 'admin' || (role === 'zev_owner' && managedZevCount > 1),
         isLoading: false,
         setSelectedZevId: vi.fn(),
     })
@@ -134,6 +135,60 @@ async function renderLayoutAt(path: string) {
         },
     }
 }
+
+afterEach(() => setZevUnsavedDraftGuard(false))
+
+describe('community switching with unsaved settings', () => {
+    it.each(['admin', 'zev_owner'] as const)('lets a %s cancel or confirm a dirty community switch', async (role) => {
+        mockSession(role)
+        setZevUnsavedDraftGuard(true)
+        const page = await renderLayoutAt('/zev-settings/general')
+        try {
+            const trigger = page.container.querySelector<HTMLButtonElement>('.sidebar-zev-menu .user-menu-trigger')!
+            async function selectSecond() {
+                await act(async () => trigger.click())
+                await act(async () => page.container.querySelectorAll<HTMLButtonElement>('.zev-dropdown-item')[1].click())
+            }
+            await selectSecond()
+            expect(mockManagedZev().setSelectedZevId).not.toHaveBeenCalled()
+            const dialog = page.container.querySelector('[role="dialog"]')!
+            expect(dialog.textContent).toContain('pages.zevSettings.unsavedGuardSwitchMessage')
+            const cancel = Array.from(dialog.querySelectorAll('button')).find((button) => button.textContent === 'common.cancel')!
+            await act(async () => cancel.click())
+            expect(page.container.querySelector('[role="dialog"]')).toBeNull()
+            expect(mockManagedZev().setSelectedZevId).not.toHaveBeenCalled()
+            expect(document.activeElement).toBe(trigger)
+            await selectSecond()
+            const confirm = Array.from(page.container.querySelectorAll('[role="dialog"] button'))
+                .find((button) => button.textContent === 'pages.zevSettings.switchWithoutSaving') as HTMLButtonElement
+            await act(async () => confirm.click())
+            expect(mockManagedZev().setSelectedZevId).toHaveBeenCalledExactlyOnceWith(2)
+            expect(page.container.querySelector('[role="dialog"]')).toBeNull()
+        } finally {
+            page.unmount()
+        }
+    })
+
+    it('does not prompt for the selected community or after the draft is cleared', async () => {
+        mockSession('admin')
+        setZevUnsavedDraftGuard(true)
+        const page = await renderLayoutAt('/zev-settings/general')
+        try {
+            const trigger = page.container.querySelector<HTMLButtonElement>('.sidebar-zev-menu .user-menu-trigger')!
+            await act(async () => trigger.click())
+            await act(async () => page.container.querySelectorAll<HTMLButtonElement>('.zev-dropdown-item')[0].click())
+            expect(page.container.querySelector('[role="dialog"]')).toBeNull()
+            expect(mockManagedZev().setSelectedZevId).not.toHaveBeenCalled()
+            setZevUnsavedDraftGuard(false)
+            await act(async () => trigger.click())
+            await act(async () => page.container.querySelectorAll<HTMLButtonElement>('.zev-dropdown-item')[1].click())
+            expect(mockManagedZev().setSelectedZevId).toHaveBeenCalledExactlyOnceWith(2)
+            expect(page.container.querySelector('[role="dialog"]')).toBeNull()
+        } finally {
+            page.unmount()
+        }
+    })
+})
 
 describe('phase-3 hub nav (see docs/specs/2026-03-community-and-access.md §9.3)', () => {
     it('admin sees operate entries, Setup, Feasibility and the consolidated Platform group', async () => {

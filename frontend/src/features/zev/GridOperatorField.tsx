@@ -12,6 +12,10 @@ type GridOperatorFieldProps = {
   elcomId?: number | null
   onChange: (next: { grid_operator: string; grid_operator_elcom_id: number | null }) => void
   label: string
+  /** Disabled-ZEV owner view: value stays visible but cannot change. */
+  disabled?: boolean
+  error?: string
+  errorId?: string
 }
 
 /**
@@ -26,7 +30,7 @@ type GridOperatorFieldProps = {
  * separately, so the two can never disagree: editing a picked name by one
  * character drops the id, which is the honest outcome.
  */
-export function GridOperatorField({ value, elcomId, onChange, label }: GridOperatorFieldProps) {
+export function GridOperatorField({ value, elcomId, onChange, label, disabled = false, error, errorId }: GridOperatorFieldProps) {
   const { t } = useTranslation()
 
   const operatorsQuery = useQuery({
@@ -58,6 +62,9 @@ export function GridOperatorField({ value, elcomId, onChange, label }: GridOpera
       value={value}
       data={names}
       limit={20}
+      disabled={disabled}
+      error={error}
+      errorProps={errorId ? { id: errorId, className: 'field-error', role: 'alert' } : undefined}
       // The list load is best-effort: if it fails the field keeps working as
       // the plain text input it replaced, which is what a ZEV wizard needs.
       description={

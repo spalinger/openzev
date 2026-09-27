@@ -521,12 +521,23 @@ corresponding hub tab or `/admin/system-settings` tab.
 
 Accessible to `admin` and `zev_owner` at `/zev-settings` (General) and
 `/zev-settings/:tab`. `ZevSettingsTabRoute` rejects unknown tabs. Uses the
-globally selected ZEV from `useManagedZev()`; all tabs share the same form
-state and submit the complete form through `updateZev`. Switching tabs
-preserves unsaved edits; changing the selected ZEV reloads its values.
-Success invalidates the ZEV list and the cockpit and period-list readiness
-queries. `ZevGeneralSettingsFields` accepts `group: general | billing | documents`;
-omitting it renders every group for existing full-form consumers.
+globally selected ZEV from `useManagedZev()`; the three editing tabs share one
+draft and saved baseline tied to a ZEV id and selection epoch, with derived dirty
+state, persisted through a single save bar (one PATCH). Tab switches preserve
+the draft; same-ZEV refresh preserves a dirty draft and is accepted when
+clean; selecting another ZEV re-initializes and clears errors before editing
+is possible. Save submits the whole draft against its captured ZEV id and epoch;
+on success the returned `Zev`
+becomes draft and baseline, the list cache entry is updated in place, and list
++ both readiness queries invalidate. A refetch older than the accepted save's
+`updated_at` cannot replace its draft. Late responses for a previous selection
+never touch the new draft. Discard restores the baseline with no request.
+Switching communities confirms while dirty through `Layout`; browser reload
+and close use `beforeunload`. Ordinary in-app route navigation abandons the
+draft without a prompt. A pending save disables controls and actions for its
+own draft only. `ZevGeneralSettingsFields` accepts `group: general | billing |
+documents`; omitting it renders every group for existing full-form consumers.
+Every validated control carries a `data-zev-field` anchor for focus jumps.
 
 - **General** (`general`): name, start date, ZEV type, grid operator (including
   ElCom ID and tariff-source URL), grid connection point.
@@ -548,10 +559,36 @@ omitting it renders every group for existing full-form consumers.
 - **Export / transfer** (`export`): opens `ZevExportModal` for the selected
   ZEV. Import remains on the platform ZEVs tab.
 
+**Cross-tab validation:** `attemptSave` runs `validateZevForm` over the whole
+draft first (required name/start date, IBAN checksum, required payment term 1–365
+integer, VAT-number/mode pairing — mirroring `ZevSerializer`). On failure the
+page sets per-field inline messages (`fieldErrors`, cleared per field on
+edit), navigates to the first invalid field's tab (`ZEV_FIELD_TABS`), and
+focuses it via its `data-zev-field` anchor after the target tab and error UI
+render and pending-save controls are enabled. The hidden VAT number falls back
+to the VAT mode; the ElCom ID falls back to the grid-operator autocomplete.
+DRF 400 payloads go through the same jump via `parseZevFieldErrors` + the
+flattened generic banner. Every editable field exposes its inline server error
+through `aria-invalid` and `aria-describedby`; grid-operator name and ElCom ID
+errors share the autocomplete. Email subject and body errors appear beside
+their fields even when a field uses the platform default. Focus prefers the
+input/textarea over reset actions; an inherited email field falls back to
+its Customize button, and dates use their date-picker trigger.
+
+**Save bar:** one compact sticky bottom bar (`.zev-settings-save-bar`,
+opaque `var(--surface-card)`, safe-area padding), rendered on every tab only
+while dirty, saving, or showing a save error — `Unsaved changes` plus
+`Discard` / `Save changes` (saving shows the saving label with both actions
+disabled). On editing tabs the external Save button submits the active form
+with native constraint validation disabled, so click and Enter use the same
+whole-draft validation. Audit and Export keep the same in-place actions; no
+back-to-settings detour. Disabled ZEVs are fully read-only for owners; admins
+keep edit rights.
+
 **Email template fields** (via `ZevEmailTemplateFields`):
-- Subject input and 10-row body textarea use the currently effective global invoice-email template as placeholder: the DB override when present, otherwise the hardcoded default.
-- Reset controls appear only for non-empty values; they clear the ZEV form override in local state, and the normal document-form save persists that change.
-- The shared `FieldReference` is always rendered from the owner-readable global response's `fields` catalog. It supports search, examples, occurrence badges, and caret insertion for `{invoice_number}`, `{zev_name}`, `{participant_name}`, `{period_start}`, `{period_end}`, `{due_date}` (empty when absent), and `{total_chf}`. The same component is used by both admin email and PDF editors.
+- One sentence of guidance; each field carries its own small source badge beside the label (`Using platform default` / `Customized for this ZEV`) with its action above the field. Subject and body are independent.
+- Explicit choice, no placeholder inheritance: the default state shows the platform text read-only (DB override when present, otherwise the hardcoded default) plus `Customize`, which seeds the editor with that text for real editing. The custom state shows the editor plus `Use platform default`, which only stages `''`; Save persists it, Discard restores the saved value. Text matching today's platform default still counts as an override once saved. Owner reads of the fallback are authorized (`IsZevOwnerOrAdmin` on the `invoice_email` detail GET); a failed fetch shows one error and allows customization from a blank editor. `notes`, `local_tariff_notes`, and `additional_contract_notes` have no badges.
+- The shared `FieldReference` hides behind an `Insert field` toggle (default closed; with no editor focused and the body on default, a token click starts the body from the default text on a new line). Open, it renders from the owner-readable global response's `fields` catalog with search, examples, occurrence badges, and caret insertion for `{invoice_number}`, `{zev_name}`, `{participant_name}`, `{period_start}`, `{period_end}`, `{due_date}` (empty when absent), and `{total_chf}`. The same component is used by both admin email and PDF editors.
 
 ### 9.8 TypeScript types
 
@@ -753,7 +790,7 @@ Tests cover dashboard access (`test_invoice_dashboard_is_admin_only`) confirming
   configured queue selection, broken-DB-probe degradation, zero-worker
   degradation, and real Kombu publication failure without reconnect retries.
   Tests never broadcast to real workers.
-- ZevSettingsPage: the root and sub-routes share `ZevSettingsTabRoute`, preserving unsaved form state when leaving the initial General tab. General settings + email-template sections both submit via `updateZev`; success invalidates the ZEV list and both readiness forms. `zev-settings-tabs.test.ts` covers shared form state and update behavior; the API-backed effective-template placeholders, clear-only reset controls, and shared `FieldReference` are implementation behavior not directly page-tested.
+- ZevSettingsPage: `zev-settings-tabs.test.ts` covers shared draft saves, Discard, refresh/version ordering, validation focus, email errors, pending saves across ZEV switches, audit/export actions, `beforeunload`, and disabled-ZEV read-only. Its real field components cover delayed save rejections, same-tab and cross-tab email editor focus, and server-error associations for native, autocomplete and date controls. `layout-nav.test.ts` covers dirty community-switch confirmation/cancellation for owners and admins, and clean/current-community switches. `zev-email-template-fields.test.ts` covers field insertion, fallback loading/failure, customization, and read-only mode.
 
 ### 13.3 Acceptance criteria
 

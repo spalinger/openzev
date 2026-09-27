@@ -170,6 +170,8 @@ export interface FeatureFlagInput {
 
 export interface Zev {
     id: string
+    /** Server revision used to ignore list responses older than an accepted save. */
+    updated_at?: string
     name: string
     start_date: string
     owner: number

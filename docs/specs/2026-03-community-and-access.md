@@ -1307,7 +1307,13 @@ community it is unmounted; participants get no switcher.
 The switcher is a keyboard-operable disclosure: opening it focuses the first
 enabled community button (or the empty/loading panel), Escape closes it and
 returns focus to the trigger, selecting a community closes it and restores
-focus to the trigger, and tabbing out closes it. On mobile, Escape also closes
+focus to the trigger, and tabbing out closes it. When the ZEV settings draft
+is dirty, selecting a different community opens `ConfirmDialog`: Cancel keeps
+the current selection and edits; Switch without saving changes the selection
+and drops the draft. Selecting the current community or switching with a clean
+draft opens no confirmation. `ZevSettingsPage` publishes and clears this state
+through `zevUnsavedGuard`; `layout-nav.test.ts` covers both owner and admin
+confirmation flows. On mobile, Escape also closes
 the sidebar drawer and returns focus to its menu button. Opening one disclosure
 closes the other. The account disclosure
 in the top bar follows the same focus and dismissal rules while keeping its
