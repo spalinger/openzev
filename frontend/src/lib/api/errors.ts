@@ -43,6 +43,10 @@ export function formatApiError(error: unknown, fallbackMessage = 'Request failed
     if (typeof detail === 'string' && detail.trim()) {
       return detail
     }
+    const message = (responseData as { error?: unknown }).error
+    if (typeof message === 'string' && message.trim()) {
+      return message
+    }
   }
 
   const flattened = flattenErrorMessages(responseData)

@@ -89,13 +89,9 @@ Admins can create a ZEV together with a new responsible-person account in a sing
 
 ![ZEV settings](screenshots/06-zev-settings.png)
 
-One save bar serves every tab: **Unsaved changes** with **Save changes** /
-**Discard changes**. Switching tabs keeps your edits. Saving checks all
-settings; if another tab has an invalid field, the page opens it and focuses
-the field. If the server rejects a field, its error appears beside the control
-and focus returns to that control once saving finishes. Your edits remain
-available to correct and retry. Switching communities asks for confirmation
-while edits are unsaved. Save or discard before navigating to another page.
+One save bar serves every tab. Switching tabs keeps your edits; **Save changes**
+checks all settings and opens the first invalid field. Switching communities
+or leaving settings asks for confirmation while edits are unsaved.
 
 ### General tab
 
@@ -270,12 +266,10 @@ From the page, **Send me a sign-in link** emails a one-time link to the address 
 
 Both fields support variable placeholders such as `{invoice_number}`, `{zev_name}`, `{participant_name}`, `{period_start}`, `{period_end}`, and `{total_chf}`. See [Email Configuration → Email Templates](10-email-configuration.md#email-templates) for the full variable reference.
 
-Subject and body are independent: each shows the platform text with
-**Using platform default**, or your own text with **Customized for this ZEV**.
-**Customize** starts the editor from the platform text (or blank if it cannot
-be loaded); **Use platform default** clears one field. Like any edit, both take
-effect on **Save changes** only. Text matching today's platform default still
-counts as a customization once saved.
+Subject and body can inherit the platform template or use your own text
+independently. Their badges show the saved choice; **Unsaved changes** marks a
+staged edit. **Use platform default** takes effect after **Save changes**. See
+[Email Configuration](10-email-configuration.md#email-templates) for details.
 
 If a template contains an invalid placeholder, the system falls back to defaults automatically.
 

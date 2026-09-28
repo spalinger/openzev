@@ -16,13 +16,46 @@ import {
     updateAnnualStatementPdfTemplate,
 } from '../lib/api/invoices'
 import { queryKeys } from '../lib/api/queryKeys'
-import type { PdfTemplateResponse, TemplateField, TemplateFieldGroup } from '../types/api'
+import { formatApiError } from '../lib/api/errors'
+import type { PdfTemplateMutationResponse, PdfTemplateResponse, TemplateField, TemplateFieldGroup } from '../types/api'
 import { useToast } from '../lib/toast'
 import { PdfPreview } from '../components/PdfPreview'
+import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
+import { TemplateSourceStatus } from '../components/TemplateSourceStatus'
+import { useTemplateDraft } from '../lib/useTemplateDraft'
 
 const PDF_TEMPLATE_TABS = ['invoice', 'contract', 'annual_statement'] as const
 
 export type PdfTemplateTab = (typeof PDF_TEMPLATE_TABS)[number]
+
+const PDF_TEMPLATE_CONFIG = {
+    invoice: {
+        queryKey: queryKeys.admin.invoicePdfTemplate,
+        fetch: fetchInvoicePdfTemplate,
+        save: updateInvoicePdfTemplate,
+        reset: resetInvoicePdfTemplate,
+    },
+    contract: {
+        queryKey: queryKeys.admin.contractPdfTemplate,
+        fetch: fetchContractPdfTemplate,
+        save: updateContractPdfTemplate,
+        reset: resetContractPdfTemplate,
+    },
+    annual_statement: {
+        queryKey: queryKeys.admin.annualStatementPdfTemplate,
+        fetch: fetchAnnualStatementPdfTemplate,
+        save: updateAnnualStatementPdfTemplate,
+        reset: resetAnnualStatementPdfTemplate,
+    },
+} satisfies Record<PdfTemplateTab, {
+    queryKey: () => readonly string[]
+    fetch: () => Promise<PdfTemplateResponse>
+    save: (content: string) => Promise<PdfTemplateMutationResponse>
+    reset: () => Promise<PdfTemplateMutationResponse>
+}>
+
+const selectPdfContent = (data: PdfTemplateResponse) => data.content
+const equalPdfContent = (left: string, right: string) => left === right
 
 export interface TemplateTextareaHandle {
     insert: (variable: string, keepFocus: boolean) => void
@@ -33,10 +66,12 @@ const TemplateTextarea = forwardRef(function TemplateTextarea(
         value,
         onChange,
         groups,
+        disabled = false,
     }: {
         value: string
         onChange: (value: string) => void
         groups: TemplateFieldGroup[]
+        disabled?: boolean
     },
     ref,
 ) {
@@ -107,6 +142,7 @@ const TemplateTextarea = forwardRef(function TemplateTextarea(
                 rows={24}
                 className="template-editor"
                 spellCheck={false}
+                disabled={disabled}
             />
             <div
                 ref={overlayRef}
@@ -187,14 +223,20 @@ function TemplateEditor({
     data: PdfTemplateResponse | undefined
     isLoading: boolean
     isError: boolean
-    onSave: (content: string) => void
-    onReset: () => void
+    onSave: (content: string) => Promise<PdfTemplateMutationResponse>
+    onReset: () => Promise<PdfTemplateMutationResponse>
     isSaving: boolean
     isResetting: boolean
     templateType: 'invoice' | 'contract' | 'annual_statement'
 }) {
     const { t } = useTranslation()
-    const [content, setContent] = useState('')
+    const [mutationError, setMutationError] = useState<string | null>(null)
+    const { dialog, confirm, handleConfirm, handleCancel, isLoading: dialogLoading } = useConfirmDialog()
+    const busy = isSaving || isResetting || dialogLoading
+    const { draft, setDraft, saved, accept } = useTemplateDraft(data, busy, selectPdfContent, equalPdfContent)
+    const content = draft ?? ''
+    const savedContent = saved
+    const setContent = setDraft
     const [showPreview, setShowPreview] = useState(true)
     const [debugSource, setDebugSource] = useState(false)
     const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -207,11 +249,37 @@ function TemplateEditor({
     const abortRef = useRef<AbortController | null>(null)
     const textareaHandleRef = useRef<TemplateTextareaHandle>(null)
 
-    useEffect(() => {
-        if (data?.content != null) {
-            setContent(data.content)
+    async function save() {
+        if (busy) return
+        setMutationError(null)
+        try {
+            const result = await onSave(content)
+            accept(result.content)
+        } catch (error) {
+            setMutationError(formatApiError(error, t('common.error')))
         }
-    }, [data])
+    }
+
+    function askReset() {
+        if (busy || !data?.is_customized) return
+        confirm({
+            title: t('admin.resetBuiltInConfirmTitle', {
+                template: t(templateType === 'invoice' ? 'admin.invoiceTemplate'
+                    : templateType === 'contract' ? 'admin.contractTemplate' : 'admin.annualStatementTemplate'),
+            }),
+            message: t('admin.resetBuiltInConfirmMessage'),
+            confirmText: t('admin.resetBuiltIn'),
+            onConfirm: async () => {
+                setMutationError(null)
+                try {
+                    const result = await onReset()
+                    accept(result.content)
+                } catch (error) {
+                    setMutationError(formatApiError(error, t('common.error')))
+                }
+            },
+        })
+    }
 
     // Single render path shared by the debounced auto-render and the explicit
     // Render button: owns the revision guard, the abort controller and the
@@ -266,7 +334,6 @@ function TemplateEditor({
         return () => window.clearTimeout(timer)
     }, [content, showPreview, debugSource, renderPreview])
 
-    // Cleanup on unmount.
     useEffect(
         () => () => {
             revisionRef.current += 1
@@ -277,19 +344,24 @@ function TemplateEditor({
     )
 
     const handleInsert = useCallback((variable: string, keepFocus: boolean) => {
+        if (busy) return
         textareaHandleRef.current?.insert(variable, keepFocus)
-    }, [])
+    }, [busy])
 
     return (
+        <>
         <div className="content-with-aside">
             <section className="card page-stack">
-                {data?.is_customized && (
-                    <div><span className="badge badge-info">{t('admin.customized')}</span></div>
-                )}
                 {isLoading && <PageSkeleton variant="card" />}
                 {isError && <p className="error-banner">{t('common.error')}</p>}
                 {data && (
                     <>
+                        <TemplateSourceStatus
+                            source={data.is_customized ? 'customized' : 'builtIn'}
+                            changed={savedContent !== null && content !== savedContent}
+                            description={t('admin.platformPdfScope')}
+                        />
+                        {mutationError && <p className="error-banner" role="alert">{mutationError}</p>}
                         {data.is_stale && (
                             <div className="warning-banner" role="alert">
                                 {t('admin.staleTemplate')}
@@ -303,6 +375,7 @@ function TemplateEditor({
                                     value={content}
                                     onChange={setContent}
                                     groups={data.fields ?? []}
+                                    disabled={busy}
                                 />
                             </label>
                         )}
@@ -366,12 +439,12 @@ function TemplateEditor({
                             </div>
                         )}
                         {previewError && <p className="error-banner">{previewError}</p>}
-                        <div className="actions-row">
+                        <div className="actions-row actions-row-wrap">
                             <button
                                 className="button"
                                 type="button"
-                                disabled={isSaving || isResetting}
-                                onClick={() => onSave(content)}
+                                disabled={busy}
+                                onClick={() => void save()}
                             >
                                 {isSaving ? t('common.saving') : t('common.save')}
                             </button>
@@ -386,10 +459,10 @@ function TemplateEditor({
                                 <button
                                     className="button button-secondary"
                                     type="button"
-                                    disabled={isSaving || isResetting}
-                                    onClick={onReset}
+                                    disabled={busy}
+                                    onClick={askReset}
                                 >
-                                    {isResetting ? t('common.loading') : t('admin.resetToDefault')}
+                                    {isResetting ? t('common.loading') : t('admin.resetBuiltIn')}
                                 </button>
                             )}
                         </div>
@@ -400,7 +473,7 @@ function TemplateEditor({
                 <FieldReference
                     groups={data.fields ?? []}
                     content={content}
-                    onInsert={showPreview ? undefined : handleInsert}
+                    onInsert={showPreview || busy ? undefined : handleInsert}
                 />
             ) : isError ? (
                 <p className="error-banner" role="alert">{t('common.error')}</p>
@@ -408,6 +481,8 @@ function TemplateEditor({
                 <p className="muted" role="status">{t('common.loading')}</p>
             )}
         </div>
+        {dialog && <ConfirmDialog {...dialog} isLoading={dialogLoading} onConfirm={handleConfirm} onCancel={handleCancel} />}
+        </>
     )
 }
 
@@ -432,76 +507,34 @@ export function AdminPdfTemplatesPage({ embedded = false, template }: {
     }
 
 
-    const invoiceTemplateQuery = useQuery({
-        queryKey: queryKeys.admin.invoicePdfTemplate(),
-        queryFn: fetchInvoicePdfTemplate,
-        enabled: activeTab === 'invoice',
+    const selectedConfig = PDF_TEMPLATE_CONFIG[activeTab]
+    const templateQuery = useQuery({
+        queryKey: selectedConfig.queryKey(),
+        queryFn: selectedConfig.fetch,
     })
 
-    const saveInvoiceMutation = useMutation({
-        mutationFn: updateInvoicePdfTemplate,
-        onSuccess: (result) => {
+    async function acceptResult(result: PdfTemplateMutationResponse, templateType: PdfTemplateTab) {
+        const key = PDF_TEMPLATE_CONFIG[templateType].queryKey()
+        await queryClient.cancelQueries({ queryKey: key })
+        queryClient.setQueryData<PdfTemplateResponse>(key, (previous) =>
+            previous ? { ...previous, ...result, is_stale: result.is_stale ?? false } : previous)
+    }
+
+    const saveMutation = useMutation({
+        mutationFn: ({ templateType, content }: { templateType: PdfTemplateTab; content: string }) =>
+            PDF_TEMPLATE_CONFIG[templateType].save(content),
+        onSuccess: async (result, { templateType }) => {
+            await acceptResult(result, templateType)
             pushToast(result.detail ?? t('common.save'), 'success')
-            void queryClient.invalidateQueries({ queryKey: queryKeys.admin.invoicePdfTemplate() })
         },
-        onError: () => pushToast(t('common.error'), 'error'),
     })
 
-    const resetInvoiceMutation = useMutation({
-        mutationFn: resetInvoicePdfTemplate,
-        onSuccess: (result) => {
+    const resetMutation = useMutation({
+        mutationFn: (templateType: PdfTemplateTab) => PDF_TEMPLATE_CONFIG[templateType].reset(),
+        onSuccess: async (result, templateType) => {
+            await acceptResult(result, templateType)
             pushToast(result.detail ?? t('admin.resetToDefault'), 'success')
-            void queryClient.invalidateQueries({ queryKey: queryKeys.admin.invoicePdfTemplate() })
         },
-        onError: () => pushToast(t('common.error'), 'error'),
-    })
-
-    const contractTemplateQuery = useQuery({
-        queryKey: queryKeys.admin.contractPdfTemplate(),
-        queryFn: fetchContractPdfTemplate,
-        enabled: activeTab === 'contract',
-    })
-
-    const saveContractMutation = useMutation({
-        mutationFn: updateContractPdfTemplate,
-        onSuccess: (result) => {
-            pushToast(result.detail ?? t('common.save'), 'success')
-            void queryClient.invalidateQueries({ queryKey: queryKeys.admin.contractPdfTemplate() })
-        },
-        onError: () => pushToast(t('common.error'), 'error'),
-    })
-
-    const resetContractMutation = useMutation({
-        mutationFn: resetContractPdfTemplate,
-        onSuccess: (result) => {
-            pushToast(result.detail ?? t('admin.resetToDefault'), 'success')
-            void queryClient.invalidateQueries({ queryKey: queryKeys.admin.contractPdfTemplate() })
-        },
-        onError: () => pushToast(t('common.error'), 'error'),
-    })
-
-    const annualStatementTemplateQuery = useQuery({
-        queryKey: queryKeys.admin.annualStatementPdfTemplate(),
-        queryFn: fetchAnnualStatementPdfTemplate,
-        enabled: activeTab === 'annual_statement',
-    })
-
-    const saveAnnualStatementMutation = useMutation({
-        mutationFn: updateAnnualStatementPdfTemplate,
-        onSuccess: (result) => {
-            pushToast(result.detail ?? t('common.save'), 'success')
-            void queryClient.invalidateQueries({ queryKey: queryKeys.admin.annualStatementPdfTemplate() })
-        },
-        onError: () => pushToast(t('common.error'), 'error'),
-    })
-
-    const resetAnnualStatementMutation = useMutation({
-        mutationFn: resetAnnualStatementPdfTemplate,
-        onSuccess: (result) => {
-            pushToast(result.detail ?? t('admin.resetToDefault'), 'success')
-            void queryClient.invalidateQueries({ queryKey: queryKeys.admin.annualStatementPdfTemplate() })
-        },
-        onError: () => pushToast(t('common.error'), 'error'),
     })
 
     return (
@@ -525,44 +558,17 @@ export function AdminPdfTemplatesPage({ embedded = false, template }: {
                 </label>
             )}
 
-            {activeTab === 'invoice' && (
-                <TemplateEditor
-                    data={invoiceTemplateQuery.data}
-                    isLoading={invoiceTemplateQuery.isLoading}
-                    isError={invoiceTemplateQuery.isError}
-                    onSave={(content) => saveInvoiceMutation.mutate(content)}
-                    onReset={() => resetInvoiceMutation.mutate()}
-                    isSaving={saveInvoiceMutation.isPending}
-                    isResetting={resetInvoiceMutation.isPending}
-                    templateType="invoice"
-                />
-            )}
-
-            {activeTab === 'contract' && (
-                <TemplateEditor
-                    data={contractTemplateQuery.data}
-                    isLoading={contractTemplateQuery.isLoading}
-                    isError={contractTemplateQuery.isError}
-                    onSave={(content) => saveContractMutation.mutate(content)}
-                    onReset={() => resetContractMutation.mutate()}
-                    isSaving={saveContractMutation.isPending}
-                    isResetting={resetContractMutation.isPending}
-                    templateType="contract"
-                />
-            )}
-
-            {activeTab === 'annual_statement' && (
-                <TemplateEditor
-                    data={annualStatementTemplateQuery.data}
-                    isLoading={annualStatementTemplateQuery.isLoading}
-                    isError={annualStatementTemplateQuery.isError}
-                    onSave={(content) => saveAnnualStatementMutation.mutate(content)}
-                    onReset={() => resetAnnualStatementMutation.mutate()}
-                    isSaving={saveAnnualStatementMutation.isPending}
-                    isResetting={resetAnnualStatementMutation.isPending}
-                    templateType="annual_statement"
-                />
-            )}
+            <TemplateEditor
+                key={activeTab}
+                data={templateQuery.data}
+                isLoading={templateQuery.isLoading}
+                isError={templateQuery.isError}
+                onSave={(content) => saveMutation.mutateAsync({ templateType: activeTab, content })}
+                onReset={() => resetMutation.mutateAsync(activeTab)}
+                isSaving={saveMutation.isPending && saveMutation.variables?.templateType === activeTab}
+                isResetting={resetMutation.isPending && resetMutation.variables === activeTab}
+                templateType={activeTab}
+            />
         </div>
     )
 }

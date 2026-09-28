@@ -1,13 +1,18 @@
 import { useQuery } from '@tanstack/react-query'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { fetchEmailTemplate } from '../lib/api/invoices'
 import { queryKeys } from '../lib/api/queryKeys'
 import { FieldReference, useTemplateTokenInsertion } from './FieldReference'
+import { TemplateSourceStatus } from './TemplateSourceStatus'
 
 type ZevEmailTemplateFieldsProps = {
     subjectTemplate: string
     bodyTemplate: string
+    savedSubjectTemplate?: string
+    savedBodyTemplate?: string
+    /** A completed save or discard resets editor mode, independently of typing. */
+    resetRevision?: number
     onSubjectTemplateChange: (value: string) => void
     onBodyTemplateChange: (value: string) => void
     fieldErrors?: Record<string, string>
@@ -18,6 +23,9 @@ type ZevEmailTemplateFieldsProps = {
 export function ZevEmailTemplateFields({
     subjectTemplate,
     bodyTemplate,
+    savedSubjectTemplate = subjectTemplate,
+    savedBodyTemplate = bodyTemplate,
+    resetRevision = 0,
     onSubjectTemplateChange,
     onBodyTemplateChange,
     fieldErrors = {},
@@ -30,6 +38,11 @@ export function ZevEmailTemplateFields({
     const [fieldsOpen, setFieldsOpen] = useState(false)
     const [editingDefaultSubject, setEditingDefaultSubject] = useState(false)
     const [editingDefaultBody, setEditingDefaultBody] = useState(false)
+
+    useEffect(() => {
+        setEditingDefaultSubject(false)
+        setEditingDefaultBody(false)
+    }, [resetRevision])
 
     // Owner-readable fallback; a failed fetch never blocks editing or saving.
     const globalTemplateQuery = useQuery({
@@ -68,6 +81,8 @@ export function ZevEmailTemplateFields({
         const globalValue = isSubject ? globalSubject : globalBody
         const usesDefault = value === '' && !(isSubject ? editingDefaultSubject : editingDefaultBody)
         const inheritsDefault = value === ''
+        const savedValue = isSubject ? savedSubjectTemplate : savedBodyTemplate
+        const changed = value !== savedValue
         const error = fieldErrors[isSubject ? 'email_subject_template' : 'email_body_template']
         const labelId = `zev-settings-email-${field}-label`
         const errorId = `zev-settings-email-${field}-error`
@@ -78,10 +93,11 @@ export function ZevEmailTemplateFields({
             <div className="zev-email-field" data-zev-field={`email_${field}_template`}>
                 <div className="zev-email-label-row">
                     <span id={labelId}>{t(isSubject ? 'admin.emailTemplates.subject' : 'admin.emailTemplates.body')}</span>
-                    <span className={`badge ${inheritsDefault ? 'badge-info' : 'badge-neutral'}`}>
-                        {t(inheritsDefault ? 'pages.zevSettings.emailUsingDefault' : 'pages.zevSettings.emailCustomized')}
-                    </span>
-                    {!readOnly && (
+                    <TemplateSourceStatus
+                        source={savedValue === '' ? 'platform' : 'zev'}
+                        changed={changed}
+                        description={changed && inheritsDefault ? t('pages.zevSettings.emailInheritanceOnSave') : undefined}
+                        action={!readOnly && (
                         <button
                             type="button"
                             className="button button-secondary button-compact"
@@ -96,7 +112,8 @@ export function ZevEmailTemplateFields({
                         >
                             {t(usesDefault ? 'pages.zevSettings.emailCustomize' : 'pages.zevSettings.emailUseDefault')}
                         </button>
-                    )}
+                        )}
+                    />
                 </div>
                 {usesDefault ? (hasGlobal && (
                     <p className="zev-email-default-preview">{globalValue}</p>
@@ -133,9 +150,6 @@ export function ZevEmailTemplateFields({
         <>
             <header>
                 <h3>{t('pages.zevSettings.emailTemplateTitle')}</h3>
-                <p className="muted">
-                    {t('pages.zevSettings.emailTemplateDescription')}
-                </p>
             </header>
 
             <div className="inline-form page-stack">

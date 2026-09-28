@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react'
-import { MemoryRouter } from 'react-router-dom'
+import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { MantineProvider } from '@mantine/core'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AppRoutes } from '../src/components/AppRoutes'
@@ -188,22 +188,16 @@ async function renderAt(path: string) {
     const container = document.createElement('div')
     document.body.appendChild(container)
     const root = createRoot(container)
+    const router = createMemoryRouter([{ path: '*', element: createElement(AppRoutes) }], { initialEntries: [path] })
     await act(async () => {
         root.render(
             createElement(
-                MemoryRouter,
-                { initialEntries: [path] },
-                createElement(
-                    MantineProvider,
-                    null,
-                    createElement(
-                        ToastProvider,
-                        null,
-                        createElement(
-                            QueryClientProvider,
-                            { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
-                            createElement(AppRoutes),
-                        ),
+                MantineProvider,
+                null,
+                createElement(ToastProvider, null,
+                    createElement(QueryClientProvider,
+                        { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
+                        createElement(RouterProvider, { router }),
                     ),
                 ),
             ),

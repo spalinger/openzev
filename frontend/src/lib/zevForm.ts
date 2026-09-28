@@ -117,9 +117,9 @@ export interface ZevFormViolation {
 
 /**
  * Client-side mirror of the backend write rules (`ZevSerializer` + model
- * validation): required name, IBAN checksum, payment-term range, and the
- * VAT-number/mode pairing. Select-bound fields (type, interval, language)
- * cannot hold invalid values, so they are not checked.
+ * validation): required name, IBAN checksum, payment-term range, and VAT
+ * number required when registered. Select-bound fields (type, interval,
+ * language) cannot hold invalid values, so they are not checked.
  */
 export function validateZevForm(form: ZevInput): ZevFormViolation[] {
     const violations: ZevFormViolation[] = []
@@ -138,9 +138,6 @@ export function validateZevForm(form: ZevInput): ZevFormViolation[] {
     }
     if (form.vat_mode === 'registered' && !(form.vat_number ?? '').trim()) {
         violations.push({ field: 'vat_number', messageKey: 'vatNumberRequired' })
-    }
-    if (form.vat_mode !== 'registered' && (form.vat_number ?? '').trim() !== '') {
-        violations.push({ field: 'vat_number', messageKey: 'vatNumberNotAllowed' })
     }
     return violations
 }

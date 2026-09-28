@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { PageSkeleton } from '../components/PageSkeleton'
 import { useTranslation } from 'react-i18next'
 import {
@@ -8,9 +8,25 @@ import {
     updateEmailTemplate,
 } from '../lib/api/invoices'
 import { queryKeys } from '../lib/api/queryKeys'
+import { formatApiError } from '../lib/api/errors'
 import { useToast } from '../lib/toast'
 import { FieldReference, useTemplateTokenInsertion } from '../components/FieldReference'
 import type { EmailTemplateKey } from '../lib/emailTemplateFields'
+import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
+import { TemplateSourceStatus } from '../components/TemplateSourceStatus'
+import { useTemplateDraft } from '../lib/useTemplateDraft'
+import type { EmailTemplateResponse } from '../types/api'
+
+const EMAIL_TEMPLATE_LABEL_KEYS: Record<EmailTemplateKey, string> = {
+    invoice_email: 'admin.emailTemplates.invoiceEmail',
+    participant_onboarding: 'admin.emailTemplates.onboardingEmail',
+    email_verification: 'admin.emailTemplates.verificationEmail',
+    participant_magic_link: 'admin.emailTemplates.magicLinkEmail',
+}
+
+type EmailDraft = Pick<EmailTemplateResponse, 'subject' | 'body'>
+const selectEmailDraft = ({ subject, body }: EmailDraft): EmailDraft => ({ subject, body })
+const equalEmailDraft = (left: EmailDraft, right: EmailDraft) => left.subject === right.subject && left.body === right.body
 
 function EmailTemplateEditor({ templateKey }: { templateKey: EmailTemplateKey }) {
     const { t } = useTranslation()
@@ -19,39 +35,41 @@ function EmailTemplateEditor({ templateKey }: { templateKey: EmailTemplateKey })
     const subjectRef = useRef<HTMLInputElement>(null)
     const bodyRef = useRef<HTMLTextAreaElement>(null)
     const lastFocusedRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null)
+    const { dialog, confirm, handleConfirm, handleCancel, isLoading: dialogLoading } = useConfirmDialog()
 
     const query = useQuery({
         queryKey: queryKeys.admin.emailTemplate(templateKey),
         queryFn: () => fetchEmailTemplate(templateKey),
     })
 
-    const [subject, setSubject] = useState('')
-    const [body, setBody] = useState('')
-
-    useEffect(() => {
-        if (query.data) {
-            setSubject(query.data.subject)
-            setBody(query.data.body)
-        }
-    }, [query.data])
+    const [mutationError, setMutationError] = useState<string | null>(null)
 
     const saveMutation = useMutation({
-        mutationFn: () => updateEmailTemplate(templateKey, subject, body),
-        onSuccess: (result) => {
+        mutationFn: ({ subject, body }: EmailDraft) => updateEmailTemplate(templateKey, subject, body),
+        onSuccess: async (result) => {
+            await queryClient.cancelQueries({ queryKey: queryKeys.admin.emailTemplate(templateKey) })
+            queryClient.setQueryData<EmailTemplateResponse>(queryKeys.admin.emailTemplate(templateKey), (previous) =>
+                previous ? { ...previous, ...result } : previous)
             pushToast(result.detail ?? t('common.save'), 'success')
-            void queryClient.invalidateQueries({ queryKey: queryKeys.admin.emailTemplate(templateKey) })
         },
-        onError: () => pushToast(t('common.error'), 'error'),
     })
 
     const resetMutation = useMutation({
         mutationFn: () => resetEmailTemplate(templateKey),
-        onSuccess: (result) => {
+        onSuccess: async (result) => {
+            await queryClient.cancelQueries({ queryKey: queryKeys.admin.emailTemplate(templateKey) })
+            queryClient.setQueryData<EmailTemplateResponse>(queryKeys.admin.emailTemplate(templateKey), (previous) =>
+                previous ? { ...previous, ...result } : previous)
             pushToast(result.detail ?? t('admin.resetToDefault'), 'success')
-            void queryClient.invalidateQueries({ queryKey: queryKeys.admin.emailTemplate(templateKey) })
         },
-        onError: () => pushToast(t('common.error'), 'error'),
     })
+
+    const busy = saveMutation.isPending || resetMutation.isPending || dialogLoading
+    const { draft, setDraft, saved, accept } = useTemplateDraft(query.data, busy, selectEmailDraft, equalEmailDraft)
+    const subject = draft?.subject ?? ''
+    const body = draft?.body ?? ''
+    const setSubject = (value: string) => setDraft((previous) => previous && { ...previous, subject: value })
+    const setBody = (value: string) => setDraft((previous) => previous && { ...previous, body: value })
 
     const handleInsert = useTemplateTokenInsertion(
         subjectRef,
@@ -61,18 +79,42 @@ function EmailTemplateEditor({ templateKey }: { templateKey: EmailTemplateKey })
         setBody,
     )
 
+    async function save() {
+        if (busy) return
+        setMutationError(null)
+        try {
+            const result = await saveMutation.mutateAsync({ subject, body })
+            accept(selectEmailDraft(result))
+        } catch (error) {
+            setMutationError(formatApiError(error, t('common.error')))
+        }
+    }
+
+    function askReset() {
+        if (busy || !query.data?.is_customized) return
+        confirm({
+            title: t('admin.resetBuiltInConfirmTitle', {
+                template: t(EMAIL_TEMPLATE_LABEL_KEYS[templateKey]),
+            }),
+            message: t('admin.resetBuiltInConfirmMessage'),
+            confirmText: t('admin.resetBuiltIn'),
+            onConfirm: async () => {
+                setMutationError(null)
+                try {
+                    const result = await resetMutation.mutateAsync()
+                    accept(selectEmailDraft(result))
+                } catch (error) {
+                    setMutationError(formatApiError(error, t('common.error')))
+                }
+            },
+        })
+    }
+
     return (
+        <>
         <div className="content-with-aside">
             <section className="card page-stack">
-                {query.data?.is_customized && (
-                    <div><span className="badge badge-info">{t('admin.customized')}</span></div>
-                )}
-                {/* The sign-in mail is the only template shipped in all four
-                    languages, and a saved override replaces it for every one of
-                    them — `EmailTemplate` holds one row per key. Customising it
-                    therefore opts out of translation, which is worth saying
-                    here rather than letting an admin discover it from a
-                    participant's confused reply. */}
+                {/* One sign-in override replaces all four translated defaults. */}
                 {templateKey === 'participant_magic_link' && (
                     <p className="muted">{t('admin.emailTemplates.magicLinkLanguageNote')}</p>
                 )}
@@ -80,6 +122,12 @@ function EmailTemplateEditor({ templateKey }: { templateKey: EmailTemplateKey })
                 {query.isError && <p className="error-banner">{t('common.error')}</p>}
                 {query.data && (
                     <>
+                        <TemplateSourceStatus
+                            source={query.data.is_customized ? 'customized' : 'builtIn'}
+                            changed={saved !== null && !equalEmailDraft({ subject, body }, saved)}
+                            description={t(templateKey === 'invoice_email' ? 'admin.platformInvoiceEmailScope' : 'admin.platformTemplateScope')}
+                        />
+                        {mutationError && <p className="error-banner" role="alert">{mutationError}</p>}
                         <label>
                             <span>{t('admin.emailTemplates.subject')}</span>
                             <input
@@ -87,6 +135,7 @@ function EmailTemplateEditor({ templateKey }: { templateKey: EmailTemplateKey })
                                 onFocus={() => { lastFocusedRef.current = subjectRef.current }}
                                 type="text"
                                 value={subject}
+                                disabled={busy}
                                 onChange={(e) => setSubject(e.target.value)}
                             />
                         </label>
@@ -98,6 +147,7 @@ function EmailTemplateEditor({ templateKey }: { templateKey: EmailTemplateKey })
                                 className="mono-editor"
                                 rows={24}
                                 value={body}
+                                disabled={busy}
                                 onChange={(e) => setBody(e.target.value)}
                             />
                         </label>
@@ -105,8 +155,8 @@ function EmailTemplateEditor({ templateKey }: { templateKey: EmailTemplateKey })
                             <button
                                 className="button"
                                 type="button"
-                                disabled={saveMutation.isPending || resetMutation.isPending}
-                                onClick={() => saveMutation.mutate()}
+                                disabled={busy}
+                                onClick={() => void save()}
                             >
                                 {saveMutation.isPending ? t('common.saving') : t('common.save')}
                             </button>
@@ -114,10 +164,10 @@ function EmailTemplateEditor({ templateKey }: { templateKey: EmailTemplateKey })
                                 <button
                                     className="button button-secondary"
                                     type="button"
-                                    disabled={saveMutation.isPending || resetMutation.isPending}
-                                    onClick={() => resetMutation.mutate()}
+                                    disabled={busy}
+                                    onClick={askReset}
                                 >
-                                    {resetMutation.isPending ? t('common.loading') : t('admin.resetToDefault')}
+                                    {resetMutation.isPending ? t('common.loading') : t('admin.resetBuiltIn')}
                                 </button>
                             )}
                         </div>
@@ -128,7 +178,7 @@ function EmailTemplateEditor({ templateKey }: { templateKey: EmailTemplateKey })
                 <FieldReference
                     groups={query.data.fields ?? []}
                     content={`${subject}\n${body}`}
-                    onInsert={handleInsert}
+                    onInsert={busy ? undefined : handleInsert}
                 />
             ) : query.isError ? (
                 <p className="error-banner" role="alert">{t('common.error')}</p>
@@ -136,6 +186,8 @@ function EmailTemplateEditor({ templateKey }: { templateKey: EmailTemplateKey })
                 <p className="muted" role="status">{t('common.loading')}</p>
             )}
         </div>
+        {dialog && <ConfirmDialog {...dialog} isLoading={dialogLoading} onConfirm={handleConfirm} onCancel={handleCancel} />}
+        </>
     )
 }
 
@@ -152,10 +204,10 @@ export function AdminEmailTemplatesPage({ embedded = false, template }: {
     const activeTab = template ?? selectedTemplate
 
     const tabs: { key: EmailTemplateKey; label: string }[] = [
-        { key: 'invoice_email', label: t('admin.emailTemplates.invoiceEmail') },
-        { key: 'participant_onboarding', label: t('admin.emailTemplates.onboardingEmail') },
-        { key: 'email_verification', label: t('admin.emailTemplates.verificationEmail') },
-        { key: 'participant_magic_link', label: t('admin.emailTemplates.magicLinkEmail') },
+        { key: 'invoice_email', label: t(EMAIL_TEMPLATE_LABEL_KEYS.invoice_email) },
+        { key: 'participant_onboarding', label: t(EMAIL_TEMPLATE_LABEL_KEYS.participant_onboarding) },
+        { key: 'email_verification', label: t(EMAIL_TEMPLATE_LABEL_KEYS.email_verification) },
+        { key: 'participant_magic_link', label: t(EMAIL_TEMPLATE_LABEL_KEYS.participant_magic_link) },
     ]
 
     return (

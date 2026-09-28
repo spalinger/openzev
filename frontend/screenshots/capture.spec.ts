@@ -227,6 +227,7 @@ test.describe('User Guide Screenshots', () => {
 
   test('06c-zev-documents-settings', async ({ page }) => {
     await navigateTo(page, '/zev-settings/documents')
+    await expect(page.locator('[data-zev-field="email_body_template"] textarea')).toBeVisible()
     await page.locator('[data-zev-field="email_body_template"] button').click()
     await expect(page.locator('[data-zev-field="email_body_template"] .zev-email-default-preview')).toBeVisible()
     await screenshotFull(page, '06c-zev-documents-settings')

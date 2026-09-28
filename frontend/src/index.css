@@ -4342,6 +4342,23 @@ input.recurrence-chip-input {
   gap: 0.4rem;
 }
 
+.template-source {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.template-source-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.template-source p {
+  margin: 0;
+}
+
 .zev-email-label-row {
   display: flex;
   align-items: center;

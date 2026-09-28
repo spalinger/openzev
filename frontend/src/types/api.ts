@@ -171,7 +171,7 @@ export interface FeatureFlagInput {
 export interface Zev {
     id: string
     /** Server revision used to ignore list responses older than an accepted save. */
-    updated_at?: string
+    updated_at: string
     name: string
     start_date: string
     owner: number
@@ -1325,11 +1325,6 @@ export interface TemplateFieldGroup {
     fields: TemplateField[]
 }
 
-/** PATCH/DELETE response payload; the client refetches the detail and catalog. */
-export interface TemplateMutationResponse {
-    detail: string
-}
-
 export interface PdfTemplateResponse {
     template_name: string
     content: string
@@ -1339,6 +1334,9 @@ export interface PdfTemplateResponse {
     fields: TemplateFieldGroup[]
 }
 
+/** Template mutations return the saved state; the field catalog remains unchanged. */
+export type PdfTemplateMutationResponse = Omit<PdfTemplateResponse, 'fields'> & { detail: string }
+
 export interface EmailTemplateResponse {
     template_key: string
     subject: string
@@ -1347,6 +1345,8 @@ export interface EmailTemplateResponse {
     detail?: string
     fields: TemplateFieldGroup[]
 }
+
+export type EmailTemplateMutationResponse = Omit<EmailTemplateResponse, 'fields'> & { detail: string }
 
 export interface ZevOwnerDashboardSummary {
     role: 'zev_owner'

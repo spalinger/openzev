@@ -29,9 +29,11 @@ import { ZevEmailTemplateFields } from '../src/components/ZevEmailTemplateFields
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
-function Harness({ initialSubject = 'Subject', initialBody = 'Body', readOnly = false }: {
+function Harness({ initialSubject = 'Subject', initialBody = 'Body', savedSubject, savedBody, readOnly = false }: {
     initialSubject?: string
     initialBody?: string
+    savedSubject?: string
+    savedBody?: string
     readOnly?: boolean
 } = {}) {
     const [subject, setSubject] = useState(initialSubject)
@@ -39,13 +41,15 @@ function Harness({ initialSubject = 'Subject', initialBody = 'Body', readOnly = 
     return createElement(ZevEmailTemplateFields, {
         subjectTemplate: subject,
         bodyTemplate: body,
+        savedSubjectTemplate: savedSubject ?? initialSubject,
+        savedBodyTemplate: savedBody ?? initialBody,
         onSubjectTemplateChange: setSubject,
         onBodyTemplateChange: setBody,
         readOnly,
     })
 }
 
-function renderHarness(props?: { initialSubject?: string; initialBody?: string; readOnly?: boolean }) {
+function renderHarness(props?: { initialSubject?: string; initialBody?: string; savedSubject?: string; savedBody?: string; readOnly?: boolean }) {
     const container = document.createElement('div')
     document.body.append(container)
     const root = createRoot(container)
@@ -60,6 +64,54 @@ function openFieldReference(container: ParentNode) {
 }
 
 describe('ZEV email template field insertion', () => {
+    it.each(['subject', 'body'] as const)('keeps an inherited %s editor focused when cleared', (field) => {
+        const { container, root } = renderHarness({ initialSubject: '', initialBody: '' })
+        try {
+            const label = field === 'subject' ? 'emailCustomizeSubject' : 'emailCustomizeBody'
+            act(() => container.querySelector<HTMLButtonElement>(`button[aria-label="pages.zevSettings.${label}"]`)!.click())
+            const selector = `[data-zev-field="email_${field}_template"] ${field === 'subject' ? 'input' : 'textarea'}`
+            const editor = container.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector)!
+            editor.focus()
+            const prototype = field === 'subject' ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype
+            act(() => {
+                Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(editor, '')
+                editor.dispatchEvent(new Event('input', { bubbles: true }))
+            })
+            expect(container.querySelector(selector)).toBe(editor)
+            expect(document.activeElement).toBe(editor)
+            act(() => {
+                Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(editor, 'Replacement')
+                editor.dispatchEvent(new Event('input', { bubbles: true }))
+            })
+            expect(editor.value).toBe('Replacement')
+        } finally {
+            act(() => root.unmount())
+            container.remove()
+        }
+    })
+
+    it('shows a pending inheritance change for only the cleared field', () => {
+        const { container, root } = renderHarness({ initialSubject: 'Custom subject', initialBody: 'Custom body' })
+        try {
+            act(() => {
+                container.querySelector<HTMLButtonElement>(
+                    'button[aria-label="pages.zevSettings.emailResetSubject"]',
+                )!.click()
+            })
+            const subject = container.querySelector('[data-zev-field="email_subject_template"]')!
+            const body = container.querySelector('[data-zev-field="email_body_template"]')!
+            expect(subject.textContent).toContain('templates.source.zev')
+            expect(subject.textContent).toContain('templates.source.unsavedChanges')
+            expect(subject.textContent).toContain('pages.zevSettings.emailInheritanceOnSave')
+            expect(body.textContent).toContain('templates.source.zev')
+            expect(body.textContent).not.toContain('templates.source.unsavedChanges')
+            expect(container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Custom body')
+        } finally {
+            act(() => root.unmount())
+            container.remove()
+        }
+    })
+
     it('collapses the field reference behind Insert field but keeps it focusable', () => {
         const container = document.createElement('div')
         document.body.append(container)
@@ -181,8 +233,8 @@ describe('ZEV email template field insertion', () => {
         const { container, root } = renderHarness({ initialSubject: '', initialBody: 'Custom body' })
         try {
             const badges = Array.from(container.querySelectorAll('.badge')).map((badge) => badge.textContent)
-            expect(badges).toContain('pages.zevSettings.emailUsingDefault')
-            expect(badges).toContain('pages.zevSettings.emailCustomized')
+            expect(badges).toContain('templates.source.platform')
+            expect(badges).toContain('templates.source.zev')
             // Default subject renders its platform text, not an editor.
             expect(container.querySelector('input')).toBeNull()
             expect(container.textContent).toContain('Global subject')

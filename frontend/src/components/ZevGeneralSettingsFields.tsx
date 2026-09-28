@@ -33,6 +33,7 @@ type ZevGeneralSettingsFieldsProps = {
  */
 export function ZevGeneralSettingsFields({ form, onChange, group, zevId, readOnly = false, fieldErrors = {} }: ZevGeneralSettingsFieldsProps) {
     const { t } = useTranslation()
+    const liveIbanInvalid = (form.bank_iban ?? '').trim() !== '' && !isValidIban(form.bank_iban ?? '')
 
     function describeInvalid(field: string): { 'aria-invalid': true; 'aria-describedby': string } | Record<string, never> {
         if (!fieldErrors[field]) {
@@ -303,11 +304,13 @@ export function ZevGeneralSettingsFields({ form, onChange, group, zevId, readOnl
                                     onChange={(event) => onChange({ bank_iban: event.target.value })}
                                     onBlur={(event) => onChange({ bank_iban: normalizeIban(event.target.value) })}
                                     {...describeInvalid('bank_iban')}
+                                    aria-invalid={fieldErrors.bank_iban || liveIbanInvalid ? true : undefined}
+                                    aria-describedby={fieldErrors.bank_iban || liveIbanInvalid ? 'zev-settings-field-bank_iban-error' : undefined}
                                 />
                                 {fieldErrors['bank_iban'] ? (
                                     inlineError('bank_iban')
-                                ) : (form.bank_iban ?? '').trim() !== '' && !isValidIban(form.bank_iban ?? '') && (
-                                    <small className="field-error" role="alert">
+                                ) : liveIbanInvalid && (
+                                    <small className="field-error" id="zev-settings-field-bank_iban-error" role="alert">
                                         {t('pages.zevSettings.validation.invalidIban')}
                                     </small>
                                 )}
