@@ -137,6 +137,8 @@ export interface SystemHealth {
         age_hours?: number | null
         stale?: boolean
         encrypted?: boolean
+        encryption_required?: boolean
+        encryption_key_problem?: boolean
     }
     checked_at: string
 }
@@ -1791,6 +1793,8 @@ export interface BackupJobInput {
 export interface BackupStatus {
     /** Whether a usable encryption key is configured (not whether the last archive used it). */
     encrypted: boolean
+    /** Whether the server refuses to create unencrypted backups. */
+    encryption_required: boolean
     encryption_key_fingerprint: string
     /** Set when a key is configured but unusable, so it is not mistaken for "no key". */
     encryption_key_problem: string

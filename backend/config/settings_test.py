@@ -49,6 +49,7 @@ CELERY_TASK_ALWAYS_EAGER = True
 # .env cannot change what the suite observes. Tests that need a key or S3
 # credentials override them explicitly.
 BACKUP_ENCRYPTION_KEYS = []
+BACKUP_REQUIRE_ENCRYPTION = False
 BACKUP_S3_ACCESS_KEY_ID = ""
 BACKUP_S3_SECRET_ACCESS_KEY = ""
 BACKUP_WORK_DIR = ""

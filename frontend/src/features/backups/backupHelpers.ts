@@ -6,6 +6,7 @@ import type {
     BackupManifest,
     BackupSchedule,
     BackupScheduleInput,
+    BackupStatus,
     RestoreConflict,
     RestoreJob,
     RestorePlan,
@@ -173,6 +174,14 @@ export function hasFile(job: BackupJob): boolean {
 /** A backup that has no file left is history, not something to restore from. */
 export function fileGone(job: BackupJob): boolean {
     return job.status === 'completed' && !job.artifact_available
+}
+
+/** Whether the loaded status says a new backup would be refused. The API stays
+ * authoritative when the page is stale; this only disables the button early. */
+export function isBackupCreationBlocked(status: BackupStatus | undefined): boolean {
+    if (!status) return false
+    if (status.encryption_key_problem) return true
+    return !status.encrypted && status.encryption_required
 }
 
 // ── restoring one community ──────────────────────────────────────────────────

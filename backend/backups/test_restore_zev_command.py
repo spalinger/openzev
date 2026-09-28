@@ -10,7 +10,7 @@ from django.conf import settings
 from django.core.files.storage import default_storage
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from audit.models import AuditEvent
 from backups.fixtures import PDF_BYTES, build_world
@@ -92,6 +92,25 @@ class RestoreCommandTests(ZevCommandTestCase):
         self.assertEqual(zev_rows(self.alpha_id), damaged)
         self.assertFalse(RestoreJob.objects.exists())
 
+    @override_settings(BACKUP_ENCRYPTION_KEYS=[], BACKUP_REQUIRE_ENCRYPTION=True)
+    def test_a_real_restore_without_a_key_is_refused_before_creating_a_job(self):
+        with self.assertRaisesMessage(CommandError, "BACKUP_ENCRYPTION_KEYS"):
+            self.run_command("--zev", str(self.alpha_id), "--path", str(self.safety_dir))
+        self.assertFalse(RestoreJob.objects.exists())
+        self.assertFalse(BackupJob.objects.filter(trigger="pre_restore").exists())
+
+    @override_settings(BACKUP_ENCRYPTION_KEYS=["too-short"], BACKUP_REQUIRE_ENCRYPTION=False)
+    def test_an_invalid_key_refuses_a_real_restore_even_when_plaintext_is_allowed(self):
+        with self.assertRaises(CommandError):
+            self.run_command("--zev", str(self.alpha_id), "--path", str(self.safety_dir))
+        self.assertFalse(RestoreJob.objects.exists())
+
+    @override_settings(BACKUP_ENCRYPTION_KEYS=[], BACKUP_REQUIRE_ENCRYPTION=True)
+    def test_a_preview_needs_no_safety_backup_key(self):
+        out, _ = self.run_command("--zev", str(self.alpha_id), "--dry-run")
+        self.assertIn("Dry run", out)
+
+    @override_settings(BACKUP_ENCRYPTION_KEYS=[], BACKUP_REQUIRE_ENCRYPTION=True)
     def test_a_deleted_community_is_named_by_id_and_needs_no_safety_backup(self):
         Invoice.objects.filter(zev_id=self.alpha_id).delete()
         Zev.objects.filter(pk=self.alpha_id).delete()

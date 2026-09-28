@@ -89,4 +89,15 @@ describe('the backups card on the system health tab', () => {
         expect(card(await render({ status: 'unknown', encrypted: false })).textContent)
             .not.toContain('pages.adminOverview.health.backups.unencrypted')
     })
+
+    it('says backup creation is blocked when encryption is required without a key', async () => {
+        const c = card(await render({ status: 'degraded', encrypted: false, encryption_required: true }))
+        expect(c.textContent).toContain('pages.adminOverview.health.backups.blocked')
+        expect(c.textContent).not.toContain('pages.adminOverview.health.backups.unencrypted')
+    })
+
+    it('reports rejected keys as blocked even when encryption is optional', async () => {
+        const c = card(await render({ status: 'degraded', encrypted: false, encryption_required: false, encryption_key_problem: true }))
+        expect(c.textContent).toContain('pages.adminOverview.health.backups.blocked')
+    })
 })

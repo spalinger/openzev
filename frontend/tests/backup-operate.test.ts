@@ -45,7 +45,7 @@ vi.mock('../src/lib/api/zev', () => ({ fetchZevs: vi.fn().mockResolvedValue([]) 
 vi.mock('../src/lib/downloadBlob', () => ({ downloadBlob: vi.fn() }))
 
 const status = (overrides: Partial<BackupStatus> = {}): BackupStatus => ({
-    encrypted: true, encryption_key_fingerprint: 'abc123', encryption_key_problem: '', environment_credentials: false,
+    encrypted: true, encryption_required: false, encryption_key_fingerprint: 'abc123', encryption_key_problem: '', environment_credentials: false,
     destinations_enabled: 1, last_successful: null, last_failed: null, age_hours: null, stale: false,
     schedule_enabled: false, schedule_interval_hours: null, ...overrides,
 })
@@ -182,9 +182,27 @@ describe('the schedule', () => {
     })
 
     it('says so loudly when an enabled schedule would write unencrypted backups', async () => {
-        setup({ saved: schedule({ enabled: true }), statusData: status({ encrypted: false }) })
+        setup({ saved: schedule({ enabled: true }), statusData: status({ encrypted: false, encryption_required: false }) })
         const container = await render()
         expect(scheduleCard(container).querySelector('.warning-banner')?.textContent).toContain('pages.backups.schedule.unencrypted')
+    })
+
+    it('says the schedule cannot run when encryption is required but no key is set — never claiming unencrypted writes', async () => {
+        setup({ saved: schedule({ enabled: true }), statusData: status({ encrypted: false, encryption_required: true }) })
+        const card = scheduleCard(await render())
+        expect(card.querySelector('.error-banner')?.textContent).toContain('pages.backups.schedule.blocked')
+        expect(card.querySelector('.warning-banner')).toBeNull()
+        expect(card.textContent).not.toContain('pages.backups.schedule.unencrypted')
+    })
+
+    it('calls out an unusable key on an enabled schedule', async () => {
+        setup({
+            saved: schedule({ enabled: true }),
+            statusData: status({ encrypted: false, encryption_required: true, encryption_key_problem: 'too short' }),
+        })
+        const card = scheduleCard(await render())
+        expect(card.querySelector('.error-banner')?.textContent).toContain('pages.backups.schedule.keyProblem')
+        expect(card.querySelector('.warning-banner')).toBeNull()
     })
 
     it('does not nag about encryption while the schedule is off, or when a key is set', async () => {

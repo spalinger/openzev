@@ -439,11 +439,15 @@ corresponding hub tab or `/admin/system-settings` tab.
 
 - Query: `useQuery({ queryKey: queryKeys.auth.systemHealth(), queryFn: fetchSystemHealth, staleTime: 60_000 })`
   — a point-in-time snapshot fetched when the tab opens, no auto-refresh.
-- Three probe cards in `.grid.grid-3`, each with a status dot (`.dot` —
+- Five probe cards in `.grid.grid-3`, each with a status dot (`.dot` —
   `.dot-success`/`.dot-warning`/`.dot-info` mapped from `ok`/`degraded`/`unknown`):
   Database (engine + `formatBytes` size; SQLite uses page count × page size,
   including in-memory databases), Celery (workers responding, Redis
-  default-queue depth, exception-class-only `detail` on broker errors), Email (backend mode label).
+  default-queue depth, exception-class-only `detail` on broker errors), MFA
+  (whether its encryption key is configured), Backups (latest successful backup,
+  staleness, and whether creation is blocked by a missing required key or a
+  rejected key), and Email (backend mode label). The Backups card shows the
+  unencrypted warning only when plaintext creation is permitted.
 - Backend: `GET /api/v1/auth/system-health/` (admin-only; see the access spec
   §10.1). Probes are best-effort — an unreachable broker reports
   `status: "unknown"`, never a 500, mirroring the readiness cockpit's

@@ -2,6 +2,8 @@
 
 import io
 import os
+import subprocess
+import sys
 
 from django.test import SimpleTestCase, override_settings
 
@@ -147,6 +149,105 @@ class KeyFingerprintTests(SimpleTestCase):
     def test_no_active_fingerprint_without_a_key(self):
         self.assertEqual(crypto.active_fingerprint(), "")
         self.assertFalse(crypto.encryption_configured())
+
+
+class BackupCreationPolicyTests(SimpleTestCase):
+    """Valid keys allow creation under either flag; an empty list refuses only
+    when required; a rejected entry always refuses, without leaking key material."""
+
+    @override_settings(BACKUP_ENCRYPTION_KEYS=[KEY_A], BACKUP_REQUIRE_ENCRYPTION=True)
+    def test_valid_keys_are_allowed_when_encryption_is_required(self):
+        crypto.ensure_backup_creation_allowed()
+
+    @override_settings(BACKUP_ENCRYPTION_KEYS=[KEY_A], BACKUP_REQUIRE_ENCRYPTION=False)
+    def test_valid_keys_are_allowed_when_encryption_is_optional(self):
+        crypto.ensure_backup_creation_allowed()
+
+    @override_settings(BACKUP_ENCRYPTION_KEYS=[], BACKUP_REQUIRE_ENCRYPTION=True)
+    def test_no_keys_are_refused_when_encryption_is_required(self):
+        with self.assertRaises(crypto.BackupKeysNotConfigured) as raised:
+            crypto.ensure_backup_creation_allowed()
+        message = str(raised.exception)
+        self.assertIn("BACKUP_ENCRYPTION_KEYS", message)
+
+    @override_settings(BACKUP_ENCRYPTION_KEYS=[], BACKUP_REQUIRE_ENCRYPTION=False)
+    def test_no_keys_are_allowed_when_encryption_is_optional(self):
+        crypto.ensure_backup_creation_allowed()
+
+    @override_settings(BACKUP_ENCRYPTION_KEYS=["too-short"], BACKUP_REQUIRE_ENCRYPTION=True)
+    def test_a_rejected_key_refuses_even_when_encryption_is_required(self):
+        with self.assertRaises(crypto.BackupKeyRejected):
+            crypto.ensure_backup_creation_allowed()
+
+    @override_settings(BACKUP_ENCRYPTION_KEYS=["too-short"], BACKUP_REQUIRE_ENCRYPTION=False)
+    def test_a_rejected_key_refuses_even_when_encryption_is_optional(self):
+        with self.assertRaises(crypto.BackupKeyRejected):
+            crypto.ensure_backup_creation_allowed()
+
+    @override_settings(BACKUP_ENCRYPTION_KEYS=[KEY_A, "too-short"], BACKUP_REQUIRE_ENCRYPTION=False)
+    def test_a_valid_first_key_followed_by_a_rejected_key_still_refuses(self):
+        with self.assertRaises(crypto.BackupKeyRejected):
+            crypto.ensure_backup_creation_allowed()
+
+    @override_settings(BACKUP_ENCRYPTION_KEYS=["too-short"], BACKUP_REQUIRE_ENCRYPTION=True)
+    def test_refusal_names_no_key_material(self):
+        with self.assertRaises(crypto.BackupKeyRejected) as raised:
+            crypto.ensure_backup_creation_allowed()
+        self.assertNotIn("too-short", str(raised.exception))
+
+
+class BackupRequireEncryptionDefaultTests(SimpleTestCase):
+    """Required with DEBUG=False, permissive with DEBUG=True, explicit env wins either way.
+
+    ``override_settings(DEBUG=...)`` cannot recalculate the already-imported
+    default, so each case re-imports settings in an isolated process.
+    """
+
+    def setting_in_isolation(self, *, debug, require=None):
+        from pathlib import Path
+
+        backend = Path(__file__).resolve().parent.parent
+        env = {
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": os.environ.get("HOME", ""),
+            "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
+            "PYTHONPATH": str(backend),
+            "DJANGO_SETTINGS_MODULE": "config.settings",
+            "SECRET_KEY": "a-long-random-secret-key-for-isolated-settings-test",
+            "DEBUG": debug,
+            "DATABASE_URL": "sqlite:///db.sqlite3",
+        }
+        if require is not None:
+            env["BACKUP_REQUIRE_ENCRYPTION"] = require
+        # backend/.env would otherwise supply the "absent" variable via read_env.
+        # Suppress it before settings import so the defaults are really tested.
+        script = (
+            "import environ; environ.Env.read_env = lambda *a, **k: None; "
+            "import django; django.setup(); "
+            "from django.conf import settings; "
+            "print(settings.BACKUP_REQUIRE_ENCRYPTION)"
+        )
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True, text=True, env=env, cwd=str(backend), timeout=60,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        return completed.stdout.strip()
+
+    def assert_setting(self, *, debug, require, expected):
+        self.assertEqual(self.setting_in_isolation(debug=debug, require=require), expected)
+
+    def test_required_by_default_in_production(self):
+        self.assert_setting(debug="False", require=None, expected="True")
+
+    def test_permissive_by_default_with_debug(self):
+        self.assert_setting(debug="True", require=None, expected="False")
+
+    def test_an_explicit_value_wins_in_production(self):
+        self.assert_setting(debug="False", require="False", expected="False")
+
+    def test_an_explicit_value_wins_with_debug(self):
+        self.assert_setting(debug="True", require="True", expected="True")
 
 
 @override_settings(BACKUP_ENCRYPTION_KEYS=[KEY_A])

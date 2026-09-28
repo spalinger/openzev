@@ -115,6 +115,14 @@ Store a copy of all three keys outside the server. Losing
 `MFA_ENCRYPTION_KEYS` makes enrolled authenticator apps unusable, and losing
 `BACKUP_ENCRYPTION_KEYS` makes encrypted backups unreadable.
 
+What each key protects, and what losing it costs:
+
+| Key | Protects | If lost |
+|---|---|---|
+| `BACKUP_ENCRYPTION_KEYS` | Backup archives **and stored destination credentials** | Encrypted backups and stored S3 secrets needing that key cannot be opened. Keep old keys while retained archives or stored secrets still depend on them; new backups alone do not re-encrypt stored credentials. See [Backups](18-backups.md). |
+| `MFA_ENCRYPTION_KEYS` | Two-factor (TOTP) secrets | Authenticator access is affected; it is not the key that opens a backup archive. It is needed when recovering those devices. |
+| `SECRET_KEY` | Signing and authentication state | Replacing it can invalidate sessions and tokens; it does not make the backed-up business data undecryptable. |
+
 The backend checks this configuration every time it starts. If a required
 value is missing or still points at a development host, the database
 migration step stops with an error such as `accounts.E003` (hosts),

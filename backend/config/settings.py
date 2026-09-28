@@ -344,8 +344,13 @@ EXPORT_RUNNER_TIMEOUT_S = env.int("EXPORT_RUNNER_TIMEOUT_S", default=1800)
 # Optional, rotatable keys for backup artifacts and stored destination secrets.
 # The first key encrypts; every key can decrypt. Deliberately independent of
 # MFA_ENCRYPTION_KEYS and SECRET_KEY (ADR 0024). With none set, archives are
-# written in the clear and every surface says so.
+# written in the clear and every surface says so — unless BACKUP_REQUIRE_ENCRYPTION
+# refuses to create them (the production default).
 BACKUP_ENCRYPTION_KEYS = env.list("BACKUP_ENCRYPTION_KEYS", default=[])
+
+# Fail closed in production: refuse new backups with no usable key.
+# Permissive in DEBUG; an explicit value wins (see backend/.env.example).
+BACKUP_REQUIRE_ENCRYPTION = env.bool("BACKUP_REQUIRE_ENCRYPTION", default=not DEBUG)
 
 # S3 credentials from the environment override any stored on a destination, so
 # a hardened deployment can keep them out of the database entirely.

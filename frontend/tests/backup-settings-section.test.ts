@@ -48,7 +48,7 @@ const downloadBlob = vi.hoisted(() => vi.fn())
 vi.mock('../src/lib/downloadBlob', () => ({ downloadBlob }))
 
 const status = (overrides: Partial<BackupStatus> = {}): BackupStatus => ({
-    encrypted: true, encryption_key_fingerprint: 'abc123', encryption_key_problem: '', environment_credentials: false,
+    encrypted: true, encryption_required: false, encryption_key_fingerprint: 'abc123', encryption_key_problem: '', environment_credentials: false,
     destinations_enabled: 1, last_successful: null, last_failed: null, age_hours: null, stale: false,
     schedule_enabled: false, schedule_interval_hours: null, ...overrides,
 })
@@ -128,7 +128,7 @@ const labelled = (container: Element, key: string) =>
 
 describe('encryption status banner', () => {
     it('warns loudly that backups are not encrypted, and does not claim they are', async () => {
-        setup({ statusData: status({ encrypted: false, encryption_key_fingerprint: '' }) })
+        setup({ statusData: status({ encrypted: false, encryption_required: false, encryption_key_fingerprint: '' }) })
         const container = await render()
         expect(container.querySelector('.warning-banner')?.textContent).toContain('pages.backups.status.unencryptedTitle')
         expect(container.querySelector('.info-banner')).toBeNull()
@@ -146,6 +146,21 @@ describe('encryption status banner', () => {
         const container = await render()
         expect(container.querySelector('.error-banner')?.textContent).toContain('pages.backups.status.keyProblem')
         expect(container.querySelector('.warning-banner')).toBeNull()
+    })
+
+    it('says backups cannot run when encryption is required but no key is set', async () => {
+        setup({ statusData: status({ encrypted: false, encryption_required: true, encryption_key_fingerprint: '' }) })
+        const container = await render()
+        expect(container.querySelector('.error-banner')?.textContent).toContain('pages.backups.status.blockedTitle')
+        expect(container.querySelector('.warning-banner')).toBeNull()
+        expect(container.querySelector('.info-banner')).toBeNull()
+    })
+
+    it('evaluates a rejected key before the missing-key case', async () => {
+        setup({ statusData: status({ encrypted: false, encryption_required: true, encryption_key_problem: 'too short' }) })
+        const container = await render()
+        expect(container.querySelector('.error-banner')?.textContent).toContain('pages.backups.status.keyProblem')
+        expect(container.querySelector('.error-banner')?.textContent).not.toContain('pages.backups.status.blockedTitle')
     })
 
     it('points at the server command for restoring an instance and says single-community restore is not in the app yet', async () => {
@@ -246,6 +261,57 @@ describe('starting a backup', () => {
         const container = await render()
         await click(button(container, 'pages.backups.jobs.backUpNow'))
         expect(api.createBackupJob).toHaveBeenCalledWith({ scope: 'instance', destination_id: 'd-disk' })
+    })
+
+    it('disables Back up now with a visible reason when creation is blocked', async () => {
+        setup({ statusData: status({ encrypted: false, encryption_required: true }) })
+        const container = await render()
+        expect(button(container, 'pages.backups.jobs.backUpNow')!.disabled).toBe(true)
+        expect(container.textContent).toContain('pages.backups.jobs.blocked')
+        expect(api.createBackupJob).not.toHaveBeenCalled()
+    })
+
+    it('disables Back up now when the key is unusable, keeping existing job actions usable', async () => {
+        setup({
+            statusData: status({ encrypted: false, encryption_key_problem: 'too short' }),
+            jobs: [completed()],
+        })
+        const blob = new Blob(['zip'])
+        api.downloadBackupArtifact.mockResolvedValue(blob)
+        api.verifyBackupJob.mockResolvedValue(completed())
+        const container = await render()
+        expect(button(container, 'pages.backups.jobs.backUpNow')!.disabled).toBe(true)
+        expect(container.textContent).toContain('pages.backups.jobs.blockedKeyProblem')
+        const download = button(container, 'pages.backups.jobs.download')!
+        const check = button(container, 'pages.backups.jobs.check')!
+        const details = button(container, 'pages.backups.jobs.details')!
+        expect(download.disabled).toBe(false)
+        expect(check.disabled).toBe(false)
+        await click(download)
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+        expect(api.downloadBackupArtifact).toHaveBeenCalledWith('j-1')
+        expect(downloadBlob).toHaveBeenCalledWith(blob, 'openzev-backup-1.zip')
+        await click(check)
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+        expect(api.verifyBackupJob).toHaveBeenCalledWith('j-1')
+        await click(details)
+        expect(container.textContent).toContain('pages.backups.details.title')
+    })
+
+    it('shows the server 409 detail when a stale allowed page submits', async () => {
+        setup()
+        const axiosError = {
+            isAxiosError: true,
+            response: { data: { code: 'backup_encryption_required', detail: 'Backups require encryption on this instance.' } },
+        }
+        const { default: axios } = await import('axios')
+        vi.spyOn(axios, 'isAxiosError').mockReturnValue(true)
+        api.createBackupJob.mockRejectedValue(axiosError)
+        const container = await render()
+        await click(button(container, 'pages.backups.jobs.backUpNow'))
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)) })
+        expect(pushToast).toHaveBeenCalledWith('Backups require encryption on this instance.', 'error')
+        vi.restoreAllMocks()
     })
 
     it('a single-community backup needs a community chosen first', async () => {

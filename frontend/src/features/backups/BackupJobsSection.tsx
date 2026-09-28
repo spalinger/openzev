@@ -19,9 +19,16 @@ import { downloadBlob } from '../../lib/downloadBlob'
 import { formatBytes } from '../../lib/numbers'
 import { useToast } from '../../lib/toast'
 import { ConfirmDialog, useConfirmDialog } from '../../components/ConfirmDialog'
-import type { BackupJob, BackupJobScope, BackupJobStatus } from '../../types/api'
+import type { BackupJob, BackupJobScope, BackupJobStatus, BackupStatus } from '../../types/api'
 import { BackupJobDetailsModal } from './BackupJobDetailsModal'
-import { fileGone, hasActiveJob, hasFile, isDownloadable, verificationState } from './backupHelpers'
+import {
+    fileGone,
+    hasActiveJob,
+    hasFile,
+    isBackupCreationBlocked,
+    isDownloadable,
+    verificationState,
+} from './backupHelpers'
 
 const POLL_MS = 3000
 
@@ -32,7 +39,7 @@ const STATUS_BADGE: Record<BackupJobStatus, string> = {
     failed: 'badge-danger',
 }
 
-export function BackupJobsSection() {
+export function BackupJobsSection({ status }: { status: BackupStatus | undefined }) {
     const { t } = useTranslation()
     const { settings } = useAppSettings()
     const queryClient = useQueryClient()
@@ -88,7 +95,10 @@ export function BackupJobsSection() {
             void queryClient.invalidateQueries({ queryKey: queryKeys.backups.jobs() })
             pushToast(t('pages.backups.jobs.queued'), 'success')
         },
-        onError: (error) => pushToast(formatApiError(error), 'error'),
+        onError: (error) => {
+            pushToast(formatApiError(error), 'error')
+            void queryClient.invalidateQueries({ queryKey: queryKeys.backups.status() })
+        },
     })
 
     const verifyMutation = useMutation({
@@ -123,8 +133,9 @@ export function BackupJobsSection() {
         onError: () => pushToast(t('pages.backups.jobs.downloadFailed'), 'error'),
     })
 
+    const blocked = isBackupCreationBlocked(status)
     const canStart =
-        !!selectedDestination && (scope === 'instance' || !!zevId) && !startMutation.isPending
+        !!selectedDestination && (scope === 'instance' || !!zevId) && !startMutation.isPending && !blocked
 
     return (
         <section className="card page-stack">
@@ -186,6 +197,13 @@ export function BackupJobsSection() {
                         {t('pages.backups.jobs.backUpNow')}
                     </button>
                 </div>
+                {blocked && status && (
+                    <div className="error-banner">
+                        {status.encryption_key_problem
+                            ? t('pages.backups.jobs.blockedKeyProblem', { problem: status.encryption_key_problem })
+                            : t('pages.backups.jobs.blocked')}
+                    </div>
+                )}
             </form>
 
             {jobsQuery.isLoading ? (

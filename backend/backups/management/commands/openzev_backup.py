@@ -63,9 +63,10 @@ class Command(BaseCommand):
         zev = self._resolve_zev(options["zev"]) if options["zev"] else None
 
         try:
-            encrypting = crypto.encryption_configured()
+            crypto.ensure_backup_creation_allowed()
         except crypto.BackupCryptoError as exc:
             raise CommandError(str(exc)) from exc
+        encrypting = crypto.encryption_configured()
         if not encrypting:
             self.stderr.write(self.style.WARNING(
                 "WARNING: BACKUP_ENCRYPTION_KEYS is not set, so this archive will NOT be encrypted. "

@@ -4,13 +4,14 @@ import tempfile
 import uuid
 from unittest import mock
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from audit.models import AuditEvent
 from backups import tasks
 from backups.fixtures import build_world
 from backups.models import BackupDestination, BackupJob, BackupJobStatus, RestoreJob
+from invoices.models import Invoice
 from testing.helpers import authenticate
 
 BASE = "/api/v1/backups"
@@ -86,6 +87,34 @@ class CreateTests(RestoreApiTestCase):
         job = RestoreJob.objects.get(pk=response.data["id"])
         self.assertFalse(job.dry_run)
         self.assertEqual(job.safety_destination_id, self.destination.pk)
+
+    def test_a_real_restore_refuses_when_the_safety_backup_cannot_be_encrypted(self):
+        cases = [
+            ([], True, "backup_encryption_required"),
+            (["too-short"], False, "backup_encryption_invalid"),
+        ]
+        for keys, required, code in cases:
+            with self.subTest(code=code), override_settings(
+                BACKUP_ENCRYPTION_KEYS=keys, BACKUP_REQUIRE_ENCRYPTION=required,
+            ):
+                response, delay = self.create({"dry_run": False})
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(response.data["code"], code)
+                self.assertTrue(response.data["detail"])
+                self.assertFalse(RestoreJob.objects.exists())
+                self.assertFalse(AuditEvent.objects.filter(action_type="restore.created").exists())
+                delay.assert_not_called()
+
+    @override_settings(BACKUP_ENCRYPTION_KEYS=[], BACKUP_REQUIRE_ENCRYPTION=True)
+    def test_preview_and_recreation_need_no_safety_backup_key(self):
+        preview, _ = self.create({"dry_run": True})
+        self.assertEqual(preview.status_code, 202)
+        RestoreJob.objects.all().delete()
+        zev_id = self.world.alpha.pk
+        Invoice.objects.filter(zev=self.world.alpha).delete()
+        self.world.alpha.delete()
+        recreation, _ = self.create({"dry_run": False, "target_zev_id": str(zev_id)})
+        self.assertEqual(recreation.status_code, 202, recreation.content)
 
     def test_the_response_says_which_backup_it_came_from(self):
         response, _ = self.create({})

@@ -92,8 +92,9 @@ unusable — back it up like `SECRET_KEY`. The key is only needed by the backend
 
 Backup archives and stored backup-destination secrets are encrypted with keys
 that are independent of `SECRET_KEY` and the two-factor key (ADR 0024). A
-backup holds password hashes, personal data and invoices, so set one. Until
-then archives are written unencrypted. Keys must be at least 32 characters:
+backup holds password hashes, personal data and invoices, so set one. The
+chart runs with `DEBUG` off, so `BACKUP_REQUIRE_ENCRYPTION` defaults to true:
+with no key configured, backup creation is refused. Keys must be at least 32 characters:
 
 ```bash
 python -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
@@ -114,6 +115,20 @@ newest first: the first encrypts and all are tried on decrypt, so a key can be
 rotated. Keep a copy off the cluster — without it an encrypted backup cannot be
 opened. The key is passed to the backend and the worker (which runs backup
 jobs), not to beat.
+
+There is no dedicated value for the creation policy: to keep creating
+unencrypted backups deliberately, set `BACKUP_REQUIRE_ENCRYPTION=False` through
+`extraEnv` on the backend and the worker (and the same environment for
+administrative CLI runs), then restart the affected processes:
+
+```yaml
+backend:
+  extraEnv:
+    BACKUP_REQUIRE_ENCRYPTION: "False"
+worker:
+  extraEnv:
+    BACKUP_REQUIRE_ENCRYPTION: "False"
+```
 
 ## Passkeys
 

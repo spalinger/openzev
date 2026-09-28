@@ -2,6 +2,7 @@
 
 import tempfile
 from io import StringIO
+from pathlib import Path
 from unittest import mock
 
 from django.core.management import call_command
@@ -135,6 +136,24 @@ class ScheduledRunTests(TestCase):
         job.refresh_from_db()
         self.assertEqual((job.status, job.trigger, job.destination_id), ("completed", "scheduled", d.pk))
 
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=True, BACKUP_ENCRYPTION_KEYS=[])
+    def test_a_scheduled_job_reaches_the_guarded_runner_and_fails_safely_without_an_artifact(self):
+        from backups import crypto
+
+        d = self.destination("d")
+        with mock.patch.object(tasks.run_backup_job, "delay"):
+            result = tasks.run_scheduled_backup()
+        self.assertEqual(result, {"queued": ["d"], "skipped": []})
+        job = BackupJob.objects.get()
+        # Execute explicitly so a worker failure is not mistaken for a broker failure.
+        with self.assertRaises(crypto.BackupKeysNotConfigured):
+            tasks.execute_backup_job(job.pk)
+        job.refresh_from_db()
+        self.assertEqual(job.status, BackupJobStatus.FAILED)
+        self.assertIn("BACKUP_ENCRYPTION_KEYS", job.error_message)
+        self.assertEqual(job.archive_location, "")
+        self.assertEqual(list(Path(d.path).glob("openzev-backup-*")), [])
+
 
 class ScheduleApiTests(TestCase):
     @classmethod
@@ -207,11 +226,37 @@ class UnencryptedScheduleWarningTests(TestCase):
     def test_no_warning_when_nothing_is_scheduled(self):
         self.assertEqual(self.check(), [])
 
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=False, BACKUP_ENCRYPTION_KEYS=[])
     def test_a_schedule_without_a_key_warns(self):
         schedule.set_schedule(enabled=True, frequency="daily", hour=2, minute=0, day_of_week=0)
         (warning,) = self.check()
         self.assertEqual(warning.id, "backups.W001")
         self.assertIn("BACKUP_ENCRYPTION_KEYS", warning.msg)
+        self.assertIn("unencrypted", warning.msg)
+
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=True, BACKUP_ENCRYPTION_KEYS=[])
+    def test_a_schedule_without_a_required_key_says_it_cannot_run(self):
+        schedule.set_schedule(enabled=True, frequency="daily", hour=2, minute=0, day_of_week=0)
+        (warning,) = self.check()
+        self.assertEqual(warning.id, "backups.W001")
+        self.assertIn("BACKUP_ENCRYPTION_KEYS", warning.msg)
+        self.assertIn("cannot run", warning.msg)
+        self.assertNotIn("unencrypted", warning.msg)
+
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=False, BACKUP_ENCRYPTION_KEYS=["too-short"])
+    def test_a_rejected_key_warns_that_the_schedule_cannot_run(self):
+        schedule.set_schedule(enabled=True, frequency="daily", hour=2, minute=0, day_of_week=0)
+        (warning,) = self.check()
+        self.assertEqual(warning.id, "backups.W001")
+        self.assertIn("BACKUP_ENCRYPTION_KEYS", warning.msg)
+        self.assertIn("cannot run", warning.msg)
+
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=True, BACKUP_ENCRYPTION_KEYS=["too-short"])
+    def test_a_rejected_key_warns_even_when_encryption_is_required(self):
+        schedule.set_schedule(enabled=True, frequency="daily", hour=2, minute=0, day_of_week=0)
+        (warning,) = self.check()
+        self.assertEqual(warning.id, "backups.W001")
+        self.assertIn("cannot run", warning.msg)
 
     @override_settings(BACKUP_ENCRYPTION_KEYS=["K" * 40])
     def test_a_key_silences_it(self):

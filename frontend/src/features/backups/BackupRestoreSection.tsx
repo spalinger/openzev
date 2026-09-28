@@ -16,7 +16,7 @@ import { queryKeys } from '../../lib/api/queryKeys'
 import { formatDateTime, useAppSettings } from '../../lib/appSettings'
 import { formatNumber } from '../../lib/numbers'
 import { useToast } from '../../lib/toast'
-import type { BackupJobStatus, RestoreJob } from '../../types/api'
+import type { BackupJobStatus, BackupStatus, RestoreJob } from '../../types/api'
 import {
     canStartRestore,
     communitiesIn,
@@ -24,6 +24,7 @@ import {
     forceableConflicts,
     hardConflicts,
     hasActiveRestore,
+    isBackupCreationBlocked,
     readPlan,
     restorableBackups,
 } from './backupHelpers'
@@ -48,7 +49,7 @@ const STATUS_BADGE: Record<BackupJobStatus, string> = {
  * this is the one action on the page that destroys current data.
  * Restoring the whole instance is not offered here; it is a command on the server.
  */
-export function BackupRestoreSection() {
+export function BackupRestoreSection({ status }: { status?: BackupStatus } = {}) {
     const { t } = useTranslation()
     const { settings } = useAppSettings()
     const queryClient = useQueryClient()
@@ -125,12 +126,14 @@ export function BackupRestoreSection() {
 
     const running = job?.status === 'queued' || job?.status === 'running'
     const canPreview = !!backup && !!selectedZev && !start.isPending && !running
+    const restoreBlockedByEncryption = isBackupCreationBlocked(status) && (plan?.zev.exists_now ?? false)
     const canApply =
         previewReady &&
         !!plan &&
         canStartRestore(plan, force) &&
         confirmText.trim() === confirmWith &&
         (!plan.zev.exists_now || !!safetyDestination) &&
+        !restoreBlockedByEncryption &&
         !start.isPending &&
         !running
 
@@ -237,6 +240,9 @@ export function BackupRestoreSection() {
                         <div className="error-banner">{t('pages.backups.restore.blocked')}</div>
                     ) : (
                         <>
+                            {restoreBlockedByEncryption && (
+                                <div className="error-banner">{t('pages.backups.restore.blockedByEncryption')}</div>
+                            )}
                             <div className="warning-banner">
                                 {plan.zev.exists_now
                                     ? t('pages.backups.restore.warning', { name: plan.zev.current_name })

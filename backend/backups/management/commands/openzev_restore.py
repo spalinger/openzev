@@ -142,6 +142,11 @@ class Command(BaseCommand):
         zev_id, name = self._resolve_zev(options["zev"])
         needs_safety = not options["dry_run"] and bool(name)
         saved, adhoc = self._safety_destination(options, needed=needs_safety)
+        if needs_safety:
+            try:
+                crypto.ensure_backup_creation_allowed()
+            except crypto.BackupCryptoError as exc:
+                raise CommandError(str(exc)) from exc
 
         job = RestoreJob.objects.create(
             target_zev_id=zev_id, target_zev_name=name, source_description=options["source"][:500],
