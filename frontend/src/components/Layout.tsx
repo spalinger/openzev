@@ -8,6 +8,8 @@ import { fetchUsers } from '../lib/api/auth'
 import { fetchFeasibilityCalculatorEnabled } from '../lib/api/feasibility'
 import { queryKeys } from '../lib/api/queryKeys'
 import { LanguageSelector } from './LanguageSelector'
+import { ConfirmDialog, useConfirmDialog } from './ConfirmDialog'
+import { hasUnsavedZevSettingsDraft } from '../lib/zevUnsavedGuard'
 import { useToast } from '../lib/toast'
 import pkg from '../../package.json'
 
@@ -67,6 +69,7 @@ export function Layout() {
         return window.localStorage.getItem('openzev.sidebarCollapsed') === 'true'
     })
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+    const { dialog: zevSwitchDialog, confirm: confirmZevSwitch, handleConfirm: handleZevSwitchConfirm, handleCancel: handleZevSwitchCancel } = useConfirmDialog()
     const userMenuRef = useRef<HTMLDivElement | null>(null)
     const zevMenuRef = useRef<HTMLDivElement | null>(null)
     const userMenuTriggerRef = useRef<HTMLButtonElement | null>(null)
@@ -164,6 +167,26 @@ export function Layout() {
         }
     }, [isPlatformScope])
 
+    // A dirty settings draft lives in ZevSettingsPage; confirm before the
+    // switcher drops it. Clean switches go through immediately.
+    function requestZevSwitch(zevId: string) {
+        if (zevId === selectedZevId) {
+            return
+        }
+        if (!hasUnsavedZevSettingsDraft()) {
+            setSelectedZevId(zevId)
+            return
+        }
+        confirmZevSwitch({
+            title: t('pages.zevSettings.unsavedGuardTitle'),
+            message: t('pages.zevSettings.unsavedGuardSwitchMessage'),
+            confirmText: t('pages.zevSettings.switchWithoutSaving'),
+            onConfirm: () => {
+                setSelectedZevId(zevId)
+            },
+        })
+    }
+
     return (
         <div className={`shell${isSidebarCollapsed ? ' shell-collapsed' : ''}${isPlatformScope ? ' shell-scope-platform' : ''}`}>
             <div
@@ -255,7 +278,7 @@ export function Layout() {
                                                             onClick={() => {
                                                                 zevMenuTriggerRef.current?.focus()
                                                                 if (isSelectable) {
-                                                                    setSelectedZevId(zev.id)
+                                                                    requestZevSwitch(zev.id)
                                                                 }
                                                                 setIsZevMenuOpen(false)
                                                             }}
@@ -445,6 +468,13 @@ export function Layout() {
                 </header>
                 <Outlet />
             </main>
+            {zevSwitchDialog && (
+                <ConfirmDialog
+                    {...zevSwitchDialog}
+                    onConfirm={handleZevSwitchConfirm}
+                    onCancel={handleZevSwitchCancel}
+                />
+            )}
         </div>
     )
 }

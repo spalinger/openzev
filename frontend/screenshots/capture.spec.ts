@@ -225,6 +225,13 @@ test.describe('User Guide Screenshots', () => {
     })
   }
 
+  test('06c-zev-documents-settings', async ({ page }) => {
+    await navigateTo(page, '/zev-settings/documents')
+    await page.locator('[data-zev-field="email_body_template"] button').click()
+    await expect(page.locator('[data-zev-field="email_body_template"] .zev-email-default-preview')).toBeVisible()
+    await screenshotFull(page, '06c-zev-documents-settings')
+  })
+
   // 07 — Tariffs
   test('07-tariffs', async ({ page }) => {
     await navigateTo(page, '/tariffs')

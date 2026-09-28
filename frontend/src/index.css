@@ -58,6 +58,19 @@ select:where(:not([multiple])) {
   line-height: var(--field-line-height);
 }
 
+/* Shared ZEV editors use the field tokens in the settings page and edit modal. */
+.zev-general-settings-fields textarea,
+.zev-email-field textarea {
+  width: 100%;
+  padding: 0.625rem var(--field-padding-inline);
+  border: 1px solid var(--border-default);
+  border-radius: var(--field-radius);
+  background: var(--white);
+  font: inherit;
+  font-size: var(--field-font-size);
+  line-height: var(--field-line-height);
+}
+
 /* Keep checkboxes and radios at intrinsic width even when another form rule
    applies a width to inputs. They are excluded from the field rule above. */
 input[type="checkbox"],
@@ -4289,4 +4302,69 @@ input.recurrence-chip-input {
 .yearly-document-status:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
+}
+
+/* ZEV settings save bar: compact sticky footer, visible only while dirty,
+   saving, or showing a save error. Opaque so scrolled content never shows
+   through; safe-area padding for mobile browsers. */
+.zev-settings-save-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border-default);
+  border-radius: 0.75rem;
+  background: var(--surface-card);
+}
+
+.zev-settings-save-bar-text {
+  flex: 1 1 auto;
+  min-width: 10rem;
+  font-weight: 600;
+}
+
+.zev-settings-save-bar .actions-row {
+  margin-left: auto;
+}
+
+.zev-settings-save-bar-error {
+  flex: 1 1 100%;
+}
+
+/* Email subject/body: label row carries the source badge and the action
+   above the field; default mode shows the platform text read-only. */
+.zev-email-field {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.zev-email-label-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.zev-email-label-row > button {
+  margin-left: auto;
+}
+
+.zev-email-default-preview {
+  margin: 0;
+  padding: 0.625rem var(--field-padding-inline);
+  border: 1px dashed var(--border-default);
+  border-radius: var(--field-radius);
+  background: var(--surface);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.zev-email-fields-toggle {
+  display: grid;
+  gap: 0.5rem;
+  justify-items: start;
 }

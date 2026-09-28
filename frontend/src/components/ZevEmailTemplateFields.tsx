@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { fetchEmailTemplate } from '../lib/api/invoices'
 import { queryKeys } from '../lib/api/queryKeys'
@@ -10,6 +10,9 @@ type ZevEmailTemplateFieldsProps = {
     bodyTemplate: string
     onSubjectTemplateChange: (value: string) => void
     onBodyTemplateChange: (value: string) => void
+    fieldErrors?: Record<string, string>
+    /** Disabled-ZEV owner view: values stay visible but nothing is editable. */
+    readOnly?: boolean
 }
 
 export function ZevEmailTemplateFields({
@@ -17,12 +20,18 @@ export function ZevEmailTemplateFields({
     bodyTemplate,
     onSubjectTemplateChange,
     onBodyTemplateChange,
+    fieldErrors = {},
+    readOnly = false,
 }: ZevEmailTemplateFieldsProps) {
     const { t } = useTranslation()
     const subjectRef = useRef<HTMLInputElement>(null)
     const bodyRef = useRef<HTMLTextAreaElement>(null)
     const lastFocusedRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null)
+    const [fieldsOpen, setFieldsOpen] = useState(false)
+    const [editingDefaultSubject, setEditingDefaultSubject] = useState(false)
+    const [editingDefaultBody, setEditingDefaultBody] = useState(false)
 
+    // Owner-readable fallback; a failed fetch never blocks editing or saving.
     const globalTemplateQuery = useQuery({
         queryKey: queryKeys.admin.emailTemplate('invoice_email'),
         queryFn: () => fetchEmailTemplate('invoice_email'),
@@ -30,6 +39,7 @@ export function ZevEmailTemplateFields({
 
     const globalSubject = globalTemplateQuery.data?.subject ?? ''
     const globalBody = globalTemplateQuery.data?.body ?? ''
+    const hasGlobal = globalTemplateQuery.data != null
 
     const handleInsert = useTemplateTokenInsertion(
         subjectRef,
@@ -38,6 +48,86 @@ export function ZevEmailTemplateFields({
         onSubjectTemplateChange,
         onBodyTemplateChange,
     )
+
+    function handleInsertWithCustomize(variable: string, keepFocus: boolean) {
+        if (lastFocusedRef.current && !lastFocusedRef.current.isConnected) {
+            lastFocusedRef.current = null
+        }
+        if (!lastFocusedRef.current && !bodyRef.current && !readOnly && hasGlobal) {
+            const separator = globalBody && !/\s$/.test(globalBody) ? '\n' : ''
+            setEditingDefaultBody(true)
+            onBodyTemplateChange(`${globalBody}${separator}${variable}`)
+            return
+        }
+        handleInsert(variable, keepFocus)
+    }
+
+    function renderField(field: 'subject' | 'body') {
+        const isSubject = field === 'subject'
+        const value = isSubject ? subjectTemplate : bodyTemplate
+        const globalValue = isSubject ? globalSubject : globalBody
+        const usesDefault = value === '' && !(isSubject ? editingDefaultSubject : editingDefaultBody)
+        const inheritsDefault = value === ''
+        const error = fieldErrors[isSubject ? 'email_subject_template' : 'email_body_template']
+        const labelId = `zev-settings-email-${field}-label`
+        const errorId = `zev-settings-email-${field}-error`
+        const change = isSubject ? onSubjectTemplateChange : onBodyTemplateChange
+        const setEditing = isSubject ? setEditingDefaultSubject : setEditingDefaultBody
+
+        return (
+            <div className="zev-email-field" data-zev-field={`email_${field}_template`}>
+                <div className="zev-email-label-row">
+                    <span id={labelId}>{t(isSubject ? 'admin.emailTemplates.subject' : 'admin.emailTemplates.body')}</span>
+                    <span className={`badge ${inheritsDefault ? 'badge-info' : 'badge-neutral'}`}>
+                        {t(inheritsDefault ? 'pages.zevSettings.emailUsingDefault' : 'pages.zevSettings.emailCustomized')}
+                    </span>
+                    {!readOnly && (
+                        <button
+                            type="button"
+                            className="button button-secondary button-compact"
+                            onClick={() => {
+                                setEditing(usesDefault)
+                                change(usesDefault ? globalValue : '')
+                            }}
+                            aria-label={t(usesDefault
+                                ? (isSubject ? 'pages.zevSettings.emailCustomizeSubject' : 'pages.zevSettings.emailCustomizeBody')
+                                : (isSubject ? 'pages.zevSettings.emailResetSubject' : 'pages.zevSettings.emailResetBody'))}
+                            aria-describedby={usesDefault && error ? errorId : undefined}
+                        >
+                            {t(usesDefault ? 'pages.zevSettings.emailCustomize' : 'pages.zevSettings.emailUseDefault')}
+                        </button>
+                    )}
+                </div>
+                {usesDefault ? (hasGlobal && (
+                    <p className="zev-email-default-preview">{globalValue}</p>
+                )) : isSubject ? (
+                    <input
+                        ref={subjectRef}
+                        aria-labelledby={labelId}
+                        onFocus={() => { lastFocusedRef.current = subjectRef.current }}
+                        value={value}
+                        disabled={readOnly}
+                        aria-invalid={error ? true : undefined}
+                        aria-describedby={error ? errorId : undefined}
+                        onChange={(event) => { setEditing(true); change(event.target.value) }}
+                    />
+                ) : (
+                    <textarea
+                        ref={bodyRef}
+                        aria-labelledby={labelId}
+                        onFocus={() => { lastFocusedRef.current = bodyRef.current }}
+                        rows={10}
+                        value={value}
+                        disabled={readOnly}
+                        aria-invalid={error ? true : undefined}
+                        aria-describedby={error ? errorId : undefined}
+                        onChange={(event) => { setEditing(true); change(event.target.value) }}
+                    />
+                )}
+                {error && <small className="field-error" id={errorId} role="alert">{error}</small>}
+            </div>
+        )
+    }
 
     return (
         <>
@@ -49,63 +139,27 @@ export function ZevEmailTemplateFields({
             </header>
 
             <div className="inline-form page-stack">
-                <label>
-                    <span>{t('admin.emailTemplates.subject')}</span>
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                        <input
-                            ref={subjectRef}
-                            onFocus={() => { lastFocusedRef.current = subjectRef.current }}
-                            style={{ flex: 1 }}
-                            value={subjectTemplate}
-                            placeholder={globalSubject}
-                            onChange={(event) => onSubjectTemplateChange(event.target.value)}
-                        />
-                        {/* Empty field = already at the global default, so
-                            the reset action is meaningless and stays hidden. */}
-                        {subjectTemplate !== '' && (
-                            <button
-                                type="button"
-                                className="button button-secondary"
-                                onClick={() => onSubjectTemplateChange('')}
-                                title={t('pages.zevSettings.resetToGlobalDefault')}
-                            >
-                                {t('admin.resetToDefault')}
-                            </button>
-                        )}
-                    </div>
-                </label>
-
-                <label>
-                    <span>{t('admin.emailTemplates.body')}</span>
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
-                        <textarea
-                            ref={bodyRef}
-                            onFocus={() => { lastFocusedRef.current = bodyRef.current }}
-                            style={{ flex: 1 }}
-                            rows={10}
-                            value={bodyTemplate}
-                            placeholder={globalBody}
-                            onChange={(event) => onBodyTemplateChange(event.target.value)}
-                        />
-                        {bodyTemplate !== '' && (
-                            <button
-                                type="button"
-                                className="button button-secondary"
-                                onClick={() => onBodyTemplateChange('')}
-                                title={t('pages.zevSettings.resetToGlobalDefault')}
-                            >
-                                {t('admin.resetToDefault')}
-                            </button>
-                        )}
-                    </div>
-                </label>
+                {renderField('subject')}
+                {renderField('body')}
 
                 {globalTemplateQuery.data ? (
-                    <FieldReference
-                        groups={globalTemplateQuery.data.fields ?? []}
-                        content={`${subjectTemplate}\n${bodyTemplate}`}
-                        onInsert={handleInsert}
-                    />
+                    <div className="zev-email-fields-toggle">
+                        <button
+                            type="button"
+                            className="button button-secondary button-compact"
+                            aria-expanded={fieldsOpen}
+                            onClick={() => setFieldsOpen((open) => !open)}
+                        >
+                            {t('pages.zevSettings.emailInsertField')}
+                        </button>
+                        {fieldsOpen && (
+                            <FieldReference
+                                groups={globalTemplateQuery.data.fields ?? []}
+                                content={`${subjectTemplate}\n${bodyTemplate}`}
+                                onInsert={readOnly ? undefined : handleInsertWithCustomize}
+                            />
+                        )}
+                    </div>
                 ) : globalTemplateQuery.isError ? (
                     <p className="error-banner" role="alert">{t('common.error')}</p>
                 ) : (

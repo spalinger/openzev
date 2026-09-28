@@ -29,24 +29,45 @@ import { ZevEmailTemplateFields } from '../src/components/ZevEmailTemplateFields
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
-function Harness() {
-    const [subject, setSubject] = useState('Subject')
-    const [body, setBody] = useState('Body')
+function Harness({ initialSubject = 'Subject', initialBody = 'Body', readOnly = false }: {
+    initialSubject?: string
+    initialBody?: string
+    readOnly?: boolean
+} = {}) {
+    const [subject, setSubject] = useState(initialSubject)
+    const [body, setBody] = useState(initialBody)
     return createElement(ZevEmailTemplateFields, {
         subjectTemplate: subject,
         bodyTemplate: body,
         onSubjectTemplateChange: setSubject,
         onBodyTemplateChange: setBody,
+        readOnly,
     })
 }
 
+function renderHarness(props?: { initialSubject?: string; initialBody?: string; readOnly?: boolean }) {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    act(() => root.render(createElement(Harness, props)))
+    return { container, root }
+}
+
+function openFieldReference(container: ParentNode) {
+    const toggle = Array.from(container.querySelectorAll('button'))
+        .find((button) => button.textContent === 'pages.zevSettings.emailInsertField')!
+    act(() => { toggle.click() })
+}
+
 describe('ZEV email template field insertion', () => {
-    it('makes the scrollable field reference keyboard focusable', () => {
+    it('collapses the field reference behind Insert field but keeps it focusable', () => {
         const container = document.createElement('div')
         document.body.append(container)
         const root = createRoot(container)
         try {
             act(() => root.render(createElement(Harness)))
+            expect(container.querySelector('aside')).toBeNull()
+            openFieldReference(container)
             expect(container.querySelector('aside')?.tabIndex).toBe(0)
         } finally {
             act(() => root.unmount())
@@ -60,6 +81,7 @@ describe('ZEV email template field insertion', () => {
         const root = createRoot(container)
         try {
             act(() => root.render(createElement(Harness)))
+            openFieldReference(container)
             const subject = container.querySelector<HTMLInputElement>('input')!
             const body = container.querySelector<HTMLTextAreaElement>('textarea')!
             const token = Array.from(container.querySelectorAll<HTMLButtonElement>('.field-reference-token'))
@@ -109,12 +131,105 @@ describe('ZEV email template field insertion', () => {
         try {
             act(() => root.render(createElement(Harness)))
             expect(container.querySelector('aside')).toBeNull()
-            expect(container.textContent).toContain('common.error')
+            expect(container.querySelector('.error-banner')).not.toBeNull()
             expect(container.textContent).not.toContain('admin.noMatchingFields')
         } finally {
             act(() => root.unmount())
             container.remove()
             queryState.current = previous
+        }
+    })
+
+    it('keeps default fields editable when the platform template cannot load', () => {
+        const previous = queryState.current
+        queryState.current = { isError: true }
+        const { container, root } = renderHarness({ initialSubject: '', initialBody: '' })
+        try {
+            expect(container.querySelectorAll('.error-banner')).toHaveLength(1)
+            expect(container.textContent?.match(/common.error/g)).toHaveLength(1)
+            const customize = container.querySelector<HTMLButtonElement>(
+                'button[aria-label="pages.zevSettings.emailCustomizeSubject"]',
+            )!
+            expect(customize.disabled).toBe(false)
+            act(() => customize.click())
+            expect(container.querySelector<HTMLInputElement>('[data-zev-field="email_subject_template"] input')?.value).toBe('')
+        } finally {
+            act(() => root.unmount())
+            container.remove()
+            queryState.current = previous
+        }
+    })
+
+    it('starts the default body when a token is clicked without an editor focus', () => {
+        const { container, root } = renderHarness({ initialSubject: 'Custom subject', initialBody: '' })
+        try {
+            openFieldReference(container)
+            const token = Array.from(container.querySelectorAll<HTMLButtonElement>('.field-reference-token'))
+                .find((button) => button.textContent === '{invoice_number}')!
+            act(() => token.click())
+            expect(container.querySelector<HTMLTextAreaElement>('[data-zev-field="email_body_template"] textarea')?.value)
+                .toBe('Global body\n{invoice_number}')
+            expect(container.querySelector<HTMLInputElement>('[data-zev-field="email_subject_template"] input')?.value)
+                .toBe('Custom subject')
+        } finally {
+            act(() => root.unmount())
+            container.remove()
+        }
+    })
+
+    it('shows the platform text with Customize while on the default', () => {
+        const { container, root } = renderHarness({ initialSubject: '', initialBody: 'Custom body' })
+        try {
+            const badges = Array.from(container.querySelectorAll('.badge')).map((badge) => badge.textContent)
+            expect(badges).toContain('pages.zevSettings.emailUsingDefault')
+            expect(badges).toContain('pages.zevSettings.emailCustomized')
+            // Default subject renders its platform text, not an editor.
+            expect(container.querySelector('input')).toBeNull()
+            expect(container.textContent).toContain('Global subject')
+            expect(container.querySelector('button[aria-label="pages.zevSettings.emailResetSubject"]')).toBeNull()
+            // Customize seeds the editor with the platform text for real editing.
+            act(() => {
+                container.querySelector('button[aria-label="pages.zevSettings.emailCustomizeSubject"]')!.click()
+            })
+            expect(container.querySelector<HTMLInputElement>('input')!.value).toBe('Global subject')
+            // The body reset only stages the default; the editor unmounts.
+            const bodyReset = container.querySelector('button[aria-label="pages.zevSettings.emailResetBody"]')!
+            act(() => { bodyReset.click() })
+            expect(container.querySelector('textarea')).toBeNull()
+            expect(container.textContent).toContain('Global body')
+            expect(container.querySelectorAll('.badge').length).toBe(2)
+        } finally {
+            act(() => root.unmount())
+            container.remove()
+        }
+    })
+
+    it('disables every control in read-only mode', () => {
+        const { container, root } = renderHarness({ readOnly: true })
+        try {
+            expect(container.querySelector('input')!.disabled).toBe(true)
+            expect(container.querySelector('textarea')!.disabled).toBe(true)
+            expect(container.querySelector('button[aria-label="pages.zevSettings.emailResetSubject"]')).toBeNull()
+            expect(container.querySelector('button[aria-label="pages.zevSettings.emailResetBody"]')).toBeNull()
+            expect(container.querySelector('button[aria-label="pages.zevSettings.emailCustomizeSubject"]')).toBeNull()
+        } finally {
+            act(() => root.unmount())
+            container.remove()
+        }
+    })
+
+    it('shows default previews without actions in read-only mode', () => {
+        const { container, root } = renderHarness({ initialSubject: '', initialBody: '', readOnly: true })
+        try {
+            expect(container.querySelector('input')).toBeNull()
+            expect(container.querySelector('textarea')).toBeNull()
+            expect(container.textContent).toContain('Global subject')
+            expect(container.textContent).toContain('Global body')
+            expect(container.querySelector('button[aria-label="pages.zevSettings.emailCustomizeSubject"]')).toBeNull()
+            expect(container.querySelector('button[aria-label="pages.zevSettings.emailCustomizeBody"]')).toBeNull()
+        } finally {
+            act(() => root.unmount())
+            container.remove()
         }
     })
 })
