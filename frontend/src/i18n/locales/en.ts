@@ -2455,7 +2455,6 @@ export const en = {
             failedInvoices: 'Failed to load invoices.',
             cockpit: {
                 title: 'Billing cockpit',
-                description: 'Open work for the billing period that needs you first.',
                 failed: 'Failed to load period readiness.',
                 firstRunTitle: 'Set up your ZEV',
                 firstRunDescription: 'Complete these steps before the first billing run.',
@@ -2468,7 +2467,6 @@ export const en = {
                 setupIban: 'No IBAN is set for QR bills, so invoices carry no payment details.',
                 setupIbanLink: 'Billing settings',
                 setupSettings: 'Complete billing settings (IBAN)',
-                periodLabel: 'Billing period requiring action',
                 stepLabels: {
                     metering: 'Metering data',
                     assignments: 'Meter assignments',
@@ -2509,19 +2507,9 @@ export const en = {
                     none: 'All done',
                 },
                 openStep: 'Open',
-                nextUp: 'Next up',
-                allDone: 'This period is fully processed.',
-                completedSummary_one: '{{count}} completed step',
-                completedSummary_other: '{{count}} completed steps',
             },
             attention: {
                 failed: 'Failed to load cross-period alerts.',
-                title: 'Needs attention',
-                labels: {
-                    email_failed: 'Invoice email failed to deliver',
-                    invoice_overdue: 'Sent invoice overdue for payment',
-                    participant_validity: 'Participant validity ending or ended',
-                },
                 text: {
                     emailFailed: 'Invoice {{number}} — email to {{recipient}} failed',
                     invoiceOverdue: 'Invoice {{number}} overdue since {{due}}',
@@ -2530,12 +2518,7 @@ export const en = {
                 },
             },
             openInvoices: {
-                title: 'Open Invoices',
-                empty: 'No open invoices.',
                 overdue: 'Overdue',
-                open: 'Open',
-                outstanding: '{{openCount}} open · {{overdueCount}} overdue · CHF {{amount}} outstanding',
-                viewAll: 'View all invoices',
             },
             noInvoices: 'No invoices available.',
             invoiceCol: {

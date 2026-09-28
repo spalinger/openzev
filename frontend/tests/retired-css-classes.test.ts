@@ -12,7 +12,40 @@ import { join, resolve } from 'node:path'
  * 52 call sites and is a deliberate readability marker rather than an
  * oversight, since `.button` already carries the primary appearance.
  */
-const RETIRED_CLASSES = ['form-group', 'button-sm']
+const RETIRED_CLASSES = [
+    'form-group',
+    'button-sm',
+    'open-invoices-list',
+    'open-invoice-main',
+    'open-invoice-number',
+    'open-invoice-participant',
+    'open-invoice-amount',
+    'open-invoices-foot',
+    'cockpit-head',
+    'cockpit-period',
+    'cockpit-steps',
+    'cockpit-step',
+    'cockpit-step-badge',
+    'cockpit-step-label',
+    'cockpit-step-detail',
+    'cockpit-step-link',
+    'cockpit-completed',
+    'cockpit-completed-steps',
+    'cockpit-caught-up',
+    'cockpit-foot',
+    'cockpit-setup-list',
+    'cockpit-setup-warnings',
+    'cockpit-alerts',
+    'cockpit-alert',
+    'cockpit-alert-text',
+    'cockpit-alert-link',
+    'billing-completed-periods',
+    'billing-periods-heading',
+    'billing-periods-subheading',
+    'billing-current-period-actions',
+    'dot-danger',
+    'table-inline-action',
+]
 
 const SRC = resolve(__dirname, '../src')
 

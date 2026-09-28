@@ -2444,7 +2444,6 @@ export const fr = {
             failedInvoices: 'Impossible de charger les factures.',
             cockpit: {
                 title: 'Cockpit de facturation',
-                description: 'Travail ouvert pour la période de facturation qui vous attend en premier.',
                 failed: 'Impossible de charger l\'état de la période.',
                 firstRunTitle: 'Configurez votre CEL',
                 firstRunDescription: 'Terminez ces étapes avant la première facturation.',
@@ -2457,7 +2456,6 @@ export const fr = {
                 setupIban: 'Aucun IBAN configuré pour les QR-factures, les factures ne contiennent donc aucun moyen de paiement.',
                 setupIbanLink: 'Paramètres de facturation',
                 setupSettings: 'Compléter les paramètres de facturation (IBAN)',
-                periodLabel: 'Période de facturation à traiter',
                 stepLabels: {
                     metering: 'Données de comptage',
                     assignments: 'Affectations des compteurs',
@@ -2498,19 +2496,9 @@ export const fr = {
                     none: 'Tout est terminé',
                 },
                 openStep: 'Ouvrir',
-                nextUp: 'Prochaine étape',
-                allDone: 'Cette période est entièrement traitée.',
-                completedSummary_one: '{{count}} étape terminée',
-                completedSummary_other: '{{count}} étapes terminées',
             },
             attention: {
                 failed: 'Impossible de charger les alertes couvrant plusieurs périodes.',
-                title: 'Nécessite votre attention',
-                labels: {
-                    email_failed: 'Échec d\'envoi de la facture par e-mail',
-                    invoice_overdue: 'Facture envoyée en retard de paiement',
-                    participant_validity: 'Validité d\'un participant se terminant ou terminée',
-                },
                 text: {
                     emailFailed: 'Facture {{number}} — échec de l\'e-mail à {{recipient}}',
                     invoiceOverdue: 'Facture {{number}} en retard depuis le {{due}}',
@@ -2519,12 +2507,7 @@ export const fr = {
                 },
             },
             openInvoices: {
-                title: 'Factures ouvertes',
-                empty: 'Aucune facture ouverte.',
                 overdue: 'En retard',
-                open: 'Ouverte',
-                outstanding: '{{openCount}} ouverte(s) · {{overdueCount}} en retard · CHF {{amount}} impayé',
-                viewAll: 'Voir toutes les factures',
             },
             noInvoices: 'Aucune facture disponible.',
             invoiceCol: {
