@@ -1,10 +1,14 @@
 """Encryption for backup artifacts and stored destination secrets.
 
 Everything here hangs off ``settings.BACKUP_ENCRYPTION_KEYS``, a dedicated,
-optional, rotatable key list that is deliberately independent of
+rotatable key list that is deliberately independent of
 ``MFA_ENCRYPTION_KEYS`` and ``SECRET_KEY`` — see ADR 0024. The first key
 encrypts; every key can decrypt, so a rotation is: add the new key first, take
-fresh backups, retire the old key once no retained archive still needs it.
+fresh backups, retire the old key once no retained archive or stored
+destination secret still needs it.
+Whether an empty list still permits plaintext is creation policy
+(``settings.BACKUP_REQUIRE_ENCRYPTION``, enforced by
+``ensure_backup_creation_allowed``).
 
 Two different things are encrypted, with keys derived from the same
 configured string under different HKDF ``info`` labels so a value encrypted
@@ -103,6 +107,24 @@ def configured_keys() -> tuple[str, ...]:
 
 def encryption_configured() -> bool:
     return bool(configured_keys())
+
+
+def ensure_backup_creation_allowed() -> None:
+    """Refuse to create a new backup when policy requires encryption but no usable key exists.
+
+    Keys are validated first, so a rejected entry raises ``BackupKeyRejected``
+    even when the flag is off; an empty list raises ``BackupKeysNotConfigured``
+    only when ``BACKUP_REQUIRE_ENCRYPTION`` is true. Decryption is unchanged.
+    Safety backups follow this creation policy.
+    """
+    keys = configured_keys()
+    if keys:
+        return
+    if settings.BACKUP_REQUIRE_ENCRYPTION:
+        raise BackupKeysNotConfigured(
+            "Backups require encryption on this instance. Configure BACKUP_ENCRYPTION_KEYS "
+            "and restart the backend and workers before retrying."
+        )
 
 
 def key_fingerprint(key: str) -> str:

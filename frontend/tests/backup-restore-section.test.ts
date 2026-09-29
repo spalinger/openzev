@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MantineProvider } from '@mantine/core'
 import { BackupRestoreSection } from '../src/features/backups/BackupRestoreSection'
-import type { BackupDestination, BackupJob, RestoreConflict, RestoreJob, RestorePlan } from '../src/types/api'
+import type { BackupDestination, BackupJob, BackupStatus, RestoreConflict, RestoreJob, RestorePlan } from '../src/types/api'
 
 // `t` returns the key, so assertions read as "this message is shown".
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
@@ -37,6 +37,11 @@ const disk: BackupDestination = {
     has_secret_access_key: false, created_at: '', updated_at: '',
 }
 const other: BackupDestination = { ...disk, id: 'd-other', name: 'offsite' }
+const blockedStatus: BackupStatus = {
+    encrypted: false, encryption_required: true, encryption_key_fingerprint: '', encryption_key_problem: '',
+    environment_credentials: false, destinations_enabled: 2, last_successful: null, last_failed: null,
+    age_hours: null, stale: false, schedule_enabled: false, schedule_interval_hours: null,
+}
 
 const zevEntry = (id: string, name: string) => ({ id, name, counts: {}, media: { files: 0, bytes: 0, missing: [], unsafe: [] } })
 const backup = (overrides: Partial<BackupJob> = {}): BackupJob => ({
@@ -96,7 +101,7 @@ beforeEach(() => {
     })
 })
 
-async function render() {
+async function render(status?: BackupStatus) {
     const container = document.createElement('div')
     document.body.append(container)
     const root = createRoot(container)
@@ -104,7 +109,7 @@ async function render() {
     cleanups.push(() => { act(() => root.unmount()); client.clear(); container.remove() })
     await act(async () => root.render(
         createElement(QueryClientProvider, { client },
-            createElement(MantineProvider, null, createElement(BackupRestoreSection))),
+            createElement(MantineProvider, null, createElement(BackupRestoreSection, { status }))),
     ))
     await settle()
     return container
@@ -236,6 +241,25 @@ describe('applying', () => {
         expect(api.createRestoreJob).toHaveBeenLastCalledWith({
             source_backup_id: 'b1', target_zev_id: 'z1', dry_run: false, force: false, safety_destination_id: 'd-disk',
         })
+    })
+
+    it('keeps preview available but blocks a real restore when its safety backup is blocked', async () => {
+        setup()
+        const container = await render(blockedStatus)
+        await preview(container)
+        expect(container.textContent).toContain('pages.backups.restore.blockedByEncryption')
+        await act(async () => setValue(confirmInput(container)!, 'Sonnenhof'))
+        expect(button(container, 'pages.backups.restore.apply')?.disabled).toBe(true)
+        expect(api.createRestoreJob).toHaveBeenCalledTimes(1)
+    })
+
+    it('allows a real restore without a safety backup when the community is gone', async () => {
+        setup()
+        const container = await render(blockedStatus)
+        await preview(container, job({ plan_json: plan({ zev: { ...plan().zev, exists_now: false } }) }))
+        await act(async () => setValue(confirmInput(container)!, 'Sonnenhof'))
+        expect(container.textContent).not.toContain('pages.backups.restore.blockedByEncryption')
+        expect(button(container, 'pages.backups.restore.apply')?.disabled).toBe(false)
     })
 
     it('lets the safety backup go somewhere else', async () => {

@@ -101,7 +101,11 @@ export function AdminSystemHealthPanel() {
                         <p className="muted text-error">{t('pages.adminOverview.health.backups.stale')}</p>
                     )}
                     {health.backups.status !== 'unknown' && health.backups.encrypted === false && (
-                        <p className="muted text-error">{t('pages.adminOverview.health.backups.unencrypted')}</p>
+                        <p className="muted text-error">
+                            {health.backups.encryption_required || health.backups.encryption_key_problem
+                                ? t('pages.adminOverview.health.backups.blocked')
+                                : t('pages.adminOverview.health.backups.unencrypted')}
+                        </p>
                     )}
                     <p className="muted" style={{ margin: 0 }}>
                         <Link to="/admin/system-settings?tab=backup">{t('pages.adminOverview.health.backups.manage')}</Link>

@@ -222,6 +222,59 @@ class FailedRestoreTests(RestoreRunnerTestCase):
         self.assertIn("permission denied", job.error_message)
         self.assertEqual(zev_rows(self.alpha_id), damaged)
 
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=True, BACKUP_ENCRYPTION_KEYS=[])
+    def test_a_safety_backup_refused_by_encryption_policy_stops_the_restore_before_any_write(self):
+        self.damage()
+        damaged = zev_rows(self.alpha_id)
+        media_before = b"PDF changed since the backup"
+        default_storage.delete(self.alpha_pdf)
+        default_storage.save(self.alpha_pdf, io.BytesIO(media_before))
+        job = self.restore_job()
+        with self.assertRaises(restore.RestoreError) as raised:
+            tasks.execute_restore_job(job.pk)
+        self.assertIn("safety backup failed", str(raised.exception))
+        self.assertIn("BACKUP_ENCRYPTION_KEYS", str(raised.exception))
+        job.refresh_from_db()
+        self.assertEqual(job.status, BackupJobStatus.FAILED)
+        self.assertIn("safety backup failed", job.error_message)
+        self.assertEqual(zev_rows(self.alpha_id), damaged)
+        with default_storage.open(self.alpha_pdf, "rb") as handle:
+            self.assertEqual(handle.read(), media_before)
+        # The failed safety backup is still bookkept, like any other safety failure.
+        self.assertIsNotNone(job.safety_backup_id)
+        safety = BackupJob.objects.get(pk=job.safety_backup_id)
+        self.assertEqual(safety.status, BackupJobStatus.FAILED)
+        self.assertIn("BACKUP_ENCRYPTION_KEYS", safety.error_message)
+        self.assertEqual(safety.archive_location, "")
+
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=True, BACKUP_ENCRYPTION_KEYS=[])
+    def test_a_dry_run_needs_no_safety_backup_and_has_no_new_key_requirement(self):
+        self.damage()
+        damaged = zev_rows(self.alpha_id)
+        before = BackupJob.objects.count()
+        job = self.restore_job(dry_run=True)
+        tasks.execute_restore_job(job.pk)
+        job.refresh_from_db()
+        self.assertEqual(job.status, BackupJobStatus.COMPLETED)
+        self.assertEqual(zev_rows(self.alpha_id), damaged)
+        self.assertEqual(BackupJob.objects.count(), before)
+        self.assertIsNone(job.safety_backup)
+
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=True, BACKUP_ENCRYPTION_KEYS=[])
+    def test_a_real_restore_of_a_deleted_community_needs_no_safety_backup(self):
+        """No safety backup means no new key requirement."""
+        Invoice.objects.filter(zev_id=self.alpha_id).delete()
+        Zev.objects.filter(pk=self.alpha_id).delete()
+        self.assertFalse(Zev.objects.filter(pk=self.alpha_id).exists())
+        before = BackupJob.objects.count()
+        job = self.restore_job()
+        tasks.execute_restore_job(job.pk)
+        job.refresh_from_db()
+        self.assertEqual(job.status, BackupJobStatus.COMPLETED)
+        self.assertEqual(zev_rows(self.alpha_id), self.original)
+        self.assertEqual(BackupJob.objects.count(), before)
+        self.assertIsNone(job.safety_backup)
+
     def test_no_place_to_write_the_safety_backup_is_a_clear_refusal(self):
         self.damage()
         damaged = zev_rows(self.alpha_id)

@@ -21,12 +21,14 @@ export function BackupSettingsSection() {
             <section className="card page-stack">
                 <p className="muted" style={{ margin: 0 }}>{t('pages.backups.intro')}</p>
 
-                {/* Encryption is optional (ADR 0024), so the unencrypted state has to
-                    be loud: an archive holds password hashes, personal data and the
-                    OAuth client secret in the clear. */}
                 {status?.encryption_key_problem ? (
                     <div className="error-banner">
                         {t('pages.backups.status.keyProblem', { problem: status.encryption_key_problem })}
+                    </div>
+                ) : status && !status.encrypted && status.encryption_required ? (
+                    <div className="error-banner">
+                        <strong>{t('pages.backups.status.blockedTitle')}</strong>
+                        <div>{t('pages.backups.status.blocked')}</div>
                     </div>
                 ) : status && !status.encrypted ? (
                     <div className="warning-banner">
@@ -91,8 +93,8 @@ export function BackupSettingsSection() {
 
             <BackupDestinationsSection status={status} />
             <BackupScheduleSection status={status} />
-            <BackupJobsSection />
-            <BackupRestoreSection />
+            <BackupJobsSection status={status} />
+            <BackupRestoreSection status={status} />
         </div>
     )
 }

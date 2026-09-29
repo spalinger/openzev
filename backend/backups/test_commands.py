@@ -59,12 +59,14 @@ class BackupCommandTests(CommandTestCase):
         self.assertEqual(len(self.archives()), 1)
         self.assertEqual(BackupJob.objects.get().destination.name, "nightly")
 
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=False, BACKUP_ENCRYPTION_KEYS=[])
     def test_an_unencrypted_backup_warns_loudly_on_stderr_before_it_starts(self):
         _, err = run("openzev_backup", "--path", self.dest_dir.name)
         self.assertIn("will NOT be encrypted", err)
         self.assertIn("password hashes", err)
+        self.assertEqual(BackupJob.objects.get().status, BackupJobStatus.COMPLETED)
 
-    @override_settings(BACKUP_ENCRYPTION_KEYS=[KEY])
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=False, BACKUP_ENCRYPTION_KEYS=[KEY])
     def test_an_encrypted_backup_does_not_warn_and_reports_the_key(self):
         out, err = run("openzev_backup", "--path", self.dest_dir.name)
         self.assertNotIn("NOT be encrypted", err)
@@ -126,12 +128,35 @@ class BackupCommandTests(CommandTestCase):
         self.assertEqual(BackupJob.objects.get().status, BackupJobStatus.FAILED)
         self.assertEqual(self.archives(), [])
 
-    @override_settings(BACKUP_ENCRYPTION_KEYS=["too-short"])
+    @override_settings(BACKUP_ENCRYPTION_KEYS=["too-short"], BACKUP_REQUIRE_ENCRYPTION=False)
     def test_a_rejected_key_stops_the_command_before_a_job_is_created(self):
         with self.assertRaises(CommandError) as raised:
             run("openzev_backup", "--path", self.dest_dir.name)
         self.assertIn("shorter than", str(raised.exception))
         self.assertFalse(BackupJob.objects.exists())
+
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=True, BACKUP_ENCRYPTION_KEYS=[])
+    def test_a_missing_required_key_refuses_a_path_backup_before_a_job_exists(self):
+        with self.assertRaises(CommandError) as raised:
+            run("openzev_backup", "--path", self.dest_dir.name)
+        self.assertIn("BACKUP_ENCRYPTION_KEYS", str(raised.exception))
+        self.assertFalse(BackupJob.objects.exists())
+        self.assertEqual(self.archives(), [])
+
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=True, BACKUP_ENCRYPTION_KEYS=[])
+    def test_a_missing_required_key_refuses_a_destination_backup_before_a_job_exists(self):
+        BackupDestination.objects.create(name="nightly", kind="local", path=self.dest_dir.name)
+        with self.assertRaises(CommandError) as raised:
+            run("openzev_backup", "--destination", "nightly")
+        self.assertIn("BACKUP_ENCRYPTION_KEYS", str(raised.exception))
+        self.assertFalse(BackupJob.objects.exists())
+        self.assertEqual(self.archives(), [])
+
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=True, BACKUP_ENCRYPTION_KEYS=[KEY])
+    def test_valid_keys_encrypt_when_required(self):
+        out, _ = run("openzev_backup", "--path", self.dest_dir.name)
+        self.assertIn(f"yes (key {crypto.key_fingerprint(KEY)})", out)
+        self.assertTrue(BackupJob.objects.get().encrypted)
 
     def test_the_run_is_audited_as_a_management_command(self):
         run("openzev_backup", "--path", self.dest_dir.name)

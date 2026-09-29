@@ -136,6 +136,7 @@ class EncryptionTests(RunnerTestCase):
         self.assertEqual(result["manifest"]["encryption"]["key_fingerprint"], crypto.key_fingerprint(KEY))
         self.assertEqual(job.manifest_json["encryption"], result["manifest"]["encryption"])
 
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=False, BACKUP_ENCRYPTION_KEYS=[])
     def test_without_a_key_the_backup_runs_and_is_flagged_unencrypted(self):
         job = self.job()
         tasks.execute_backup_job(job.pk)
@@ -154,6 +155,62 @@ class EncryptionTests(RunnerTestCase):
         self.assertEqual(job.status, BackupJobStatus.FAILED)
         self.assertIn("shorter than", job.error_message)
         self.assertNoLeftovers()
+
+
+class RequiredEncryptionRunnerTests(RunnerTestCase):
+    """A job queued before the key was removed, or created directly, still fails
+    safely without building an archive."""
+
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=True, BACKUP_ENCRYPTION_KEYS=[])
+    def test_a_required_policy_refuses_a_directly_created_job_without_building_an_archive(self):
+        job = self.job()
+        with mock.patch("backups.tasks.archive.build_archive") as build, \
+                mock.patch("backups.tasks.store_archive") as store:
+            with self.assertRaises(crypto.BackupKeysNotConfigured):
+                tasks.execute_backup_job(job.pk)
+        job.refresh_from_db()
+        self.assertEqual(job.status, BackupJobStatus.FAILED)
+        self.assertIsNotNone(job.completed_at)
+        self.assertIn("BACKUP_ENCRYPTION_KEYS", job.error_message)
+        self.assertNotIn("A" * 10, job.error_message)
+        build.assert_not_called()
+        store.assert_not_called()
+        self.assertEqual(os.listdir(self.dest_dir.name), [])
+        self.assertNoLeftovers()
+        failed = self.audit("backup.failed")
+        self.assertEqual(len(failed), 1)
+        self.assertIn("BACKUP_ENCRYPTION_KEYS", failed[0].summary)
+
+    def test_a_job_created_while_valid_still_fails_once_the_key_is_removed(self):
+        with override_settings(BACKUP_REQUIRE_ENCRYPTION=True, BACKUP_ENCRYPTION_KEYS=[KEY]):
+            job = self.job()
+        with mock.patch("backups.tasks.archive.build_archive") as build, \
+                mock.patch("backups.tasks.store_archive") as store:
+            with override_settings(BACKUP_REQUIRE_ENCRYPTION=True, BACKUP_ENCRYPTION_KEYS=[]):
+                with self.assertRaises(crypto.BackupKeysNotConfigured):
+                    tasks.execute_backup_job(job.pk)
+        job.refresh_from_db()
+        self.assertEqual(job.status, BackupJobStatus.FAILED)
+        self.assertIsNotNone(job.completed_at)
+        build.assert_not_called()
+        store.assert_not_called()
+        self.assertEqual(self.audit("backup.failed")[0].status, "failed")
+
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=True, BACKUP_ENCRYPTION_KEYS=[KEY])
+    def test_a_valid_key_still_succeeds_when_required(self):
+        job = self.job()
+        tasks.execute_backup_job(job.pk)
+        job.refresh_from_db()
+        self.assertEqual(job.status, BackupJobStatus.COMPLETED)
+        self.assertTrue(job.encrypted)
+
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=False, BACKUP_ENCRYPTION_KEYS=["too-short"])
+    def test_a_rejected_key_still_fails_when_encryption_is_optional(self):
+        job = self.job()
+        with self.assertRaises(crypto.BackupKeyRejected):
+            tasks.execute_backup_job(job.pk)
+        job.refresh_from_db()
+        self.assertEqual(job.status, BackupJobStatus.FAILED)
 
 
 class FailureTests(RunnerTestCase):

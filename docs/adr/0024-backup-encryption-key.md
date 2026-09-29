@@ -1,7 +1,8 @@
-# ADR 0024: Backup artifacts are encrypted under a dedicated, optional key
+# ADR 0024: Backup artifacts are encrypted under a dedicated key, required by default in production
 
 - Status: Accepted
 - Date: 2026-09-21
+- Revised: 2026-09-23 — encryption is now required by default in production (see below); the opt-out remains.
 
 ## Context
 
@@ -31,7 +32,7 @@ its ciphertext is one of the things a backup carries.
 ## Decision
 
 Backup artifacts are encrypted under **`BACKUP_ENCRYPTION_KEYS`**: a dedicated,
-optional, rotatable key list, separate from both `SECRET_KEY` and
+rotatable key list, separate from both `SECRET_KEY` and
 `MFA_ENCRYPTION_KEYS`.
 
 - **Separate from `MFA_ENCRYPTION_KEYS`.** Different blast radius and different
@@ -42,11 +43,17 @@ optional, rotatable key list, separate from both `SECRET_KEY` and
 - **A list, like the MFA keys.** The first entry encrypts; every entry can
   decrypt. This gives the same staged rotation `accounts/mfa_crypto.py` already
   implements — add the new key, take fresh backups, retire the old key once no
-  retained archive needs it.
-- **Optional.** With no key configured, archives are written in clear and backup
-  still runs. An instance whose operator has not yet provisioned a key is better
-  served by an unencrypted backup than by no backup.
-- **The unencrypted path is loud, not quiet.** The management command prints a
+  retained archive or stored destination secret still needs it.
+- **Required by default in production, still escapable on purpose.**
+  `BACKUP_REQUIRE_ENCRYPTION` defaults to `not DEBUG`: a production instance
+  (`DEBUG=False`) refuses to create a new backup when no usable key is
+  configured — through the app, the command line, scheduled jobs, direct runner
+  calls and pre-restore safety backups. A development instance stays
+  permissive by default, and an explicit environment value wins in either
+  environment, so an operator who deliberately supplies protection elsewhere keeps
+  one documented opt-out (`BACKUP_REQUIRE_ENCRYPTION=False`, scoping it to a
+  single command for a one-off run).
+- **The unencrypted path, where permitted, is loud, not quiet.** The management command prints a
   warning, the admin UI marks the destination as unencrypted, `BackupJob.encrypted`
   records it per artifact, and the user guide leads with what an unencrypted
   archive contains. "Optional" must never read as "fine by default".
@@ -85,10 +92,13 @@ Trade-offs:
   encrypted archive unrecoverable — a worse outcome than losing
   `MFA_ENCRYPTION_KEYS`, which costs TOTP enrolment but not the data. The user
   guide must treat it as a key to escrow, not a key to generate and forget.
-- **Optional means the insecure path exists.** A hurried operator gets plaintext
-  PII in a bucket. Mitigated by loud warnings rather than by removing the choice,
-  because forcing key provisioning before any backup can run is how instances end
-  up with no backups at all.
+- **Requiring by default can still leave an instance without new backups.**
+  An operator who never provisions a key gets refused runs instead of plaintext
+  ones. This is the intended trade: a refused backup is visible (a failed job,
+  a 409, a UI banner saying backups cannot run, `backups.W001`) while a quiet
+  plaintext archive in a bucket is not — and the documented opt-out covers the
+  deliberate cases. What is *not* kept is the old silent default, where omitting
+  a variable changed the security property of every future archive.
 - **Hand-rolled chunk framing.** Small, but it is envelope code that must be got
   right: nonce uniqueness per chunk, authenticated chunk ordering, and a final
   chunk marker so truncation cannot pass verification.
@@ -108,9 +118,14 @@ Trade-offs:
    - Removes the insecure path entirely.
    - Rejected: a backup that refuses to run is not safer than an unencrypted one.
      The realistic outcome is an operator who postpones backups until "later",
-     which is the failure this feature exists to prevent. Loud warnings, and a
-     spec-level question about whether *remote* destinations should require a key,
-     carry the risk instead.
+     which is the failure this feature exists to prevent.
+   - Update 2026-09-23: revisited and partly adopted — encryption is now required
+     *by default* (`BACKUP_REQUIRE_ENCRYPTION`, default `not DEBUG`), which
+     closed the remote-destination question the same way for every destination.
+     The full alternative (no opt-out at all) stays rejected: a deliberate,
+     documented plaintext run remains possible through the one setting, so an
+     operator who protects the output elsewhere is not forced through key
+     provisioning to get any backup at all.
 
 3. **Delegate to storage-side encryption only (S3 SSE, encrypted volumes).**
    - Zero application code, and operators running on managed object storage get it
@@ -138,9 +153,11 @@ Trade-offs:
 - Destination credentials (S3 access keys) are a different secret with a different
   lifetime and are not covered here; their storage rules are in
   [SPEC-2026-09-backup-and-restore](../specs/2026-09-backup-and-restore.md) §4.2.
-- A Django system check warns when a scheduled backup is configured with no
-  encryption key (`backups.W001`, in `backups/checks.py`). It is tagged `database`,
+- A Django system check distinguishes an enabled schedule with missing required
+  keys, missing optional keys, and rejected keys (`backups.W001`, in
+  `backups/checks.py`). It is tagged `database`,
   since the schedule lives in the database, so it runs under `manage.py check
   --database default` and not in an ordinary `check`.
-- Whether a *remote* destination should refuse to run without a key is still open;
-  encryption remains optional and loud.
+- Whether a *remote* destination should refuse to run without a key was closed
+  2026-09-23: `BACKUP_REQUIRE_ENCRYPTION` (default `not DEBUG`) refuses creation
+  for every destination kind unless explicitly opted out.

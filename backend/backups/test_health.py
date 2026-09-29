@@ -139,7 +139,13 @@ class StatusMappingTests(HealthTestCase):
 
     @override_settings(BACKUP_ENCRYPTION_KEYS=["too-short"])
     def test_an_unusable_key_is_not_encrypted_and_not_an_error(self):
-        self.assertFalse(health.backup_health()["encrypted"])
+        result = health.backup_health()
+        self.assertFalse(result["encrypted"])
+        self.assertTrue(result["encryption_key_problem"])
+
+    @override_settings(BACKUP_ENCRYPTION_KEYS=[], BACKUP_REQUIRE_ENCRYPTION=True)
+    def test_the_health_payload_reports_when_encryption_is_required(self):
+        self.assertTrue(health.backup_health()["encryption_required"])
 
 
 class SystemHealthEndpointTests(HealthTestCase):
@@ -153,6 +159,12 @@ class SystemHealthEndpointTests(HealthTestCase):
 
     def test_the_health_snapshot_carries_a_backups_probe(self):
         self.assertEqual(self.probe()["status"], "unknown")
+
+    @override_settings(BACKUP_ENCRYPTION_KEYS=[], BACKUP_REQUIRE_ENCRYPTION=True)
+    def test_the_probe_reports_blocked_backup_creation(self):
+        probe = self.probe()
+        self.assertTrue(probe["encryption_required"])
+        self.assertFalse(probe["encryption_key_problem"])
 
     def test_a_stale_schedule_shows_up_as_degraded_with_the_facts_the_card_needs(self):
         self.destination()

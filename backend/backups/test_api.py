@@ -355,6 +355,51 @@ class JobCreateTests(ApiTestCase):
                 delay.assert_not_called()
         self.assertFalse(BackupJob.objects.exists())
 
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=True, BACKUP_ENCRYPTION_KEYS=[])
+    def test_a_missing_required_key_is_a_409_with_no_job_no_enqueue_and_no_audit(self):
+        destination = self.local_destination()
+        response, delay = self.create({"scope": "instance", "destination_id": str(destination.pk)})
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertEqual(response.data["code"], "backup_encryption_required")
+        self.assertIn("BACKUP_ENCRYPTION_KEYS", response.data["detail"])
+        self.assertFalse(BackupJob.objects.exists())
+        delay.assert_not_called()
+        self.assertFalse(AuditEvent.objects.filter(action_type="backup.created").exists())
+
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=True, BACKUP_ENCRYPTION_KEYS=["too-short"])
+    def test_a_rejected_key_is_a_409_with_no_job_no_enqueue_and_no_audit(self):
+        destination = self.local_destination()
+        response, delay = self.create({"scope": "instance", "destination_id": str(destination.pk)})
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertEqual(response.data["code"], "backup_encryption_invalid")
+        self.assertIn("shorter than", response.data["detail"])
+        self.assertFalse(BackupJob.objects.exists())
+        delay.assert_not_called()
+        self.assertFalse(AuditEvent.objects.filter(action_type="backup.created").exists())
+
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=False, BACKUP_ENCRYPTION_KEYS=["too-short"])
+    def test_a_rejected_key_is_still_a_409_when_encryption_is_optional(self):
+        destination = self.local_destination()
+        response, delay = self.create({"scope": "instance", "destination_id": str(destination.pk)})
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertEqual(response.data["code"], "backup_encryption_invalid")
+        self.assertFalse(BackupJob.objects.exists())
+        delay.assert_not_called()
+
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=True, BACKUP_ENCRYPTION_KEYS=[KEY])
+    def test_a_valid_key_with_required_policy_still_queues(self):
+        destination = self.local_destination()
+        response, delay = self.create({"scope": "instance", "destination_id": str(destination.pk)})
+        self.assertEqual(response.status_code, 202, response.content)
+        delay.assert_called_once()
+
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=False, BACKUP_ENCRYPTION_KEYS=[])
+    def test_explicit_optional_plaintext_still_queues(self):
+        destination = self.local_destination()
+        response, delay = self.create({"scope": "instance", "destination_id": str(destination.pk)})
+        self.assertEqual(response.status_code, 202, response.content)
+        delay.assert_called_once()
+
 
 class JobReadTests(ApiTestCase):
     def test_list_is_newest_first_and_filterable(self):
@@ -451,6 +496,7 @@ class StatusTests(ApiTestCase):
         self.assertEqual(data["encryption_key_fingerprint"], "")
         self.assertEqual((data["last_successful"], data["last_failed"], data["age_hours"]), (None, None, None))
         self.assertEqual(data["destinations_enabled"], 0)
+        self.assertIn("encryption_required", data)
 
     @override_settings(BACKUP_ENCRYPTION_KEYS=[KEY])
     def test_a_configured_key_is_reported_by_fingerprint_never_by_value(self):
@@ -472,6 +518,14 @@ class StatusTests(ApiTestCase):
         data = self.status()
         self.assertTrue(data["environment_credentials"])
         self.assertNotIn("envsecret", str(data))
+
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=True)
+    def test_the_status_reports_that_encryption_is_required(self):
+        self.assertTrue(self.status()["encryption_required"])
+
+    @override_settings(BACKUP_REQUIRE_ENCRYPTION=False)
+    def test_the_status_reports_that_plaintext_is_permitted(self):
+        self.assertFalse(self.status()["encryption_required"])
 
     def test_a_safety_backup_or_a_community_backup_does_not_make_the_instance_look_backed_up(self):
         destination = self.local_destination()

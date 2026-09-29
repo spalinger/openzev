@@ -27,7 +27,8 @@ mfaEncryptionKeys:
 # Key(s) that encrypt backup archives and stored backup-destination secrets,
 # comma-separated newest-first (at least 32 characters each; the first
 # encrypts, all decrypt). Independent of secretKey and mfaEncryptionKeys
-# (ADR 0024). Empty means backups are written unencrypted. Generate one with:
+# (ADR 0024). Empty blocks backup creation unless BACKUP_REQUIRE_ENCRYPTION=False
+# is set in backend and worker extraEnv. Generate one with:
 #   python -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
 backupEncryptionKeys:
   value: ""

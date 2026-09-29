@@ -187,6 +187,19 @@ class BackupJobListCreateView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
+        try:
+            crypto.ensure_backup_creation_allowed()
+        except crypto.BackupKeysNotConfigured as exc:
+            return Response(
+                {"code": "backup_encryption_required", "detail": str(exc)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except crypto.BackupCryptoError as exc:
+            return Response(
+                {"code": "backup_encryption_invalid", "detail": str(exc)},
+                status=status.HTTP_409_CONFLICT,
+            )
+
         job = BackupJob.objects.create(
             scope=data["scope"], zev=data["zev"], destination=data["destination"], requester=request.user,
         )
@@ -301,6 +314,20 @@ class RestoreJobListCreateView(APIView):
         serializer = RestoreJobCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
+
+        if not data["dry_run"] and Zev.objects.filter(pk=data["target_zev_id"]).exists():
+            try:
+                crypto.ensure_backup_creation_allowed()
+            except crypto.BackupKeysNotConfigured as exc:
+                return Response(
+                    {"code": "backup_encryption_required", "detail": str(exc)},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            except crypto.BackupCryptoError as exc:
+                return Response(
+                    {"code": "backup_encryption_invalid", "detail": str(exc)},
+                    status=status.HTTP_409_CONFLICT,
+                )
 
         if RestoreJob.objects.filter(
             target_zev_id=data["target_zev_id"], status__in=(BackupJobStatus.QUEUED, BackupJobStatus.RUNNING)
@@ -473,6 +500,7 @@ class BackupStatusView(APIView):
         health = backup_health()
         return Response({
             "encrypted": encrypted,
+            "encryption_required": bool(settings.BACKUP_REQUIRE_ENCRYPTION),
             "encryption_key_fingerprint": fingerprint,
             "encryption_key_problem": key_problem,
             "environment_credentials": bool(

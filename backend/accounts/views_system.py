@@ -208,6 +208,8 @@ def _probe_backups() -> dict:
         "age_hours": health["age_hours"],
         "stale": health["stale"],
         "encrypted": health["encrypted"],
+        "encryption_required": health["encryption_required"],
+        "encryption_key_problem": health["encryption_key_problem"],
     }
 
 

@@ -172,6 +172,7 @@ def execute_backup_job(job_id, *, source: str = AuditEventSource.CELERY, destina
     )
 
     try:
+        crypto.ensure_backup_creation_allowed()
         if target is None:
             raise DestinationError("This backup has no destination to write to.")
         fingerprint = crypto.active_fingerprint()

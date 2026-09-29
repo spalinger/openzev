@@ -40,6 +40,39 @@ encryption keys themselves.
 password hashes, participants' names, addresses and consumption profiles, every
 invoice, and the OAuth client secret in readable form.
 
+> **Upgrade note.** Production installations (`DEBUG=False`) now **require**
+> encryption by default: without a backup key, no new backup is created.
+> Existing archives are unchanged; a restore that needs a new safety backup
+> still needs a key. Development installations (`DEBUG=True`) stay permissive
+> unless explicitly configured.
+>
+> 1. Generate a backup key with the command below. Keep existing keys if any are
+>    already configured; do not replace a key just to adopt this policy.
+> 2. Save a protected copy outside this server, for example in the operator's
+>    password manager. Keep the recovery instructions accessible if the server
+>    is lost.
+> 3. Configure the same key list and policy in backend, worker, beat and
+>    administrative CLI environments. Recreate/restart affected processes through
+>    the deployment's normal workflow; editing an env file does not update
+>    running processes. Apply this to every place those environments are
+>    defined (Compose files, Helm values) so a redeploy does not revert it.
+> 4. Take a backup, confirm its recorded `encrypted` state, and verify it. Use the
+>    existing restore-drill instructions to test recovery on a disposable instance
+>    before relying on it.
+> 5. Preserve old backups until a replacement is verified; switching the setting
+>    does not encrypt earlier files.
+>
+> To deliberately allow plaintext, set `BACKUP_REQUIRE_ENCRYPTION=False`. For a
+> one-off plaintext run without changing web or worker settings, scope it to
+> that command (the directory must be one the operator has secured):
+>
+> ```bash
+> BACKUP_REQUIRE_ENCRYPTION=False python manage.py openzev_backup --path /secure/backups
+> ```
+>
+> The opt-out also permits plaintext safety backups in any process using it.
+> Configured valid keys still encrypt; rejected keys still fail.
+
 Encryption is switched on by setting `BACKUP_ENCRYPTION_KEYS` on the server. Generate
 a key with:
 
@@ -52,7 +85,8 @@ python -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).dec
 - Backups are encrypted with AES-256-GCM. Several keys can be listed, comma
   separated: the first encrypts, every one can decrypt. To rotate, add the new
   key **in front**, take fresh backups, and drop the old key only once no backup
-  you still need was made with it.
+  you still need was made with it — and no stored destination secret still
+  needs it, since new backups do not re-encrypt stored credentials.
 - **Keep a copy of the key somewhere other than the server.** Without it an
   encrypted backup cannot be opened — by anyone, including us. It is a separate
   secret from `MFA_ENCRYPTION_KEYS` and `SECRET_KEY`, and it is not stored in the
@@ -158,9 +192,11 @@ Two things have to be true for it to run at all, and the page says both:
 - **The scheduler (beat) has to be running** next to the worker. Without it the
   schedule is saved but nothing fires. The backup page and the *System health* tab go
   red if it stops working — see below.
-- **Set `BACKUP_ENCRYPTION_KEYS` first.** A schedule without a key writes unencrypted
-  archives, unattended, every time. The page warns while a schedule is on with no key,
-  and `python manage.py check --database default` reports it as `backups.W001`.
+- **Set `BACKUP_ENCRYPTION_KEYS` first.** Without a key, scheduled backups
+  cannot run where encryption is required (they fail with a clear error), and
+  are written unencrypted where plaintext is still permitted. The page says
+  which while a schedule is on, and `python manage.py check --database default`
+  reports it as `backups.W001`.
 
 Changes take effect without a restart.
 
@@ -210,7 +246,8 @@ whole-instance backup is older than **twice the schedule's interval** — one mi
 run is tolerated, two are a problem — or when none has ever finished. The health card
 is also red when the last run failed after the last success, or when a destination is
 enabled but nothing has ever succeeded; it is grey ("not set up") when no destination
-is enabled at all.
+is enabled at all. With a destination enabled, the card distinguishes blocked
+backup creation from backups that are permitted to be unencrypted.
 
 Only whole-instance backups count. A backup of one community does not protect the
 instance, and a safety backup is the way back from a restore, so neither can make the
@@ -361,7 +398,10 @@ backup one.
      running for that community. Resolve these first, then preview again.
 3. **Choose where the safety backup goes.** Before anything is changed, the
    community *as it is now* is backed up there. If that backup fails, nothing is
-   restored. It is the way back: restore from it to undo the restore.
+   restored. If backup creation is blocked by the encryption settings, the
+   restore button stays disabled until the server configuration is fixed. A
+   preview and recreation of a deleted community need no safety backup. The
+   safety backup is the way back: restore from it to undo the restore.
 4. **Type the community's name** and press **Restore now**. The whole restore is
    applied in one step. If anything fails, the community is exactly as it was.
 
@@ -414,6 +454,7 @@ saved destination instead of `--path`. `--force` goes ahead past the
 | *would delete or roll back N issued record(s)* | Sent or paid invoices, or issued contracts, would be lost | Read them in the plan; go ahead only if you mean it |
 | *cannot be overridden* | See step 2 above | Resolve it and preview again |
 | *safety backup failed* | The safety backup could not be written | Fix the destination (**Test** it under Destinations); nothing was restored |
+| *Backups require encryption* / *BACKUP_ENCRYPTION_KEYS entry is shorter* | The safety backup cannot be created with the current key settings | Configure a valid `BACKUP_ENCRYPTION_KEYS` value and restart the backend and workers; nothing was restored |
 | *newer version* / *migrations* | The backup was made by a different version | As for [restoring an instance](#when-the-command-refuses) |
 
 ## What a backup does not do
@@ -433,7 +474,8 @@ saved destination instead of `--path`. `--force` goes ahead past the
 
 | Setting | Purpose |
 |---|---|
-| `BACKUP_ENCRYPTION_KEYS` | Comma-separated keys, at least 32 characters each. First encrypts, all decrypt. Optional but strongly recommended. |
+| `BACKUP_ENCRYPTION_KEYS` | Comma-separated keys, at least 32 characters each. First encrypts, all decrypt. Required for new backups in production by default (see above); without a key, creation is refused unless explicitly opted out. |
+| `BACKUP_REQUIRE_ENCRYPTION` | Refuse to create new backups when no usable key is configured. Default `True` in production (`DEBUG=False`), `False` in development; an explicit value wins in either environment. |
 | `BACKUP_S3_ACCESS_KEY_ID`, `BACKUP_S3_SECRET_ACCESS_KEY` | S3 credentials from the environment; override any stored on a destination. |
 | `BACKUP_WORK_DIR` | Where archives are assembled before being stored. Needs room for one full archive. |
 | `BACKUP_RUNNER_TIMEOUT_S` | Time budget for one backup run. Default 10800 (3 hours). A job still `running` well past this is failed by the sweep. |

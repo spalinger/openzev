@@ -9,6 +9,7 @@ be the failure this exists to prevent.
 
 from __future__ import annotations
 
+from django.conf import settings
 from django.utils import timezone
 
 from . import crypto
@@ -56,8 +57,10 @@ def backup_health(now=None) -> dict:
 
     try:
         encrypted = crypto.encryption_configured()
+        encryption_key_problem = False
     except crypto.BackupCryptoError:
         encrypted = False
+        encryption_key_problem = True
 
     return {
         "status": status,
@@ -69,4 +72,6 @@ def backup_health(now=None) -> dict:
         "stale": bool(stale),
         "last_failed_after_success": failed_since,
         "encrypted": encrypted,
+        "encryption_required": bool(settings.BACKUP_REQUIRE_ENCRYPTION),
+        "encryption_key_problem": encryption_key_problem,
     }

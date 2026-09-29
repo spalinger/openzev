@@ -189,7 +189,10 @@ Made while implementing phases 1 to 4; each is reflected in the sections below.
     destination and no path.
 30. **`backups.W001` is a database-tagged system check** (it runs under `manage.py
     check --database default`, since an ordinary check must not need a database),
-    warning when a schedule is on and no `BACKUP_ENCRYPTION_KEYS` is set (ADR 0024).
+    distinguishing an enabled schedule with missing required keys (cannot run),
+    missing optional keys (writes unencrypted), and rejected keys (cannot be used).
+    It reuses key validation and safe messages, and stays silent with a valid key,
+    a disabled schedule, without `--database`, or on an unmigrated database.
 31. **`manage.py openzev_backup_sweep [--dry-run]`** applies retention, expiry and
     stalled-job recovery from cron where there is no beat, and previews what a
     retention setting would delete. The sweep runs hourly on beat, `expired` +
@@ -197,10 +200,15 @@ Made while implementing phases 1 to 4; each is reflected in the sections below.
     `queued` for four hours, or `running` past `BACKUP_RUNNER_TIMEOUT_S` plus 15
     minutes, is failed with a safe message; the same goes for restores and for a
     verification claim nobody released.
-32. **The remaining open question of ADR 0024 stays open**: whether a *remote*
-    destination should refuse to run without an encryption key. Encryption remains
-    optional, and loud (the schedule warning, `backups.W001`, the health card's
-    unencrypted note, the banner and the per-job badge).
+32. **The open question of ADR 0024 is closed**: a *remote* destination no longer
+    runs without an encryption key by default either. `BACKUP_REQUIRE_ENCRYPTION`
+    (default `not DEBUG`) governs creation for whole-instance and per-community
+    backups, local and S3 destinations, API and CLI requests, scheduled jobs,
+    direct runner calls and pre-restore safety backups. Encryption is required by
+    default in production and loud where plaintext is still permitted (the schedule
+    warning, `backups.W001`, the health card's unencrypted note, the banner and
+    the per-job badge); an explicit `BACKUP_REQUIRE_ENCRYPTION=False` remains as
+    the one documented opt-out.
 
 ## 1. Problem and outcome
 
@@ -420,6 +428,7 @@ Added to `backend/config/settings.py`:
 | Setting | Env | Default | Purpose |
 |---|---|---|---|
 | `BACKUP_ENCRYPTION_KEYS` | `env.list` | `[]` | Artifact encryption and destination-secret encryption (ADR 0024) |
+| `BACKUP_REQUIRE_ENCRYPTION` | `env.bool` | `not DEBUG` (required in production, permissive in development) | Fail closed: refuse to create a new backup when no usable key is configured. An explicit value wins in either environment; scoped to one command for a deliberate plaintext run |
 | `BACKUP_S3_ACCESS_KEY_ID` | `env` | `""` | Overrides every stored S3 credential |
 | `BACKUP_S3_SECRET_ACCESS_KEY` | `env` | `""` | Overrides every stored S3 credential |
 | `BACKUP_WORK_DIR` | `env` | `""` (the system temp directory) | Where archives are assembled. Must have room for one full archive, and for a second copy while encrypting (the plaintext is deleted before the upload) |
@@ -442,17 +451,17 @@ Phase 1:
 | `/api/v1/backups/destinations/{id}/` | DELETE | 204. Existing archives are not touched and jobs keep their recorded location. Audited `backup_destination.delete` |
 | `/api/v1/backups/destinations/{id}/test/` | POST | Writes and deletes a small probe object. `{"ok": true}` or 400 `{"detail"}` with a safe message; never echoes credentials or a raw provider response |
 | `/api/v1/backups/jobs/` | GET | Newest first, a plain list. Filters `?scope=`, `?status=`, `?limit=` (1–100, default 25) |
-| `/api/v1/backups/jobs/` | POST | `{scope, zev_id?, destination_id}` → 202 with the job. Persist, then enqueue on commit; a failed enqueue marks the job `failed` and returns 503 — never a 202 for a job that will not run (ADR 0017). 400 for an unknown or disabled destination, a `zev` scope without a ZEV, an `instance` scope with one, or an unknown ZEV |
+| `/api/v1/backups/jobs/` | POST | `{scope, zev_id?, destination_id}` → 202 with the job. Persist, then enqueue on commit; a failed enqueue marks the job `failed` and returns 503 — never a 202 for a job that will not run (ADR 0017). 400 for an unknown or disabled destination, a `zev` scope without a ZEV, an `instance` scope with one, or an unknown ZEV. **409** when creation is refused by encryption policy — `backup_encryption_required` (no usable key while `BACKUP_REQUIRE_ENCRYPTION` is true) or `backup_encryption_invalid` (a rejected key) — with the safe message as `detail`; no job is created, nothing is enqueued and no `backup.created` event is emitted |
 | `/api/v1/backups/jobs/{id}/` | GET | Status, for polling |
 | `/api/v1/backups/jobs/{id}/download/` | GET | `FileResponse` for a completed job in a **local** destination. 409 when there is no artifact or the archive is in S3 (fetch it from the bucket); 410 when the file, or its destination, no longer exists, or when the recorded location does not resolve inside the destination's directory |
-| `/api/v1/backups/status/` | GET | `{encrypted, encryption_key_fingerprint, encryption_key_problem, environment_credentials, destinations_enabled, last_successful, last_failed, age_hours}`. `encrypted` is whether a *usable key is configured*; a configured-but-unusable key sets `encryption_key_problem` instead, so it is not read as "no key". Key value never appears |
+| `/api/v1/backups/status/` | GET | `{encrypted, encryption_required, encryption_key_fingerprint, encryption_key_problem, environment_credentials, destinations_enabled, last_successful, last_failed, age_hours}`. `encrypted` is whether a *usable key is configured*; a configured-but-unusable key sets `encryption_key_problem` instead, so it is not read as "no key". `encryption_required` is whether the server refuses unencrypted creation. Key value never appears |
 
 Phase 3:
 
 | Endpoint | Method | Behaviour |
 |---|---|---|
 | `/api/v1/backups/restores/` | GET | Newest first, a plain list. Filters `?zev_id=`, `?limit=` (1–100, default 25) |
-| `/api/v1/backups/restores/` | POST | `{source_backup_id, target_zev_id, dry_run (default true), force (default false), safety_destination_id?}` → 202. Persist, then enqueue on commit; a failed enqueue marks the job `failed` and returns 503. **400** for: `mode: "instance"` ("Whole-instance restore is only available as a management command."), an unknown or unfinished backup, a community the backup's manifest does not hold, an unknown or disabled safety destination, and a real restore of an existing community with nowhere to write the safety backup (the source backup's destination is the default). **409** when that community already has a queued or running restore. Audited `restore.created` on the community |
+| `/api/v1/backups/restores/` | POST | `{source_backup_id, target_zev_id, dry_run (default true), force (default false), safety_destination_id?}` → 202. Persist, then enqueue on commit; a failed enqueue marks the job `failed` and returns 503. **400** for: `mode: "instance"` ("Whole-instance restore is only available as a management command."), an unknown or unfinished backup, a community the backup's manifest does not hold, an unknown or disabled safety destination, and a real restore of an existing community with nowhere to write the safety backup (the source backup's destination is the default). **409** when that community already has a queued or running restore, or when a real restore of an existing community needs a safety backup that current encryption settings refuse (`backup_encryption_required` or `backup_encryption_invalid`, with a safe `detail`). Dry runs and recreations of deleted communities bypass this creation check. Refusal creates no restore job or `restore.created` event. Audited `restore.created` on accepted requests |
 | `/api/v1/backups/restores/{id}/` | GET | Status and `plan_json`, for polling |
 
 Phase 4:
@@ -624,8 +633,13 @@ directly by `manage.py openzev_backup`, which must work with no broker.
 
 1. **Claim** with a single `UPDATE … WHERE status='queued'`; a lost claim returns
    `None` (duplicate delivery runs the job once). Audit `backup.started`.
-2. Resolve the destination (`destination` override, then the job's) and the active
-   key fingerprint.
+2. Enforce creation policy first with `crypto.ensure_backup_creation_allowed()`:
+   a rejected key always refuses, and an empty key list refuses while
+   `BACKUP_REQUIRE_ENCRYPTION` is true — before any archive is built or stored,
+   so a refused backup builds no archive. A job queued before the configuration
+   changed, or created directly, is still refused here. Then resolve the
+   destination (`destination` override, then the job's) and the active key
+   fingerprint.
 3. In a `TemporaryDirectory(dir=BACKUP_WORK_DIR)`, call
    `archive.build_archive` into a file — **never a buffer**. It runs in one
    `atomic(durable=True)` block, with `SET TRANSACTION ISOLATION LEVEL REPEATABLE
@@ -652,11 +666,14 @@ Audit is best-effort (`_audit_best_effort`): a failed audit write neither fails 
 completed backup nor masks the exception a failed one is about to raise.
 
 **CLI.** `openzev_backup (--destination NAME | --path DIR) [--zev ID|NAME]`
+checks the same creation policy after resolving destination/scope but before
+creating a job (a crypto refusal becomes `CommandError` with no job row), then
 creates a `BackupJob`, runs it in-process with `source=MANAGEMENT_COMMAND`, prints
 the location, size, SHA-256 and encryption status, warns on standard error before
-starting when no key is set, and exits non-zero (`CommandError`) on failure with the
+starting when plaintext is permitted but no key is set, and exits non-zero (`CommandError`) on refusal or failure with the
 row's safe message. `--path` writes to an ad-hoc local directory with no saved
-destination. `openzev_backup_verify FILE` runs `verify_archive`.
+destination. A deliberate one-off plaintext run scopes `BACKUP_REQUIRE_ENCRYPTION=False`
+to that command without changing web or worker settings. `openzev_backup_verify FILE` runs `verify_archive`.
 
 ### 6.4 Scheduling and retention
 
@@ -665,7 +682,10 @@ destination. `openzev_backup_verify FILE` runs `verify_archive`.
   `run_scheduled_backup` creates one whole-instance `BackupJob` per **enabled
   destination** with `trigger="scheduled"`, skips a destination that already has a
   `queued`/`running` instance job, and enqueues each; a broker outage fails that
-  row with a safe message instead of leaving it queued.
+  row with a safe message instead of leaving it queued. The scheduler queues as
+  today; the guarded runner records a safe failure and audit event when policy
+  refuses one. A missing worker remains a queued/stalled-job problem handled by
+  the existing recovery mechanism.
 - **Sweep** (`backups.retention.sweep(steps, dry_run)`), as the beat task
   `sweep_backup_artifacts` every hour (`CELERY_BEAT_SCHEDULE`), at the start of
   every backup (`expired`, `stalled` — never `retention`), at the end of every
@@ -872,11 +892,11 @@ All under `frontend/src/features/backups/`.
 
 | Component | Contents |
 |---|---|
-| `BackupSettingsSection` | Composes the tab. An intro; the **encryption banner** — `error-banner` when `encryption_key_problem` is set, `warning-banner` when no key is configured, `info-banner` (with the key fingerprint) when one is; a note that restore is not available in the app yet; `StatCard`s for last successful / last failed backup and enabled destinations |
+| `BackupSettingsSection` | Composes the tab. An intro; the **encryption banner** — `error-banner` with the specific problem when `encryption_key_problem` is set (evaluated first), `error-banner` ("Backups cannot run" with a server-configuration remedy) when no key is configured while `encryption_required` is true, `warning-banner` when no key is configured while plaintext is permitted, `info-banner` (with the key fingerprint) when one is; a note that restore is not available in the app yet; `StatCard`s for last successful / last failed backup and enabled destinations |
 | `BackupDestinationsSection` | Destination table (name, type, target, credential mode, status) with **Test**, **Edit**, **Delete** (`ConfirmDialog`), and a `FormModal` form. The secret input is disabled, with the reason, when no encryption key is configured; blank on edit; a "remove the stored secret" switch appears only when one is stored; an info banner notes when environment credentials override the form. Kind is fixed on edit |
-| `BackupJobsSection` | **Back up now** (scope, community, destination) and the job table with status and encryption badges, **Details** (completed) and **Download** (completed, local archives only). Polls every 3 s only while a job is queued or running, and refreshes the status query when work finishes |
+| `BackupJobsSection` | **Back up now** (scope, community, destination), disabled with a visible reason when the loaded status says creation is blocked (`isBackupCreationBlocked`: a rejected key, or no key while `encryption_required`); the API stays authoritative when the page is stale and its 409 `detail` is shown via `formatApiError`. The job table carries status and encryption badges, **Details** (completed) and **Download** (completed, local archives only); existing archive actions stay usable when creation is blocked. Polls every 3 s only while a job is queued or running, and refreshes the status query when work finishes |
 | `BackupJobDetailsModal` | Archive name, location, size, SHA-256, encryption, timestamps, record count, per-community table, a warning when invoice PDFs were missing from storage, and a note when the archive is in object storage |
-| `backupHelpers.ts` | Pure logic: `buildDestinationPayload`, `destinationTarget`, `readManifest`, `hasActiveJob`, `isDownloadable`, … |
+| `backupHelpers.ts` | Pure logic: `buildDestinationPayload`, `destinationTarget`, `readManifest`, `hasActiveJob`, `isBackupCreationBlocked`, `isDownloadable`, … |
 
 `buildDestinationPayload` follows the API's secret contract: absent leaves a stored
 secret alone, a typed value replaces it, `''` clears it (only on the explicit
@@ -1015,6 +1035,8 @@ export interface BackupJobInput {
 export interface BackupStatus {
     /** Whether a usable encryption key is configured (not whether the last archive used it). */
     encrypted: boolean
+    /** Whether the server refuses to create unencrypted backups. */
+    encryption_required: boolean
     encryption_key_fingerprint: string
     /** Set when a key is configured but unusable, so it is not mistaken for "no key". */
     encryption_key_problem: string
@@ -1065,12 +1087,12 @@ names are passed as a `{{command}}` placeholder so they are never translated.
 
 | Part | Behaviour |
 |---|---|
-| `BackupScheduleSection` | Enable switch; *daily* / *weekly* (with a weekday); a time (`<input type="time">`, labelled with the server's time zone); the last run. **Save** is enabled only when the form is valid and differs from what is saved. A `warning-banner` while enabled and no encryption key is set, and another when no destination is enabled; a note that nothing runs unless the scheduler is |
+| `BackupScheduleSection` | Enable switch; *daily* / *weekly* (with a weekday); a time (`<input type="time">`, labelled with the server's time zone); the last run. **Save** is enabled only when the form is valid and differs from what is saved. While enabled: an `error-banner` naming the problem when the key is unusable, an `error-banner` that scheduled backups are blocked when no key is configured while `encryption_required` (never claiming it "will write unencrypted backups"), a `warning-banner` when no key is configured while plaintext is permitted, and another when no destination is enabled; a note that nothing runs unless the scheduler is |
 | Stale banner (`BackupSettingsSection`) | An `error-banner` when `status.stale`: how many hours ago the last backup finished against the schedule's interval, or that none has yet |
 | Destination form and table | *Keep the latest* (a number; blank or `0` keeps everything) and a *Keeps* column |
 | Job list | A *Scheduled* / *Safety backup* badge; **Check** (disabled while a check runs; polling continues while `verifying`); an *Integrity* column (*Not checked*, *Checking…*, *Intact* + date, *Check failed* + reason); **Delete file** behind a `ConfirmDialog`; for a backup with no file, "File removed: beyond retention / expired" and no actions; the expiry of a safety backup |
-| Restore section | Only backups whose file still exists are offered |
-| `AdminSystemHealthPanel` | A *Backups* card: not set up (`unknown`), the last backup's time, *the schedule has fallen behind*, *not encrypted*, and a link to the backup tab; the grid is three columns wide |
+| Restore section | Only backups whose file still exists are offered. A preview stays available; after a preview of an existing community, `isBackupCreationBlocked(status)` disables **Restore now** and shows an error when its required safety backup cannot be created. A deleted community can still be recreated without a safety backup. `openzev_restore --mode zev` checks the same creation policy before creating a job for a real restore of an existing community |
+| `AdminSystemHealthPanel` | A *Backups* card: not set up (`unknown`), the last backup's time, *the schedule has fallen behind*, a blocked-creation message when a required key is absent or any configured key is rejected, the unencrypted note when plaintext creation is permitted, and a link to the backup tab; the grid is three columns wide. `backup_health()` and `/api/v1/auth/system-health/` expose `encrypted`, `encryption_required`, and boolean `encryption_key_problem` for this distinction |
 
 Pure logic in `backupHelpers.ts`: `buildSchedulePayload` (a valid `HH:MM`; the weekday
 only for weekly), `scheduleChanged`, `scheduleToForm`, `parseRetention`,
@@ -1083,8 +1105,8 @@ only for weekly), `scheduleChanged`, `scheduleToForm`, `parseRetention`,
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Archives carry plaintext secrets and full PII — `OAuthProvider.client_secret` is a clear `CharField`, plus password hashes, participant addresses, invoice PDFs | Critical | `BACKUP_ENCRYPTION_KEYS` (ADR 0024). Optional, so mitigation depends on the operator setting one: warned in CLI and UI, recorded per artifact, led with in the docs. TLS + SSE for S3. `clean()` forbids a local path inside `MEDIA_ROOT` |
-| `BACKUP_ENCRYPTION_KEYS` lost | High — every encrypted archive is unrecoverable | Documented as a key to escrow; key list allows staged rotation; a system check warns when a schedule exists with no key |
+| Archives carry plaintext secrets and full PII — `OAuthProvider.client_secret` is a clear `CharField`, plus password hashes, participant addresses, invoice PDFs | Critical | `BACKUP_ENCRYPTION_KEYS` (ADR 0024), required by default in production (`BACKUP_REQUIRE_ENCRYPTION`, default `not DEBUG`): a missing key refuses creation with a clear error, a rejected key always refuses; where plaintext is still permitted it is loud in CLI and UI, recorded per artifact, led with in the docs. TLS + SSE for S3. `clean()` forbids a local path inside `MEDIA_ROOT` |
+| `BACKUP_ENCRYPTION_KEYS` lost | High — every encrypted archive is unrecoverable | Documented as a key to escrow; key list allows staged rotation; `backups.W001` distinguishes a schedule that cannot run (missing required key, rejected key) from one that would write unencrypted |
 | `MFA_ENCRYPTION_KEYS` mismatch on restore | High — every TOTP secret undecryptable | Fingerprints in the manifest; preflight names the required fingerprint before loading anything |
 | Per-ZEV restore destroys issued documents | High — `sent`/`paid` invoices and `ContractIssue` rows have legal retention | Refused by default, `force` required, recorded on the job and in the audit event |
 | Restore interleaves with an invoice run | High | `select_for_update()` on the ZEV; refusal while a generation or export job for it is active |
@@ -1098,25 +1120,25 @@ only for weekly), `scheduleChanged`, `scheduleToForm`, `parseRetention`,
 
 ## 9. Test plan
 
-### Backend — `backend/backups/` (508 tests, phases 1–4)
+### Backend — `backend/backups/` (541 tests, phases 1–4 plus fail-closed encryption policy)
 
 | Module | Tests | Covers |
 |---|---|---|
-| `test_crypto.py` | 22 | Envelope round trip (multi-chunk, exact multiple, empty); **truncation, reordered chunk, flipped bit and edited header each fail authentication**; wrong key names the required fingerprint; rotation; short-key rejection; domain separation between archive and secret keys; destination-secret round trip and rotation |
+| `test_crypto.py` | 34 | Envelope round trip (multi-chunk, exact multiple, empty); **truncation, reordered chunk, flipped bit and edited header each fail authentication**; wrong key names the required fingerprint; rotation; short-key rejection; domain separation between archive and secret keys; destination-secret round trip and rotation. **Creation policy** (`ensure_backup_creation_allowed`): the four-row table (valid keys allowed under either flag, empty refused only when required, rejected always refused including while optional, valid-first-then-rejected still refuses, no key material in errors). **Settings default** in isolated processes: required with `DEBUG=False`, permissive with `DEBUG=True`, explicit env wins either way |
 | `test_archive.py` | 54 | `ArchiveShapeTests` — manifest, every section present, **timestamps keep their microseconds**, every line a serialized row, **primary keys preserved** (UUID and integer), FKs are real keys, a ZEV holds only its own rows, PDFs travel byte-exact under their own ZEV, contract PDFs base64 in-row, **rows whose ZEV was deleted are in the instance scope**, account refs, credentials travel, M2M excluded, no row of an excluded model, counts match rows, **no key material in the archive**. `ZevScopeTests`. `MediaTests` — missing PDF recorded not fatal, `..` and absolute names refused, a shared file stored once. `CoverageTests` — the registry closure. `DurabilityTests`. `VerifyTests` — tampered member, missing member, injected member, disagreeing count, **transfer archive refused by kind**, unknown version, malformed manifest, not a zip, failure cap. `EncryptedArchiveTests`. `RoundTripTests` — deserializing the sections reproduces the rows with their keys |
 | `test_destinations.py` | 45 | Local and S3 validation (**path inside `MEDIA_ROOT` refused**, `..` resolved first, half a credential pair); credential precedence; boto client construction (custom endpoint → path-style and relaxed checksums; instance role passes no keys); local storage (0600, no partial file on failure, atomic); S3 upload key/SSE/location; **provider errors become safe messages that never echo the response, and an unrecognised error code is named only if it is shaped like one**; persistence |
-| `test_runner.py` | 31 | Completed job records location/size/checksum/manifest; stored archive verifies; encryption on/off; a rejected key fails the job with the reason; failures (missing destination, unwritable, **unexpected error is generic on the row and detailed only in the log**, soft time limit); **a job runs once if delivered twice; a late completion does not resurrect a failed job**; audit events; **a broken audit write does not fail a completed backup**; S3 runner; the builder is handed a file, not a buffer; the work directory is empty afterwards |
-| `test_api.py` | 46 | (phase 4: **a destination that still holds a backup file, or a running backup, cannot be deleted**; failed backups do not hold one; a safety or community backup does not make the instance look backed up.) **Every endpoint refuses anonymous, owner and participant callers**; destination CRUD; **the secret is never returned, never in the audit log**; absent/empty/new secret semantics; 202 with enqueue after commit; **broker outage → 503 and a failed job**; validation matrix; list filters and limit; download streams, 409/410 cases, **a location outside the destination is never served**; status |
-| `test_commands.py` | 22 | `openzev_backup` (path, destination, zev by id or name, ambiguous name, refusal cases, warning on stderr when unencrypted, non-zero exit with a safe message on failure, needs no broker, audited as a management command) and `openzev_backup_verify` (good, encrypted, wrong key, corrupted, missing file) |
+| `test_runner.py` | 35 | Completed job records location/size/checksum/manifest; stored archive verifies; encryption on/off; a rejected key fails the job with the reason; **required policy refuses a directly created job and one queued while valid without building or storing an archive** (failed status, timestamp, safe message, `backup.failed` audit, zero build/store calls); a valid key still succeeds when required; failures (missing destination, unwritable, **unexpected error is generic on the row and detailed only in the log**, soft time limit); **a job runs once if delivered twice; a late completion does not resurrect a failed job**; audit events; **a broken audit write does not fail a completed backup**; S3 runner; the builder is handed a file, not a buffer; the work directory is empty afterwards |
+| `test_api.py` | 53 | (phase 4: **a destination that still holds a backup file, or a running backup, cannot be deleted**; failed backups do not hold one; a safety or community backup does not make the instance look backed up.) **Every endpoint refuses anonymous, owner and participant callers**; destination CRUD; **the secret is never returned, never in the audit log**; absent/empty/new secret semantics; 202 with enqueue after commit; **broker outage → 503 and a failed job**; validation matrix; **creation refused by policy → 409** (`backup_encryption_required` for a missing required key, `backup_encryption_invalid` for a rejected key, both with useful detail and no job, enqueue or `backup.created`; valid key + required → 202; explicit optional plaintext → 202); list filters and limit; download streams, 409/410 cases, **a location outside the destination is never served**; status (including `encryption_required`) |
+| `test_commands.py` | 25 | `openzev_backup` (path, destination, zev by id or name, ambiguous name, refusal cases, warning on stderr when unencrypted, non-zero exit with a safe message on failure, needs no broker, audited as a management command; **a missing required key refuses both destination modes before a job exists; valid keys encrypt with the flag true; the unencrypted, encrypted and rejected-key cases pin the policy flag explicitly**) and `openzev_backup_verify` (good, encrypted, wrong key, corrupted, missing file) |
 | `test_restore_instance.py` | 54 | **Round trip:** every row of every backed-up table equal field for field after a wipe and restore (primary keys and timestamps included), PDFs back under the same name and bytes, encrypted round trip, the audit trail restored and the restore appended to it, a bootstrap superuser replaced, ordinary inserts after a restore. **Dry run:** writes nothing, refuses exactly when the real run would, `--force` reports what would be replaced, schema-unreadable records found. **Refusals leave the database untouched:** populated instance without `--force`, transfer archive, single-community backup, newer-version backup, unapplied migrations, schema newer than the backup (names the `migrate` steps), unrelated apps' migrations ignored. **Integrity:** corrupted member, a manifest missing a whole section, **a section cannot create a model it does not own**, an unreadable record is named without quoting its content, dangling references roll everything back. **Rollback:** a late failure undoes rows and files (**a PDF the restore overwrote is put back**), a failed forced restore leaves existing data, timestamp flags restored, an audit failure does not undo a finished restore. **Media:** a file at that name is replaced not renamed, a PDF already missing at backup time is reported, **unreferenced and `..` media are not written**. MFA key warnings; sequence reset covers exactly the integer-keyed models; S3 source parsing and safe errors; the command (file, dry run, refusal, missing file, listed verification failures, S3 download, warnings on stderr) |
 | `test_restore_zev.py` | 43 | The engine. **Replace in place:** a damaged community comes back exactly; **nothing outside it changes** (every other backed-up row identical); **no account row created, modified or deleted**; the community row is updated in place so audit events and `preferred_zev` keep pointing at it; **the audit trail is untouched and none is written**; a deleted community is recreated and its orphaned audit events stay as they were; other communities restore from the same instance backup; a single-community backup works and refuses other communities; PDFs written back; only the integer-keyed model's sequence is reset. **Accounts:** relinked by email under a new id, a missing account reported and left empty (never created), owner follows the email, a live community keeps its owner, a recreation without a findable owner refused. **Conflicts:** none on a clean restore; a sent/paid invoice deleted or rolled back and an issued contract deleted each need `force` and `force` then works; **a meter id owned by another community, a missing price source, a running export and another restore are not forceable**; a refusal changes nothing; the list is capped with "and N more". **Dry run:** plan and no writes, refusals reported not raised, missing accounts shown, no safety backup, schema misfits found without quoting content. **Safety backup:** after the plan and before the first write, a failure stops everything, not taken for a refusal or a community that does not exist, **conflicts checked again under the lock after it**. **Rollback:** late failure, overwritten PDF restored, dangling references, other communities and the trail survive. **Lock** taken on the community row, and not for a dry run |
-| `test_restore_runner.py` | 28 | The job lifecycle. A restore records its plan; **a safety backup of the damaged state is taken first, linked, and can undo the restore**; a dry run writes and backs up nothing; audited started/completed with what it did; **every earlier audit event unchanged**; a broken audit write does not undo a restore. A refused restore fails with its plan and takes no safety backup; `force` recorded and lets an overridable conflict through. A failing or missing safety destination stops before any write; an explicit destination is used; **an unexpected error is generic on the row**; soft time limit; a missing file or deleted source row; **damaged-archive failures stored in the plan**; delivered twice runs once; **a late completion does not resurrect a failed job**. Sources: encrypted with and without its key, **S3 round trip through a fake client**, a local file standing in for the job. `fetch_from_destination`: **a location outside its destination is never followed** (local, traversal, other bucket or prefix), a provider error is a safe message |
-| `test_restore_api.py` | 21 | **Every endpoint refuses anonymous, owner and participant callers**; dry run by default; the safety destination defaults to the backup's; audited on the community; **naming the whole instance is a 400, not a downgrade**; validation matrix; another community's backup cannot restore this one; a missing safety destination is a 400 for a real restore only; **409 while a restore of that community is active**; broker outage → 503 and a failed job; list order, filter, limit; detail carries the plan; an API-created job runs end to end |
-| `test_restore_zev_command.py` | 19 | `--mode zev`: restore by id and by name with a safety backup written where told; recorded as a job and audited as a management command; a saved destination; **refused up front without a place for the safety backup**; a deleted community named by id needs none; unknown and ambiguous names; a safety path inside `MEDIA_ROOT` refused; S3 source; dry run prints the plan and changes nothing; **a dry run that would be refused exits non-zero**; each problem listed with whether `force` helps, and `--force` says it overrode; missing accounts warned; argument checks |
+| `test_restore_runner.py` | 31 | The job lifecycle. A restore records its plan; **a safety backup of the damaged state is taken first, linked, and can undo the restore**; a dry run writes and backs up nothing; audited started/completed with what it did; **every earlier audit event unchanged**; a broken audit write does not undo a restore. A refused restore fails with its plan and takes no safety backup; `force` recorded and lets an overridable conflict through. A failing or missing safety destination stops before any write; **a safety backup refused by encryption policy stops the restore before any write** (safety job failed with no archive, community/database/media unchanged, bookkeeping kept); **a dry run needs no safety backup and gains no new key requirement, and neither does a real restore of a deleted community**; an explicit destination is used; **an unexpected error is generic on the row**; soft time limit; a missing file or deleted source row; **damaged-archive failures stored in the plan**; delivered twice runs once; **a late completion does not resurrect a failed job**. Sources: encrypted with and without its key, **S3 round trip through a fake client**, a local file standing in for the job. `fetch_from_destination`: **a location outside its destination is never followed** (local, traversal, other bucket or prefix), a provider error is a safe message |
+| `test_restore_api.py` | 23 | **Every endpoint refuses anonymous, owner and participant callers**; dry run by default; the safety destination defaults to the backup's; audited on the community; **naming the whole instance is a 400, not a downgrade**; validation matrix; another community's backup cannot restore this one; a missing safety destination is a 400 for a real restore only; **409 while a restore of that community is active or safety backup encryption is blocked**, with code and detail but no job, enqueue or audit event; previews and recreations still accepted without a key; broker outage → 503 and a failed job; list order, filter, limit; detail carries the plan; an API-created job runs end to end |
+| `test_restore_zev_command.py` | 22 | `--mode zev`: restore by id and by name with a safety backup written where told; recorded as a job and audited as a management command; a saved destination; **refused up front without a place for the safety backup or with a blocked encryption setting**, before creating a job; a deleted community named by id and a dry run need no safety backup key; unknown and ambiguous names; a safety path inside `MEDIA_ROOT` refused; S3 source; dry run prints the plan and changes nothing; **a dry run that would be refused exits non-zero**; each problem listed with whether `force` helps, and `--force` says it overrode; missing accounts warned; argument checks |
 | `test_retention.py` | 44 | **Retention:** nothing deleted unless switched on; the newest N kept per destination; the row outlives its file and says why; **the newest is never deleted, even at one**; **each kind counted separately** so a community backup cannot evict the instance backup; **safety backups never counted**; failed/running jobs ignored; destinations independent; **a backup a restore or a check is reading is not deleted**; dry run deletes nothing; audited with reason and location. **Expiry:** a safety backup gets one, no other does, `0` days disables it, an expired one goes and an unexpired one does not, **one on an ad-hoc `--path` or with its destination deleted is left alone without an error**. **Robustness:** a file already gone is recorded as deleted; a missing destination raises and leaves the row; **one unreachable destination does not stop the others**; an unexpected error is contained and counted; a broken audit write does not undo a deletion. **Storage guards:** a location outside its destination, a traversal, another bucket or prefix are never followed; S3 delete; provider errors are safe messages. **With backups:** **retention runs after the new backup exists, never before**; the start-of-run sweep only expires and recovers; a failing sweep never fails the backup. **Stalled jobs:** running past the limit, queued for hours, restores too, dead verification claims, dry run. The `openzev_backup_sweep` command |
-| `test_schedule.py` | 27 | Reads as off before anything is saved; saving creates the periodic task; weekly and its interval; a second save edits the one task; shared crontabs; **a save notifies beat**. Scheduled run: one instance backup per enabled destination, **a busy destination skipped**, a community backup in flight does not block, nowhere to write, **a broker outage fails the row visibly**. API: **every endpoint refuses anonymous, owner and participant callers**, defaults, save, validation, **audited as governance with a diff**, the status reports the schedule and staleness. **`backups.W001`:** warns for a schedule without a key, silent with a key / disabled / without `--database`, wired into `check`, tolerant of an unmigrated database |
+| `test_schedule.py` | 31 | Reads as off before anything is saved; saving creates the periodic task; weekly and its interval; a second save edits the one task; shared crontabs; **a save notifies beat**. Scheduled run: one instance backup per enabled destination, **a busy destination skipped**, a community backup in flight does not block, nowhere to write, **a broker outage fails the row visibly**; **a scheduled job reaches the guarded runner and fails safely without an artifact when required keys are missing**. API: **every endpoint refuses anonymous, owner and participant callers**, defaults, save, validation, **audited as governance with a diff**, the status reports the schedule and staleness. **`backups.W001`:** missing required keys / missing optional keys / rejected keys each worded to match, silent with a key / disabled / without `--database`, wired into `check`, tolerant of an unmigrated database |
 | `test_verify.py` | 33 | An intact backup is recorded; **a file that rotted at rest fails on the recorded checksum**; a right-checksum, wrong-content file lists what is wrong (capped, "and N more"); not a zip; missing file; encrypted with and without the key; **an unexpected error is generic on the row**; no claim, nothing runs; **a result never overwrites a claim someone else holds**; no copy left behind; audited either way. Claim: one check at a time, none for an unfinished backup or a deleted file. API: 202, 409 while running / without a file, 503 releases the claim, the result on the job, 404. **Delete file:** deletes, keeps the row, audits who; a deleted backup can no longer be downloaded, verified, deleted or restored from; **not while a restore or a check uses it**; 502 with a safe message; **a destination can be deleted only once its files are gone**; owners and participants refused. Retention setting: default, set and audited, bounds, on create |
-| `test_health.py` | 19 | **Staleness:** never without a schedule, fresh within twice the interval, **one missed run tolerated and two not**, the weekly yardstick, never-run is stale, disabled is not, **a safety or community backup does not freshen it**. **Status mapping:** not set up is `unknown`, unused is `degraded`, recent success `ok`, **a failure after the last success `degraded`**, an old failure forgiven, encryption reported. The health endpoint carries the probe, **names no destination or path**, and a failing probe degrades to `unknown` |
+| `test_health.py` | 21 | **Staleness:** never without a schedule, fresh within twice the interval, **one missed run tolerated and two not**, the weekly yardstick, never-run is stale, disabled is not, **a safety or community backup does not freshen it**. **Status mapping:** not set up is `unknown`, unused is `degraded`, recent success `ok`, **a failure after the last success `degraded`**, an old failure forgiven, encryption policy and invalid-key state reported. The health endpoint carries the probe, **names no destination or path**, and a failing probe degrades to `unknown` |
 
 The mutation checks run while building this (removing the traversal guard, the
 final-chunk flag, the admin permission, the `MEDIA_ROOT` guard) each turned the
@@ -1216,7 +1238,8 @@ the dev worker.
   `openzev_backup_sweep --dry-run` named it and left the file, the real sweep deleted
   it, and the row stayed (`completed`, reason `expired`, `artifact_available: false`).
 - **`manage.py check --database default`** reported `backups.W001` for a schedule with
-  no key.
+  no key (worded for the policy/key state: cannot-run when required, unencrypted
+  otherwise, unusable key called out).
 - **A bug found by doing this**: a safety backup written with `--path` has no saved
   destination, so the sweep could not resolve where its file may live and errored on it
   every hour. Such a backup now gets no expiry and the sweep skips anything without a
@@ -1232,21 +1255,25 @@ the dev worker.
 - Not verified against a real object store, as before; the beat process itself was not
   left running to watch a schedule fire.
 
-### Frontend (106 tests, phases 1, 3 and 4)
+### Frontend (113 tests, phases 1, 3 and 4 plus fail-closed encryption policy)
 
 - `tests/backup-helpers.test.ts` (17) — the payload contract: a blank edit never
   wipes a secret, a clear is explicit, switching kind clears the other kind's
   fields; target formatting; manifest reading; polling and download rules.
-- `tests/backup-settings-section.test.ts` (21) — the encryption banner in each of
-  its three states; the restore notice (server command for an instance, single-community restore not yet in the app); destination list and empty state;
+- `tests/backup-settings-section.test.ts` (26) — the encryption banner in each of
+  its four states (encrypted; plaintext warning where permitted; "cannot run"
+  where required; rejected key evaluated first); the restore notice (server command for an instance, single-community restore not yet in the app); destination list and empty state;
   secret field disabled without a key; environment-credentials notice; create
-  payload; server validation shown inside the form; start-backup rules; job list
+  payload; server validation shown inside the form; start-backup rules (blocked
+  create disabled with a visible reason, rejected key keeps archive actions
+  (download, check, details) enabled and working, stale-page 409 detail shown); job list
   (download only for local archives, unencrypted badge, failed reason, details).
 - `tests/backup-restore-helpers.test.ts` (10) — `canStartRestore` (clean, needs `force`, **never past a hard conflict**), the name to type, reading a plan, choosing a backup and community, polling.
-- `tests/backup-restore-section.test.ts` (18) — no backup, communities follow the chosen backup, the whole instance never offered; **a preview is a dry run**; unlinked accounts named; a refusal shows the reason, the conflicts and no way forward; damaged-archive failures listed; **apply needs the exact name** (case matters); the request carries the safety destination, no `force` unless asked; a chosen destination; none for a community that no longer exists; **`force` required for overridable conflicts and absent for hard ones**; a finished restore reports and refreshes every cache; changing the community resets the flow; history.
+- `tests/backup-restore-section.test.ts` (20) — no backup, communities follow the chosen backup, the whole instance never offered; **a preview is a dry run** and remains available when safety-backup encryption blocks a real restore; a deleted community can still be recreated; unlinked accounts named; a refusal shows the reason, the conflicts and no way forward; damaged-archive failures listed; **apply needs the exact name** (case matters); the request carries the safety destination, no `force` unless asked; a chosen destination; none for a community that no longer exists; **`force` required for overridable conflicts and absent for hard ones**; a finished restore reports and refreshes every cache; changing the community resets the flow; history.
 - `tests/backup-operate-helpers.test.ts` (12) — the schedule form (HH:MM with leading zeros, the request, **the weekday only for weekly**, invalid times refused, a change reported only when the server would store a difference), retention parsing (blank/zero/negative/junk keep everything) and its place in the payload, the four verification states, a finished backup without a file, polling while a check runs.
-- `tests/backup-operate.test.ts` (22) — the schedule (shows what is saved, **Save disabled until something changes**, the request and status refresh, the weekday only when weekly, an invalid time cannot be saved, the unencrypted and no-destination warnings, the server's error); the stale banner (and the never-run wording, and absent when current); **Check** (queued, disabled while running, results and the reason a check failed); **Delete file asks first and does nothing on no**; a deleted backup is history with no actions; trigger badges and expiry; a deleted backup is not offered for restore; retention listed and sent.
-- `tests/system-health-backups.test.ts` (5) — the health card: not set up is a state, the last backup and the link, **degraded when the schedule has fallen behind**, never-run, and the unencrypted note only when set up.
+- `tests/backup-operate.test.ts` (24) — the schedule (shows what is saved, **Save disabled until something changes**, the request and status refresh, the weekday only when weekly, an invalid time cannot be saved, the unencrypted / blocked / key-problem warnings each honest — a blocked schedule never claims unencrypted writes — and the no-destination warning, the server's error); the stale banner (and the never-run wording, and absent when current); **Check** (queued, disabled while running, results and the reason a check failed); **Delete file asks first and does nothing on no**; a deleted backup is history with no actions; trigger badges and expiry; a deleted backup is not offered for restore; retention listed and sent.
+
+- `tests/system-health-backups.test.ts` (7) — the health card: not set up is a state, the last backup and the link, **degraded when the schedule has fallen behind**, never-run, the unencrypted note only when set up, and blocked-creation wording for a missing required key or rejected key.
 - `tests/system-settings-tabs.test.ts` — six tabs, and `?tab=backup` opens the
   section.
 - Checks: `npm run build`, `npm run lint`, `npm run lint:style`,
@@ -1257,8 +1284,8 @@ the dev worker.
 
 ### Acceptance criteria
 
-- [x] A backup runs to local and/or S3-compatible storage, with a SHA-256 manifest, encrypted whenever `BACKUP_ENCRYPTION_KEYS` is set *(manually, from cron, and from the built-in schedule)*
-- [x] With no key set, the backup still runs and both the CLI and the admin UI say the archive is unencrypted
+- [x] A backup runs to local and/or S3-compatible storage, with a SHA-256 manifest, encrypted whenever `BACKUP_ENCRYPTION_KEYS` is set *(manually, from cron, and from the built-in schedule)*; with no usable key while `BACKUP_REQUIRE_ENCRYPTION` is true (the production default) creation is refused before any archive is built, through every path including scheduled jobs and safety backups
+- [x] With no key set and `BACKUP_REQUIRE_ENCRYPTION=False`, the backup still runs and both the CLI and the admin UI say the archive is unencrypted; where required, the CLI, API (409), runner and UI say backups cannot run and how to fix it
 - [x] A destination secret stored in the database is encrypted at rest, never serialized, and overridden by environment credentials
 - [x] A fresh install restores to a working instance from a backup alone — accounts, settings, templates, dynamic price series, invoice PDFs, issued contracts and the audit trail all present and linked, with primary keys preserved
 - [x] An existing install restores one ZEV to its backed-up state without touching other ZEVs, any account row, or any existing audit row — and the restore itself appears in the log

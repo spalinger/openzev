@@ -22,9 +22,8 @@ import {
  * When backups run by themselves.
  *
  * The schedule is data (beat's own periodic task), so changing it needs no
- * deploy. Two things are said out loud because nothing else would: an
- * unattended schedule that writes unencrypted archives (ADR 0024), and that
- * nothing runs unless a beat process does.
+ * deploy. The page must say what a keyless schedule does, and that nothing
+ * runs unless a beat process does.
  */
 export function BackupScheduleSection({ status }: { status: BackupStatus | undefined }) {
     const { t } = useTranslation()
@@ -72,7 +71,13 @@ export function BackupScheduleSection({ status }: { status: BackupStatus | undef
             </div>
 
             {form.enabled && status && !status.encrypted && (
-                <div className="warning-banner">{t('pages.backups.schedule.unencrypted')}</div>
+                status.encryption_key_problem ? (
+                    <div className="error-banner">{t('pages.backups.schedule.keyProblem', { problem: status.encryption_key_problem })}</div>
+                ) : status.encryption_required ? (
+                    <div className="error-banner">{t('pages.backups.schedule.blocked')}</div>
+                ) : (
+                    <div className="warning-banner">{t('pages.backups.schedule.unencrypted')}</div>
+                )
             )}
             {form.enabled && status && status.destinations_enabled === 0 && (
                 <div className="warning-banner">{t('pages.backups.schedule.noDestination')}</div>
