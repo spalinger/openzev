@@ -258,6 +258,7 @@ Current application:
 - `TariffsPage` uses category sections for `energy`, `grid_fees`, `levies`, and `metering`.
 - `MeteringChartPage` uses routed Chart, Quality and Import history tabs sharing one page instance (`/metering/chart`, `/metering/quality`, `/metering/imports`). Chart and Quality share the period selection; Imports hides these controls and does not request chart data. See `2026-03-community-and-access.md` §9.2.
 - The Templates hub renders all seven template editors as one standard tab strip with two labelled rows: PDF on one line, Email on the next, both left-bound via a fixed tag column — with no icons and no nested category/document tab bars. The active tab identifies the document; the editor does not repeat it as a heading.
+- Template editors use a shared source/status presentation. The persisted source badge and local unsaved cue are separate; platform resets require confirmation and ZEV email inheritance changes wait for the settings save.
 - Tab strips use Mantine `Tabs` with the `.app-tabs` contract and render their content as `Tabs.Panel` inside the same root; hand-rolled tab strips are not permitted.
 - `AdminSystemSettingsPage` predates this contract (default-styled `Tabs` embedded in a card, panels rendered outside the root) and is pending migration.
 

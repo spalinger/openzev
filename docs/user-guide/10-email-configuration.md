@@ -77,10 +77,13 @@ including their placeholders.
 | **Subject** | Email subject line | `Invoice {invoice_number} – {zev_name}` |
 | **Body** | Email message body | See default template below |
 
-Subject and body resolve independently: each either shows the platform
-invoice-email default (possibly an admin customization) or keeps its own
-text — switch with **Customize** / **Use platform default**. Resetting only
-stages the change — **Save changes** persists it.
+Subject and body can be customized independently. **Customize** starts from the
+platform text; **Use platform default** stages a reset of that field. The badge
+shows its saved source, while **Unsaved changes** marks a staged edit. Click
+**Save changes** to apply it. Later platform edits reach inherited fields; a
+saved ZEV override takes precedence even when its text matches the platform text.
+You can clear the editor and type replacement text without reopening it.
+**Discard changes** restores the saved text or inherited preview.
 
 ### Template Variables
 

@@ -250,6 +250,8 @@ Admins can manage the HTML/CSS template used for invoice PDF generation in **Pla
 - Edit the template used for invoice PDF rendering (tabs for the invoice, participant contract, and annual statement templates)
 - The **Available Fields** panel lists supported fields with preview examples. In source view, search by token or description and click a token to insert it at the caret. Shift-click keeps the caret in its original position. Loop tags insert a ready-to-fill block.
 - **Preview** shows a real, sample-data PDF rendered through the same pipeline as issued documents; a source toggle reveals the raw template markup
+- **Built-in default** means no platform override is saved; **Customized** means an override is saved. **Unsaved changes** describes edits in the current editor separately.
+- **Reset to built-in default** appears for a saved override. Confirming removes it immediately and replaces current edits with the current shipped template. Canceling keeps the editor as it is.
 - Template changes affect future PDF renders. Existing stored PDFs remain
   unchanged until **regenerated** — individual invoices can be regenerated, and
   administrators can regenerate PDFs for an entire billing period.
@@ -276,7 +278,7 @@ of anything else you send — it exists only to carry `{link_url}`. If your edit
 uses a placeholder that does not exist, OpenZEV sends the shipped default
 instead, so the link always works even when the wording is not yours.
 
-Administrators can edit the default subject and body for each template. These defaults are used unless a ZEV owner has set a custom template for their ZEV.
+Administrators can edit the default subject and body for each template. ZEV owners can override the invoice-email subject and body independently for their community.
 
 ### Accessing Email Templates
 
@@ -328,13 +330,16 @@ See [Email Configuration → Email Templates](10-email-configuration.md#email-te
 | `{link_url}` | One-time sign-in link |
 | `{valid_minutes}` | Sign-in-link lifetime in minutes |
 
+If saving fails, the editor keeps your changes and shows the server’s validation
+message when available, so you can correct the template and retry.
+
 ### Customization Indicator
 
-When a template has been edited, a **Customized** badge appears next to the template title. This helps you see at a glance which templates have been changed from the built-in defaults.
+Each editor shows **Built-in default** when no platform override is saved or **Customized** when one is saved. **Unsaved changes** marks local edits; typing alone does not change the saved source.
 
 ### Resetting to Default
 
-If a template has been customized, a **Reset to Default** button appears alongside the Save button. Clicking it restores the original built-in template for that email type.
+If a template has a saved override, **Reset to built-in default** appears alongside Save. A confirmation names the selected template. Confirming removes that platform override immediately, discards current edits, and loads the current built-in text. It does not clear a ZEV's own invoice-email overrides or change messages already sent.
 
 Templates that have not been customized do not show the reset button.
 

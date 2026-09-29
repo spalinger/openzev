@@ -2,10 +2,11 @@ import type {
   DashboardStats,
   EmailLog,
   EmailTemplateResponse,
+  EmailTemplateMutationResponse,
   Invoice,
   InvoicePeriodOverview,
   PdfTemplateResponse,
-  TemplateMutationResponse,
+  PdfTemplateMutationResponse,
 } from '../../types/api'
 import { api } from './client'
 import { fetchAllPages } from './pagination'
@@ -217,8 +218,8 @@ export async function fetchInvoicePdfTemplate(): Promise<PdfTemplateResponse> {
   return data
 }
 
-export async function updateInvoicePdfTemplate(content: string): Promise<TemplateMutationResponse> {
-  const { data } = await api.patch<TemplateMutationResponse>('/invoices/invoices/pdf-template/', { content })
+export async function updateInvoicePdfTemplate(content: string): Promise<PdfTemplateMutationResponse> {
+  const { data } = await api.patch<PdfTemplateMutationResponse>('/invoices/invoices/pdf-template/', { content })
   return data
 }
 
@@ -227,18 +228,18 @@ export async function fetchContractPdfTemplate(): Promise<PdfTemplateResponse> {
   return data
 }
 
-export async function updateContractPdfTemplate(content: string): Promise<TemplateMutationResponse> {
-  const { data } = await api.patch<TemplateMutationResponse>('/invoices/invoices/contract-pdf-template/', { content })
+export async function updateContractPdfTemplate(content: string): Promise<PdfTemplateMutationResponse> {
+  const { data } = await api.patch<PdfTemplateMutationResponse>('/invoices/invoices/contract-pdf-template/', { content })
   return data
 }
 
-export async function resetInvoicePdfTemplate(): Promise<TemplateMutationResponse> {
-  const { data } = await api.delete<TemplateMutationResponse>('/invoices/invoices/pdf-template/')
+export async function resetInvoicePdfTemplate(): Promise<PdfTemplateMutationResponse> {
+  const { data } = await api.delete<PdfTemplateMutationResponse>('/invoices/invoices/pdf-template/')
   return data
 }
 
-export async function resetContractPdfTemplate(): Promise<TemplateMutationResponse> {
-  const { data } = await api.delete<TemplateMutationResponse>('/invoices/invoices/contract-pdf-template/')
+export async function resetContractPdfTemplate(): Promise<PdfTemplateMutationResponse> {
+  const { data } = await api.delete<PdfTemplateMutationResponse>('/invoices/invoices/contract-pdf-template/')
   return data
 }
 
@@ -247,13 +248,13 @@ export async function fetchAnnualStatementPdfTemplate(): Promise<PdfTemplateResp
   return data
 }
 
-export async function updateAnnualStatementPdfTemplate(content: string): Promise<TemplateMutationResponse> {
-  const { data } = await api.patch<TemplateMutationResponse>('/invoices/invoices/annual-statement-pdf-template/', { content })
+export async function updateAnnualStatementPdfTemplate(content: string): Promise<PdfTemplateMutationResponse> {
+  const { data } = await api.patch<PdfTemplateMutationResponse>('/invoices/invoices/annual-statement-pdf-template/', { content })
   return data
 }
 
-export async function resetAnnualStatementPdfTemplate(): Promise<TemplateMutationResponse> {
-  const { data } = await api.delete<TemplateMutationResponse>('/invoices/invoices/annual-statement-pdf-template/')
+export async function resetAnnualStatementPdfTemplate(): Promise<PdfTemplateMutationResponse> {
+  const { data } = await api.delete<PdfTemplateMutationResponse>('/invoices/invoices/annual-statement-pdf-template/')
   return data
 }
 
@@ -277,12 +278,12 @@ export async function fetchEmailTemplate(templateKey: string): Promise<EmailTemp
   return data
 }
 
-export async function updateEmailTemplate(templateKey: string, subject: string, body: string): Promise<TemplateMutationResponse> {
-  const { data } = await api.patch<TemplateMutationResponse>(`/invoices/invoices/email-template/${templateKey}/`, { subject, body })
+export async function updateEmailTemplate(templateKey: string, subject: string, body: string): Promise<EmailTemplateMutationResponse> {
+  const { data } = await api.patch<EmailTemplateMutationResponse>(`/invoices/invoices/email-template/${templateKey}/`, { subject, body })
   return data
 }
 
-export async function resetEmailTemplate(templateKey: string): Promise<TemplateMutationResponse> {
-  const { data } = await api.delete<TemplateMutationResponse>(`/invoices/invoices/email-template/${templateKey}/`)
+export async function resetEmailTemplate(templateKey: string): Promise<EmailTemplateMutationResponse> {
+  const { data } = await api.delete<EmailTemplateMutationResponse>(`/invoices/invoices/email-template/${templateKey}/`)
   return data
 }

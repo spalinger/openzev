@@ -1,7 +1,7 @@
 import { act, createElement, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { MemoryRouter, Outlet } from 'react-router-dom'
+import { createMemoryRouter, Outlet, RouterProvider } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MantineProvider } from '@mantine/core'
 import { AppRoutes } from '../src/components/AppRoutes'
@@ -121,9 +121,16 @@ beforeEach(() => {
     emailSpy.mockClear()
 })
 
+const routers = new WeakMap<QueryClient, ReturnType<typeof createMemoryRouter>>()
+
 function element(route: string, client: QueryClient) {
-    return createElement(MemoryRouter, { initialEntries: [route] },
-        createElement(QueryClientProvider, { client }, createElement(MantineProvider, null, createElement(AppRoutes))))
+    let router = routers.get(client)
+    if (!router) {
+        router = createMemoryRouter([{ path: '*', element: createElement(AppRoutes) }], { initialEntries: [route] })
+        routers.set(client, router)
+    }
+    return createElement(QueryClientProvider, { client },
+        createElement(MantineProvider, null, createElement(RouterProvider, { router })))
 }
 
 async function renderAt(route: string) {
@@ -137,11 +144,12 @@ async function renderAt(route: string) {
         await act(async () => { await new Promise((resolve) => setTimeout(resolve, 25)) })
     }
     await act(async () => {})
-    return { container, root, client }
+    return { container, root, client, router: routers.get(client)! }
 }
 
 async function rerender(root: Root, route: string, client: QueryClient) {
     await act(async () => { root.render(element(route, client)) })
+    await act(async () => { await routers.get(client)!.navigate(route, { replace: true }) })
     await act(async () => {})
 }
 
@@ -262,6 +270,24 @@ describe('ZEV settings routed form', () => {
         expect(saveBar(container)).toBeNull()
     })
 
+    it('clears a failed-save message when the draft returns to its baseline', async () => {
+        state.updateImpl = async () => { throw new Error('save failed') }
+        const { container } = await renderAt('/zev-settings/general')
+        setField(generalInput(container)!, 'Unsaved name')
+        await submitForm(container)
+        await waitForText(container, 'pages.zevSettings.updateFailed')
+        setField(generalInput(container)!, 'First community')
+        await waitForCondition(() => saveBar(container) === null, 'clean save bar')
+    })
+
+    it('describes a live IBAN error with the same id as the save-time error', async () => {
+        const { container } = await renderAt('/zev-settings/billing')
+        setField(billingInput(container)!, 'invalid')
+        expect(billingInput(container)?.getAttribute('aria-describedby')).toBe('zev-settings-field-bank_iban-error')
+        expect(container.querySelector('#zev-settings-field-bank_iban-error')?.textContent)
+            .toContain('pages.zevSettings.validation.invalidIban')
+    })
+
     it('keeps a dirty draft on same-ZEV refresh but accepts fresh values when clean', async () => {
         const { container, root, client } = await renderAt('/zev-settings/general')
         // Discard with no server change restores the baseline, no request.
@@ -372,25 +398,53 @@ describe('ZEV settings routed form', () => {
             'body default preview',
         )
         const badges = Array.from(container.querySelectorAll('.badge')).map((badge) => badge.textContent)
-        expect(badges).toContain('pages.zevSettings.emailCustomized')
-        expect(badges).toContain('pages.zevSettings.emailUsingDefault')
+        expect(badges).toContain('templates.source.zev')
+        expect(badges).toContain('templates.source.platform')
         // Resetting the subject leaves the body alone and issues no request.
         await act(async () => {
             container.querySelector('button[aria-label="pages.zevSettings.emailResetSubject"]')!.click()
         })
         expect(container.querySelector('input')).toBeNull()
+        expect(container.querySelector('[data-zev-field="email_subject_template"] .badge')?.textContent)
+            .toBe('templates.source.zev')
+        expect(container.querySelector('[data-zev-field="email_subject_template"] .template-source')?.textContent)
+            .toContain('pages.zevSettings.emailInheritanceOnSave')
         expect(updateSpy).not.toHaveBeenCalled()
+        await act(async () => { discardButton(container)!.click() })
+        expect(subjectInput(container)!.value).toBe('Saved subject')
+        expect(container.querySelector('[data-zev-field="email_subject_template"] .badge')?.textContent)
+            .toBe('templates.source.zev')
+        await act(async () => {
+            container.querySelector('button[aria-label="pages.zevSettings.emailResetSubject"]')!.click()
+        })
         // Customize seeds the editor with the platform text for real editing.
         await act(async () => {
             container.querySelector('button[aria-label="pages.zevSettings.emailCustomizeSubject"]')!.click()
         })
         expect(subjectInput(container)!.value).toBe('Global subject')
-        expect(container.textContent).toContain('pages.zevSettings.emailCustomized')
+        expect(container.textContent).toContain('templates.source.zev')
         await act(async () => {
             container.querySelector('button[aria-label="pages.zevSettings.emailResetSubject"]')!.click()
         })
         await submitForm(container)
         expect(updateSpy).toHaveBeenCalledWith('z1', expect.objectContaining({ email_subject_template: '' }))
+        await waitForCondition(() => saveBar(container) === null, 'saved email reset')
+        expect(container.querySelector('[data-zev-field="email_subject_template"] .badge')?.textContent)
+            .toBe('templates.source.platform')
+    })
+
+    it('returns an inherited field to its preview after discarding customization', async () => {
+        const { container } = await renderAt('/zev-settings/documents')
+        await waitForCondition(() => container.textContent?.includes('Global body') ?? false, 'body default preview')
+        await act(async () => {
+            container.querySelector<HTMLButtonElement>('button[aria-label="pages.zevSettings.emailCustomizeBody"]')!.click()
+        })
+        const editor = container.querySelector<HTMLTextAreaElement>('[data-zev-field="email_body_template"] textarea')!
+        setField(editor, 'Draft body')
+        await act(async () => { discardButton(container)!.click() })
+        expect(container.querySelector('[data-zev-field="email_body_template"] textarea')).toBeNull()
+        expect(container.querySelector('[data-zev-field="email_body_template"] .zev-email-default-preview')?.textContent).toBe('Global body')
+        expect(updateSpy).not.toHaveBeenCalled()
     })
 
     it('shows the platform default after saving an emptied custom editor', async () => {
@@ -589,5 +643,26 @@ describe('ZEV settings routed form', () => {
         const dirty = new Event('beforeunload', { cancelable: true })
         window.dispatchEvent(dirty)
         expect(dirty.defaultPrevented).toBe(true)
+    })
+
+    it('confirms before leaving settings with an unsaved draft', async () => {
+        const { container, router } = await renderAt('/zev-settings/general')
+        setField(generalInput(container)!, 'Unsaved name')
+        await act(async () => { void router.navigate('/participants') })
+        expect(router.state.location.pathname).toBe('/zev-settings/general')
+        expect(container.querySelector('[role="dialog"]')?.textContent)
+            .toContain('pages.zevSettings.unsavedGuardLeaveMessage')
+        await act(async () => {
+            Array.from(container.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'))
+                .find((button) => button.textContent === 'common.cancel')!.click()
+        })
+        expect(generalInput(container)?.value).toBe('Unsaved name')
+        expect(router.state.location.pathname).toBe('/zev-settings/general')
+        await act(async () => { void router.navigate('/participants') })
+        await act(async () => {
+            Array.from(container.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'))
+                .find((button) => button.textContent === 'pages.zevSettings.leaveWithoutSaving')!.click()
+        })
+        await waitForCondition(() => router.state.location.pathname === '/participants', 'navigation after confirmation')
     })
 })

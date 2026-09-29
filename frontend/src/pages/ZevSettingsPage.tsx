@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faBan, faDownload, faPlay, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
 import { Tabs } from '@mantine/core'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useBlocker, useNavigate, useParams } from 'react-router-dom'
 import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
 import { PageSkeleton } from '../components/PageSkeleton'
 import { ZevEmailTemplateFields } from '../components/ZevEmailTemplateFields'
@@ -110,6 +110,9 @@ export function ZevSettingsPage({ tab = 'general' }: { tab?: ZevSettingsTab }) {
 
     const draftIsSelected = draft.zevId === selectedZevId && selectedZev?.id === selectedZevId
     const isDirty = draftIsSelected && isZevFormDirty(draft.form, draft.baseline)
+    const leaveBlocker = useBlocker(({ nextLocation }) =>
+        isDirty && !/^\/zev-settings(?:\/|$)/.test(nextLocation.pathname),
+    )
 
     useEffect(() => {
         if (!selectedZev || selectedZev.id !== selectedZevId) {
@@ -218,6 +221,13 @@ export function ZevSettingsPage({ tab = 'general' }: { tab?: ZevSettingsTab }) {
     // The bar stays mounted while an error shows so a failed save keeps its
     // retry action next to the message on every tab.
     const showSaveBar = isDirty || isPending || error !== null
+
+    useEffect(() => {
+        if (!isDirty && error !== null) {
+            setError(null)
+            setFieldErrors({})
+        }
+    }, [isDirty, error])
 
     // Errors and navigation must render, and the save must release disabled
     // controls, before focus can reach the invalid editor.
@@ -411,9 +421,12 @@ export function ZevSettingsPage({ tab = 'general' }: { tab?: ZevSettingsTab }) {
                     <section className="card page-stack">
                         <form id="zev-settings-form" className="inline-form page-stack" noValidate onSubmit={submit}>
                             <ZevEmailTemplateFields
-                                key={`${selectedZevId}:${draft.epoch}:${emailEditorRevision}`}
+                                key={`${selectedZevId}:${draft.epoch}`}
                                 subjectTemplate={form.email_subject_template ?? ''}
                                 bodyTemplate={form.email_body_template ?? ''}
+                                savedSubjectTemplate={baseline.email_subject_template ?? ''}
+                                savedBodyTemplate={baseline.email_body_template ?? ''}
+                                resetRevision={emailEditorRevision}
                                 fieldErrors={fieldErrors}
                                 readOnly={controlsReadOnly}
                                 onSubjectTemplateChange={(value) =>
@@ -529,6 +542,16 @@ export function ZevSettingsPage({ tab = 'general' }: { tab?: ZevSettingsTab }) {
                     isLoading={dialogLoading}
                     onConfirm={handleConfirm}
                     onCancel={handleCancel}
+                />
+            )}
+
+            {leaveBlocker.state === 'blocked' && (
+                <ConfirmDialog
+                    title={t('pages.zevSettings.unsavedGuardTitle')}
+                    message={t('pages.zevSettings.unsavedGuardLeaveMessage')}
+                    confirmText={t('pages.zevSettings.leaveWithoutSaving')}
+                    onConfirm={() => leaveBlocker.proceed()}
+                    onCancel={() => leaveBlocker.reset()}
                 />
             )}
 

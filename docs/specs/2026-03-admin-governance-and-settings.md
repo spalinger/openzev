@@ -257,9 +257,7 @@ interface PdfTemplateResponse {
     fields: TemplateFieldGroup[]
 }
 
-interface TemplateMutationResponse {
-    detail: string
-}
+type PdfTemplateMutationResponse = Omit<PdfTemplateResponse, 'fields'> & { detail: string }
 ```
 
 **Validation and staleness semantics** (migration `invoices/0009` added
@@ -507,13 +505,13 @@ corresponding hub tab or `/admin/system-settings` tab.
 - `AdminTemplatesHubPage` renders one standard Mantine `Tabs` strip (`.app-tabs` contract) with two labelled rows — PDF on one line, Email on the next. A fixed tag column keeps both rows left-bound; on narrow screens each tag stacks above its tabs. There are no icons. The active tab's `Tabs.Panel` mounts the matching embedded editor; `keepMounted={false}` unmounts the rest. There are no repeated editor titles and no hub description.
 - Category routes remain `/admin/templates/{pdf,email}`; `?template=` selects PDF key `invoice`, `contract`, or `annual_statement`, and email key `invoice_email`, `participant_onboarding`, `email_verification`, or `participant_magic_link`. Missing, invalid, or other-category values fall back to `invoice` on the PDF route and `invoice_email` on the email route. Tab changes replace the URL, preserving unrelated query parameters.
 - Both editor pages accept optional `template` and `embedded` props; embedded mode omits their header and picker. Standalone pages retain a category-specific select. Switching templates unmounts the previous editor (discarding unsaved edits, as before); PDF preview cleanup aborts pending renders and revokes object URLs.
-- Editor with three templates: invoice (`fetchInvoicePdfTemplate`), contract (`fetchContractPdfTemplate`), and annual statement (`fetchAnnualStatementPdfTemplate`); each template has its own query, save mutation, and reset mutation.
-- The selected template shows an `is_customized` badge when a DB override exists and a large monospace `TemplateTextarea` with an overlay that highlights cataloged `{{ }}`/`{% %}` tokens and shows descriptions/examples on hover. Base-variable lookup ignores whitespace and optional Django filters. Unlisted tokens remain unmarked because valid loop-local variables also occur in the default template; save-time strict validation checks output variables.
+- A typed endpoint map selects invoice, contract, or annual statement; one query, save mutation, and reset mutation serve the selected PDF template.
+- The selected template shows `Built-in default` without a DB override or `Customized` with one. `TemplateSourceStatus` (`templates.source.*`) displays this persisted state separately from unsaved editor changes; shared `useTemplateDraft` accepts clean background updates while preserving dirty buffers. A large monospace `TemplateTextarea` has an overlay that highlights cataloged `{{ }}`/`{% %}` tokens and shows descriptions/examples on hover. Base-variable lookup ignores whitespace and optional Django filters. Unlisted tokens remain unmarked because valid loop-local variables also occur in the default template; save-time strict validation checks output variables.
 - The shared `FieldReference` renders the selected response's backend `fields`: search, occurrence badges, computed examples, and click-to-insert at the caret. Loop tags insert an indented block; Shift-click inserts without moving focus, and the helper leaves the caret at the insertion start.
-- `AdminEmailTemplatesPage` mounts the same shared reference for the selected email key, with subject/body inputs, customized/reset actions, and the language note for `participant_magic_link`.
+- `AdminEmailTemplatesPage` mounts the same shared reference and source/status presentation for the selected email key, with subject/body inputs and the language note for `participant_magic_link`. Only invoice email may be overridden per ZEV.
 - **Preview:** `previewPdfTemplateBlob(content, templateType, signal)` POSTs the current editor content to `preview-pdf-template/` with `output: "pdf"`, fetches the returned bytes as a Blob, and renders them through `PdfPreview`. A source toggle displays the submitted template source (escaped in a `<pre>`), not rendered HTML; render errors show an error banner.
 - **Save** sends the content string to the matching update endpoint; success toast displays the API `detail` message.
-- **Reset to default** (visible only when `is_customized`) calls DELETE, reverts the editor to the default response, and toasts the result.
+- **Reset to built-in default** (visible only when `is_customized`) confirms the selected template before DELETE. Save and reset use the mutation response as the saved state and update the query cache, retaining its field catalog; an in-flight GET is cancelled so a stale response cannot replace that state. Cancel leaves the buffer intact; a failed mutation leaves the draft and source available for retry. Failures show one inline error with the backend validation message when available (including unaltered template variable names); other failures use the shared API error formatter with a translated fallback. Pending mutations disable conflicting edits and insertion. Background refetch preserves a dirty editor buffer.
 
 ### 9.7 ZevSettingsPage (per-community)
 
@@ -532,9 +530,9 @@ becomes draft and baseline, the list cache entry is updated in place, and list
 + both readiness queries invalidate. A refetch older than the accepted save's
 `updated_at` cannot replace its draft. Late responses for a previous selection
 never touch the new draft. Discard restores the baseline with no request.
-Switching communities confirms while dirty through `Layout`; browser reload
-and close use `beforeunload`. Ordinary in-app route navigation abandons the
-draft without a prompt. A pending save disables controls and actions for its
+Switching communities confirms while dirty through `Layout`; leaving settings
+through an in-app route uses a navigation blocker, while tab switches proceed.
+Browser reload and close use `beforeunload`. A pending save disables controls and actions for its
 own draft only. `ZevGeneralSettingsFields` accepts `group: general | billing |
 documents`; omitting it renders every group for existing full-form consumers.
 Every validated control carries a `data-zev-field` anchor for focus jumps.
@@ -561,7 +559,7 @@ Every validated control carries a `data-zev-field` anchor for focus jumps.
 
 **Cross-tab validation:** `attemptSave` runs `validateZevForm` over the whole
 draft first (required name/start date, IBAN checksum, required payment term 1–365
-integer, VAT-number/mode pairing — mirroring `ZevSerializer`). On failure the
+integer, VAT number required when registered — mirroring `ZevSerializer`). On failure the
 page sets per-field inline messages (`fieldErrors`, cleared per field on
 edit), navigates to the first invalid field's tab (`ZEV_FIELD_TABS`), and
 focuses it via its `data-zev-field` anchor after the target tab and error UI
@@ -579,16 +577,18 @@ its Customize button, and dates use their date-picker trigger.
 opaque `var(--surface-card)`, safe-area padding), rendered on every tab only
 while dirty, saving, or showing a save error — `Unsaved changes` plus
 `Discard` / `Save changes` (saving shows the saving label with both actions
-disabled). On editing tabs the external Save button submits the active form
+disabled). Returning the draft to its baseline clears a stale save error and
+hides the bar. On editing tabs the external Save button submits the active form
 with native constraint validation disabled, so click and Enter use the same
 whole-draft validation. Audit and Export keep the same in-place actions; no
 back-to-settings detour. Disabled ZEVs are fully read-only for owners; admins
 keep edit rights.
 
 **Email template fields** (via `ZevEmailTemplateFields`):
-- One sentence of guidance; each field carries its own small source badge beside the label (`Using platform default` / `Customized for this ZEV`) with its action above the field. Subject and body are independent.
-- Explicit choice, no placeholder inheritance: the default state shows the platform text read-only (DB override when present, otherwise the hardcoded default) plus `Customize`, which seeds the editor with that text for real editing. The custom state shows the editor plus `Use platform default`, which only stages `''`; Save persists it, Discard restores the saved value. Text matching today's platform default still counts as an override once saved. Owner reads of the fallback are authorized (`IsZevOwnerOrAdmin` on the `invoice_email` detail GET); a failed fetch shows one error and allows customization from a blank editor. `notes`, `local_tariff_notes`, and `additional_contract_notes` have no badges.
-- The shared `FieldReference` hides behind an `Insert field` toggle (default closed; with no editor focused and the body on default, a token click starts the body from the default text on a new line). Open, it renders from the owner-readable global response's `fields` catalog with search, examples, occurrence badges, and caret insertion for `{invoice_number}`, `{zev_name}`, `{participant_name}`, `{period_start}`, `{period_end}`, `{due_date}` (empty when absent), and `{total_chf}`. The same component is used by both admin email and PDF editors.
+- **Draft:** Subject and body change independently. An inherited field shows the platform text read-only (DB override when present, otherwise the hardcoded default); `Customize` seeds its editor with that text. `Use platform default` stages `''`; Save persists it and Discard restores the saved value. Clearing an editor while typing keeps it mounted and focused, even when the saved field inherits the default. `ZevSettingsPage` increments `emailEditorRevision` on a successful save or Discard and passes it as `resetRevision`; only that explicit reset clears both fields’ local editing modes. Community changes remount the fields using the ZEV id and selection epoch.
+- **Source:** Each field's badge reports its saved source (`Using platform default` / `Customized for this ZEV`) via the shared `TemplateSourceStatus` labels (`templates.source.*`), decoupled from the ZEV settings copy so rewording one surface cannot silently change the other. Draft changes show a separate `Unsaved changes` cue; a cleared unsaved field says inheritance starts after Save. Text matching today's platform default still counts as a saved override. Notes fields have no source badges.
+- **Validation:** Inline subject/body errors stay beside their fields, including inherited fields. Owner reads of the fallback are authorized (`IsZevOwnerOrAdmin` on the `invoice_email` detail GET); a failed fetch shows one error and permits customization from a blank editor.
+- **Field insertion:** The shared `FieldReference` hides behind an `Insert field` toggle (default closed; with no editor focused and the body on default, a token click starts the body from the default text on a new line). Open, it renders from the owner-readable global response's `fields` catalog with search, examples, occurrence badges, and caret insertion for `{invoice_number}`, `{zev_name}`, `{participant_name}`, `{period_start}`, `{period_end}`, `{due_date}` (empty when absent), and `{total_chf}`. The same component is used by both admin email and PDF editors.
 
 ### 9.8 TypeScript types
 
@@ -649,6 +649,8 @@ interface EmailTemplateResponse {
     detail?: string
     fields: TemplateFieldGroup[]
 }
+
+type EmailTemplateMutationResponse = Omit<EmailTemplateResponse, 'fields'> & { detail: string }
 ```
 
 ### 9.9 API client functions
@@ -781,7 +783,7 @@ Tests cover dashboard access (`test_invoice_dashboard_is_admin_only`) confirming
 
 - AdminSystemSettingsPage: tab selector switches between regional settings, feature flags, OAuth providers, and VAT rates. Regional format selector renders all 4 options per format type, preview updates live, and save mutation calls `updateAppSettings`.
 - VatSettingsSection (VAT tab): form validates percentage 0–100, converts to fraction, create/edit/delete flows work. Overlap errors display as toast.
-- `templates-hub.test.ts` covers the two-row hub, seven route keys, category switching, and fallbacks. `field-reference.test.ts` covers token parsing, whitespace/filter normalization, syntax-aware occurrence counting, and caret insertion; `zev-email-template-fields.test.ts` checks keyboard focusability, example rendering, catalog loading/error states, and insertion into the last-focused subject. `email-template-parity.test.ts` checks the four frontend/backend email keys, tabs, and that every backend email/PDF catalog description key has an English translation; `locale-parity.test.ts` covers structural parity across all four locales. The hub tests mock the editor pages; the PDF editor's three API-backed editors, mutations, and real PDF preview remain implementation behavior rather than direct page-level test coverage.
+- `templates-hub.test.ts` covers the two-row hub, seven route keys, category switching, and fallbacks. `field-reference.test.ts` covers token parsing, whitespace/filter normalization, syntax-aware occurrence counting, and caret insertion; `zev-email-template-fields.test.ts` checks keyboard focusability, example rendering, catalog loading/error states, insertion into the last-focused subject, and the pending per-field inheritance cue. `admin-email-template-source.test.ts` and `admin-pdf-template-source.test.ts` cover dirty refetches, definitive mutation responses after failed refreshes, reset confirmation, single failure reporting, and preservation of server validation messages. `zev-email-template-fields.test.ts` also covers clearing and retyping inherited subject/body text without losing focus; `zev-settings-tabs.test.ts` covers returning to the inherited preview after Discard or Save. `email-template-parity.test.ts` checks the four frontend/backend email keys, tabs, and that every backend email/PDF catalog description key has an English translation; `locale-parity.test.ts` covers structural parity across all four locales. The hub tests mock the editor pages; real PDF preview rendering remains outside the unit tests.
 - AdminDashboardPage: stats display, auto-refresh at 30s interval (as the
   Overview hub tab).
 - `accounts/test_system_health.py` (8 tests): 401 unauthenticated,
@@ -790,7 +792,7 @@ Tests cover dashboard access (`test_invoice_dashboard_is_admin_only`) confirming
   configured queue selection, broken-DB-probe degradation, zero-worker
   degradation, and real Kombu publication failure without reconnect retries.
   Tests never broadcast to real workers.
-- ZevSettingsPage: `zev-settings-tabs.test.ts` covers shared draft saves, Discard, refresh/version ordering, validation focus, email errors, pending saves across ZEV switches, audit/export actions, `beforeunload`, and disabled-ZEV read-only. Its real field components cover delayed save rejections, same-tab and cross-tab email editor focus, and server-error associations for native, autocomplete and date controls. `layout-nav.test.ts` covers dirty community-switch confirmation/cancellation for owners and admins, and clean/current-community switches. `zev-email-template-fields.test.ts` covers field insertion, fallback loading/failure, customization, and read-only mode.
+- ZevSettingsPage: `zev-settings-tabs.test.ts` covers shared draft saves, Discard, refresh/version ordering, validation focus, email errors, pending saves across ZEV switches, in-app navigation blocking, audit/export actions, `beforeunload`, and disabled-ZEV read-only. Its real field components cover delayed save rejections, same-tab and cross-tab email editor focus, live IBAN association, and server-error associations for native, autocomplete and date controls. `layout-nav.test.ts` covers dirty community-switch confirmation/cancellation for owners and admins, and clean/current-community switches. `zev-email-template-fields.test.ts` covers field insertion, fallback loading/failure, customization, and read-only mode.
 
 ### 13.3 Acceptance criteria
 

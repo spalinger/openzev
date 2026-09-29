@@ -1227,6 +1227,14 @@ task that reads uncommitted participant data.
 
 ## 9. Frontend routing and access control
 
+The app root (`App.tsx`) mounts `AppRoutes` through a data router
+(`createBrowserRouter([{ path: '*', element: <AppRoutes /> }])` +
+`RouterProvider`), not `BrowserRouter`. `ZevSettingsPage` relies on this for
+its in-app dirty-draft guard (`useBlocker`, blocked outside
+`/zev-settings/*`): `useBlocker` throws outside a data router, so tests that
+render `/zev-settings` through `AppRoutes` must use the data-router setup —
+`MemoryRouter` crashes there.
+
 ### 9.1 ProtectedRoute component
 
 `ProtectedRoute({ children, allowedRoles? })`:
