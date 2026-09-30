@@ -200,7 +200,7 @@ describe('metering tab state', () => {
         expect(range()).toBe(historical)
 
         await act(async () => {
-            buttonByText(container, 'nav.meteringData').click()
+            buttonByText(container, 'nav.meteringCharts').click()
         })
         expect(range()).toBe(historical)
         const back = Array.from(container.querySelectorAll('select')).find((s) =>

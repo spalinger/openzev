@@ -32,7 +32,7 @@ export function OverviewPage() {
         <div className="page-stack">
             <header>
                 {selectedZev?.name ? <p className="eyebrow">{selectedZev.name}</p> : null}
-                <h2>{t('dashboard.title')}</h2>
+                <h2>{t('pages.overview.title')}</h2>
                 <p className="muted">{t('pages.overview.description')}</p>
             </header>
 

@@ -35,7 +35,7 @@ New users can register themselves and create their ZEV without admin involvement
 4. Click **Send verification email**
 
 The panel is shown only while self-registration is enabled (an admin can turn
-it off under **Platform → System Settings → Functions**).
+it off under **Platform → Settings → Functions**).
 
 **Step 2: Verify your email**
 

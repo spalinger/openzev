@@ -144,6 +144,7 @@ export function Layout() {
     const canManage = isZevScope
     const isFormerParticipant = shellRole === 'former'
     const selectedEntry = entries.find((entry) => entry.id === selectedZevId)
+    const isGuest = shellRole === 'none'
     // Hub entries light on their sub-routes (chart/quality/imports are tabs
     // of the metering hub since phase 3).
     const meteringChartActive = useMatch('/metering/chart') != null
@@ -252,7 +253,9 @@ export function Layout() {
                                     }
                                 }}
                             >
-                                <span className="user-avatar" aria-hidden="true">🏢</span>
+                                <span className="user-avatar" aria-hidden="true">
+                                    {selectedEntry?.name ? initialsOf(selectedEntry.name) : <PlatformIcon />}
+                                </span>
                                 <span className="user-meta">
                                     <strong>{selectedEntry?.name || selectedZev?.name || t('nav.noZevSelected')}</strong>
                                     <small>
@@ -323,6 +326,10 @@ export function Layout() {
                             </>
                         )}
 
+                        {isGuest && (
+                            <SidebarLink to="/account" label={t('account.title')} icon={<AccountIcon />} className="nav-standalone" />
+                        )}
+
                         {isParticipantScope && !isFormerParticipant && (
                             <>
                                 <SidebarLink to="/" label={t('nav.dashboard')} icon={<DashboardIcon />} />
@@ -345,7 +352,7 @@ export function Layout() {
                                 <SidebarLink to="/metering/points" label={t('nav.meteringPoints')} icon={<PlugIcon />} />
                                 <SidebarLink to="/tariffs" label={t('nav.tariffs')} icon={<TagIcon />} />
                                 <SidebarLink to="/zev-settings" label={t('nav.zevSettings')} icon={<SettingsIcon />} />
-                                {/* Audit log moved into the ZEV settings hub
+                                {/* Audit log lives in the ZEV settings hub
                                     (phase 3); /audit-logs stays as a deep-link
                                     alias rendered by the hub. */}
                             </div>
@@ -361,12 +368,11 @@ export function Layout() {
                                 {/* Admin console hubs (phase 3): Overview holds the
                                     KPIs, ZEVs, all-invoices, audit-log and
                                     system-health tabs; Accounts holds users +
-                                    API keys; Templates holds PDF + email;
-                                    System settings stays on its own route. */}
+                                    API keys; Templates holds PDF + email. */}
                                 <SidebarLink to="/admin" end active={adminOverviewActive} label={t('nav.adminOverview')} icon={<OverviewIcon />} />
-                                <SidebarLink to="/admin/accounts" label={t('nav.adminAccounts')} icon={<UsersIcon />} />
+                                <SidebarLink to="/admin/accounts" label={t('nav.adminAccounts')} icon={<AccountsIcon />} />
                                 <SidebarLink to="/admin/templates" label={t('nav.adminTemplates')} icon={<PdfIcon />} />
-                                <SidebarLink to="/admin/system-settings" label={t('nav.adminSystemSettings')} icon={<SettingsIcon />} />
+                                <SidebarLink to="/admin/system-settings" label={t('nav.adminSystemSettings')} icon={<SystemIcon />} />
                             </div>
                         )}
                     </nav>
@@ -447,7 +453,7 @@ export function Layout() {
                                 setIsUserMenuOpen((prev) => !prev)
                             }}
                         >
-                            <span className="user-avatar" aria-hidden="true">👤</span>
+                            <span className="user-avatar" aria-hidden="true">{initialsOf(displayName)}</span>
                             <span className="user-meta">
                                 <strong>{displayName}</strong>
                                 <small>{user?.email}</small>
@@ -501,6 +507,38 @@ function UsersIcon() {
     return <IconSvg path="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2m18 0v-2a4 4 0 0 0-3-3.87M14 4.13a4 4 0 0 1 0 7.75M9.5 11A4 4 0 1 0 9.5 3a4 4 0 0 0 0 8Z" />
 }
 
+
+/** User accounts on the platform console — an ID card, so it does not read
+ * as the community's participant list (`UsersIcon`). */
+function AccountsIcon() {
+    return (
+        <IconSvg
+            path={
+                <>
+                    <rect x="2.5" y="5" width="19" height="14" rx="2" />
+                    <circle cx="8.5" cy="11" r="2" />
+                    <path d="M5.6 16c.6-1.3 1.7-2 2.9-2s2.3.7 2.9 2M14.5 10h4M14.5 13.5h3" />
+                </>
+            }
+        />
+    )
+}
+
+/** Platform system settings — a host stack, so it does not read as the
+ * community's own settings (`SettingsIcon`). */
+function SystemIcon() {
+    return (
+        <IconSvg
+            path={
+                <>
+                    <rect x="3" y="4" width="18" height="6.5" rx="2" />
+                    <rect x="3" y="13.5" width="18" height="6.5" rx="2" />
+                    <path d="M7 7.25h.01M7 16.75h.01M11 7.25h4M11 16.75h4" />
+                </>
+            }
+        />
+    )
+}
 
 function PlugIcon() {
     return <IconSvg path="M9 7V3m6 4V3m-7 8h8a2 2 0 0 0 2-2V7H6v2a2 2 0 0 0 2 2Zm4 0v6a4 4 0 0 1-4 4h-1" />
@@ -572,6 +610,13 @@ function ChevronIcon({ direction }: { direction: 'left' | 'right' }) {
             {direction === 'left' ? <path d="m15 18-6-6 6-6" /> : <path d="m9 18 6-6-6-6" />}
         </svg>
     )
+}
+
+/** Up to two initials from the first two words. Empty input renders '·'. */
+function initialsOf(name: string | undefined | null): string {
+    const words = (name ?? '').trim().split(/\s+/).filter(Boolean)
+    const letters = words.slice(0, 2).map((word) => word[0]?.toUpperCase() ?? '').join('')
+    return letters || '·'
 }
 
 function IconSvg({ path }: { path: string | ReactNode }) {

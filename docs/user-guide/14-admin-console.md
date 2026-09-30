@@ -10,7 +10,7 @@ The Platform group has four entries (hubs with tabs-as-routes):
 - **Overview** (`/admin`) — KPIs · ZEVs · All invoices · Dynamic price sources · Platform audit log · System health
 - **Accounts** (`/admin/accounts`) — Users · API keys
 - **Templates** (`/admin/templates`) — PDF templates · Email templates
-- **System Settings** (`/admin/system-settings`) — Regional Settings · Functions · OAuth · Security · VAT · Backup
+- **Settings** (`/admin/system-settings`) — Regional Settings · Functions · OAuth · Security · VAT · Backup
 
 Legacy routes (`/admin/zevs`, `/admin/invoices`, `/admin/audit-logs`,
 `/admin/api-keys`, `/admin/pdf-templates`, `/admin/email-templates`) redirect
@@ -109,16 +109,16 @@ one.
 
 ![Admin dynamic price sources](screenshots/17b-admin-dynamic-sources.png)
 
-## System Settings
+## Settings
 
 Regional display settings, feature flags, OAuth providers, and VAT rates are consolidated
-under **Platform → System Settings**.
+under **Platform → Settings**.
 
-Backups are configured in **Platform → System Settings → Backup**; see [Backups](18-backups.md).
+Backups are configured in **Platform → Settings → Backup**; see [Backups](18-backups.md).
 
 ### Regional
 
-Configure regional display settings in **Platform → System Settings → Regional**:
+Configure regional display settings in **Platform → Settings → Regional**:
 
 ![Regional settings](screenshots/12-admin-regional-settings.png)
 
@@ -130,12 +130,12 @@ Configure regional display settings in **Platform → System Settings → Region
 
 ### Functions
 
-Feature flags are managed in **Platform → System Settings → Functions**.
+Feature flags are managed in **Platform → Settings → Functions**.
 See [Feature Flags](#feature-flags) below.
 
 ### OAuth
 
-Configure external OAuth login providers in **Platform → System Settings → OAuth**:
+Configure external OAuth login providers in **Platform → Settings → OAuth**:
 
 - **Name** — Provider identifier (e.g. `github`)
 - **Display Name** — Human-readable label shown on the login page
@@ -149,17 +149,17 @@ Configure external OAuth login providers in **Platform → System Settings → O
 - **Enabled** — Toggle to activate or deactivate the provider
 
 > **Note:** The legacy routes `/admin/features`, `/admin/oauth`, and `/admin/settings/vat` redirect to
-> the matching tab on the System Settings page.
+> the matching tab on the Settings page.
 
 ### Security
 
 Choose whether every account must use two-factor authentication, and the grace
-period they get, in **Platform → System Settings → Security**. See
+period they get, in **Platform → Settings → Security**. See
 [Roles and Permissions → Requiring it for everyone](11-roles-and-permissions.md#requiring-it-for-everyone-administrators).
 
 ### VAT
 
-Configure VAT rates in **Platform → System Settings → VAT**. See [VAT Settings](#vat-settings) for validity-window behavior and the workflow.
+Configure VAT rates in **Platform → Settings → VAT**. See [VAT Settings](#vat-settings) for validity-window behavior and the workflow.
 
 ## Audit Logs
 
@@ -223,7 +223,7 @@ API keys.
 
 ## VAT Settings
 
-Admins configure VAT rates in **Platform → System Settings → VAT**.
+Admins configure VAT rates in **Platform → Settings → VAT**.
 
 ![VAT settings](screenshots/13-admin-vat-settings.png)
 
@@ -238,7 +238,7 @@ VAT rates are validity-window based — you can set rates for specific time peri
 
 1. A manager chooses the ZEV's **VAT treatment** in [ZEV Settings](02-zev-setup.md#vat-configuration)
    (*VAT-registered* also needs the **VAT Number**)
-2. An admin configures the applicable VAT rate(s) in **Platform → System Settings → VAT**
+2. An admin configures the applicable VAT rate(s) in **Platform → Settings → VAT**
 3. When invoices are generated, the system looks up the rate active on the invoice period's end date
 
 A ZEV that is *Not VAT-registered* is billed without VAT. If no VAT rate is
@@ -394,7 +394,7 @@ Feature flags can be controlled by:
 
 1. Code defaults (defined in backend code)
 2. Environment variable overrides
-3. Platform toggles (System Settings → Functions)
+3. Platform toggles (Settings → Functions)
 
 The backend and frontend both read the same feature flag state.
 
@@ -412,7 +412,7 @@ The backend and frontend both read the same feature flag state.
 For each flag, OpenZEV resolves the final state in this order:
 
 1. Environment variable `FEATURE_<FLAG_NAME_IN_UPPERCASE>`
-2. Value stored in database (set via Platform → System Settings → Functions)
+2. Value stored in database (set via Platform → Settings → Functions)
 3. Code default
 4. `false` fallback
 
@@ -424,7 +424,7 @@ FEATURE_ZEV_SELF_REGISTRATION_ENABLED=true
 
 ### Managing flags via the UI
 
-Manage flags in **Platform → System Settings → Functions**.
+Manage flags in **Platform → Settings → Functions**.
 
 Each flag has:
 

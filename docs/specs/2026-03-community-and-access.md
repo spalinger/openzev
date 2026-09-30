@@ -1388,7 +1388,7 @@ reaches every ZEV-scope route and sees its pages read-only
 
 | Route | Allowed roles | Page component |
 |---|---|---|
-| `/` | any authenticated | `HomePage`: `OverviewPage` in ZEV scope; `DashboardPage` otherwise |
+| `/` | any authenticated | `HomePage`: `OverviewPage` in ZEV scope; `GuestHomePage` for shell role `none` (linking explanation + secondary account link); `DashboardPage` otherwise |
 | `/dashboard` | any authenticated | `DashboardPage` (manager title/navigation: Energy balance; participant root remains `/`) |
 | `/account` | any authenticated | `AccountProfilePage` — tabs `profile` (default) · `security` (password, linked accounts, two-factor) · `api-keys`, chosen by `?tab=`; a forced password change and an OAuth link return open `security` (`resolveAccountTab`) |
 | `/admin` | `admin` | `AdminOverviewHubPage` (tabs = routes; default tab `overview`) |
@@ -1438,12 +1438,13 @@ The sidebar (`Layout.tsx`) shows sections conditionally:
 | Section | Condition |
 |---|---|
 | Overview (`/`), Energy balance (`/dashboard`), Metering (`/metering/chart`, active on `/metering/chart` + `/metering/quality` + `/metering/imports`), Billing (`/billing/invoices`, active on `/billing/*`), Reports | `isZevScope` (shell role `admin`, `manager` or `viewer`; the `/reports` route itself also allows participants) |
+| Account (`/account`) | shell role `none` (only nav entry; landing page explains the unlinked state) |
 | Dashboard (`/`) | shell role `participant` |
 | My invoices (`/me/invoices`) | shell role `participant` or `former` (a former participant sees only this entry) |
 | Annual statement (`/me/statement`) | shell role `participant` (consumption is available on the participant dashboard) |
 | Setup group (participants, metering points `/metering/points`, tariffs, ZEV settings `/zev-settings`) | `isZevScope` (audit logs live in the ZEV settings hub; no standalone entry) |
-| Feasibility | `isZevScope` |
-| Platform group (four entries: Overview `/admin`, Accounts `/admin/accounts`, Templates `/admin/templates`, System settings `/admin/system-settings`) | `role == 'admin'` (ZEVs/API keys/invoices/audit-logs/pdf+email templates live as hub tabs) |
+| Feasibility (`/feasibility`, standalone entry below Setup) | `isZevScope` + `feasibility_calculator_enabled` (planning tool, not a setup step) |
+| Platform group (four entries: Overview `/admin`, Accounts `/admin/accounts`, Templates `/admin/templates`, Settings `/admin/system-settings`) | `role == 'admin'` (ZEVs/API keys/invoices/audit-logs/pdf+email templates live as hub tabs) |
 
 Overview stays active on `/admin` and its five tab routes, without matching
 Accounts, Templates or System settings.
@@ -1484,7 +1485,11 @@ audit-logs page follows the Setup convention (selected ZEV name); every
 `/admin/*` page instead shows the platform label (`nav.platformScope`), so
 platform headers never name a community and never a role.
 Group labels (`nav.setupGroup`, `nav.platformGroup`) separate ZEV-scoped
-entries from platform tooling. Under `/admin/*` the shell adds
+entries from platform tooling; the operate entries above Setup
+(Overview, Energy balance, Metering, Billing, Reports) are unlabelled.
+The Platform group reuses the short community words (`Overview`,
+`Settings`) for its own scope — the group label and the distinct platform
+icons carry the scope, so the labels stay on one line. Under `/admin/*` the shell adds
 `shell-scope-platform`: the switcher is unmounted in favour of a translated
 "Platform administration" chip (`nav.platformScope`) in the sidebar context
 block. There is no header scope chip: every ZEV-scoped page header names the
@@ -1939,8 +1944,11 @@ lists the test classes per module (test counts are the `test_*` methods).
   and role gating.
 - `frontend/tests/layout-nav.test.ts` — hub-nav visibility per role,
   collapsed switcher naming, impersonation banner, `aria-current` alignment
-  (incl. `/metering/quality`, `/billing/emails`), and the sidebar scope indicator (platform vs ZEV; page eyebrows carry
-  the selected community, with no duplicate header chip). `frontend/tests/route-guard-matrix.test.ts` —
+  (incl. `/metering/quality`, `/billing/emails`), guest isolation to
+  `/account`, avatar initials, and the sidebar scope indicator (platform vs ZEV; page eyebrows carry
+  the selected community, with no duplicate header chip). `frontend/tests/nav-labels.test.ts` —
+  distinct labels within each jointly rendered nav region plus the
+  charts-tab-vs-hub guard, in all four locales. `frontend/tests/route-guard-matrix.test.ts` —
   the §9.2 route → role matrix against `AppRoutes` for all three roles
   (42 rows; home/energy split, hub tabs, aliases, and deep links included).
   `frontend/tests/route-aliases.test.ts` — legacy alias redirects preserve

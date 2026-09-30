@@ -325,6 +325,7 @@ label > small.muted {
   overflow-x: hidden;
   overflow-y: auto;
   padding-right: 0.25rem;
+  padding-bottom: 0.5rem;
   scrollbar-width: thin;
   scrollbar-color: rgba(148, 163, 184, 0.5) transparent;
   align-content: start;
@@ -469,14 +470,20 @@ label > small.muted {
 
 .nav-label {
   min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 /* First labelled group — same clearance as nav-standalone, no divider. */
 .nav-section-start {
   margin-top: 1rem;
+}
+
+/* Consecutive groups: enough room above the label that it reads as the start
+   of a group rather than another row. The divider stays reserved for the
+   platform section, which is a different scope and not just another group. */
+.nav-section + .nav-section {
+  margin-top: 0.75rem;
 }
 
 .nav-section-end {
@@ -802,6 +809,9 @@ label > small.muted {
   align-items: center;
   justify-content: center;
   background: var(--brand);
+  color: var(--white);
+  font-size: 0.8rem;
+  font-weight: 700;
 }
 
 .user-meta {

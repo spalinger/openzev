@@ -2,7 +2,7 @@
 
 Back up the whole instance, or a single community, to a local directory or to
 S3-compatible storage. Administrators manage backups under **Platform
-administration → System Settings → Backup**.
+administration → Settings → Backup**.
 
 > **Two kinds of restore.** One **community** can be brought back to the state of a
 > backup from this page — see [Restoring one community](#restoring-one-community).
@@ -375,7 +375,7 @@ to the state of a backup and leaves alone:
   a two-factor device,
 - the **audit trail** — it is never rewritten; the restore itself is added to it.
 
-It works from **Platform administration → System Settings → Backup → Restore a
+It works from **Platform administration → Settings → Backup → Restore a
 community**, and from the command line (below). You need a finished backup that
 holds the community: an instance backup holds all of them, a single-community
 backup one.

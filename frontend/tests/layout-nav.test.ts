@@ -219,7 +219,7 @@ describe('phase-3 hub nav (see docs/specs/2026-03-community-and-access.md §9.3)
             '/zev-settings',
             '/feasibility',
             // Platform group consolidated to four hub entries (phase 3):
-            // Overview, Accounts (+ API keys tab), Templates, System settings.
+            // Overview, Accounts (+ API keys tab), Templates, Settings.
             '/admin',
             '/admin/accounts',
             '/admin/templates',
@@ -240,10 +240,16 @@ describe('phase-3 hub nav (see docs/specs/2026-03-community-and-access.md §9.3)
         ]) {
             expect(page.hasHref(href)).toBe(false)
         }
-        // Scope colouring: group labels + the ZEV switcher in the sidebar.
+        // Only Setup and Platform carry group labels; the operate entries
+        // above them are unlabelled. The ZEV switcher stays in the sidebar.
+        expect(page.html()).not.toContain('nav.workGroup')
+        expect(page.html()).not.toContain('nav.moneyGroup')
         expect(page.html()).toContain('nav.setupGroup')
         expect(page.html()).toContain('nav.platformGroup')
         expect(page.html()).toContain('sidebar-zev-menu')
+        // Two labelled groups, each rendered as a group for assistive tech.
+        expect(page.container.querySelectorAll('.nav-group-label').length).toBe(2)
+        expect(page.container.querySelectorAll('nav [role="group"]').length).toBe(2)
         page.unmount()
     })
 
@@ -300,6 +306,36 @@ describe('phase-3 hub nav (see docs/specs/2026-03-community-and-access.md §9.3)
         const page = await renderLayout()
         expect(page.html()).not.toContain('sidebar-zev-menu')
         expect(page.hasHref('/participants')).toBe(true)
+        page.unmount()
+    })
+
+    it('renders avatars as initials rather than emoji', async () => {
+        mockSession('admin')
+        const page = await renderLayout()
+        const zevAvatar = page.container.querySelector('.sidebar-zev-menu .user-avatar')
+        // ZEV is "Muster ZEV" in the fixture.
+        expect(zevAvatar?.textContent).toBe('MZ')
+        expect(zevAvatar?.getAttribute('aria-hidden')).toBe('true')
+        const userAvatar = page.container.querySelector('.top-nav .user-avatar')
+        // Session fixture is Test User.
+        expect(userAvatar?.textContent).toBe('TU')
+        expect(page.html()).not.toContain('👤')
+        expect(page.html()).not.toContain('🏢')
+        page.unmount()
+    })
+
+    it('sends a guest to the account page and nothing else', async () => {
+        mockSession('guest')
+        const page = await renderLayout()
+        expect(page.hasHref('/account')).toBe(true)
+        for (const href of [
+            '/', '/dashboard', '/metering/chart', '/billing/invoices', '/reports',
+            '/participants', '/metering/points', '/tariffs', '/zev-settings',
+            '/me/invoices', '/me/statement', '/admin',
+        ]) {
+            expect(page.hasHref(href), `guest sees ${href}`).toBe(false)
+        }
+        expect(page.html()).not.toContain('nav.platformGroup')
         page.unmount()
     })
 

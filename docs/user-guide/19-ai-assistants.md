@@ -26,7 +26,7 @@ change, approve, send or delete anything.
 
 An administrator must turn the feature on first — it is off by default:
 
-1. Open **Platform → System Settings → Functions**.
+1. Open **Platform → Settings → Functions**.
 2. Enable `mcp_server_enabled`.
 
 While the flag is off, the MCP endpoint does not exist as far as any caller
