@@ -29,6 +29,7 @@ export const en = {
         setupGroup: 'Setup',
         platformGroup: 'Platform',
         platformScope: 'Platform administration',
+        scopedLabel: '{{scope}}: {{label}}',
         metering: 'Metering',
         billing: 'Billing',
         myInvoices: 'My invoices',
@@ -990,7 +991,7 @@ export const en = {
             eyebrow: 'Planning tool',
             title: 'vZEV Feasibility Calculator',
             description: 'Estimate whether forming a vZEV is worth it, before any metering data exists — compared against selling all local production at the feed-in tariff.',
-            disabled: 'The feasibility calculator is not enabled on this instance. An administrator can turn it on under System Settings → Feature Flags.',
+            disabled: 'The feasibility calculator is not enabled on this instance. An administrator can turn it on under Platform → Settings → Functions.',
             form: {
                 systemTitle: 'System & energy',
                 energyInputModeAggregate: 'Aggregate',
@@ -2484,8 +2485,8 @@ export const en = {
             },
         },
         guest: {
-            title: 'Your account is not linked yet',
-            description: 'Your account is not linked to an energy community. Ask the administrator to link it or send a new invitation.',
+            title: 'Account not linked',
+            description: 'Ask your administrator to grant access to your energy community or link this account to a participant.',
             accountLink: 'Account settings',
         },
         overview: {

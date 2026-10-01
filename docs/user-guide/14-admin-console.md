@@ -109,6 +109,8 @@ one.
 
 ![Admin dynamic price sources](screenshots/17b-admin-dynamic-sources.png)
 
+<span id="system-settings"></span>
+
 ## Settings
 
 Regional display settings, feature flags, OAuth providers, and VAT rates are consolidated

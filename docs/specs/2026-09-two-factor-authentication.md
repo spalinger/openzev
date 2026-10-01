@@ -505,8 +505,9 @@ dismissible ("Set this up later"); after it, it is not. A hard lockout of existi
 upgrade is the failure mode this exists to prevent.
 
 **As shipped.** The decision lives in `lib/mfaGate.ts` (`pass` / `grace` / `hard`) so it is testable
-without a router. `/account` always passes, so the enrolment UI stays reachable, and an impersonating
-admin is never gated. **The gate withholds the app shell in the browser; it is not what makes the
+without a router. `/account`, including an optional trailing slash, always passes using the same
+route matcher as `ProtectedRoute`, so the enrolment UI stays reachable. An impersonating admin is
+never gated. **The gate withholds the app shell in the browser; it is not what makes the
 policy binding** — `accounts.authentication.enforce_mfa_enrolment` (§7.3a) is, and applies regardless
 of which client is calling.
 
@@ -727,7 +728,7 @@ successful login stamps `User.last_login`),
 one) and additionally cover replay of a spent ceremony,
 wrong-origin and tampered-signature assertions, the zero-counter exemption, the grace-period
 arithmetic (including an account far older than the policy), and recovery codes surviving a second
-factor. Frontend: `tests/mfa.test.ts` (22) covers the API client, the WebAuthn bridge and the gate's
+factor. Frontend: `tests/mfa.test.ts` covers the API client, the WebAuthn bridge and the gate's
 decision table (`lib/mfaGate.ts`).
 
 ### Backend — `accounts/test_mfa.py` (new)

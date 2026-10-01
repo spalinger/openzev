@@ -43,13 +43,14 @@ describe('role-aware home page', () => {
         expect(page.querySelector('[data-testid="dashboard"]')).toBeNull()
     })
 
-    it('keeps the participant dashboard at the root route', () => {
-        const page = renderRole('participant')
+    it.each(['participant', 'former'] as const)('keeps the dashboard at the root route for %s', (role) => {
+        const page = renderRole(role)
         expect(page.querySelector('[data-testid="dashboard"]')).not.toBeNull()
         expect(page.querySelector('[data-testid="overview"]')).toBeNull()
+        expect(page.querySelector('[data-testid="guest"]')).toBeNull()
     })
 
-    it('explains the account state to a guest instead of rendering the dashboard', () => {
+    it('explains the account state without community access', () => {
         const page = renderRole('none')
         expect(page.querySelector('[data-testid="guest"]')).not.toBeNull()
         expect(page.querySelector('[data-testid="dashboard"]')).toBeNull()

@@ -301,7 +301,8 @@ pages look the same, just without data.
 
 1. Navigate to http://localhost:8080 (or your instance's `https://` URL)
 2. Login with admin credentials (or a manager's account to manage a community)
-3. Managers land on **Overview**; participants land on their personal dashboard
+3. Managers land on **Overview**; participants land on their personal dashboard.
+   Unlinked guest accounts see an explanation and a link to **Account settings**.
 
 The interface follows your browser's language (German, French, Italian or
 English). To change it, open the account menu at the top right

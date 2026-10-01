@@ -20,6 +20,7 @@ export const de = {
         setupGroup: 'Konfiguration',
         platformGroup: 'Plattform',
         platformScope: 'Plattformverwaltung',
+        scopedLabel: '{{scope}}: {{label}}',
         metering: 'Messdaten',
         billing: 'Abrechnung',
         myInvoices: 'Meine Rechnungen',
@@ -981,7 +982,7 @@ export const de = {
             eyebrow: 'Planungstool',
             title: 'vZEV-Wirtschaftlichkeitsrechner',
             description: 'Schätzen Sie ab, ob sich die Gründung eines vZEV lohnt — noch bevor Messdaten vorliegen, im Vergleich zur vollständigen Einspeisung ins Netz.',
-            disabled: 'Der Wirtschaftlichkeitsrechner ist auf dieser Instanz nicht aktiviert. Ein Administrator kann ihn unter Systemeinstellungen → Feature-Flags einschalten.',
+            disabled: 'Der Wirtschaftlichkeitsrechner ist auf dieser Instanz nicht aktiviert. Ein Administrator kann ihn unter Plattform → Einstellungen → Funktionen einschalten.',
             form: {
                 systemTitle: 'Anlage & Energie',
                 energyInputModeAggregate: 'Gesamt',
@@ -2473,8 +2474,8 @@ export const de = {
             },
         },
         guest: {
-            title: 'Ihr Konto ist noch nicht verknüpft',
-            description: 'Ihr Konto ist keiner Energiegemeinschaft zugeordnet. Bitten Sie die Administration, es zu verknüpfen oder Ihnen eine neue Einladung zu senden.',
+            title: 'Konto nicht verknüpft',
+            description: 'Bitten Sie die Administration, Ihnen Zugang zu Ihrer Energiegemeinschaft zu gewähren oder dieses Konto mit einem Teilnehmer zu verknüpfen.',
             accountLink: 'Kontoeinstellungen',
         },
         overview: {

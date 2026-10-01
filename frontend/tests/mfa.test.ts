@@ -169,8 +169,12 @@ describe('enrolment gate', () => {
         expect(at(expired, { dismissed: true })).toBe('hard')
     })
 
-    it('always lets the account page through so enrolment stays reachable', () => {
-        expect(at({ grace_until: '2026-06-10T12:00:00Z' }, { pathname: '/account' })).toBe('pass')
+    it.each(['/account', '/account/'])('keeps enrolment reachable at %s after the deadline', (pathname) => {
+        expect(at({ grace_until: '2026-06-10T12:00:00Z' }, { pathname })).toBe('pass')
+    })
+
+    it.each(['/accounting', '/account/security'])('keeps %s gated after the deadline', (pathname) => {
+        expect(at({ grace_until: '2026-06-10T12:00:00Z' }, { pathname })).toBe('hard')
     })
 
     it('never gates an impersonating admin', () => {

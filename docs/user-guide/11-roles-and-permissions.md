@@ -47,7 +47,7 @@ role. Participants get theirs by being linked to a participant entry.
 
 - **Account Management:** Create, edit, remove user accounts
 - **Access:** Make other accounts admins, and give access to any community
-- **Settings:** regional date formats, VAT rate configuration, feature flags, and OAuth providers
+- **Platform settings:** regional date formats, VAT rate configuration, feature flags, and OAuth providers
 - **Overview hub:** KPIs, multi-ZEV oversight, all invoices, the platform audit log, and system health
 - **Accounts:** user management and platform-wide API keys
 - **Templates:** PDF invoice/contract/statement templates and system-wide email defaults
@@ -176,9 +176,11 @@ participant. An admin can impersonate it, as any other account that is not an
 admin.
 
 Signing in without a community opens an explanation page with a link to the
-account profile. The sidebar shows only **Account**. Ask an administrator to
+account profile. The sidebar shows only **Account**; bookmarks to other
+protected pages return to the explanation. Ask an administrator to
 give the account community access or link it to a participant. A new
-invitation may be needed, since unlinking revokes onboarding links.
+invitation may be needed, since unlinking revokes onboarding links. Reload
+the page to pick up access changed by an administrator in another session.
 
 ## Access Control Matrix
 

@@ -748,7 +748,12 @@ selected one (`InvoiceDetailPage`).
 ### 9.3 Routes (`components/AppRoutes.tsx`, `components/ProtectedRoute.tsx`)
 
 `ProtectedRoute`'s `allowedRoles` now lists **shell roles** (`ShellRole[]`) and
-compares them with `useCommunityAccess().shellRole`:
+compares them with `useCommunityAccess().shellRole`. Accounts with shell role
+`none` may open only `/` and `/account` (including a trailing slash) inside
+the protected shell; other paths redirect to `/` before the page mounts.
+The outer guard uses `allowUnlinked` to check authentication before the
+community provider mounts, and an inner guard checks the selected relation.
+Public authentication and bearer-link routes remain outside these guards:
 
 | Routes | Old `allowedRoles` | New `allowedRoles` |
 |---|---|---|
@@ -764,21 +769,23 @@ The sidebar follows the selected entry's shell role: `isZevScope` → Overview,
 Energy balance, Metering, Billing, Reports and the Setup group (the owner
 navigation as before), Feasibility when enabled; `participant` → Dashboard, My
 invoices, Annual statement; `former` → My invoices only. The Platform group
-stays admin-only.
+stays admin-only. Shell role `none` gets only the Account navigation entry.
 
 The **switcher** shows when the account can manage something or has more than
 one entry, and not with exactly one entry (nothing to switch). It lists
 `entries`, each with the relation below the name (`nav.relation.*`, class
-`zev-dropdown-relation`). Its header shows the owner when it is known (an
-admin, or the owner itself), else the account's relation. A context without
+`zev-dropdown-relation`). Its header shows the selected ZEV's current issuer when it has one, else
+the account's relation. A context without
 `entries` (the older shape) lists `managedZevs`.
 
 `DashboardPage`: `isZevScope` → the community dashboard for the selected ZEV
 (as before); `isParticipantScope` → the participant dashboard, asking about the
 selected ZEV (`zev_id`) only when the account has more than one entry, so a
 single membership sends exactly the old request. The page branches on
-`summary.summary_kind` (`zev` / `participant`). `HomePage`: `isZevScope` → Overview, else
-the dashboard.
+`summary.summary_kind` (`zev` / `participant`). `HomePage`: `isZevScope` →
+Overview; shell role `none` → `GuestHomePage`, explaining how to obtain a grant
+or a participant link and offering a secondary Account link; otherwise the
+dashboard.
 
 **Community labels (PR 7).** Pages that list across every membership (My
 invoices, metering points, the chart) name the community only when the account

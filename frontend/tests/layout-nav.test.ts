@@ -10,7 +10,8 @@ import { setZevUnsavedDraftGuard } from '../src/lib/zevUnsavedGuard'
 
 vi.mock('react-i18next', () => ({
     useTranslation: () => ({
-        t: (k: string) => k,
+        t: (k: string, options?: { scope: string; label: string }) =>
+            k === 'nav.scopedLabel' && options ? `${options.scope}: ${options.label}` : k,
         i18n: { language: 'en', changeLanguage: vi.fn() },
     }),
 }))
@@ -47,7 +48,7 @@ const ZEV = { id: 1, name: 'Muster ZEV', owner: 9 }
 const SECOND_ZEV = { id: 2, name: 'Second ZEV', owner: 9 }
 
 /** An admin, or a non-admin account managing or taking part in a community (#761). */
-type Persona = 'admin' | 'manager' | 'participant'
+type Persona = 'admin' | 'manager' | 'viewer' | 'participant' | 'former' | 'none'
 
 function mockSession(persona: Persona, impersonating = false, managedZevCount = 2) {
     const role = persona === 'admin' ? 'admin' : 'user'
@@ -71,13 +72,13 @@ function mockSession(persona: Persona, impersonating = false, managedZevCount = 
     // Participants have no managed ZEV selection. Two communities by default
     // so the sidebar switcher renders (it hides for exactly one — there is
     // nothing to switch).
-    const manages = persona !== 'participant'
+    const manages = persona === 'admin' || persona === 'manager' || persona === 'viewer'
     const managedZevs = manages ? [ZEV, SECOND_ZEV].slice(0, managedZevCount) : []
     // What the provider lists for the switcher (#761): a manager's
     // communities, every one for an admin, a participant's one community.
     const entries = manages
         ? managedZevs.map((zev) => ({ id: zev.id, name: zev.name, relation: persona }))
-        : [{ id: ZEV.id, name: ZEV.name, relation: 'participant' }]
+        : persona === 'none' ? [] : [{ id: ZEV.id, name: ZEV.name, relation: persona }]
     mockManagedZev.mockReturnValue({
         managedZevs,
         entries,
@@ -124,14 +125,15 @@ async function renderLayoutAt(path: string) {
     document.body.appendChild(container)
     const client = new QueryClient()
     const root = createRoot(container)
+    const render = () => root.render(
+        createElement(
+            MemoryRouter,
+            { initialEntries: [path] },
+            createElement(QueryClientProvider, { client }, createElement(Layout)),
+        ),
+    )
     await act(async () => {
-        root.render(
-            createElement(
-                MemoryRouter,
-                { initialEntries: [path] },
-                createElement(QueryClientProvider, { client }, createElement(Layout)),
-            ),
-        )
+        render()
     })
     await act(async () => {
         await new Promise((r) => setTimeout(r, 0))
@@ -140,6 +142,7 @@ async function renderLayoutAt(path: string) {
         container,
         html: () => container.innerHTML,
         link: (href: string) => container.querySelector(`a[href="${href}"]`),
+        rerender: async () => { await act(async () => render()) },
         unmount: () => {
             act(() => root.unmount())
             container.remove()
@@ -148,6 +151,26 @@ async function renderLayoutAt(path: string) {
 }
 
 afterEach(() => setZevUnsavedDraftGuard(false))
+
+function mockMobileViewport(initialMobile: boolean) {
+    const matchMedia = window.matchMedia.bind(window)
+    const media = Object.assign(new EventTarget(), {
+        matches: initialMobile,
+        media: '(max-width: 768px)',
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+    })
+    const spy = vi.spyOn(window, 'matchMedia').mockImplementation((query) =>
+        query === media.media ? media : matchMedia(query))
+    return {
+        change: (matches: boolean) => {
+            media.matches = matches
+            media.dispatchEvent(Object.assign(new Event('change'), { matches }))
+        },
+        restore: () => spy.mockRestore(),
+    }
+}
 
 describe('community switching with unsaved settings', () => {
     it.each(['admin', 'manager'] as const)('lets a %s cancel or confirm a dirty community switch', async (role) => {
@@ -201,8 +224,8 @@ describe('community switching with unsaved settings', () => {
     })
 })
 
-describe('phase-3 hub nav (see docs/specs/2026-03-community-and-access.md §9.3)', () => {
-    it('admin sees operate entries, Setup, Feasibility and the consolidated Platform group', async () => {
+describe('role navigation (see docs/specs/2026-03-community-and-access.md §9.3)', () => {
+    it('admin sees operational links, Setup, Feasibility and the consolidated Platform group', async () => {
         mockSession('admin')
         const page = await renderLayout()
         for (const href of [
@@ -218,7 +241,7 @@ describe('phase-3 hub nav (see docs/specs/2026-03-community-and-access.md §9.3)
             '/tariffs',
             '/zev-settings',
             '/feasibility',
-            // Platform group consolidated to four hub entries (phase 3):
+            // Platform group has four hub entries:
             // Overview, Accounts (+ API keys tab), Templates, Settings.
             '/admin',
             '/admin/accounts',
@@ -240,15 +263,12 @@ describe('phase-3 hub nav (see docs/specs/2026-03-community-and-access.md §9.3)
         ]) {
             expect(page.hasHref(href)).toBe(false)
         }
-        // Only Setup and Platform carry group labels; the operate entries
-        // above them are unlabelled. The ZEV switcher stays in the sidebar.
-        expect(page.html()).not.toContain('nav.workGroup')
-        expect(page.html()).not.toContain('nav.moneyGroup')
+        // Only Setup and Platform carry group labels; the operational links
+        // above them have no group heading. The ZEV switcher stays in the sidebar.
         expect(page.html()).toContain('nav.setupGroup')
         expect(page.html()).toContain('nav.platformGroup')
         expect(page.html()).toContain('sidebar-zev-menu')
         // Two labelled groups, each rendered as a group for assistive tech.
-        expect(page.container.querySelectorAll('.nav-group-label').length).toBe(2)
         expect(page.container.querySelectorAll('nav [role="group"]').length).toBe(2)
         page.unmount()
     })
@@ -266,8 +286,8 @@ describe('phase-3 hub nav (see docs/specs/2026-03-community-and-access.md §9.3)
         page.unmount()
     })
 
-    it('owner sees Reports and imports but no Platform group', async () => {
-        mockSession('manager')
+    it.each(['manager', 'viewer'] as const)('%s sees Reports and imports but no Platform group', async (persona) => {
+        mockSession(persona)
         const page = await renderLayout()
         expect(page.hasHref('/metering/chart')).toBe(true)
         // Imports moved into the metering hub (phase 3): no standalone link.
@@ -301,6 +321,21 @@ describe('phase-3 hub nav (see docs/specs/2026-03-community-and-access.md §9.3)
         page.unmount()
     })
 
+    it.each([false, true])('keeps former-participant invoice navigation accessible when collapsed=%s', async (collapsed) => {
+        window.localStorage.setItem('openzev.sidebarCollapsed', String(collapsed))
+        mockSession('former')
+        const page = await renderLayout()
+        try {
+            const links = page.container.querySelectorAll('nav.nav-list a')
+            expect(links).toHaveLength(1)
+            expect(links[0].getAttribute('href')).toBe('/me/invoices')
+            expect(links[0].getAttribute('aria-label') ?? links[0].textContent).toBe('nav.myInvoices')
+            expect(links[0].getAttribute('title')).toBe(collapsed ? 'nav.myInvoices' : null)
+        } finally {
+            page.unmount()
+        }
+    })
+
     it('a single managed community renders no switcher — the page eyebrow carries the name', async () => {
         mockSession('manager', false, 1)
         const page = await renderLayout()
@@ -313,29 +348,255 @@ describe('phase-3 hub nav (see docs/specs/2026-03-community-and-access.md §9.3)
         mockSession('admin')
         const page = await renderLayout()
         const zevAvatar = page.container.querySelector('.sidebar-zev-menu .user-avatar')
-        // ZEV is "Muster ZEV" in the fixture.
         expect(zevAvatar?.textContent).toBe('MZ')
         expect(zevAvatar?.getAttribute('aria-hidden')).toBe('true')
         const userAvatar = page.container.querySelector('.top-nav .user-avatar')
-        // Session fixture is Test User.
         expect(userAvatar?.textContent).toBe('TU')
-        expect(page.html()).not.toContain('👤')
-        expect(page.html()).not.toContain('🏢')
         page.unmount()
     })
 
-    it('sends a guest to the account page and nothing else', async () => {
-        mockSession('guest')
+    it.each([
+        ['(v)ZEV Nord', 'VN'],
+        ['🌞 Solar', 'S'],
+        ['𐐨 Nord', '𐐀N'],
+        ['ß Team', 'ST'],
+        ['E\u0301nergie Nord', 'ÉN'],
+        ['Genossenschaft', 'G'],
+        ['', '·'],
+        ['  ', '·'],
+    ])('renders readable initials for %j', async (name, initials) => {
+        mockSession('admin')
+        Object.assign(mockAuth().user, { first_name: name, last_name: '', username: '' })
         const page = await renderLayout()
-        expect(page.hasHref('/account')).toBe(true)
-        for (const href of [
-            '/', '/dashboard', '/metering/chart', '/billing/invoices', '/reports',
-            '/participants', '/metering/points', '/tariffs', '/zev-settings',
-            '/me/invoices', '/me/statement', '/admin',
-        ]) {
-            expect(page.hasHref(href), `guest sees ${href}`).toBe(false)
+        try {
+            expect(page.container.querySelector('.top-nav .user-avatar')?.textContent).toBe(initials)
+        } finally {
+            page.unmount()
         }
-        expect(page.html()).not.toContain('nav.platformGroup')
+    })
+
+    it('uses the username when the account has no name', async () => {
+        mockSession('participant')
+        Object.assign(mockAuth().user, { first_name: '', last_name: '', username: 'marina' })
+        const page = await renderLayout()
+        expect(page.container.querySelector('.top-nav .user-avatar')?.textContent).toBe('M')
+        page.unmount()
+    })
+
+    it('shows a decorative icon when no community is selected', async () => {
+        mockSession('admin', false, 0)
+        const page = await renderLayout()
+        const avatar = page.container.querySelector('.sidebar-zev-menu .user-avatar')
+        expect(avatar?.querySelector('svg')).not.toBeNull()
+        expect(avatar?.getAttribute('aria-hidden')).toBe('true')
+        page.unmount()
+    })
+
+    it.each([false, true])('preserves link names and shows tooltips only when collapsed=%s', async (collapsed) => {
+        window.localStorage.setItem('openzev.sidebarCollapsed', String(collapsed))
+        mockSession('admin')
+        const page = await renderLayout()
+        try {
+            for (const [href, key] of [
+                ['/admin', 'nav.adminOverview'],
+                ['/admin/accounts', 'nav.adminAccounts'],
+                ['/admin/templates', 'nav.adminTemplates'],
+                ['/admin/system-settings', 'nav.adminSystemSettings'],
+            ]) {
+                const link = page.container.querySelector(`nav a[href="${href}"]`)
+                expect(link?.getAttribute('aria-label')).toBe(`nav.platformGroup: ${key}`)
+                expect(link?.textContent).toBe(key)
+            }
+            function expectTooltips(shown: boolean) {
+                for (const link of page.container.querySelectorAll('nav.nav-list a')) {
+                    const scoped = link.getAttribute('href')?.startsWith('/admin')
+                    const name = scoped ? link.getAttribute('aria-label') : link.textContent
+                    expect(name).toBeTruthy()
+                    expect(link.getAttribute('aria-label')).toBe(scoped || shown ? name : null)
+                    expect(link.getAttribute('title')).toBe(shown ? name : null)
+                }
+            }
+            expectTooltips(collapsed)
+            const toggle = page.container.querySelector<HTMLButtonElement>('.sidebar-collapse-button')!
+            await act(async () => toggle.click())
+            expectTooltips(!collapsed)
+        } finally {
+            page.unmount()
+            window.localStorage.removeItem('openzev.sidebarCollapsed')
+        }
+    })
+
+    it.each([
+        { role: 'admin', path: '/' },
+        { role: 'admin', path: '/admin' },
+        { role: 'participant', path: '/' },
+        { role: 'none', path: '/' },
+    ] as const)('ignores desktop collapse on mobile and restores it on desktop for $role at $path', async ({ role, path }) => {
+        const viewport = mockMobileViewport(false)
+        const previousOverflow = document.body.style.overflow
+        let unmount: (() => void) | undefined
+        try {
+            document.body.style.overflow = 'auto'
+            mockSession(role)
+            const page = await renderLayoutAt(path)
+            unmount = page.unmount
+            await act(async () => page.container.querySelector<HTMLButtonElement>('.sidebar-collapse-button')!.click())
+            expect(page.container.querySelector('.shell-collapsed')).not.toBeNull()
+            await act(async () => viewport.change(true))
+            expect(page.container.querySelector('.shell-collapsed')).toBeNull()
+            expect(page.container.querySelector('.sidebar.collapsed')).toBeNull()
+            await act(async () => page.container.querySelector<HTMLButtonElement>('.mobile-menu-button')!.click())
+            expect(page.container.querySelector('.sidebar.mobile-open')).not.toBeNull()
+            expect(document.body.style.overflow).toBe('hidden')
+            expect(page.container.querySelector('nav a[title]')).toBeNull()
+            const switcher = page.container.querySelector<HTMLButtonElement>('.sidebar-zev-menu .user-menu-trigger')
+            if (switcher) await act(async () => switcher.click())
+            else page.container.querySelector<HTMLButtonElement>('.mobile-menu-button')!.focus()
+            expect(window.localStorage.getItem('openzev.sidebarCollapsed')).toBe('true')
+            await act(async () => viewport.change(false))
+            expect(page.container.querySelector('.shell-collapsed')).not.toBeNull()
+            expect(document.body.style.overflow).toBe('auto')
+            expect(page.container.querySelector('.sidebar.mobile-open')).toBeNull()
+            if (switcher) {
+                expect(page.container.querySelector('.zev-menu-dropdown')).toBeNull()
+            }
+            expect(document.activeElement).toBe(switcher ?? page.container.querySelector('.sidebar-collapse-button'))
+            page.container.querySelector<HTMLAnchorElement>('nav a')!.focus()
+            await act(async () => viewport.change(true))
+            expect(page.container.querySelector('.sidebar.mobile-open')).toBeNull()
+            expect(document.body.style.overflow).toBe('auto')
+            expect(document.activeElement).toBe(page.container.querySelector('.mobile-menu-button'))
+        } finally {
+            unmount?.()
+            viewport.restore()
+            document.body.style.overflow = previousOverflow
+            window.localStorage.removeItem('openzev.sidebarCollapsed')
+        }
+    })
+
+    it.each([false, true])('preserves unrelated body focus on resize (previous navigation focus: %s)', async (previousNavigationFocus) => {
+        const viewport = mockMobileViewport(true)
+        let unmount: (() => void) | undefined
+        try {
+            window.localStorage.setItem('openzev.sidebarCollapsed', 'true')
+            mockSession('admin')
+            const page = await renderLayoutAt('/')
+            unmount = page.unmount
+            if (previousNavigationFocus) {
+                const button = page.container.querySelector<HTMLButtonElement>('.mobile-menu-button')!
+                await act(async () => {
+                    button.focus()
+                    button.blur()
+                })
+            }
+            expect(document.activeElement).toBe(document.body)
+            await act(async () => viewport.change(false))
+            expect(document.activeElement).toBe(document.body)
+        } finally {
+            unmount?.()
+            viewport.restore()
+            window.localStorage.removeItem('openzev.sidebarCollapsed')
+        }
+    })
+
+    it('recovers dropdown focus lost before the breakpoint effect runs', async () => {
+        const viewport = mockMobileViewport(true)
+        let unmount: (() => void) | undefined
+        try {
+            window.localStorage.setItem('openzev.sidebarCollapsed', 'true')
+            mockSession('admin')
+            const page = await renderLayoutAt('/')
+            unmount = page.unmount
+            const switcher = page.container.querySelector<HTMLButtonElement>('.sidebar-zev-menu .user-menu-trigger')!
+            await act(async () => switcher.click())
+            const option = page.container.querySelector<HTMLButtonElement>('.zev-dropdown-item')!
+            expect(document.activeElement).toBe(option)
+            await act(async () => {
+                viewport.change(false)
+                option.blur()
+                expect(document.activeElement).toBe(document.body)
+            })
+            expect(document.activeElement).toBe(switcher)
+            expect(page.container.querySelector('.zev-menu-dropdown')).toBeNull()
+        } finally {
+            unmount?.()
+            viewport.restore()
+            window.localStorage.removeItem('openzev.sidebarCollapsed')
+        }
+    })
+
+    it.each([0, 2])('forgets focus when the switcher disappears from %s communities to one', async (count) => {
+        const viewport = mockMobileViewport(true)
+        let unmount: (() => void) | undefined
+        try {
+            window.localStorage.setItem('openzev.sidebarCollapsed', 'true')
+            mockSession('admin', false, count)
+            const page = await renderLayoutAt('/')
+            unmount = page.unmount
+            await act(async () => page.container.querySelector<HTMLButtonElement>('.sidebar-zev-menu .user-menu-trigger')!.click())
+            const focused = document.activeElement!
+            expect(focused.closest('.zev-menu-dropdown')).not.toBeNull()
+            mockSession('admin', false, 1)
+            await page.rerender()
+            expect(focused.isConnected).toBe(false)
+            expect(document.activeElement).toBe(document.body)
+            await act(async () => viewport.change(false))
+            expect(document.activeElement).toBe(document.body)
+        } finally {
+            unmount?.()
+            viewport.restore()
+            window.localStorage.removeItem('openzev.sidebarCollapsed')
+        }
+    })
+
+    it('preserves confirmation-dialog focus across breakpoints', async () => {
+        const viewport = mockMobileViewport(true)
+        let unmount: (() => void) | undefined
+        try {
+            mockSession('admin')
+            setZevUnsavedDraftGuard(true)
+            const page = await renderLayoutAt('/zev-settings/general')
+            unmount = page.unmount
+            await act(async () => page.container.querySelector<HTMLButtonElement>('.sidebar-zev-menu .user-menu-trigger')!.click())
+            await act(async () => page.container.querySelectorAll<HTMLButtonElement>('.zev-dropdown-item')[1].click())
+            const dialog = page.container.querySelector<HTMLElement>('[role="dialog"]')!
+            expect(document.activeElement).toBe(dialog)
+            for (const mobile of [false, true]) {
+                await act(async () => viewport.change(mobile))
+                expect(document.activeElement).toBe(dialog)
+                expect(page.container.contains(dialog)).toBe(true)
+            }
+        } finally {
+            unmount?.()
+            viewport.restore()
+            window.localStorage.removeItem('openzev.sidebarCollapsed')
+        }
+    })
+
+    it('ignores saved desktop collapse when mounted on mobile', async () => {
+        const viewport = mockMobileViewport(true)
+        let unmount: (() => void) | undefined
+        try {
+            window.localStorage.setItem('openzev.sidebarCollapsed', 'true')
+            mockSession('none')
+            const page = await renderLayoutAt('/')
+            unmount = page.unmount
+            expect(page.container.querySelector('.shell-collapsed')).toBeNull()
+            expect(page.container.querySelector('nav a[title]')).toBeNull()
+            expect(page.container.querySelector('.sidebar.mobile-open')).toBeNull()
+            expect(window.localStorage.getItem('openzev.sidebarCollapsed')).toBe('true')
+        } finally {
+            unmount?.()
+            viewport.restore()
+            window.localStorage.removeItem('openzev.sidebarCollapsed')
+        }
+    })
+
+    it('shows only account navigation for accounts without community access', async () => {
+        mockSession('none')
+        const page = await renderLayout()
+        const hrefs = Array.from(page.container.querySelectorAll('nav.nav-list a'), (link) => link.getAttribute('href'))
+        expect(hrefs).toEqual(['/account'])
         page.unmount()
     })
 
@@ -348,7 +609,7 @@ describe('phase-3 hub nav (see docs/specs/2026-03-community-and-access.md §9.3)
             expect(trigger?.getAttribute('aria-label')).toBe('nav.manageZevFor')
             expect(trigger?.getAttribute('aria-expanded')).toBe('false')
             expect(trigger?.getAttribute('aria-controls')).toBe('zev-menu-list')
-            // Collapsed shell hides the text; the emoji carries no name.
+            // Collapsed shell hides the text; the avatar carries no name.
             expect(page.container.querySelector('.shell.shell-collapsed')).not.toBe(null)
             expect(trigger?.querySelector('.user-avatar')?.getAttribute('aria-hidden')).toBe('true')
             page.unmount()

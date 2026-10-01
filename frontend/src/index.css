@@ -479,13 +479,6 @@ label > small.muted {
   margin-top: 1rem;
 }
 
-/* Consecutive groups: enough room above the label that it reads as the start
-   of a group rather than another row. The divider stays reserved for the
-   platform section, which is a different scope and not just another group. */
-.nav-section + .nav-section {
-  margin-top: 0.75rem;
-}
-
 .nav-section-end {
   margin-top: 0.75rem;
   padding-top: 0.6rem;
@@ -804,6 +797,7 @@ label > small.muted {
 .user-avatar {
   width: 2rem;
   height: 2rem;
+  flex-shrink: 0;
   border-radius: 999px;
   display: inline-flex;
   align-items: center;
@@ -812,6 +806,11 @@ label > small.muted {
   color: var(--white);
   font-size: 0.8rem;
   font-weight: 700;
+}
+
+.user-avatar svg {
+  width: 1.2rem;
+  height: 1.2rem;
 }
 
 .user-meta {
@@ -2773,6 +2772,7 @@ input.recurrence-chip-input {
 }
 
 @media (max-width: 768px) {
+  /* Keep in sync with Layout.tsx's mobile media query. */
   /* Switch shell to single-column — sidebar becomes an overlay */
   .shell,
   .shell.shell-collapsed {

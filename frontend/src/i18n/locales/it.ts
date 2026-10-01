@@ -20,6 +20,7 @@ export const it = {
         setupGroup: 'Configurazione',
         platformGroup: 'Piattaforma',
         platformScope: 'Amministrazione della piattaforma',
+        scopedLabel: '{{scope}}: {{label}}',
         metering: 'Misure',
         billing: 'Fatturazione',
         myInvoices: 'Le mie fatture',
@@ -981,7 +982,7 @@ export const it = {
             eyebrow: 'Strumento di pianificazione',
             title: 'Calcolatore di fattibilità CEL',
             description: 'Stima se la costituzione di un CEL ne vale la pena, ancora prima di disporre di dati di misurazione — confrontato con l’immissione totale in rete.',
-            disabled: 'Il calcolatore di fattibilità non è attivo su questa istanza. Un amministratore può attivarlo in Impostazioni di sistema → Feature Flag.',
+            disabled: 'Il calcolatore di fattibilità non è attivo su questa istanza. Un amministratore può attivarlo in Piattaforma → Impostazioni → Funzioni.',
             form: {
                 systemTitle: 'Impianto & energia',
                 energyInputModeAggregate: 'Aggregato',
@@ -2473,8 +2474,8 @@ export const it = {
             },
         },
         guest: {
-            title: 'Il tuo account non è ancora collegato',
-            description: 'Il tuo account non è collegato a nessuna comunità energetica. Chiedi all\'amministratore di collegarlo o di inviarti un nuovo invito.',
+            title: 'Account non collegato',
+            description: 'Chiedi alla tua amministrazione di concederti accesso alla tua comunità energetica o di collegare questo account a un partecipante.',
             accountLink: 'Impostazioni account',
         },
         overview: {

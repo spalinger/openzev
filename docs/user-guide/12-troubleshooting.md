@@ -128,7 +128,7 @@ Many meters show "Missing". Diagnose the gaps with
 **Problem:** The generate action is missing or returns an error.
 
 **Checks:**
-1. Metering data imported? Check **Metering → Chart**
+1. Metering data imported? Check **Metering → Charts**
 2. Tariffs configured? Check **Tariffs**
 3. Participants active? Check **Participants**
 4. Data quality OK? Check **Metering → Data Quality**

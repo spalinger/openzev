@@ -836,11 +836,18 @@ start loading. `logout` clears synchronously alongside `setUser(null)` and
 fires the reset without awaiting it, matching its existing fire-and-forget
 `logoutRequest()` call.
 
+`refreshUser()` updates the same-account user snapshot without clearing the
+query cache. Account link/unlink changes in another session are picked up
+on page reload or an explicit `refreshUser()` call; the client has no polling
+or push for these changes. Link/unlink actions leave JWT sessions valid, while API
+permissions use the current database user. Reloading also starts a fresh
+frontend query cache.
+
 ### 5.8 Forced password change redirect
 
-`ProtectedRoute` checks: if `user.must_change_password` is true and the user is
-not impersonating and the current path is not `/account`, redirect to
-`/account` with `state.forcePasswordChange = true`.
+`ProtectedRoute` sends required password changes to `/account` with
+`state.forcePasswordChange = true`; see the guard ordering and account-route
+matching in §9.1.
 
 ### 5.9 Auth endpoint throttling
 
@@ -1367,17 +1374,28 @@ render `/zev-settings` through `AppRoutes` must use the data-router setup —
 
 ### 9.1 ProtectedRoute component
 
-`ProtectedRoute({ children, allowedRoles? })`:
+`ProtectedRoute({ children, allowedRoles?, allowUnlinked? })`:
 1. If loading → show loading indicator.
 2. If not authenticated → redirect to `/login`.
-3. If `must_change_password` and not impersonating and not on `/account` →
-   redirect to `/account`.
-4. If `allowedRoles` (a `ShellRole[]`) is specified and the account's shell
+3. If `must_change_password` and not impersonating and not on `/account`
+   (with an optional trailing slash) → redirect to `/account`.
+4. Unless `allowUnlinked` is true, if the selected shell role is `none` and
+   the path is neither `/` nor `/account` (with an optional trailing slash)
+   → redirect to `/` before mounting the protected page.
+5. If `allowedRoles` (a `ShellRole[]`) is specified and the account's shell
    role for the selected community (`useCommunityAccess().shellRole`, §9.4) is
    not in the list → redirect to `/`.
-5. Otherwise → render children.
+6. Otherwise → render children.
+
+The outer shell guard uses `allowUnlinked` for authentication before
+`ManagedZevProvider` mounts. A second guard inside the provider checks the
+selected relation before mounting `Layout`. Public authentication and
+bearer-link routes stay outside both guards.
 
 ### 9.2 Route → role mapping
+
+Protected routes below exclude shell role `none` through the inner shell
+guard, except `/` and `/account`.
 
 Allowed roles are **shell roles** (`ShellRole` in `lib/communityAccess.ts`:
 `admin` · `manager` · `viewer` · `participant` · `former` · `none`), the
@@ -1392,7 +1410,7 @@ reaches every ZEV-scope route and sees its pages read-only
 | `/dashboard` | any authenticated | `DashboardPage` (manager title/navigation: Energy balance; participant root remains `/`) |
 | `/account` | any authenticated | `AccountProfilePage` — tabs `profile` (default) · `security` (password, linked accounts, two-factor) · `api-keys`, chosen by `?tab=`; a forced password change and an OAuth link return open `security` (`resolveAccountTab`) |
 | `/admin` | `admin` | `AdminOverviewHubPage` (tabs = routes; default tab `overview`) |
-| `/admin/overview` · `/admin/zevs` · `/admin/invoices` · `/admin/audit` · `/admin/health` | `admin` | `AdminOverviewHubPage tab=…` (KPIs · ZEVs table · all invoices · platform audit log · System health) |
+| `/admin/overview` · `/admin/zevs` · `/admin/invoices` · `/admin/dynamic-sources` · `/admin/audit` · `/admin/health` | `admin` | `AdminOverviewHubPage tab=…` (KPIs · ZEVs table · all invoices · dynamic price sources · platform audit log · System health) |
 | `/admin/audit-logs` | `admin` | alias → `/admin/audit` |
 | `/admin/system-settings` | `admin` | `AdminSystemSettingsPage` |
 | `/admin/accounts` | `admin` | `AdminAccountsHubPage` (Users tab) |
@@ -1408,7 +1426,7 @@ reaches every ZEV-scope route and sees its pages read-only
 | `/audit-logs` | ZEV scope | alias → `/zev-settings/audit` (owner-scoped log in the settings hub) |
 | `/metering/points` | any authenticated | `MeteringPointsPage` (read-only for participants, no nav entry) |
 | `/metering-points` | any authenticated | alias → `/metering/points` |
-| `/metering/chart` | any authenticated | `MeteringChartPage` (`tab="chart"`, wrapped in default-allow `ProtectedRoute` so tab switches don't remount) |
+| `/metering/chart` | any authenticated | `MeteringChartPage` (`tab="chart"`, wrapped in `ProtectedRoute` without a role list so tab switches don't remount) |
 | `/metering/quality` | ZEV scope | `MeteringChartPage` (`tab="quality"`) — intentional participant restriction: quality shows whole-ZEV severity counts, participant names, and overlap warnings (operator view; backend role-scoping means no leak either way) |
 | `/metering/imports` | ZEV scope | `MeteringChartPage` (`tab="imports"`, embedding `ImportsPage embedded`) |
 | `/metering-data` | any authenticated | alias → `/metering/chart`, except `?tab=quality` → guarded `/metering/quality`; `tab` is always stripped, remaining params preserved |
@@ -1426,6 +1444,11 @@ reaches every ZEV-scope route and sees its pages read-only
 | `/reports` | ZEV scope, `participant` | `ReportsPage` (participants: own downloads; owners/admins: annual ZEV report, tax overview, and annual-statement ZIP) |
 | `/login` | public | `LoginPage` |
 | `/verify-email` | public | `VerifyEmailPage` |
+| `/confirm-email-change` | public | `ConfirmEmailChangePage` |
+| `/oauth/callback` | public | `OAuthCallbackPage` |
+| `/join/:prefix` | public | `ParticipantOnboardingPage` (onboarding bearer link) |
+| `/signin/:token` | public | `MagicSignInPage` (magic sign-in link) |
+| `/i/:prefix` | public | `PublicInvoicePage` (invoice bearer link) |
 
 Legacy admin routes `/admin/settings/regional`, `/admin/settings/vat`,
 `/admin/features`, and `/admin/oauth` redirect into tabs on
@@ -1446,8 +1469,8 @@ The sidebar (`Layout.tsx`) shows sections conditionally:
 | Feasibility (`/feasibility`, standalone entry below Setup) | `isZevScope` + `feasibility_calculator_enabled` (planning tool, not a setup step) |
 | Platform group (four entries: Overview `/admin`, Accounts `/admin/accounts`, Templates `/admin/templates`, Settings `/admin/system-settings`) | `role == 'admin'` (ZEVs/API keys/invoices/audit-logs/pdf+email templates live as hub tabs) |
 
-Overview stays active on `/admin` and its five tab routes, without matching
-Accounts, Templates or System settings.
+Overview stays active on `/admin` and its six tab routes, without matching
+Accounts, Templates or Settings.
 
 The community switcher lives at the sidebar top (inline expander, full
 sidebar width, expands-first when collapsed, auto-closes on entry into
@@ -1456,8 +1479,8 @@ account in ZEV scope or with more than one community, and is unmounted with
 exactly one community. It lists the provider's `entries` (§9.4) — every
 community the account relates to — each with the account's relation below the
 name (`nav.relation.{admin,manager,viewer,participant,former}`, class
-`zev-dropdown-relation`). The trigger's subtitle shows the owner when it is
-known, otherwise the relation. A participant with one community gets no
+`zev-dropdown-relation`). The trigger's subtitle shows the current issuer's display name when the
+selected ZEV has one, otherwise the relation. A participant with one community gets no
 switcher, as before.
 The switcher is a keyboard-operable disclosure: opening it focuses the first
 enabled community button (or the empty/loading panel), Escape closes it and
@@ -1469,7 +1492,12 @@ and drops the draft. Selecting the current community or switching with a clean
 draft opens no confirmation. `ZevSettingsPage` publishes and clears this state
 through `zevUnsavedGuard`; `layout-nav.test.ts` covers both owner and admin
 confirmation flows. On mobile, Escape also closes
-the sidebar drawer and returns focus to its menu button. Opening one disclosure
+the sidebar drawer and returns focus to its menu button. Mobile navigation
+ignores the saved desktop collapse preference. Returning to desktop restores
+it, closes the drawer and releases the scroll lock. Breakpoint changes close
+the community disclosure and move focus from hidden controls to a visible
+navigation control. Focus elsewhere is preserved.
+Opening one disclosure
 closes the other. The account disclosure
 in the top bar follows the same focus and dismissal rules while keeping its
 language choices as ordinary buttons; selecting a language leaves it open.
@@ -1485,11 +1513,15 @@ audit-logs page follows the Setup convention (selected ZEV name); every
 `/admin/*` page instead shows the platform label (`nav.platformScope`), so
 platform headers never name a community and never a role.
 Group labels (`nav.setupGroup`, `nav.platformGroup`) separate ZEV-scoped
-entries from platform tooling; the operate entries above Setup
-(Overview, Energy balance, Metering, Billing, Reports) are unlabelled.
-The Platform group reuses the short community words (`Overview`,
-`Settings`) for its own scope — the group label and the distinct platform
-icons carry the scope, so the labels stay on one line. Under `/admin/*` the shell adds
+entries from platform tooling; the operational links above Setup
+(Overview, Energy balance, Metering, Billing, Reports) have no group heading.
+Platform reuses `Overview` and `Settings`; its link accessible names include
+the translated Platform group label (`nav.scopedLabel`: `{{scope}}: {{label}}`).
+Tooltips appear only in the collapsed desktop rail; visible labels wrap.
+Avatars show up to two letter or digit initials, ignoring symbols. Empty names
+show `·`; no selected community shows a decorative platform icon. Avatars do
+not shrink.
+Under `/admin/*` the shell adds
 `shell-scope-platform`: the switcher is unmounted in favour of a translated
 "Platform administration" chip (`nav.platformScope`) in the sidebar context
 block. There is no header scope chip: every ZEV-scoped page header names the
@@ -1939,19 +1971,23 @@ lists the test classes per module (test counts are the `test_*` methods).
 
 ### 16.2 Frontend
 
-- `npm run build` verifies type-safety and route correctness.
+- `npm run build` checks TypeScript and the production build. Route tests
+  verify access and redirects.
 - `ProtectedRoute` handles loading, unauthenticated, forced password change,
-  and role gating.
-- `frontend/tests/layout-nav.test.ts` — hub-nav visibility per role,
-  collapsed switcher naming, impersonation banner, `aria-current` alignment
-  (incl. `/metering/quality`, `/billing/emails`), guest isolation to
-  `/account`, avatar initials, and the sidebar scope indicator (platform vs ZEV; page eyebrows carry
-  the selected community, with no duplicate header chip). `frontend/tests/nav-labels.test.ts` —
-  distinct labels within each jointly rendered nav region plus the
-  charts-tab-vs-hub guard, in all four locales. `frontend/tests/route-guard-matrix.test.ts` —
-  the §9.2 route → role matrix against `AppRoutes` for all three roles
-  (42 rows; home/energy split, hub tabs, aliases, and deep links included).
-  `frontend/tests/route-aliases.test.ts` — legacy alias redirects preserve
+  redirects for accounts without community access, and shell-role gating.
+- `frontend/tests/layout-nav.test.ts` — role navigation, scoped link names,
+  avatars, active state, scope context, disclosure keyboard behaviour and
+  mobile presentation independent of desktop collapse.
+- `frontend/screenshots/layout-overflow.spec.ts` — sidebar sizing and focus
+  recovery across the mobile breakpoint with browser CSS applied.
+- `frontend/tests/nav-labels.test.ts` — distinct labels within community,
+  platform and participant navigation plus the charts-tab-vs-hub guard, in
+  all four locales.
+- `frontend/tests/route-guard-matrix.test.ts` — the §9.2 matrix for all six
+  shell roles, denial before rendering for accounts without community access,
+  public routes without a session, and
+  forced-password access including trailing-slash account URLs.
+- `frontend/tests/route-aliases.test.ts` — legacy alias redirects preserve
   query and params (the §9.2 matrix is the frozen contract).
 - `frontend/tests/managed-zev-selection.test.ts` (27 tests) — the §9.4
   resolution order (explicit pick → account preference → first managed),

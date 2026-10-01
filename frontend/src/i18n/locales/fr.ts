@@ -20,6 +20,7 @@ export const fr = {
         setupGroup: 'Configuration',
         platformGroup: 'Plateforme',
         platformScope: 'Administration de la plateforme',
+        scopedLabel: '{{scope}}\u00a0: {{label}}',
         metering: 'Mesures',
         billing: 'Facturation',
         myInvoices: 'Mes factures',
@@ -981,7 +982,7 @@ export const fr = {
             eyebrow: 'Outil de planification',
             title: 'Calculateur de rentabilité RCP',
             description: 'Estimez si la création d’un regroupement (RCP) en vaut la peine, avant même de disposer de données de mesure — comparé à l’injection totale dans le réseau.',
-            disabled: 'Le calculateur de rentabilité n’est pas activé sur cette instance. Un administrateur peut l’activer dans Paramètres système → Fonctionnalités.',
+            disabled: 'Le calculateur de rentabilité n’est pas activé sur cette instance. Un administrateur peut l’activer dans Plateforme → Paramètres → Fonctions.',
             form: {
                 systemTitle: 'Installation & énergie',
                 energyInputModeAggregate: 'Agrégé',
@@ -2473,8 +2474,8 @@ export const fr = {
             },
         },
         guest: {
-            title: 'Votre compte n\'est pas encore lié',
-            description: 'Votre compte n\'est lié à aucune communauté d\'énergie. Demandez à l\'administrateur de le lier ou de vous envoyer une nouvelle invitation.',
+            title: 'Compte non lié',
+            description: 'Demandez à votre administrateur de vous donner accès à votre communauté d’énergie ou de lier ce compte à un participant.',
             accountLink: 'Paramètres du compte',
         },
         overview: {

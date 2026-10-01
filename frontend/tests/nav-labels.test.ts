@@ -6,21 +6,15 @@ import { it as itLocale } from '../src/i18n/locales/it'
 
 const LOCALES = { de, en, fr, it: itLocale }
 
-/** Entries rendered together without a group label between them. */
-const UNGROUPED = ['overview', 'energyBalance', 'metering', 'billing', 'reports'] as const
-const SETUP = ['participants', 'meteringPoints', 'tariffs', 'zevSettings', 'feasibility'] as const
+const COMMUNITY = ['overview', 'energyBalance', 'metering', 'billing', 'reports', 'participants', 'meteringPoints', 'tariffs', 'zevSettings', 'feasibility'] as const
 const PLATFORM = ['adminOverview', 'adminAccounts', 'adminTemplates', 'adminSystemSettings'] as const
 const PARTICIPANT = ['dashboard', 'myInvoices', 'annualStatement'] as const
 
-function navOf(locale: (typeof LOCALES)[keyof typeof LOCALES]): Record<string, string> {
-    return locale.nav as Record<string, string>
-}
-
 describe('sidebar labels', () => {
     for (const [name, locale] of Object.entries(LOCALES)) {
-        it(`${name}: entries shown together have distinct labels`, () => {
-            const nav = navOf(locale)
-            for (const group of [UNGROUPED, SETUP, PLATFORM, PARTICIPANT]) {
+        it(`${name}: labels are distinct within community, platform and participant navigation`, () => {
+            const nav = locale.nav
+            for (const group of [COMMUNITY, PLATFORM, PARTICIPANT]) {
                 const labels = group.map((key) => {
                     expect(nav[key], `nav.${key} is missing`).toBeTypeOf('string')
                     return nav[key]
@@ -30,7 +24,7 @@ describe('sidebar labels', () => {
         })
 
         it(`${name}: the charts tab does not repeat the metering nav label`, () => {
-            const nav = navOf(locale)
+            const nav = locale.nav
             expect(nav.meteringCharts).toBeTypeOf('string')
             expect(nav.meteringCharts).not.toBe(nav.metering)
         })

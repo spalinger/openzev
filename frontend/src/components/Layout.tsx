@@ -1,5 +1,6 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useMediaQuery } from '@mantine/hooks'
 import { Link, NavLink, Outlet, matchPath, useLocation, useMatch, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../lib/auth'
@@ -13,23 +14,31 @@ import { hasUnsavedZevSettingsDraft } from '../lib/zevUnsavedGuard'
 import { useToast } from '../lib/toast'
 import pkg from '../../package.json'
 
-function SidebarLink({ to, label, icon, active, end, className }: {
+// Keep in sync with the mobile shell breakpoint in index.css.
+const MOBILE_MEDIA_QUERY = '(max-width: 768px)'
+
+function SidebarLink({ to, label, icon, active, end, className, scope, collapsed }: {
     to: string
     label: string
     icon: ReactNode
     active?: boolean
     end?: boolean
     className?: string
+    scope?: string
+    collapsed: boolean
 }) {
+    const { t } = useTranslation()
     // Link, not NavLink: active state is computed here to control class + aria-current.
     const { pathname } = useLocation()
     const isActive = active ?? matchPath({ path: to, end: end ?? to === '/' }, pathname) != null
     const ariaCurrent = isActive ? (pathname === to ? 'page' : 'true') : undefined
+    const accessibleName = scope ? t('nav.scopedLabel', { scope, label }) : label
     return (
         <Link
             to={to}
             className={`nav-link${isActive ? ' active' : ''}${className ? ` ${className}` : ''}`}
-            title={label}
+            title={collapsed ? accessibleName : undefined}
+            aria-label={scope || collapsed ? accessibleName : undefined}
             aria-current={ariaCurrent}
         >
             <span className="nav-icon">{icon}</span>
@@ -49,9 +58,7 @@ export function Layout() {
         relation: user?.role === 'admin' ? ('admin' as const) : ('manager' as const),
     }))
     const { shellRole, isZevScope, isParticipantScope } = useCommunityAccess()
-    // Only the roles the nav link would show to anyway; a participant never
-    // needs this, and the calculator's own permission scope (see
-    // FeasibilityCalculateView) is enforced server-side regardless.
+    // Query the flag only for accounts with community-wide access.
     const feasibilityEnabledQuery = useQuery({
         queryKey: queryKeys.feasibility.enabled(),
         queryFn: fetchFeasibilityCalculatorEnabled,
@@ -71,12 +78,18 @@ export function Layout() {
         return window.localStorage.getItem('openzev.sidebarCollapsed') === 'true'
     })
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+    const isMobile = useMediaQuery(MOBILE_MEDIA_QUERY, undefined, { getInitialValueInEffect: false })
+    const isNavigationCollapsed = isSidebarCollapsed && !isMobile
     const { dialog: zevSwitchDialog, confirm: confirmZevSwitch, handleConfirm: handleZevSwitchConfirm, handleCancel: handleZevSwitchCancel } = useConfirmDialog()
     const userMenuRef = useRef<HTMLDivElement | null>(null)
     const zevMenuRef = useRef<HTMLDivElement | null>(null)
     const userMenuTriggerRef = useRef<HTMLButtonElement | null>(null)
     const zevMenuTriggerRef = useRef<HTMLButtonElement | null>(null)
     const mobileMenuButtonRef = useRef<HTMLButtonElement | null>(null)
+    const sidebarRef = useRef<HTMLElement | null>(null)
+    const sidebarCollapseButtonRef = useRef<HTMLButtonElement | null>(null)
+    const previousIsMobileRef = useRef(isMobile)
+    const lastNavigationFocusRef = useRef<HTMLElement | null>(null)
 
     useEffect(() => {
         window.localStorage.setItem('openzev.sidebarCollapsed', String(isSidebarCollapsed))
@@ -84,15 +97,40 @@ export function Layout() {
 
     useEffect(() => {
         setIsMobileMenuOpen(false)
-    }, [location.pathname])
+    }, [location.pathname, isMobile])
+
+    useLayoutEffect(() => {
+        const focused = lastNavigationFocusRef.current
+        // Forget unrelated unmounts; retain focus lost during a pending resize.
+        if (focused && !focused.isConnected && window.matchMedia(MOBILE_MEDIA_QUERY).matches === previousIsMobileRef.current) {
+            lastNavigationFocusRef.current = null
+        }
+    })
+
+    useEffect(() => {
+        if (previousIsMobileRef.current === isMobile) return
+        previousIsMobileRef.current = isMobile
+        // CSS can blur a hidden control before this effect runs.
+        const focused = document.activeElement === document.body ? lastNavigationFocusRef.current : document.activeElement
+        lastNavigationFocusRef.current = null
+        const focusInSidebar = sidebarRef.current?.contains(focused)
+        const focusInDropdown = focused instanceof Element && focused.closest('.zev-menu-dropdown') != null
+        setIsZevMenuOpen(false)
+        if (isMobile && focusInSidebar) {
+            mobileMenuButtonRef.current?.focus()
+        } else if (!isMobile && (focusInDropdown || focused === mobileMenuButtonRef.current)) {
+            const focusTarget = zevMenuTriggerRef.current ?? sidebarCollapseButtonRef.current
+            focusTarget?.focus()
+        }
+    }, [isMobile])
 
     // Prevent body scroll when mobile menu is open
     useEffect(() => {
-        if (!isMobileMenuOpen) return
+        if (!isMobile || !isMobileMenuOpen) return
         const previous = document.body.style.overflow
         document.body.style.overflow = 'hidden'
         return () => { document.body.style.overflow = previous }
-    }, [isMobileMenuOpen])
+    }, [isMobile, isMobileMenuOpen])
 
     useEffect(() => {
         if (isUserMenuOpen) {
@@ -190,12 +228,24 @@ export function Layout() {
     }
 
     return (
-        <div className={`shell${isSidebarCollapsed ? ' shell-collapsed' : ''}${isPlatformScope ? ' shell-scope-platform' : ''}`}>
+        <div
+            className={`shell${isNavigationCollapsed ? ' shell-collapsed' : ''}${isPlatformScope ? ' shell-scope-platform' : ''}`}
+            onFocusCapture={(event) => {
+                lastNavigationFocusRef.current = sidebarRef.current?.contains(event.target) || mobileMenuButtonRef.current?.contains(event.target)
+                    ? event.target : null
+            }}
+            onBlurCapture={(event) => {
+                // Retain lost focus only while a breakpoint change is pending.
+                if (event.relatedTarget || window.matchMedia(MOBILE_MEDIA_QUERY).matches === previousIsMobileRef.current) {
+                    lastNavigationFocusRef.current = null
+                }
+            }}
+        >
             <div
                 className={`sidebar-overlay${isMobileMenuOpen ? ' visible' : ''}`}
                 onClick={() => setIsMobileMenuOpen(false)}
             />
-            <aside id="app-sidebar" className={`sidebar${isSidebarCollapsed ? ' collapsed' : ''}${isMobileMenuOpen ? ' mobile-open' : ''}`}>
+            <aside ref={sidebarRef} id="app-sidebar" className={`sidebar${isNavigationCollapsed ? ' collapsed' : ''}${isMobileMenuOpen ? ' mobile-open' : ''}`}>
                 {/* Persistent scope context (replaces switcher on platform routes). */}
                 <div className="sidebar-fixed">
                     <div className="sidebar-brand-row">
@@ -207,6 +257,7 @@ export function Layout() {
                             />
                         </div>
                         <button
+                            ref={sidebarCollapseButtonRef}
                             type="button"
                             className="sidebar-collapse-button"
                             onClick={() => setIsSidebarCollapsed((prev) => !prev)}
@@ -245,7 +296,7 @@ export function Layout() {
                                 onClick={() => {
                                     setIsUserMenuOpen(false)
                                     // Auto-expand sidebar if collapsed before opening menu.
-                                    if (isSidebarCollapsed) {
+                                    if (isNavigationCollapsed) {
                                         setIsSidebarCollapsed(false)
                                         setIsZevMenuOpen(true)
                                     } else {
@@ -314,65 +365,65 @@ export function Layout() {
                     <nav className="nav-list">
                         {canManage && (
                             <>
-                                <SidebarLink to="/" label={t('nav.overview')} icon={<DashboardIcon />} />
-
-                                <SidebarLink to="/dashboard" label={t('nav.energyBalance')} icon={<EnergyIcon />} />
-
-                                <SidebarLink to="/metering/chart" label={t('nav.metering')} icon={<ChartIcon />} active={meteringActive} />
-
-                                <SidebarLink to="/billing/invoices" label={t('nav.billing')} icon={<InvoiceIcon />} active={billingActive} />
-
-                                <SidebarLink to="/reports" label={t('nav.reports')} icon={<ReportsIcon />} />
+                                <SidebarLink to="/" label={t('nav.overview')} icon={<DashboardIcon />} collapsed={isNavigationCollapsed} />
+                                <SidebarLink to="/dashboard" label={t('nav.energyBalance')} icon={<EnergyIcon />} collapsed={isNavigationCollapsed} />
+                                <SidebarLink to="/metering/chart" label={t('nav.metering')} icon={<ChartIcon />} active={meteringActive} collapsed={isNavigationCollapsed} />
+                                <SidebarLink to="/billing/invoices" label={t('nav.billing')} icon={<InvoiceIcon />} active={billingActive} collapsed={isNavigationCollapsed} />
+                                <SidebarLink to="/reports" label={t('nav.reports')} icon={<ReportsIcon />} collapsed={isNavigationCollapsed} />
                             </>
                         )}
 
                         {isGuest && (
-                            <SidebarLink to="/account" label={t('account.title')} icon={<AccountIcon />} className="nav-standalone" />
+                            <SidebarLink to="/account" label={t('account.title')} icon={<AccountIcon />} className="nav-standalone" collapsed={isNavigationCollapsed} />
                         )}
 
                         {isParticipantScope && !isFormerParticipant && (
                             <>
-                                <SidebarLink to="/" label={t('nav.dashboard')} icon={<DashboardIcon />} />
-
-                                <SidebarLink to="/me/invoices" label={t('nav.myInvoices')} icon={<InvoiceIcon />} />
-
-                                <SidebarLink to="/me/statement" label={t('nav.annualStatement')} icon={<ReportsIcon />} />
+                                <SidebarLink to="/" label={t('nav.dashboard')} icon={<DashboardIcon />} collapsed={isNavigationCollapsed} />
+                                <SidebarLink to="/me/invoices" label={t('nav.myInvoices')} icon={<InvoiceIcon />} collapsed={isNavigationCollapsed} />
+                                <SidebarLink to="/me/statement" label={t('nav.annualStatement')} icon={<ReportsIcon />} collapsed={isNavigationCollapsed} />
                             </>
                         )}
 
                         {/* A former participant keeps only the invoices it was sent. */}
                         {isFormerParticipant && (
-                            <SidebarLink to="/me/invoices" label={t('nav.myInvoices')} icon={<InvoiceIcon />} />
+                            <SidebarLink to="/me/invoices" label={t('nav.myInvoices')} icon={<InvoiceIcon />} collapsed={isNavigationCollapsed} />
                         )}
 
                         {canManage && (
                             <div className="nav-section nav-section-start" role="group" aria-label={t('nav.setupGroup')}>
                                 <div className="nav-group-label" aria-hidden="true">{t('nav.setupGroup')}</div>
-                                <SidebarLink to="/participants" label={t('nav.participants')} icon={<UsersIcon />} />
-                                <SidebarLink to="/metering/points" label={t('nav.meteringPoints')} icon={<PlugIcon />} />
-                                <SidebarLink to="/tariffs" label={t('nav.tariffs')} icon={<TagIcon />} />
-                                <SidebarLink to="/zev-settings" label={t('nav.zevSettings')} icon={<SettingsIcon />} />
-                                {/* Audit log lives in the ZEV settings hub
-                                    (phase 3); /audit-logs stays as a deep-link
-                                    alias rendered by the hub. */}
+                                <SidebarLink to="/participants" label={t('nav.participants')} icon={<UsersIcon />} collapsed={isNavigationCollapsed} />
+                                <SidebarLink to="/metering/points" label={t('nav.meteringPoints')} icon={<PlugIcon />} collapsed={isNavigationCollapsed} />
+                                <SidebarLink to="/tariffs" label={t('nav.tariffs')} icon={<TagIcon />} collapsed={isNavigationCollapsed} />
+                                <SidebarLink to="/zev-settings" label={t('nav.zevSettings')} icon={<SettingsIcon />} collapsed={isNavigationCollapsed} />
                             </div>
                         )}
 
                         {canManage && feasibilityEnabledQuery.data === true && (
-                            <SidebarLink to="/feasibility" label={t('nav.feasibility')} icon={<CalculatorIcon />} className="nav-standalone" />
+                            <SidebarLink to="/feasibility" label={t('nav.feasibility')} icon={<CalculatorIcon />} className="nav-standalone" collapsed={isNavigationCollapsed} />
                         )}
 
                         {user?.role === 'admin' && (
                             <div className="nav-section nav-section-end" role="group" aria-label={t('nav.platformGroup')}>
                                 <div className="nav-group-label nav-group-label-platform" aria-hidden="true">{t('nav.platformGroup')}</div>
-                                {/* Admin console hubs (phase 3): Overview holds the
-                                    KPIs, ZEVs, all-invoices, audit-log and
-                                    system-health tabs; Accounts holds users +
-                                    API keys; Templates holds PDF + email. */}
-                                <SidebarLink to="/admin" end active={adminOverviewActive} label={t('nav.adminOverview')} icon={<OverviewIcon />} />
-                                <SidebarLink to="/admin/accounts" label={t('nav.adminAccounts')} icon={<AccountsIcon />} />
-                                <SidebarLink to="/admin/templates" label={t('nav.adminTemplates')} icon={<PdfIcon />} />
-                                <SidebarLink to="/admin/system-settings" label={t('nav.adminSystemSettings')} icon={<SystemIcon />} />
+                                <SidebarLink
+                                    to="/admin" end active={adminOverviewActive}
+                                    label={t('nav.adminOverview')} scope={t('nav.platformGroup')}
+                                    icon={<OverviewIcon />} collapsed={isNavigationCollapsed}
+                                />
+                                <SidebarLink
+                                    to="/admin/accounts" label={t('nav.adminAccounts')} scope={t('nav.platformGroup')}
+                                    icon={<AccountsIcon />} collapsed={isNavigationCollapsed}
+                                />
+                                <SidebarLink
+                                    to="/admin/templates" label={t('nav.adminTemplates')} scope={t('nav.platformGroup')}
+                                    icon={<PdfIcon />} collapsed={isNavigationCollapsed}
+                                />
+                                <SidebarLink
+                                    to="/admin/system-settings" label={t('nav.adminSystemSettings')} scope={t('nav.platformGroup')}
+                                    icon={<SystemIcon />} collapsed={isNavigationCollapsed}
+                                />
                             </div>
                         )}
                     </nav>
@@ -508,8 +559,7 @@ function UsersIcon() {
 }
 
 
-/** User accounts on the platform console — an ID card, so it does not read
- * as the community's participant list (`UsersIcon`). */
+/** ID card distinguishes accounts from community participants. */
 function AccountsIcon() {
     return (
         <IconSvg
@@ -524,8 +574,7 @@ function AccountsIcon() {
     )
 }
 
-/** Platform system settings — a host stack, so it does not read as the
- * community's own settings (`SettingsIcon`). */
+/** Host stack distinguishes platform settings from community settings. */
 function SystemIcon() {
     return (
         <IconSvg
@@ -612,11 +661,13 @@ function ChevronIcon({ direction }: { direction: 'left' | 'right' }) {
     )
 }
 
-/** Up to two initials from the first two words. Empty input renders '·'. */
+/** Up to two word initials, skipping symbols. Empty input renders '·'. */
 function initialsOf(name: string | undefined | null): string {
-    const words = (name ?? '').trim().split(/\s+/).filter(Boolean)
-    const letters = words.slice(0, 2).map((word) => word[0]?.toUpperCase() ?? '').join('')
-    return letters || '·'
+    const initials = (name ?? '').normalize('NFC').split(/\s+/)
+        .flatMap((word) => word.match(/[\p{L}\p{N}]/u)?.[0] ?? [])
+        .slice(0, 2)
+        .map((letter) => Array.from(letter.toUpperCase())[0]).join('')
+    return initials || '·'
 }
 
 function IconSvg({ path }: { path: string | ReactNode }) {
