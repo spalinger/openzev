@@ -1362,7 +1362,7 @@ on `/metering/chart` + `/metering/quality` + `/metering/imports`, Billing on
 `/billing/*`).
 
 The manager Overview uses period cards (`BillingPeriodsPage` and
-`BillingPeriodCard`) plus `BillingCockpit` in setup-only mode. It uses
+`BillingPeriodCard`) plus `SetupGuidance` for first-run setup and warnings. It uses
 `/api/v1/invoices/invoices/readiness/` and `…/attention/` — the contract is
 documented in `2026-03-invoice-lifecycle-and-communication.md` §5.6a.
 

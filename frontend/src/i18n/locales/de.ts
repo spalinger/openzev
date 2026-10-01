@@ -2444,7 +2444,6 @@ export const de = {
             failedInvoices: 'Rechnungen konnten nicht geladen werden.',
             cockpit: {
                 title: 'Abrechnungs-Cockpit',
-                description: 'Offene Arbeit für die Abrechnungsperiode, die Sie zuerst braucht.',
                 failed: 'Abrechnungsbereitschaft konnte nicht geladen werden.',
                 firstRunTitle: 'Richten Sie Ihren ZEV ein',
                 firstRunDescription: 'Erfüllen Sie diese Schritte vor der ersten Abrechnung.',
@@ -2457,7 +2456,6 @@ export const de = {
                 setupIban: 'Keine IBAN für QR-Rechnungen hinterlegt, daher enthalten Rechnungen keine Zahlungsangaben.',
                 setupIbanLink: 'Abrechnungseinstellungen',
                 setupSettings: 'Abrechnungseinstellungen vervollständigen (IBAN)',
-                periodLabel: 'Abrechnungsperiode mit Handlungsbedarf',
                 stepLabels: {
                     metering: 'Messdaten',
                     assignments: 'Messpunkt-Zuweisungen',
@@ -2498,19 +2496,9 @@ export const de = {
                     none: 'Alles erledigt',
                 },
                 openStep: 'Öffnen',
-                nextUp: 'Als Nächstes',
-                allDone: 'Diese Periode ist vollständig verarbeitet.',
-                completedSummary_one: '{{count}} erledigter Schritt',
-                completedSummary_other: '{{count}} erledigte Schritte',
             },
             attention: {
                 failed: 'Periodenübergreifende Hinweise konnten nicht geladen werden.',
-                title: 'Braucht Aufmerksamkeit',
-                labels: {
-                    email_failed: 'Rechnungs-E-Mail konnte nicht zugestellt werden',
-                    invoice_overdue: 'Versandte Rechnung überfällig',
-                    participant_validity: 'Teilnehmenden-Gültigkeit endet oder endete',
-                },
                 text: {
                     emailFailed: 'Rechnung {{number}} — E-Mail an {{recipient}} fehlgeschlagen',
                     invoiceOverdue: 'Rechnung {{number}} überfällig seit {{due}}',
@@ -2519,12 +2507,7 @@ export const de = {
                 },
             },
             openInvoices: {
-                title: 'Offene Rechnungen',
-                empty: 'Keine offenen Rechnungen.',
                 overdue: 'Überfällig',
-                open: 'Offen',
-                outstanding: '{{openCount}} offen · {{overdueCount}} überfällig · CHF {{amount}} ausstehend',
-                viewAll: 'Alle Rechnungen anzeigen',
             },
             noInvoices: 'Keine Rechnungen verfügbar.',
             invoiceCol: {

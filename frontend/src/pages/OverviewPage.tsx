@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { BillingCockpit } from '../components/BillingCockpit'
+import { SetupGuidance } from '../features/overview/SetupGuidance'
 import { PageSkeleton } from '../components/PageSkeleton'
 import { fetchAttention, fetchReadiness } from '../lib/api/readiness'
 import { queryKeys } from '../lib/api/queryKeys'
@@ -44,10 +44,7 @@ export function OverviewPage() {
                 <div className="card">{t('pages.dashboard.selectZev')}</div>
             ) : (
                 <>
-                    <BillingCockpit
-                        readinessQuery={readinessQuery}
-                        setupOnly
-                    />
+                    <SetupGuidance readinessQuery={readinessQuery} />
                     <BillingPeriodsPage attentionQuery={attentionQuery} />
                 </>
             )}

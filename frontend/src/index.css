@@ -595,7 +595,7 @@ label > small.muted {
   opacity: 0.85;
 }
 
-/* Scope chip — shared flex/truncation base; context modifiers below. */
+/* Full-width platform scope indicator in the sidebar. */
 .sidebar-scope-chip {
   display: inline-flex;
   align-items: center;
@@ -603,21 +603,6 @@ label > small.muted {
   padding: 0.55rem 0.75rem;
   font-size: 0.88rem;
   font-weight: 600;
-}
-
-.sidebar-scope-chip .nav-icon {
-  flex-shrink: 0;
-}
-
-.sidebar-scope-chip-label {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-/* Sidebar twin: full-width platform indicator replacing the switcher. */
-.sidebar-scope-chip {
   width: 100%;
   min-height: 2.4rem;
   border: 1px solid rgba(148, 163, 184, 0.3);
@@ -627,7 +612,15 @@ label > small.muted {
 }
 
 .sidebar-scope-chip .nav-icon {
+  flex-shrink: 0;
   color: var(--gold);
+}
+
+.sidebar-scope-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .shell-collapsed .sidebar-scope-chip {
@@ -1350,191 +1343,9 @@ label > small.muted {
   box-shadow: none;
 }
 
-/* ── Open invoices exception list (dashboard; spec §5.1) ── */
+/* ── Setup guidance — the Overview start page (spec §7) ─────────────── */
 
-.open-invoices-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.open-invoices-list li {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.6rem 0;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.open-invoices-list li:last-child {
-  border-bottom: 0;
-}
-
-.open-invoice-main {
-  flex: 1;
-  min-width: 0;
-}
-
-.open-invoice-number {
-  display: block;
-  font-weight: 600;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
-}
-
-.open-invoice-participant {
-  display: block;
-  font-size: 0.78rem;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.open-invoice-amount {
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.open-invoices-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-  margin-top: 0.5rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--border-default);
-  font-size: 0.85rem;
-  color: var(--muted);
-}
-
-.open-invoices-foot strong {
-  color: var(--brand-deep);
-  font-variant-numeric: tabular-nums;
-}
-
-.open-invoices-foot a {
-  color: var(--interactive);
-  font-weight: 600;
-  text-decoration: none;
-}
-
-.open-invoices-foot a:hover {
-  text-decoration: underline;
-}
-
-.open-invoices-foot .button {
-  color: var(--ink);
-  text-decoration: none;
-}
-
-.open-invoices-foot .button:hover {
-  text-decoration: none;
-}
-
-/* ── Billing cockpit + attention card (nav-regroup phase 2, spec §7) ── */
-
-.cockpit-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-
-.cockpit-period {
-  font-size: 0.9rem;
-  white-space: nowrap;
-}
-
-.cockpit-steps {
-  list-style: none;
-  margin: 0.9rem 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.cockpit-step {
-  display: flex;
-  align-items: baseline;
-  gap: 0.6rem;
-  flex-wrap: wrap;
-  padding: 0.45rem 0;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.cockpit-step:last-child {
-  border-bottom: 0;
-}
-
-.cockpit-step-badge {
-  min-width: 6.2rem;
-  text-align: center;
-  flex-shrink: 0;
-}
-
-.cockpit-step-label {
-  font-weight: 600;
-  color: var(--ink);
-}
-
-.cockpit-step-detail {
-  font-size: 0.85rem;
-}
-
-.cockpit-step-link {
-  margin-left: auto;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.cockpit-step-link:hover {
-  text-decoration: none;
-}
-
-.cockpit-completed {
-  margin-top: 0.75rem;
-  border-top: 1px solid var(--border-default);
-  padding-top: 0.75rem;
-}
-
-.cockpit-completed summary,
-.billing-completed-periods > summary {
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 0.88rem;
-  font-weight: 600;
-}
-
-.cockpit-completed-steps {
-  margin-top: 0.5rem;
-}
-
-.cockpit-caught-up {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.cockpit-caught-up .muted {
-  margin-left: auto;
-}
-
-.cockpit-foot {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--border-default);
-}
-
-.cockpit-setup-list {
+.setup-guidance-list {
   list-style: none;
   margin: 0.5rem 0 0;
   padding: 0;
@@ -1543,77 +1354,17 @@ label > small.muted {
   gap: 0.45rem;
 }
 
-.cockpit-setup-list a {
+.setup-guidance-list a {
   color: var(--interactive);
   font-weight: 600;
   text-decoration: none;
 }
 
-.cockpit-setup-list a:hover {
+.setup-guidance-list a:hover {
   text-decoration: underline;
 }
 
-.cockpit-alerts {
-  list-style: none;
-  margin: 0;
-  padding: 0.5rem 0 0;
-}
-
-.cockpit-alert {
-  display: flex;
-  align-items: baseline;
-  gap: 0.6rem;
-  flex-wrap: wrap;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.cockpit-alert:last-child {
-  border-bottom: 0;
-}
-
-.cockpit-alert .badge {
-  flex-shrink: 0;
-}
-
-.cockpit-alert-text {
-  flex: 1;
-  min-width: 12rem;
-  font-size: 0.88rem;
-  color: var(--ink);
-}
-
-.cockpit-alert-link {
-  margin-left: auto;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.cockpit-alert-link:hover {
-  text-decoration: none;
-}
-
-/* ── Overview period scopes ─────────────────────────────────────────── */
-
-.billing-periods-heading,
-.billing-periods-subheading {
-  display: flex;
-  align-items: baseline;
-  gap: 0.65rem;
-  flex-wrap: wrap;
-}
-
-.billing-periods-heading {
-  justify-content: space-between;
-}
-
-.billing-periods-heading p {
-  margin: 0;
-}
-
-.billing-periods-subheading h4 {
-  margin: 0;
-}
+/* ── Billing hub: the current period card ───────────────────────────── */
 
 .billing-current-period {
   display: flex;
@@ -1632,21 +1383,6 @@ label > small.muted {
   display: block;
   margin: 0.25rem 0;
   font-variant-numeric: tabular-nums;
-}
-
-.billing-current-period-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  flex-wrap: wrap;
-}
-
-.billing-completed-periods {
-  padding: 1rem;
-}
-
-.billing-completed-periods > .table-card {
-  margin-top: 1rem;
 }
 
 /* ── PDF viewer frame + bar (spec §7.7) ── */
@@ -1761,13 +1497,9 @@ h3 {
 }
 
 /* Filled dots use the strongest fill available in the token set (600 for
-   success/danger; the warning/info palettes stop at 300/200). */
+   success; the warning/info palettes stop at 300/200). */
 .dot-warning {
   background: var(--warning-300);
-}
-
-.dot-danger {
-  background: var(--danger-600);
 }
 
 .dot-info {
@@ -2723,8 +2455,7 @@ input.recurrence-chip-input {
   margin-top: 0.12rem;
 }
 
-.table-inline-link,
-.table-inline-action {
+.table-inline-link {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
@@ -2738,8 +2469,7 @@ input.recurrence-chip-input {
   cursor: pointer;
 }
 
-.table-inline-link:hover,
-.table-inline-action:hover {
+.table-inline-link:hover {
   color: var(--interactive-hover);
   text-decoration: underline;
 }

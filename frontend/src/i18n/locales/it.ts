@@ -2444,7 +2444,6 @@ export const it = {
             failedInvoices: 'Impossibile caricare le fatture.',
             cockpit: {
                 title: 'Cockpit di fatturazione',
-                description: 'Lavoro aperto per il periodo di fatturazione che richiede per primo il tuo intervento.',
                 failed: 'Impossibile caricare lo stato del periodo.',
                 firstRunTitle: 'Configura il tuo CEE',
                 firstRunDescription: 'Completa questi passaggi prima della prima fatturazione.',
@@ -2457,7 +2456,6 @@ export const it = {
                 setupIban: 'Nessun IBAN configurato per le QR-fatture, quindi le fatture non contengono dati di pagamento.',
                 setupIbanLink: 'Impostazioni di fatturazione',
                 setupSettings: 'Completa le impostazioni di fatturazione (IBAN)',
-                periodLabel: 'Periodo di fatturazione da gestire',
                 stepLabels: {
                     metering: 'Dati di misurazione',
                     assignments: 'Assegnazioni dei contatori',
@@ -2498,19 +2496,9 @@ export const it = {
                     none: 'Tutto completato',
                 },
                 openStep: 'Apri',
-                nextUp: 'Prossimo passo',
-                allDone: 'Questo periodo è completamente lavorato.',
-                completedSummary_one: '{{count}} passaggio completato',
-                completedSummary_other: '{{count}} passaggi completati',
             },
             attention: {
                 failed: 'Impossibile caricare gli avvisi relativi a più periodi.',
-                title: 'Richiede attenzione',
-                labels: {
-                    email_failed: 'Invio dell\'e-mail della fattura non riuscito',
-                    invoice_overdue: 'Fattura inviata in ritardo di pagamento',
-                    participant_validity: 'Validità di un partecipante in scadenza o scaduta',
-                },
                 text: {
                     emailFailed: 'Fattura {{number}} — e-mail a {{recipient}} non riuscita',
                     invoiceOverdue: 'Fattura {{number}} in ritardo dal {{due}}',
@@ -2519,12 +2507,7 @@ export const it = {
                 },
             },
             openInvoices: {
-                title: 'Fatture aperte',
-                empty: 'Nessuna fattura aperta.',
                 overdue: 'Scaduta',
-                open: 'Aperta',
-                outstanding: '{{openCount}} aperta/e · {{overdueCount}} scaduta/e · CHF {{amount}} da pagare',
-                viewAll: 'Vedi tutte le fatture',
             },
             noInvoices: 'Nessuna fattura disponibile.',
             invoiceCol: {
