@@ -79,12 +79,12 @@ Admins can create a ZEV together with a new responsible-person account in a sing
 **Setup → Settings**, `/zev-settings`). The settings are organized into tabs:
 
 - **General** — name, start date, ZEV type, grid connection
-- **Parties** — who issues the invoices, who represents the ZEV toward the grid
-  operator, the landowners, and other contacts (see [Parties tab](#parties-tab))
+- **People & access** — who issues the invoices, who represents the ZEV toward
+  the grid operator, the landowners, who may manage or view the ZEV, and other
+  contacts (see [People & access tab](#people-and-access-tab))
 - **Billing & payment** — billing interval, invoice language, payment term,
   invoice presentation, participant QR code, invoice prefix, bank details, VAT
 - **Documents & emails** — invoice email template, notes, contract notes
-- **Access** — who may manage or view this ZEV (see [Access tab](#access-tab))
 - **Audit log** — this ZEV's audit events (see
   [Audit Logs](14-admin-console.md#audit-logs))
 - **Export / transfer** — whole-ZEV export archive (see
@@ -126,11 +126,18 @@ In **Grid Connection**, each field's guidance appears directly beneath it.
 > ElCom's copy being updated, so an untested suggestion is never saved
 > automatically, and an address you already entered is never overwritten.
 
-### Parties tab
+### People & access tab { #people-and-access-tab }
 
-The **Parties** tab records who the community deals with. Every role has a
-start date (and, once it ends, an end date), so documents always name whoever
-held a role on their own date:
+**People & access** shows, on one page, who the community deals with and what
+each of them may do in OpenZEV — on the same row: whether a person manages
+the community, can only read, or has no access, and the buttons to change it.
+It has two parts: **Roles** and **Other people**. Viewers see the tab but
+change nothing.
+
+#### Roles
+
+Every role has a start date (and, once it ends, an end date), so documents
+always name whoever held a role on their own date:
 
 | Role | What it does | Which date counts |
 |---|---|---|
@@ -144,27 +151,56 @@ held a role on their own date:
   changes.
 - **The issuer and the representative manage the community.** While a party
   holds one of these roles, its login — its own, or the one of its participant
-  entry — has manager access, exactly as if it had been given under
-  [Access](#access-tab), and loses it when the role ends. Before a change
-  takes effect, a confirmation names the login that gets access, or says that
-  nobody does because the party has no login. A change that would leave the
-  community without any manager is refused: give someone manager access first.
-- **Landowners and contacts get no access** through the tab. A landowner does
-  not see other participants' data; a contact that should work in OpenZEV gets
-  access under [Access](#access-tab), where you can pick it directly.
-- Without an issuer, documents carry only the community's name. The tab says so
-  until one is set.
+  entry — has manager access, shown on its row (see
+  [Access on each row](#access-on-each-row)), and loses it when the role ends. Before a change takes
+  effect, a confirmation names the login that gets access, or says that nobody
+  does because the party has no login. A change that would leave the community
+  without any manager is refused: give someone manager access first.
+- **Landowners get no access** through their role: a landowner does not see
+  other participants' data.
+- Without an issuer, documents carry only the community's name. The page says
+  so until one is set.
 - **Add landowner** adds a party from a date; **End** sets a landowner's last
   day. Ending a role before it started removes it.
-- A party does not have to be a participant. **Other contacts** lists the
-  people and organisations that are not, such as a property management company
-  that represents the community. **Add contact** creates one (a person, or an
-  organisation with a contact person); a contact that holds no role can be
-  deleted. In the party picker, **New contact…** creates one on the spot.
 - The owner of a ZEV created through self-registration or the admin wizard is
   its issuer and a landowner from the start date.
 
-Viewers see the tab but change nothing.
+#### Access on each row
+
+Every person on the tab shows its access to OpenZEV on its own row:
+
+- **Issuer and representative** — **Manages in OpenZEV** with the login, for
+  as long as the role lasts; that access changes with the role. A holder
+  without a login says so, and **Invite** sends it an invitation to set one up
+  (as manager).
+- **Landowners and other people** — **Manage** or **Read only** with the
+  login, or **No access to OpenZEV**. Without access, choose **Manage** or
+  **Read only** and press **Give access** (or **Invite**, when the person has
+  no login yet — the invitation goes to the email address on the person).
+  With access: **Make manager** / **Make viewer** (making a manager a viewer
+  asks for confirmation), **Resend invitation** for an invitation that has not
+  been accepted, and **Remove access**, after a confirmation.
+
+**Invitation pending** marks a login that has not been set up yet. A ZEV
+always keeps at least one manager — by access or through a role: removing the
+last one, or making them a viewer, is refused. Every change is recorded in the
+ZEV's audit log.
+
+#### Other people
+
+**Other people** lists the contacts that are not participants — such as a
+property management company that represents the community — and everyone else
+who has access: a participant given read-only access, or a login added by email
+(a bookkeeper). **Add contact** creates a contact (a person, or an organisation
+with a contact person); a contact that holds no role and has no access can be
+deleted. In a role's party picker, **New contact…** creates one on the spot.
+
+**Give access** in the header adds someone who is not listed yet: pick a
+**party of the community** or enter an **email address**, choose **Manage** or
+**Read only** and, if the access should end, a last day. Someone with an
+OpenZEV login gets access straight away and a notice by email; anyone else
+gets an invitation email to set up their account — a party at its own email
+address, after which the new login belongs to that party.
 
 ### Billing & payment tab
 
@@ -329,35 +365,8 @@ Access to a ZEV is given per community:
 | **Viewer** | Sees everything a manager sees, may download and export, changes nothing |
 | **Participant** | Read-only access to own metering data and invoices |
 
-### Access tab
-
-**ZEV settings → Access** lists everyone who may manage or view this ZEV,
-with their role, since when (and until when) they have access, and who gave
-it. **Invitation pending** marks an account that has not been set up yet.
-Tick **Show ended access** to see access that has ended.
-
-Managers and admins can:
-
-- **Give access** — pick a **party of the community** (a participant or a
-  contact from the [Parties tab](#parties-tab)) or enter an **email address**,
-  choose **Manager** or **Viewer** and, if the access should end, a last day.
-  Someone with an OpenZEV login gets access straight away and a notice by
-  email; anyone else gets an invitation email to set up their account — a
-  party at its own email address, after which the new login belongs to that
-  party. A party without an email address cannot be invited; add one in the
-  Parties tab first.
-- **Make manager** / **Make viewer** — change someone's role. Making a manager
-  a viewer asks for confirmation.
-- **Resend invitation** — for an invitation that has not been accepted.
-- **Remove access** — ends the access immediately, after a confirmation.
-
-The list also shows who manages the community **as issuer** or **as
-representative**. That access comes from the role and is changed in the
-[Parties tab](#parties-tab), not here.
-
-A ZEV always keeps at least one manager — by access or through a role:
-removing the last one, or making them a viewer, is refused. Viewers see the list but cannot change it. Every change
-is recorded in the ZEV's audit log.
+Who may manage or view a ZEV is set on the
+[People & access tab](#people-and-access-tab).
 
 Admins manage user accounts in **Platform → Accounts**.
 

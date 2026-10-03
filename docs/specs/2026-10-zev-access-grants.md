@@ -809,6 +809,12 @@ the page's existing error state.
 
 ### 9.6 ZEV settings → Access (`features/zev/ZevAccessSection.tsx`, new)
 
+> Since #761 phase 2 there is no separate access list: access is shown and changed on each
+> person's row of the **People & access** tab (`/zev-settings/people`, `AccessControls` in
+> `features/zev/PartyAccess.tsx`, SPEC-2026-10-zev-parties §8.3), and `ZevAccessSection` is
+> gone; `/zev-settings/access` redirects there. The actions, toasts and confirmations below are
+> unchanged; the text describes the original section.
+
 Tab `access` on `/zev-settings/:tab` (after Documents; `ZevSettingsTab`
 includes `'access'`; no save button, like Audit and Export). Query
 `queryKeys.zev.access(zevId, includeEnded)` → `fetchZevAccess(zevId, { includeEnded })`.
