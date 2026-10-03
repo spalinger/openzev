@@ -50,6 +50,20 @@ The dev server proxies API requests to the backend; the API URL comes from
 - `tests/` — unit tests
 - `screenshots/` — Playwright configuration used by `npm run screenshots`
 
+## Design mockups
+
+Eight interactive design concepts are available in the separate
+`/design-lab.html` Vite entry, with complete navigation for managers,
+participants, admins, and viewers, four languages, and a 400px preview. Sample
+pages cover overview, energy, billing, participants, accounts, and settings;
+additional destinations have empty pages. They use fictional data and do not
+connect to the API.
+
+Open [`../design/mockups/index.html`](../design/mockups/index.html) directly in a
+browser for the portable version. Regenerate it with `npm run mockups:build`.
+See [`../design/mockups/README.md`](../design/mockups/README.md) for the concepts,
+interactions, and source locations.
+
 ## Conventions
 
 - Prefer small, targeted changes; preserve existing style and naming.

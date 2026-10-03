@@ -82,7 +82,7 @@ Top-level keys:
 |---|---|---|
 | `primitives` | `object` | PDF names verbatim, plus `--white` and the desaturated status fills (`--neutral-100` `#e2e8f0`, `--info-100` `#e0f2fe`, `--success-100` `#dcfce7`, `--danger-100` `#fee2e2`, `--warning-100` `#fef9c3` — the existing `.badge-*` families) — the only place hex literals may live |
 | `semantics` | `object` | Alias map `semanticName → primitiveName` (e.g. `"--app-bg": "var(--surface)"`). Components reference semantics only. |
-| `themes` | `object<string, object>` | The default theme is expressed by `semantics` directly (emitted as `:root`). `themes` holds only *alternate* maps (`paper-light`, `high-contrast`, etc.) once one ships — deferred until a tested use case exists. Adding a theme is a token-file change only (pure data: reassignment of the same semantic names to primitives/ramp steps; no component code branches). |
+| `themes` | `object<string, object>` | The product default is expressed by `semantics` directly (emitted as `:root`). Eight experimental `lab-*` maps reassign only the `--lab-*` semantic names for the isolated design prototype (§7.8); they do not change product semantics. Theme palettes are pure data; prototype layouts also vary independently. |
 | `fields` | `object` | Frontend-only form-field dimensions (`--field-*`: height, type, radius, insets, label/help sizes, gaps). Dimension literals only — never hex, never `var()`; emitted to the frontend stylesheet only, so chart/PDF outputs stay color-only |
 | `charts` | `object` | Mirrors `invoices/pdf_charts.py:7-18` 1:1 (see §4.3) |
 | `type` | `object` | Font families for screen (`Inter Variable`) and print (`Helvetica Neue`). Additional scale/tracking/numeric-policy properties are deferred until they are consumed by generated outputs.
@@ -353,6 +353,93 @@ interface PdfPreviewProps {
 ### 7.8 Code-only mockups (Phase 0 gate — dropped in practice)
 
 The planned dev-only mockup routes `frontend/src/pages/design/PreviewDashboard.tsx` / `PreviewInvoiceDetail.tsx` / `PreviewCrudPage.tsx` were never created: the token sweep went straight onto the live pages, and the regenerated user-guide screenshots (Phase 4) served as the acceptance artefacts instead. The remaining Phase 0 references in this spec read as history, not inventory.
+
+A later, separate design exploration adds `frontend/design-lab.html`, included
+alongside `index.html` in Vite's build inputs. Its entry,
+`frontend/src/design-lab/main.tsx`, initializes an independent i18next instance
+with EN/DE/FR/IT copy from `frontend/src/i18n/locales/designLab.ts` and stores its
+language preference under `openzev.design-lab.language`. It imports neither
+product auth/settings/API providers nor `index.css`.
+
+`DesignLab.tsx` shows eight inert scaled previews or a selected `DemoWorkspace`.
+URL parameters are `design=alpine|control|canvas|night|guided|community|ledger|folio`,
+optional `screen=overview|energy|invoices|participants|communities|accounts|settings|profile|metering|reports|meteringPoints|tariffs|feasibility|annualStatement|templates`
+(default `overview`), optional `role=owner|participant|admin|viewer` (default
+`owner`), optional `community=sonnenhof|limmatblick|bergacker`, and optional
+`viewport=mobile` (400px frame). The portable file uses the same
+parameters in its URL fragment, or `#gallery`, to support file origins; initial
+query parameters are also accepted. Invalid designs show the gallery;
+invalid or inaccessible screens fall back to overview. Participant and viewer
+scope is Sonnenhof; owners can select Sonnenhof or Limmatblick; admins start
+in platform scope and may enter any of the three communities. History navigation
+updates the selection. Changing layout, persona, or community remounts the
+workspace and resets its fictional records.
+The layout and interactions are documented in `design/mockups/README.md`.
+
+The persona selector is a comparison tool outside the app. It does not propose
+a new backend role: owners/managers and viewers represent community grants,
+participants represent their own linked rows, and admin is the platform role.
+`navigationGroups`, `availableScreens`, `normalizeScope`, `invoicesFor`, and `mayManage` in
+`mockData.ts` define the prototype's navigation, record scope, and write controls.
+Participants get their own consumption, three issued invoices, and profile;
+managers get period work, metering quality, billing, contacts, and settings;
+viewers get the management pages without writes. Admin platform pages show
+all three communities, thirteen current invoices, accounts, and system settings;
+the context selector enters a community's management view or returns to platform
+scope. Existing invoice recipients remain unchanged when a manager edits a
+participant contact. Limmatblick's missing sample readings can be resolved on
+the Energy balance screen before its draft approval controls appear.
+
+The complete navigation matches `spalinger/ui-sidebar-labels` (`2879270b`) in
+EN/DE/FR/IT, independently of which prototype pages have content.
+`navigationGroups(role)` returns `NavigationGroup[]` with an `id`, optional
+`labelKey`, a `scope` (`community`, `platform`, or `personal`), and `items`
+containing `screen` and `labelKey`. Community navigation has Overview, Energy
+balance, Metering, Billing, and Reports; Setup has Participants, Metering Points,
+Tariffs, and Settings; Feasibility follows as a standalone entry (assumed enabled
+in the prototype). Admins additionally see the Platform group: Overview,
+Accounts, Templates, Settings. All 14 admin entries remain visible in both
+community and platform scope. Participant navigation has Dashboard, My invoices,
+and Annual statement; its account is reached from the header, and own
+consumption remains available on the dashboard and through the existing energy
+URL. Platform ZEVs and Invoices remain tabs of the Overview hub.
+
+`onNavigate(screen, communityId?)` changes the page and scope atomically.
+Community links use the current community or Sonnenhof from platform scope;
+platform links clear community scope. Active links distinguish the community
+and platform entries even where both are named Overview or Settings. Platform
+links use translated `nav.scopedLabel` accessible names. The same menu model
+supplies quick-navigation search and results, with scope-qualified platform
+labels. `blankScreens` lists Metering, Reports, Metering Points, Tariffs,
+Feasibility, Annual statement, and Templates: these destinations show only a
+heading and an empty content area. Top-navigation variants wrap the groups;
+vertical sidebars scroll without overlapping the account footer; at narrow
+widths all entries remain in a horizontally scrollable strip.
+
+Gallery and app copy is limited to functional labels. The eight layouts vary
+navigation placement, density, table treatment, page width, and master/detail
+composition. The final two follow the actual print templates' Helvetica,
+circular mark, fine rules, solid table headers, and pale zebra rows; they do
+not introduce serif headings. `frontend/tests/design-lab-access.test.ts` checks
+participant visibility, viewer write restrictions across all layouts, selected
+draft approval, missing-data resolution, admin scope entry, switching scope
+through the complete menu, blank participant statement access, URL narrowing,
+and locale parity. `npm run mockups:capture` captures all layout/persona combinations
+and checks each allowed page at 400px, including admin community scope.
+
+Prototype palette primitives and semantic names use `--lab-*`; theme selectors
+are `[data-theme="lab-<design>"]`. All new colors still originate in
+`design/tokens.json` and use the existing generator. Generated PDF declarations
+include the added primitives, but existing PDF tokens, chart palettes, and
+product semantic aliases retain their values. `design-lab.css` is loaded only
+by the prototype entry. Its container queries adapt both a resized browser and
+the simulated mobile frame.
+
+`npm run mockups:build` runs `frontend/scripts/build-design-mockups.mjs`, builds
+the prototype alone, and inlines its JavaScript, CSS, font files, and favicon in
+the committed `design/mockups/index.html`. This portable mockup opens directly
+from disk and makes no API requests. It is an exploratory artifact rather than
+a change to production workflows, routes, authorization, or invoice rendering.
 
 ### 7.9 Routes and query keys
 

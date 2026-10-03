@@ -13,6 +13,8 @@
     "test:unit": "vitest run",
     "test:unit:watch": "vitest",
     "preview": "vite preview",
+    "mockups:build": "node scripts/build-design-mockups.mjs",
+    "mockups:capture": "node scripts/capture-design-mockups.mjs",
     "screenshots": "playwright test --config screenshots.config.ts screenshots/capture.spec.ts",
     "shot": "playwright test --config screenshots.config.ts screenshots/shot.spec.ts",
     "test:browser": "playwright test --config screenshots.config.ts screenshots/layout-overflow.spec.ts screenshots/field-geometry.spec.ts",

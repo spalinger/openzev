@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [react()],
   build: {
     rolldownOptions: {
+      input: { app: 'index.html', designLab: 'design-lab.html' },
       output: {
         // Vite 8 bundles with Rolldown, where the Rollup-style `manualChunks`
         // function is deprecated and its per-module assignments are overridden
