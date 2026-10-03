@@ -35,7 +35,7 @@ New users can register themselves and create their ZEV without admin involvement
 4. Click **Send verification email**
 
 The panel is shown only while self-registration is enabled (an admin can turn
-it off under **Platform → System Settings → Functions**).
+it off under **Platform → Settings → Functions**).
 
 **Step 2: Verify your email**
 
@@ -267,7 +267,7 @@ Choose how often invoices are generated:
   already the final amounts your participants should pay.
 
 - **VAT-registered** — enter your **VAT Number** (UID format), and ask an admin
-  to configure VAT rates ([Platform → VAT Settings](14-admin-console.md#vat-settings)).
+  to configure VAT rates ([Platform → Settings → VAT](14-admin-console.md#vat-settings)).
   Tariff prices are treated as net; the invoice adds the active rate on top and
   shows a VAT line. You reclaim the VAT you pay upstream in your own VAT return.
 

@@ -47,7 +47,7 @@ more — and every tool call is traceable in the audit log.
 - Write tools (approve/send invoices, edit assignments, delete imports).
 - Participant-facing tools.
 - MCP resources/prompts (e.g. user guide as resources), SSE streams, server-initiated requests.
-- Frontend UI. The flag appears automatically in **Admin → System settings → Feature flags**
+- Frontend UI. The flag appears automatically in **Platform → Settings → Functions**
   (descriptions come from the backend). A "Connect an assistant" helper in the UI is a
   follow-up.
 - Feasibility scenarios, tariff tools.

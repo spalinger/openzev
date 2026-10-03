@@ -263,7 +263,7 @@ Then:
 4. Decide whether strangers may sign up. **Self-registration is on by
    default**: anyone who can reach the login page can register an account
    and create a community, which makes them its issuer and manager. On a public instance you run only for your
-   own community, turn it off under **Platform → System Settings → Functions**,
+   own community, turn it off under **Platform → Settings → Functions**,
    or set `FEATURE_ZEV_SELF_REGISTRATION_ENABLED=false` in `backend/.env`.
 
 Use `createsuperuser` again whenever you need another admin and cannot sign in
@@ -301,7 +301,8 @@ pages look the same, just without data.
 
 1. Navigate to http://localhost:8080 (or your instance's `https://` URL)
 2. Login with admin credentials (or a manager's account to manage a community)
-3. Managers land on **Overview**; participants land on their personal dashboard
+3. Managers land on **Overview**; participants land on their personal dashboard.
+   Unlinked guest accounts see an explanation and a link to **Account settings**.
 
 The interface follows your browser's language (German, French, Italian or
 English). To change it, open the account menu at the top right
@@ -314,7 +315,7 @@ contract PDFs use the community's own **Invoice language** instead.
 
 If logged in as admin:
 - Go to **Platform → Overview** to see system-wide KPIs
-- View **ZEVs**, **Accounts**, **Invoices**, and **System Settings** (regional/VAT)
+- View **ZEVs**, **Accounts**, **Invoices**, and **Settings** (regional/VAT)
 - To work inside a community: open **Platform → Overview → ZEVs** and click **Manage** on a row — this selects the ZEV and takes you to its operational Overview. (While under `/admin` the shell shows the **Platform administration** indicator instead of the switcher.)
 - The sidebar ZEV switcher (top-left) selects the working community anywhere else; the selected community is shown above the page title on every page, so it stays visible even when the navigation scrolls, the sidebar is collapsed, or you are on mobile
 - For keyboard access, open the switcher or account button with Enter or Space, use Tab to move through its options, and press Escape to close it. After selecting a community, focus returns to the switcher. On mobile, Escape closes the navigation drawer and returns focus to its menu button.

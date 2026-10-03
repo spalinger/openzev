@@ -272,7 +272,7 @@ nothing is billed twice.
   and metering lines are grossed up by the rate; no VAT line
 - **Not VAT-registered** — no VAT at all
 - The rate is the one active on the invoice period's end date, from
-  [Platform → System Settings → VAT](14-admin-console.md#vat-settings)
+  [Platform → Settings → VAT](14-admin-console.md#vat-settings)
 - If no rate is active, VAT defaults to 0%
 
 **Final total:**

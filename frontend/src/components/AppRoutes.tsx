@@ -60,11 +60,13 @@ export function AppRoutes() {
         <Route
           path="/"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowUnlinked>
               <MfaEnrolmentGate>
                 <ManagedZevProvider>
                   <Suspense fallback={<PageSkeleton variant="page" />}>
-                    <Layout />
+                    <ProtectedRoute>
+                      <Layout />
+                    </ProtectedRoute>
                   </Suspense>
                 </ManagedZevProvider>
               </MfaEnrolmentGate>

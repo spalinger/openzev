@@ -1,3 +1,4 @@
+import { matchPath } from 'react-router-dom'
 import type { MfaStatus } from '../types/api'
 
 /**
@@ -19,7 +20,7 @@ export function mfaGateState(
 ): MfaGateState {
     if (!status || options.impersonating) return 'pass'
     const enrolled = Boolean(status.totp?.confirmed_at) || status.passkeys.length > 0
-    if (!status.required || enrolled || options.pathname === '/account') return 'pass'
+    if (!status.required || enrolled || matchPath('/account', options.pathname)) return 'pass'
 
     const inGrace = status.grace_until !== null && new Date(status.grace_until).getTime() > options.now
     if (inGrace) return options.dismissed ? 'pass' : 'grace'

@@ -325,6 +325,7 @@ label > small.muted {
   overflow-x: hidden;
   overflow-y: auto;
   padding-right: 0.25rem;
+  padding-bottom: 0.5rem;
   scrollbar-width: thin;
   scrollbar-color: rgba(148, 163, 184, 0.5) transparent;
   align-content: start;
@@ -469,9 +470,8 @@ label > small.muted {
 
 .nav-label {
   min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 /* First labelled group — same clearance as nav-standalone, no divider. */
@@ -797,11 +797,20 @@ label > small.muted {
 .user-avatar {
   width: 2rem;
   height: 2rem;
+  flex-shrink: 0;
   border-radius: 999px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: var(--brand);
+  color: var(--white);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.user-avatar svg {
+  width: 1.2rem;
+  height: 1.2rem;
 }
 
 .user-meta {
@@ -2763,6 +2772,7 @@ input.recurrence-chip-input {
 }
 
 @media (max-width: 768px) {
+  /* Keep in sync with Layout.tsx's mobile media query. */
   /* Switch shell to single-column — sidebar becomes an overlay */
   .shell,
   .shell.shell-collapsed {

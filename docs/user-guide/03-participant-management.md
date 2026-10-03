@@ -191,7 +191,7 @@ metering point is flagged **Needs attention**. See
 
 The map is **off by default**, because locating buildings sends participant
 addresses to the public OpenStreetMap Nominatim service. An admin turns it on
-under **Platform → System Settings → Functions** (`participant_geocoding_enabled`).
+under **Platform → Settings → Functions** (`participant_geocoding_enabled`).
 
 When it is on, the Participants page shows a small map with each participant's building outlined on OpenStreetMap. It's built from the address fields (street, postal code, city), assuming a Swiss address, and updates automatically whenever a participant's address is added or changed.
 

@@ -30,7 +30,7 @@ class Command(BaseCommand):
             raise CommandError(
                 "Participant geocoding is disabled "
                 f"(FeatureFlag '{FeatureFlag.PARTICIPANT_GEOCODING_ENABLED}' is off). "
-                "Enable it in Admin → System Settings → Features before running this command."
+                "Enable it in Platform → Settings → Functions before running this command."
             )
 
         participants = Participant.objects.exclude(party__address_line1="").exclude(party__city="")

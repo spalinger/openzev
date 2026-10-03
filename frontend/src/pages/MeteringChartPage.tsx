@@ -505,7 +505,7 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
                 onChange={handleTabChange}
             >
                 <Tabs.List aria-label={t('pages.meteringData.title')}>
-                    <Tabs.Tab value="chart">{t('nav.meteringData')}</Tabs.Tab>
+                    <Tabs.Tab value="chart">{t('nav.meteringCharts')}</Tabs.Tab>
                     {isManagedScope && <Tabs.Tab value="quality">{t('nav.meteringDataQuality')}</Tabs.Tab>}
                     {isManagedScope && <Tabs.Tab value="imports">{t('nav.meteringImportsTab')}</Tabs.Tab>}
                 </Tabs.List>

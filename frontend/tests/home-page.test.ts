@@ -12,6 +12,9 @@ vi.mock('../src/pages/OverviewPage', () => ({
 vi.mock('../src/pages/DashboardPage', () => ({
     DashboardPage: () => createElement('div', { 'data-testid': 'dashboard' }),
 }))
+vi.mock('../src/pages/GuestHomePage', () => ({
+    GuestHomePage: () => createElement('div', { 'data-testid': 'guest' }),
+}))
 
 import { HomePage } from '../src/pages/HomePage'
 
@@ -19,9 +22,9 @@ const cleanups: Array<() => void> = []
 afterEach(() => cleanups.splice(0).forEach((cleanup) => cleanup()))
 
 /** An admin, or a non-admin account with this relation to the selected community (#761). */
-function renderRole(persona: 'admin' | 'manager' | 'participant') {
+function renderRole(persona: 'admin' | 'manager' | 'viewer' | 'participant' | 'former' | 'none') {
     auth.mockReturnValue({ user: { role: persona === 'admin' ? 'admin' : 'user' } })
-    managed.mockReturnValue({ relation: persona })
+    managed.mockReturnValue({ relation: persona === 'none' ? undefined : persona })
     const container = document.createElement('div')
     document.body.appendChild(container)
     const root = createRoot(container)
@@ -34,15 +37,23 @@ function renderRole(persona: 'admin' | 'manager' | 'participant') {
 }
 
 describe('role-aware home page', () => {
-    it.each(['admin', 'manager'] as const)('opens Overview for %s', (role) => {
+    it.each(['admin', 'manager', 'viewer'] as const)('opens Overview for %s', (role) => {
         const page = renderRole(role)
         expect(page.querySelector('[data-testid="overview"]')).not.toBeNull()
         expect(page.querySelector('[data-testid="dashboard"]')).toBeNull()
     })
 
-    it('keeps the participant dashboard at the root route', () => {
-        const page = renderRole('participant')
+    it.each(['participant', 'former'] as const)('keeps the dashboard at the root route for %s', (role) => {
+        const page = renderRole(role)
         expect(page.querySelector('[data-testid="dashboard"]')).not.toBeNull()
+        expect(page.querySelector('[data-testid="overview"]')).toBeNull()
+        expect(page.querySelector('[data-testid="guest"]')).toBeNull()
+    })
+
+    it('explains the account state without community access', () => {
+        const page = renderRole('none')
+        expect(page.querySelector('[data-testid="guest"]')).not.toBeNull()
+        expect(page.querySelector('[data-testid="dashboard"]')).toBeNull()
         expect(page.querySelector('[data-testid="overview"]')).toBeNull()
     })
 })

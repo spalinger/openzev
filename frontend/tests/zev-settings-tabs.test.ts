@@ -144,9 +144,12 @@ async function renderAt(route: string) {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     cleanups.push(() => { act(() => root.unmount()); client.clear(); container.remove() })
     await act(async () => { root.render(element(route, client)) })
-    for (let i = 0; i < 40 && !container.querySelector('[role="tab"]'); i++) {
-        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 25)) })
-    }
+    const field = route.endsWith('/billing') ? 'bank_iban'
+        : route.endsWith('/documents') ? 'email_subject_template'
+            : route === '/zev-settings' || route.endsWith('/general') ? 'name' : null
+    await waitForCondition(() => field
+        ? container.querySelector(`[data-zev-field="${field}"] input`) !== null
+        : container.querySelector('[role="tab"]') !== null, 'settings panel')
     await act(async () => {})
     return { container, root, client, router: routers.get(client)! }
 }
