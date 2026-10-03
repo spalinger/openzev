@@ -65,12 +65,15 @@ describe('reports i18n', () => {
         }
     })
 
-    it('has empty-state keys in all locales', () => {
+    it('delegates the no-ZEV copy to the shared scope guard', () => {
         for (const locale of [en, de, fr, itLocale] as any[]) {
-            expect(locale.pages.reports.selectZevTitle).toBeTruthy()
-            expect(locale.pages.reports.selectZevDescription).toBeTruthy()
-            expect(locale.pages.reports.noZevTitle).toBeTruthy()
-            expect(locale.pages.reports.noZevDescription).toBeTruthy()
+            expect((locale.pages.reports as any).noZevTitle).toBeUndefined()
+            expect((locale.pages.reports as any).noZevDescription).toBeUndefined()
+            expect((locale.pages.reports as any).selectZevTitle).toBeUndefined()
+            expect((locale.pages.reports as any).selectZevDescription).toBeUndefined()
+            expect(locale.common.scopeGuard.noZevTitle).toBeTruthy()
+            expect(locale.common.scopeGuard.noZevDescription).toBeTruthy()
+            expect(locale.common.scopeGuard.loadFailed).toBeTruthy()
         }
     })
 
