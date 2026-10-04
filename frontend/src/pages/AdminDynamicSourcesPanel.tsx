@@ -10,7 +10,6 @@ import { ConfirmDialog } from '../components/ConfirmDialog'
 import { EmptyState } from '../components/EmptyState'
 import { FormModal } from '../components/FormModal'
 import { StatCard } from '../components/StatCard'
-import { PageSkeleton } from '../components/PageSkeleton'
 import { DynamicPriceHistoryModal } from '../features/tariffs/DynamicPriceHistoryModal'
 import { DynamicSourceFormModal } from '../features/tariffs/DynamicSourceFormModal'
 import { fetchAuditEvents } from '../lib/api/audit'
@@ -26,6 +25,10 @@ import { formatDateTime, useAppSettings } from '../lib/appSettings'
 import { queryKeys } from '../lib/api/queryKeys'
 import { useToast } from '../lib/toast'
 import type { AuditEvent, DynamicTariffSource } from '../types/api'
+import { Link } from 'react-router-dom'
+import { usePageNavigation } from '../lib/usePageNavigation'
+import { Notice } from '../components/Notice'
+import { PageState } from '../components/PageState'
 
 function statusClass(status: DynamicTariffSource['last_fetch_status']): string {
   if (status === 'ok') return 'badge badge-success'
@@ -35,6 +38,8 @@ function statusClass(status: DynamicTariffSource['last_fetch_status']): string {
 
 export function AdminDynamicSourcesPanel() {
   const { t } = useTranslation()
+  const { searchParams, updateParams } = usePageNavigation()
+  const sourceId = searchParams.get('source') ?? ''
   const { settings } = useAppSettings()
   const { pushToast } = useToast()
   const queryClient = useQueryClient()
@@ -56,13 +61,13 @@ export function AdminDynamicSourcesPanel() {
       setConfirmation('')
       setDestructive({ mode, source })
     },
-    [],
+    [setConfirmation, setDestructive],
   )
 
   const closeDestructiveDialog = useCallback(() => {
     setDestructive(null)
     setConfirmation('')
-  }, [])
+  }, [setConfirmation, setDestructive])
 
   const sourcesQuery = useQuery({
     queryKey: queryKeys.tariffs.dynamicSources(),
@@ -132,7 +137,7 @@ export function AdminDynamicSourcesPanel() {
       cell: ({ row }) => (
         <div>
           <strong>{row.original.label}</strong>
-          <div className="muted">{row.original.url}</div>
+          <div className="muted" style={{ overflowWrap: 'anywhere' }}>{row.original.url}</div>
           <div className="muted">
             {t(`pages.dynamicSources.versions.${row.original.api_version}` as Parameters<typeof t>[0])}
             {' · '}
@@ -249,9 +254,10 @@ export function AdminDynamicSourcesPanel() {
         )
       },
     },
-  ], [fetchMutation, openDestructiveDialog, recheckMutation, settings, t])
+  ], [fetchMutation, openDestructiveDialog, recheckMutation, settings, t, setHistorySource, setActivitySource, setFormSource])
 
   const sources = sourcesQuery.data ?? []
+  const visibleSources = sourceId ? sources.filter((source) => source.id === sourceId) : sources
   const failed = sources.filter((source) => source.last_fetch_status === 'failed').length
   const reused = sources.filter((source) => source.linked_zev_count > 1).length
   const points = sources.reduce((sum, source) => sum + source.point_count, 0)
@@ -280,33 +286,52 @@ export function AdminDynamicSourcesPanel() {
         </Toolbar>
       </section>
 
-      {sourcesQuery.isLoading ? <PageSkeleton variant="kpiRow" /> : (
-        <div className="kpi-row">
+      {sourceId && (
+        <section className="card">
+          <Toolbar actions={<button className="button button-secondary" type="button" onClick={() => updateParams(params => params.delete('source'))}>{t('pages.dynamicSources.showAllSources')}</button>}>
+            <p className="muted">{t('pages.dynamicSources.sourceFilter', { label: sources.find(source => source.id === sourceId)?.label ?? sourceId })}</p>
+          </Toolbar>
+        </section>
+      )}
+      <PageState
+        isLoading={sourcesQuery.isLoading}
+        isError={sourcesQuery.isError && !sourcesQuery.data}
+        error={t('pages.dynamicSources.loadError')}
+        onRetry={() => void sourcesQuery.refetch()}
+        isRetrying={sourcesQuery.isFetching}
+        skeleton="table"
+      >
+        {sourcesQuery.isError && sourcesQuery.data && (
+          <Notice tone="warning" onRetry={() => void sourcesQuery.refetch()} isRetrying={sourcesQuery.isFetching}>
+            {t('pages.dynamicSources.refreshError')}
+          </Notice>
+        )}
+        <div className="stat-grid">
           <StatCard label={t('pages.dynamicSources.stats.sources')} value={sources.length} />
           <StatCard label={t('pages.dynamicSources.stats.points')} value={points} />
           <StatCard label={t('pages.dynamicSources.stats.reused')} value={reused} />
           <StatCard label={t('pages.dynamicSources.stats.failed')} value={failed} tone={failed ? 'danger' : 'success'} />
         </div>
-      )}
 
-      {sourcesQuery.isError && <div className="error-banner">{t('pages.dynamicSources.loadError')}</div>}
-      {sourcesQuery.isLoading ? <PageSkeleton variant="table" /> : sources.length === 0 ? (
-        <EmptyState
-          titleKey="pages.dynamicSources.empty"
-          descriptionKey="pages.dynamicSources.description"
-          actions={[{
-            labelKey: 'pages.dynamicSources.createAction',
-            icon: faPlus,
-            onClick: () => setFormSource(null),
-          }]}
-        />
-      ) : (
-        <DataTable
-          data={sources}
-          columns={columns}
-          getRowId={(source) => source.id}
-        />
-      )}
+        {sources.length === 0 && !sourceId ? (
+          <EmptyState
+            titleKey="pages.dynamicSources.empty"
+            descriptionKey="pages.dynamicSources.description"
+            actions={[{
+              labelKey: 'pages.dynamicSources.createAction',
+              icon: faPlus,
+              onClick: () => setFormSource(null),
+            }]}
+          />
+        ) : (
+          <DataTable
+            data={visibleSources}
+            columns={columns}
+            getRowId={(source) => source.id}
+            emptyMessage={t('pages.dynamicSources.sourceNotFound')}
+          />
+        )}
+      </PageState>
 
       <DynamicSourceFormModal
         isOpen={formSource !== undefined}
@@ -321,13 +346,31 @@ export function AdminDynamicSourcesPanel() {
         onClose={() => setActivitySource(null)}
         maxWidth="900px"
       >
-        <DataTable
-          data={activityQuery.data?.results ?? []}
-          columns={activityColumns}
-          getRowId={(event) => event.id}
-          loading={activityQuery.isLoading}
-          emptyMessage={t('pages.dynamicSources.activity.empty')}
-        />
+        <p>
+          <Link to={`/admin/audit?target_type=tariffs.DynamicTariffSource&target_id=${encodeURIComponent(activitySource?.id ?? '')}`}>
+            {t('pages.dynamicSources.viewActivity')}
+          </Link>
+        </p>
+        <PageState
+          isLoading={activityQuery.isLoading}
+          isError={activityQuery.isError && !activityQuery.data}
+          error={t('pages.dynamicSources.activity.loadError')}
+          onRetry={() => void activityQuery.refetch()}
+          isRetrying={activityQuery.isFetching}
+          skeleton="tableRows"
+        >
+          {activityQuery.isError && activityQuery.data && (
+            <Notice tone="warning" onRetry={() => void activityQuery.refetch()} isRetrying={activityQuery.isFetching}>
+              {t('pages.dynamicSources.activity.refreshError')}
+            </Notice>
+          )}
+          <DataTable
+            data={activityQuery.data?.results ?? []}
+            columns={activityColumns}
+            getRowId={(event) => event.id}
+            emptyMessage={t('pages.dynamicSources.activity.empty')}
+          />
+        </PageState>
       </FormModal>
 
       {destructive && (

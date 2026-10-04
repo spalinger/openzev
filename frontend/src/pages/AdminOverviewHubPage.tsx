@@ -19,8 +19,6 @@ import { PageHeader } from '../components/PageHeader'
 
 export type AdminOverviewTab = 'overview' | 'zevs' | 'invoices' | 'dynamic-sources' | 'audit' | 'health'
 
-
-
 export function AdminOverviewHubPage({ tab = 'overview' }: { tab?: AdminOverviewTab }) {
     const { t } = useTranslation()
     const { navigateTab } = usePageNavigation()
@@ -34,7 +32,7 @@ export function AdminOverviewHubPage({ tab = 'overview' }: { tab?: AdminOverview
             <PageHeader
                 eyebrow={t('nav.platformScope')}
                 title={t('nav.adminOverview')}
-                description={t('pages.adminOverview.description')}
+                description={t(`pages.adminOverview.descriptions.${tab}`)}
             />
 
             <Tabs

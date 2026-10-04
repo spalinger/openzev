@@ -2,9 +2,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faBan, faDownload, faPlay, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
+import { faBan, faClockRotateLeft, faDownload, faPlay, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
 import { Tabs } from '@mantine/core'
-import { Navigate, useBlocker, useParams } from 'react-router-dom'
+import { Link, useBlocker, useLocation, useParams } from 'react-router-dom'
 import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
 import { PageSkeleton } from '../components/PageSkeleton'
 import { ZevEmailTemplateFields } from '../components/ZevEmailTemplateFields'
@@ -36,6 +36,7 @@ import type { Zev, ZevInput } from '../types/api'
 import { PageHeader } from '../components/PageHeader'
 import { ScopeGuard } from '../components/ScopeGuard'
 import { usePageNavigation } from '../lib/usePageNavigation'
+import { AliasNavigate } from '../components/RouteAliases'
 
 /**
  * ZEV settings hub (nav-regroup phase 3, spec §5): one draft feeds the three
@@ -72,7 +73,7 @@ function focusDraftField(field: string) {
 export function ZevSettingsTabRoute() {
     const { tab = 'general' } = useParams<{ tab: string }>()
     if (MERGED_INTO_PEOPLE.has(tab)) {
-        return <Navigate to="/zev-settings/people" replace />
+        return <AliasNavigate to="/zev-settings/people" />
     }
     const active = TABS.includes(tab as ZevSettingsTab) ? (tab as ZevSettingsTab) : null
     if (!active) {
@@ -84,6 +85,7 @@ export function ZevSettingsTabRoute() {
 export function ZevSettingsPage({ tab = 'general' }: { tab?: ZevSettingsTab }) {
     const { t } = useTranslation()
     const { navigateTab } = usePageNavigation()
+    const location = useLocation()
     const queryClient = useQueryClient()
     const { pushToast } = useToast()
     const { user } = useAuth()
@@ -464,18 +466,27 @@ export function ZevSettingsPage({ tab = 'general' }: { tab?: ZevSettingsTab }) {
                         <div>
                             <h3 style={{ marginTop: 0 }}>{t('zevTransfer.exportTitle')}</h3>
                             <p className="muted" style={{ margin: 0 }}>
-                                {t('zevTransfer.exportSectionDescription')}
+                                {t('zevTransfer.exportSectionDescription', { name: selectedZev.name })}
                             </p>
                         </div>
-                        <div className="actions-row">
+                        <div className="actions-row actions-row-wrap">
                             <button
-                                className="button button-secondary"
+                                className={`button ${showSaveBar ? 'button-secondary' : 'button-primary'}`}
                                 type="button"
                                 onClick={() => setShowExportModal(true)}
                             >
                                 <FontAwesomeIcon icon={faDownload} fixedWidth />
                                 {t('zevTransfer.exportAction')}
                             </button>
+                            <Link
+                                className="button button-secondary"
+                                to={{ pathname: '/zev-settings/audit', search: location.search, hash: location.hash }}
+                                state={location.state}
+                                replace
+                            >
+                                <FontAwesomeIcon icon={faClockRotateLeft} fixedWidth />
+                                {t('pages.zevSettings.tabs.auditLog')}
+                            </Link>
                         </div>
                     </section>
 

@@ -177,6 +177,15 @@ moment, negative prices included.
   hand, from the tariff's edit form — useful once a source has already been
   created by an earlier import.
 
+Managers can choose an existing shared source or create a new source from
+the energy-tariff form. Viewers can inspect linked sources and price history.
+Open **View details** on a dynamic tariff to see its source label, endpoint,
+protocol, product, fetch status, last successful fetch and stored coverage.
+Usage counts cover the whole platform. A stored date range can
+still contain gaps; check the price history for the period you need.
+Administrators can follow **Manage source in platform admin** to its operational
+row; managers create and reuse sources in the tariff form.
+
 ### Reading a dynamic tariff's price
 
 An operator's fetched price changes every quarter-hour, so the Tariffs page

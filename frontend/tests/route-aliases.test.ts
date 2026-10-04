@@ -38,6 +38,12 @@ function renderAt(path: string, route: string, element: ReturnType<typeof create
 }
 
 describe('route aliases', () => {
+    it('preserves query and hash through a static alias', () => {
+        const page = renderAt('/billing/statements?year=2025&from=bookmark#documents', '/billing/statements', createElement(AliasNavigate, { to: '/reports' }))
+        expect(page.location()).toBe('/reports?year=2025&from=bookmark#documents')
+        page.unmount()
+    })
+
     it('routes a legacy quality bookmark to the guarded quality route, dropping ?tab', () => {
         const page = renderAt('/metering-data?tab=quality', '/metering-data', createElement(MeteringDataAlias))
         expect(page.location()).toBe('/metering/quality')

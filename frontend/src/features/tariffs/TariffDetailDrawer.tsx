@@ -13,7 +13,7 @@ import {
     faXmark,
 } from '@fortawesome/free-solid-svg-icons'
 import { useTranslation } from 'react-i18next'
-import { formatDateTime, formatShortDate } from '../../lib/appSettings'
+import { formatShortDate } from '../../lib/appSettings'
 import { todayBusinessIso } from '../../lib/dates'
 import type { AppSettings, TariffPeriod, TariffSeries, TariffVersion } from '../../types/api'
 import { bandName } from './bands'
@@ -21,6 +21,8 @@ import { MONTH_KEYS, formatSeason } from './recurrence'
 import { useTariffDisplay } from './useTariffDisplay'
 import { TariffPriceHistoryChart } from './TariffPriceHistoryChart'
 import { DynamicPriceHistoryPanel } from './DynamicPriceHistoryModal'
+import { DynamicSourceSummary } from './DynamicSourceSummary'
+import { useAuth } from '../../lib/auth'
 
 type TariffDetailDrawerProps = {
     /** The series to show; `null` closes the drawer. */
@@ -73,6 +75,7 @@ export function TariffDetailDrawer({
     readOnly = false,
 }: TariffDetailDrawerProps) {
     const { t } = useTranslation()
+    const { user } = useAuth()
     const monthNames = MONTH_KEYS.map(
         (key) => t(`pages.tariffs.monthsShort.${key}` as Parameters<typeof t>[0]),
     )
@@ -352,18 +355,9 @@ export function TariffDetailDrawer({
                             <div className="tariff-period-section-header">
                                 <div className="tariff-period-section-title-row">
                                     <h4>{t('pages.dynamicSources.history.sectionTitle')}</h4>
-                                    <span className={dynamicSource.last_fetch_status === 'failed' ? 'badge badge-danger' : 'badge badge-info'}>
-                                        {t(`pages.dynamicSources.status.${dynamicSource.last_fetch_status}` as Parameters<typeof t>[0])}
-                                    </span>
                                 </div>
                             </div>
-                            <p className="muted tariff-period-empty">
-                                {t('pages.dynamicSources.history.coverage', {
-                                    from: formatDateTime(dynamicSource.covers_from, settings),
-                                    to: formatDateTime(dynamicSource.covers_to, settings),
-                                    count: dynamicSource.point_count,
-                                })}
-                            </p>
+                            <DynamicSourceSummary source={dynamicSource} settings={settings} canOperate={user?.role === 'admin'} />
                             {/* Shown inline rather than behind a button + modal: the
                                 drawer is wide enough now, and this is the one part of
                                 it that used to still cost an extra click (#728). */}

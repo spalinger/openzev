@@ -12,11 +12,15 @@ The Platform group has four entries (hubs with tabs-as-routes):
 - **Templates** (`/admin/templates`) — PDF templates · Email templates
 - **Settings** (`/admin/system-settings`) — Regional Settings · Functions · OAuth · Security · VAT · Backup
 
-Legacy routes (`/admin/zevs`, `/admin/invoices`, `/admin/audit-logs`,
-`/admin/api-keys`, `/admin/pdf-templates`, `/admin/email-templates`) redirect
-to the matching hub tab.
+The existing `/admin/zevs` and `/admin/invoices` addresses open their matching
+Overview tabs. Legacy routes (`/admin/audit-logs`, `/admin/api-keys`,
+`/admin/pdf-templates`, `/admin/email-templates`) redirect to the matching hub tab.
 
 For general role information, see [Roles and Permissions](11-roles-and-permissions.md).
+
+Each Overview tab describes its platform-wide scope. The invoice-status
+summary links to **All invoices**, and email statistics links to **System
+health**. Your selected community is preserved when you open these views.
 
 ## ZEV Management
 
@@ -73,6 +77,19 @@ ZEV, and how many currently have a failed fetch. The table lists every
 source with its protocol version, billed component/product, current fetch
 status, last fetch time, stored point count, and how many tariffs/ZEVs
 reuse it.
+
+From a tariff's details, **Manage source in platform admin**
+opens this tab filtered to that source. **Show all sources** returns to the
+complete list. The filter survives reload. A missing source has an explanation
+and the same control to return to all sources. Usage counts are platform-wide,
+not counts for the selected community.
+
+The **View fetch log** dialog links to **View source activity**,
+which opens the platform Audit tab with the source's Target type and
+Target ID filled in. Those filters survive reload; **Clear filters** removes
+them while keeping other bookmark context.
+If activity cannot load, use **Retry**. A failed refresh keeps the last loaded
+events visible with a warning.
 
 Each row's menu offers:
 
@@ -170,17 +187,22 @@ billing-relevant, and destructive actions.
 
 - **Platform → Overview → Audit log** (`/admin/audit`) — admins can view **all**
   events across the platform.
-- **Setup → Settings → Audit log** (`/zev-settings/audit`) — admins **and
-  managers** see the events of the currently selected community. Managers only
-  see events for ZEVs they manage; they cannot see global or other-ZEV events.
+- **Setup → Settings → Audit log** (`/zev-settings/audit`) — admins, managers
+  and viewers see the events of the currently selected community.
+  Managers and viewers only see events for communities they can access;
+  they cannot see global or other-community events.
   There is no community selector here (it follows the sidebar switcher) and no
-  text search; the filters are date range, actor, category, action type, and
-  status. (The legacy route `/audit-logs` redirects here.)
+  text search; the filters are date range, actor, category, action type,
+  target type, target ID, and status. (The legacy route `/audit-logs` redirects here.)
 
 **Platform → Overview → Audit log** supports the full filter set: date range,
-community (ZEV) selector, actor, category, action type, status, and text
+community (ZEV) selector, actor, category, action type, target type, target ID,
+status, and text
 search. Text search is available only to admin users. Events are
 read-only — there is no public write endpoint.
+Action type, target type and target ID apply when you press **Enter** or leave
+the field. Open an event by clicking its summary or focusing it and pressing
+**Enter** or **Space**.
 
 The quickest way in is from the account itself: **View activity** on a row
 under **Platform → Accounts → Users** opens the audit log already filtered to

@@ -195,7 +195,8 @@ label > small.muted {
 }
 
 /* Fill the cell with the name button; shared focus styles show keyboard focus. */
-.participant-select {
+.participant-select,
+.audit-event-select {
   display: block;
   width: 100%;
   border: 0;
@@ -207,7 +208,8 @@ label > small.muted {
   cursor: pointer;
 }
 
-.participant-select:focus-visible {
+.participant-select:focus-visible,
+.audit-event-select:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
   border-radius: 0.25rem;

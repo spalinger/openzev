@@ -93,6 +93,7 @@ vi.mock('../src/lib/appSettings', () => ({
     useAppSettings: () => ({ settings: { date_format_short: 'dd.MM.yyyy' } }),
     toDayJsDateFormat: () => 'DD.MM.YYYY',
     formatShortDate: (d: string) => d,
+    formatDateTime: (d: string) => d,
 }))
 vi.mock('../src/lib/api/zev', () => ({
     fetchGridOperators: vi.fn().mockResolvedValue({ operators: [] }),
@@ -105,7 +106,18 @@ vi.mock('../src/lib/api/invoices', () => ({
     fetchEmailTemplate: (...args: unknown[]) => emailSpy(...args),
 }))
 vi.mock('../src/features/zev/ZevExportModal', () => ({ ZevExportModal: () => null }))
-vi.mock('../src/pages/AdminAuditLogsPage', () => ({ AuditLogsPage: () => createElement('div', null, 'audit') }))
+const auditSpy = vi.hoisted(() => vi.fn())
+const sampleEvent = {
+    id: 'e1', created_at: '2026-01-01', summary: 'Did something', zev: 'z1', action_category: 'metering',
+    action_type: 'metering_point.update', target_display: 'meter', target_type: 'zev.MeteringPoint',
+    target_id: 'm1', actor_display: 'owner', status: 'success',
+}
+vi.mock('../src/lib/api/audit', () => ({
+    fetchAuditEvents: (...args: unknown[]) => auditSpy(...args),
+    fetchAuditEvent: () => Promise.resolve(sampleEvent),
+    fetchAuditFilterOptions: () => Promise.resolve({ zevs: [], actors: [] }),
+}))
+
 const cleanups: (() => void)[] = []
 afterEach(() => cleanups.splice(0).forEach((cleanup) => cleanup()))
 
@@ -124,6 +136,8 @@ beforeEach(() => {
         expect(templateKey).toBe('invoice_email')
         return GLOBAL_TEMPLATE
     })
+    auditSpy.mockReset()
+    auditSpy.mockResolvedValue({ results: [], count: 0, next: null, previous: null })
     toastSpy.mockClear()
     updateSpy.mockClear()
     emailSpy.mockClear()
@@ -141,7 +155,7 @@ function element(route: string, client: QueryClient) {
         createElement(MantineProvider, null, createElement(RouterProvider, { router })))
 }
 
-async function renderAt(route: string) {
+async function renderAt(route: string, timeout = 5000) {
     const container = document.createElement('div')
     document.body.append(container)
     const root = createRoot(container)
@@ -153,7 +167,7 @@ async function renderAt(route: string) {
             : route === '/zev-settings' || route.endsWith('/general') ? 'name' : null
     await waitForCondition(() => field
         ? container.querySelector(`[data-zev-field="${field}"] input`) !== null
-        : container.querySelector('[role="tab"]') !== null, 'settings panel', 5000)
+        : container.querySelector('[role="tab"]') !== null, 'settings panel', timeout)
     await act(async () => {})
     return { container, root, client, router: routers.get(client)! }
 }
@@ -222,6 +236,15 @@ function billingInput(container: ParentNode) {
 function subjectInput(container: ParentNode) {
     return container.querySelector<HTMLInputElement>('[data-zev-field="email_subject_template"] input')
 }
+
+describe('merged settings tab bookmarks', () => {
+    it.each(['access', 'parties'])('preserves context through the %s alias', async (tab) => {
+        const { router } = await renderAt(`/zev-settings/${tab}?focus=issuer&from=bookmark#people`, 10_000)
+        expect(router.state.location.pathname).toBe('/zev-settings/people')
+        expect(router.state.location.search).toBe('?focus=issuer&from=bookmark')
+        expect(router.state.location.hash).toBe('#people')
+    }, 15_000)
+})
 
 describe('ZEV settings routed form', () => {
     it('preserves edits from the root through tabs and saves the shared form', async () => {
@@ -611,12 +634,19 @@ describe('ZEV settings routed form', () => {
     })
 
     it('keeps save actions on audit and export while a draft exists', async () => {
-        const { container } = await renderAt('/zev-settings/general')
+        const { container, router } = await renderAt('/zev-settings/general')
+        await act(async () => { await router.navigate('/zev-settings/general?from=bookmark#draft', { replace: true }) })
         setField(generalInput(container)!, 'Unsaved name')
         await clickTab(container, 'exportTransfer')
         expect(saveBar(container)).not.toBeNull()
         expect(saveButton(container)).toBeDefined()
-        await clickTab(container, 'auditLog')
+        const exportButton = Array.from(container.querySelectorAll('button')).find(button => button.textContent?.includes('zevTransfer.exportAction'))!
+        expect(exportButton.classList.contains('button-secondary')).toBe(true)
+        const auditLink = container.querySelector<HTMLAnchorElement>('a[href="/zev-settings/audit?from=bookmark#draft"]')!
+        expect(auditLink).not.toBeNull()
+        await act(async () => { auditLink.click() })
+        expect(router.state.location.search).toBe('?from=bookmark')
+        expect(router.state.location.hash).toBe('#draft')
         expect(container.textContent).toContain('audit')
         expect(saveBar(container)).not.toBeNull()
         // No detour link: the bar saves the whole draft in place.
@@ -668,4 +698,31 @@ describe('ZEV settings routed form', () => {
         })
         await waitForCondition(() => router.state.location.pathname === '/participants', 'navigation after confirmation')
     })
+})
+
+it('switching the settings community from audit page three remounts its first page and closes details', async () => {
+    auditSpy.mockResolvedValue({ results: [sampleEvent], count: 150, next: 'next', previous: 'previous' })
+    const route = '/zev-settings/audit'
+    const { container, root, client } = await renderAt(route)
+    const next = () => Array.from(container.querySelectorAll('button')).find(b => b.textContent === 'pages.auditLogs.pagination.next')!
+    await waitForCondition(() => !!next(), 'audit next')
+    await act(async () => { next().click() })
+    await waitForCondition(() => auditSpy.mock.calls.at(-1)?.[0].page === 2, 'page two')
+    await waitForCondition(() => !!next(), 'next after page two')
+    await act(async () => { next().click() })
+    await waitForCondition(() => auditSpy.mock.calls.at(-1)?.[0].page === 3, 'page three')
+    await waitForCondition(() => !!container.querySelector('tbody tr'), 'page three rows')
+    await act(async () => { (container.querySelector('tbody tr') as HTMLElement).click() })
+    await waitForCondition(() => !!document.querySelector('[role="dialog"]'), 'drawer')
+    const input = container.querySelector('input')!
+    input.dataset.auditMounted = 'yes'
+    const before = auditSpy.mock.calls.length
+    state.zev = fixtureZev({ id: 'z2', name: 'Second community' })
+    await rerender(root, route, client)
+    await waitForCondition(() => auditSpy.mock.calls.slice(before).some(([f]) => f.zev === 'z2'), 'new scope')
+    await waitForCondition(() => !document.querySelector('[role="dialog"]'), 'closed scope drawer')
+    const calls = auditSpy.mock.calls.slice(before).map(([f]) => ({ zev: f.zev, page: f.page }))
+    const remounted = !container.querySelector('[data-audit-mounted="yes"]')
+    expect(calls).toEqual([{ zev: 'z2', page: 1 }])
+    expect(remounted).toBe(true)
 })

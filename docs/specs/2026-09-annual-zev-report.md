@@ -263,6 +263,10 @@ and `.participant-table tfoot td` (bold, top border).
 (`BillingTab = 'invoices' | 'emails'`). `pages.billingHub.tabs.statements` has
 been removed and `pages.billingHub.description` reworded in all four locales.
 
+Billing's header opens `/reports`. `ReportsPage` owns year selection, defaulting
+to the previous year independently of invoice periods. Alias/query behavior is
+documented in `2026-03-community-and-access.md` §9.2.
+
 ### TypeScript types
 
 **File:** `frontend/src/types/api.ts`

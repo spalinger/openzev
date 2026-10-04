@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { fetchAuditEvents, fetchAuditFilterOptions } from '../lib/api/audit'
 import { queryKeys } from '../lib/api/queryKeys'
@@ -9,8 +8,14 @@ import { useAuth } from '../lib/auth'
 import { useManagedZev } from '../lib/managedZev'
 import { CivilDateInput } from '../components/CivilDateInput'
 import { AuditEventDrawer } from '../features/audit/AuditEventDrawer'
-import type { AuditActionCategory, AuditEvent, AuditEventFilters, AuditEventStatus } from '../types/api'
+import type { AuditActionCategory, AuditEventFilters, AuditEventStatus } from '../types/api'
 import { PageHeader } from '../components/PageHeader'
+import { usePageNavigation } from '../lib/usePageNavigation'
+import { Notice } from '../components/Notice'
+import { PageSkeleton } from '../components/PageSkeleton'
+import { Link, useLocation } from 'react-router-dom'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { faDownload } from '@fortawesome/free-solid-svg-icons'
 
 type AuditLogsScope = 'admin' | 'owner'
 
@@ -34,9 +39,6 @@ const AUDIT_STATUSES: AuditEventStatus[] = ['started', 'queued', 'success', 'fai
 
 interface AuditFilterState {
     page: number
-    actionCategory: string
-    actionType: string
-    targetType: string
     status: string
     zev: string
     actorUser: string
@@ -47,15 +49,19 @@ interface AuditFilterState {
 
 const DEFAULT_FILTERS: AuditFilterState = {
     page: 1,
-    actionCategory: '',
-    actionType: '',
-    targetType: '',
     status: '',
     zev: '',
     actorUser: '',
     dateFrom: '',
     dateTo: '',
     search: '',
+}
+
+const LINK_FILTER_PARAMS = {
+    actionCategory: 'action_category',
+    actionType: 'action_type',
+    targetType: 'target_type',
+    targetId: 'target_id',
 }
 
 function statusBadgeClass(status: AuditEventStatus): string {
@@ -65,60 +71,76 @@ function statusBadgeClass(status: AuditEventStatus): string {
     return 'badge badge-neutral'
 }
 
-/**
- * `embedded` drops the page header (mounted as a ZEV-settings tab since
- * phase 3; the platform /admin route renders it standalone).
- */
+/** `embedded` drops the page header inside the Overview and Settings hubs. */
 export function AuditLogsPage({ scope, embedded = false }: AuditLogsPageProps & { embedded?: boolean }) {
     const { t } = useTranslation()
     const { settings } = useAppSettings()
     const { user } = useAuth()
-    const [filters, setFilters] = useState<AuditFilterState>(DEFAULT_FILTERS)
-    const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
-
+    const { searchParams, updateParams } = usePageNavigation()
+    const location = useLocation()
     const isAdminView = scope === 'admin'
     const canUseSearch = isAdminView && user?.role === 'admin'
-    const { selectedZevId, isLoading: managedZevLoading } = useManagedZev()
-    const [searchParams, setSearchParams] = useSearchParams()
+    const { selectedZevId, selectedZev, isLoading: managedZevLoading } = useManagedZev()
+    const [localFilters, setFilters] = useState<AuditFilterState>(DEFAULT_FILTERS)
+    const category = searchParams.get('action_category')
+    const urlTextFilters = {
+        actionType: searchParams.get('action_type') ?? '',
+        targetType: searchParams.get('target_type') ?? '',
+        targetId: searchParams.get('target_id') ?? '',
+    }
+    const contextualFilters = {
+        actionCategory: category && AUDIT_ACTION_CATEGORIES.includes(category as AuditActionCategory) ? category : '',
+        ...urlTextFilters,
+    }
+    const [textFilters, setTextFilters] = useState(urlTextFilters)
+    const context = JSON.stringify([
+        isAdminView ? 'admin' : selectedZevId,
+        contextualFilters.actionCategory,
+        contextualFilters.actionType,
+        contextualFilters.targetType,
+        contextualFilters.targetId,
+    ])
+    const [previousContext, setPreviousContext] = useState(context)
+    const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
+    const contextChanged = previousContext !== context
+    // Reset before requesting a changed URL filter or community scope.
+    if (contextChanged) {
+        setPreviousContext(context)
+        setFilters(previous => ({ ...previous, page: 1 }))
+        setSelectedEventId(null)
+        setTextFilters(urlTextFilters)
+    }
+    const filters = { ...localFilters, ...contextualFilters, page: contextChanged ? 1 : localFilters.page }
+
     const [linkedActorUsername, setLinkedActorUsername] = useState<string | null>(null)
 
-    useEffect(() => {
-        if (isAdminView) return
-        setFilters((previous) => ({ ...previous, page: 1 }))
-        setSelectedEventId(null)
-    }, [isAdminView, selectedZevId])
-
-    // Deep link from an account row ("View activity", AdminAccountsPage):
-    // pre-select that account as the actor filter. Consumed once so the URL
-    // does not keep re-applying it after the admin changes filters manually.
+    // Preserve the existing one-time account-activity intent; keep other URL context.
     useEffect(() => {
         if (!isAdminView) return
         const actor = searchParams.get('actor')
         if (!actor) return
-        setFilters((previous) => ({ ...previous, actorUser: actor, page: 1 }))
+        setFilters(previous => ({ ...previous, actorUser: actor, page: 1 }))
+        setSelectedEventId(null)
         setLinkedActorUsername(searchParams.get('actorUsername'))
-        const params = new URLSearchParams(searchParams)
-        params.delete('actor')
-        params.delete('actorUsername')
-        setSearchParams(params, { replace: true })
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isAdminView])
+        updateParams(params => {
+            params.delete('actor')
+            params.delete('actorUsername')
+        })
+    }, [isAdminView, searchParams, updateParams])
 
-    const apiFilters = useMemo<AuditEventFilters>(
-        () => ({
-            page: filters.page,
-            action_category: (filters.actionCategory || undefined) as AuditActionCategory | undefined,
-            action_type: filters.actionType || undefined,
-            target_type: filters.targetType || undefined,
-            status: (filters.status || undefined) as AuditEventStatus | undefined,
-            zev: isAdminView ? filters.zev || undefined : selectedZevId || undefined,
-            actor_user: filters.actorUser ? Number(filters.actorUser) : undefined,
-            date_from: filters.dateFrom || undefined,
-            date_to: filters.dateTo || undefined,
-            q: canUseSearch ? filters.search || undefined : undefined,
-        }),
-        [canUseSearch, isAdminView, selectedZevId, filters.actionCategory, filters.actionType, filters.actorUser, filters.dateFrom, filters.dateTo, filters.page, filters.search, filters.status, filters.targetType, filters.zev],
-    )
+    const apiFilters: AuditEventFilters = {
+        page: filters.page,
+        action_category: (filters.actionCategory || undefined) as AuditActionCategory | undefined,
+        action_type: filters.actionType || undefined,
+        target_type: filters.targetType || undefined,
+        target_id: filters.targetId || undefined,
+        status: (filters.status || undefined) as AuditEventStatus | undefined,
+        zev: isAdminView ? filters.zev || undefined : selectedZevId || undefined,
+        actor_user: filters.actorUser ? Number(filters.actorUser) : undefined,
+        date_from: filters.dateFrom || undefined,
+        date_to: filters.dateTo || undefined,
+        q: canUseSearch ? filters.search || undefined : undefined,
+    }
 
     const eventsQuery = useQuery({
         queryKey: queryKeys.admin.auditEvents(apiFilters),
@@ -156,30 +178,68 @@ export function AuditLogsPage({ scope, embedded = false }: AuditLogsPageProps & 
 
     const events = eventsQuery.data?.results ?? []
 
-    function updateFilter<K extends keyof AuditFilterState>(key: K, value: AuditFilterState[K]) {
-        setFilters((previous) => ({
-            ...previous,
-            [key]: value,
-            ...(key === 'page' ? null : { page: 1 }),
-        }))
-    }
-
-    function selectEvent(event: AuditEvent) {
-        setSelectedEventId(event.id)
+    function updateFilter<K extends keyof typeof filters>(key: K, value: (typeof filters)[K]) {
+        if (key in LINK_FILTER_PARAMS) {
+            const param = LINK_FILTER_PARAMS[key as keyof typeof LINK_FILTER_PARAMS]
+            updateParams(params => {
+                if (value) params.set(param, String(value))
+                else params.delete(param)
+            })
+        } else {
+            setFilters(previous => ({
+                ...previous,
+                [key]: value,
+                ...(key === 'page' ? null : { page: 1 }),
+            }))
+        }
     }
 
     function clearFilters() {
         setFilters(DEFAULT_FILTERS)
+        setSelectedEventId(null)
+        setLinkedActorUsername(null)
+        setTextFilters({ actionType: '', targetType: '', targetId: '' })
+        updateParams(params => Object.values(LINK_FILTER_PARAMS).forEach(param => params.delete(param)))
     }
+
+    function commitTextFilters() {
+        if (Object.entries(textFilters).every(([key, value]) => value === urlTextFilters[key as keyof typeof textFilters])) return
+        updateParams(params => {
+            for (const [key, value] of Object.entries(textFilters)) {
+                const param = LINK_FILTER_PARAMS[key as keyof typeof textFilters]
+                if (value) params.set(param, value)
+                else params.delete(param)
+            }
+        })
+    }
+
+    const scopeDescription = isAdminView
+        ? t('pages.auditLogs.platformDescription')
+        : selectedZev ? t('pages.auditLogs.communityDescription', { name: selectedZev.name }) : undefined
 
     return (
         <div className="page-stack">
             {!embedded && (
                 <PageHeader
-                    eyebrow={t(isAdminView ? 'pages.auditLogs.eyebrowAdmin' : 'pages.auditLogs.eyebrowOwner')}
+                    eyebrow={isAdminView ? t('nav.platformScope') : selectedZev?.name}
                     title={t('pages.auditLogs.title')}
-                    description={t('pages.auditLogs.description')}
+                    description={scopeDescription}
                 />
+            )}
+
+            {embedded && !isAdminView && scopeDescription && <p className="muted">{scopeDescription}</p>}
+            {!isAdminView && (
+                <div className="actions-row">
+                    <Link
+                        className="button button-secondary"
+                        to={{ pathname: '/zev-settings/export', search: location.search, hash: location.hash }}
+                        state={location.state}
+                        replace
+                    >
+                        <FontAwesomeIcon icon={faDownload} fixedWidth />
+                        {t('zevTransfer.exportAction')}
+                    </Link>
+                </div>
             )}
 
             <section className="card page-stack">
@@ -232,11 +292,32 @@ export function AuditLogsPage({ scope, embedded = false }: AuditLogsPageProps & 
                     </label>
                     <label>
                         {t('pages.auditLogs.filters.actionType')}
-                        <input value={filters.actionType} onChange={(event) => updateFilter('actionType', event.target.value)} placeholder={t('pages.auditLogs.filters.actionTypePlaceholder')} />
+                        <input
+                            value={textFilters.actionType}
+                            onChange={(event) => setTextFilters(previous => ({ ...previous, actionType: event.target.value }))}
+                            onBlur={commitTextFilters}
+                            onKeyDown={event => { if (event.key === 'Enter') commitTextFilters() }}
+                            placeholder={t('pages.auditLogs.filters.actionTypePlaceholder')}
+                        />
                     </label>
                     <label>
                         {t('pages.auditLogs.filters.targetType')}
-                        <input value={filters.targetType} onChange={(event) => updateFilter('targetType', event.target.value)} placeholder={t('pages.auditLogs.filters.targetTypePlaceholder')} />
+                        <input
+                            value={textFilters.targetType}
+                            onChange={(event) => setTextFilters(previous => ({ ...previous, targetType: event.target.value }))}
+                            onBlur={commitTextFilters}
+                            onKeyDown={event => { if (event.key === 'Enter') commitTextFilters() }}
+                            placeholder={t('pages.auditLogs.filters.targetTypePlaceholder')}
+                        />
+                    </label>
+                    <label>
+                        {t('pages.auditLogs.filters.targetId')}
+                        <input
+                            value={textFilters.targetId}
+                            onChange={(event) => setTextFilters(previous => ({ ...previous, targetId: event.target.value }))}
+                            onBlur={commitTextFilters}
+                            onKeyDown={event => { if (event.key === 'Enter') commitTextFilters() }}
+                        />
                     </label>
                     <label>
                         {t('pages.auditLogs.filters.dateFrom')}
@@ -247,6 +328,7 @@ export function AuditLogsPage({ scope, embedded = false }: AuditLogsPageProps & 
                         <CivilDateInput value={filters.dateTo || null} onChange={(iso) => updateFilter('dateTo', iso ?? '')} />
                     </label>
                 </div>
+                <p className="muted">{t('pages.auditLogs.filters.textApplyHint')}</p>
 
                 <label>
                     {t('pages.auditLogs.filters.search')}
@@ -270,9 +352,9 @@ export function AuditLogsPage({ scope, embedded = false }: AuditLogsPageProps & 
             </section>
 
             <section className="table-card">
-                {eventsQuery.isLoading && <p>{t('pages.auditLogs.loading')}</p>}
-                {eventsQuery.isError && <p className="text-error">{t('pages.auditLogs.loadError')}</p>}
-                {!eventsQuery.isLoading && events.length === 0 && <p className="muted">{t('pages.auditLogs.empty')}</p>}
+                {eventsQuery.isLoading && <PageSkeleton variant="tableRows" />}
+                {eventsQuery.isError && <Notice tone="error" onRetry={() => void eventsQuery.refetch()} isRetrying={eventsQuery.isFetching}>{t('pages.auditLogs.loadError')}</Notice>}
+                {!eventsQuery.isLoading && !eventsQuery.isError && events.length === 0 && <p className="muted">{t('pages.auditLogs.empty')}</p>}
 
                 {events.length > 0 && (
                     <>
@@ -292,9 +374,17 @@ export function AuditLogsPage({ scope, embedded = false }: AuditLogsPageProps & 
                                 </thead>
                                 <tbody>
                                     {events.map((event) => (
-                                        <tr key={event.id} style={{ cursor: 'pointer', background: selectedEventId === event.id ? 'var(--surface-subtle)' : undefined }} onClick={() => selectEvent(event)}>
+                                        <tr key={event.id} style={{ cursor: 'pointer', background: selectedEventId === event.id ? 'var(--surface-subtle)' : undefined }} onClick={() => setSelectedEventId(event.id)}>
                                             <td>{formatDateTime(event.created_at, settings)}</td>
-                                            <td>{event.summary}</td>
+                                            <td>
+                                                <button
+                                                    type="button"
+                                                    className="audit-event-select"
+                                                    onClick={click => { click.stopPropagation(); setSelectedEventId(event.id) }}
+                                                >
+                                                    {event.summary}
+                                                </button>
+                                            </td>
                                             <td>{event.zev ? zevNameById.get(event.zev) ?? event.zev : '—'}</td>
                                             <td>{t(`pages.auditLogs.categories.${event.action_category}`)}</td>
                                             <td><code>{event.action_type}</code></td>

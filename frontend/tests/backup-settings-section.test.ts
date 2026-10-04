@@ -3,6 +3,9 @@ import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MantineProvider } from '@mantine/core'
+import { MemoryRouter } from 'react-router-dom'
+import { waitForCondition } from './helpers/waitForCondition'
+import { queryKeys } from '../src/lib/api/queryKeys'
 import { BackupSettingsSection } from '../src/features/backups/BackupSettingsSection'
 import type { BackupDestination, BackupJob, BackupSchedule, BackupStatus } from '../src/types/api'
 
@@ -82,6 +85,7 @@ function setup({ statusData = status(), destinations = [disk], jobs = [] as Back
 }
 
 const cleanups: (() => void)[] = []
+const clients = new WeakMap<Element, QueryClient>()
 afterEach(() => { cleanups.splice(0).forEach((cleanup) => cleanup()); vi.clearAllMocks() })
 
 beforeEach(() => {
@@ -94,18 +98,21 @@ beforeEach(() => {
     })
 })
 
-async function render() {
+async function render(waitForQueries = true) {
     const container = document.createElement('div')
     document.body.append(container)
     const root = createRoot(container)
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    clients.set(container, client)
     cleanups.push(() => { act(() => root.unmount()); client.clear(); container.remove() })
     await act(async () => root.render(
         createElement(QueryClientProvider, { client },
-            createElement(MantineProvider, null, createElement(BackupSettingsSection))),
+            createElement(MemoryRouter, null, createElement(MantineProvider, null, createElement(BackupSettingsSection)))),
     ))
-    // Let the status / destination / job queries settle.
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)) })
+    // Query caches can settle before React receives their notifications.
+    if (waitForQueries) await waitForCondition(() => client.isFetching() === 0
+        && !container.querySelector('.skeleton-block')
+        && !container.textContent?.includes('common.loading'), 'backup content', 5000)
     return container
 }
 
@@ -127,6 +134,50 @@ const labelled = (container: Element, key: string) =>
     Array.from(container.querySelectorAll('label')).find((l) => l.textContent?.includes(key))
 
 describe('encryption status banner', () => {
+    it('keeps cached status and operations usable after a failed status refetch', async () => {
+        setup()
+        const container = await render()
+        api.fetchBackupStatus.mockRejectedValue(new Error('offline'))
+        await act(async () => { await clients.get(container)!.invalidateQueries({ queryKey: queryKeys.backups.status() }) })
+        await waitForCondition(() => container.querySelector('[role="status"]') !== null, 'cached status warning')
+        expect(container.querySelector('.info-banner')?.textContent).toContain('pages.backups.status.encrypted')
+        expect(button(container, 'pages.backups.jobs.backUpNow')).toBeDefined()
+        expect(button(container, 'common.retry')).toBeDefined()
+    })
+
+    it('hides unknown status while independent backup operations remain available', async () => {
+        setup({ jobs: [completed({ manifest_json: { kind: 'backup', zevs: [{ id: 'zev-1', name: 'Sonnenhof' }] } })] })
+        api.fetchBackupStatus.mockReturnValue(new Promise(() => {}))
+        const container = await render(false)
+        expect(container.querySelector('.skeleton-block')).not.toBeNull()
+        expect(container.textContent).not.toContain('pages.backups.status.never')
+        expect(container.textContent).not.toContain('pages.backups.status.enabledDestinations')
+        await waitForCondition(() => button(container, 'pages.backups.restore.preview')?.disabled === false, 'restore while status is loading')
+        for (const section of ['destinations', 'schedule', 'jobs', 'restore']) {
+            expect(container.textContent).toContain(`pages.backups.${section}.title`)
+        }
+        expect(container.textContent).toContain('nightly-disk')
+        expect(api.fetchBackupDestinations).toHaveBeenCalled()
+        expect(api.fetchBackupSchedule).toHaveBeenCalled()
+        expect(api.fetchBackupJobs).toHaveBeenCalled()
+        expect(api.fetchRestoreJobs).toHaveBeenCalled()
+    })
+
+    it('keeps independent operations available on initial status failure and offers retry', async () => {
+        setup({ jobs: [completed({ manifest_json: { kind: 'backup', zevs: [{ id: 'zev-1', name: 'Sonnenhof' }] } })] })
+        api.fetchBackupStatus.mockRejectedValueOnce(new Error('offline'))
+        const container = await render()
+        expect(container.querySelector('[role="alert"]')).not.toBeNull()
+        expect(container.textContent).not.toContain('pages.backups.status.never')
+        for (const section of ['destinations', 'schedule', 'jobs', 'restore']) {
+            expect(container.textContent).toContain(`pages.backups.${section}.title`)
+        }
+        expect(button(container, 'pages.backups.restore.preview')?.disabled).toBe(false)
+        await click(button(container, 'common.retry'))
+        await waitForCondition(() => container.querySelector('.info-banner')?.textContent?.includes('pages.backups.status.encrypted') ?? false, 'recovered backup status')
+        expect(container.querySelector('.info-banner')?.textContent).toContain('pages.backups.status.encrypted')
+    })
+
     it('warns loudly that backups are not encrypted, and does not claim they are', async () => {
         setup({ statusData: status({ encrypted: false, encryption_required: false, encryption_key_fingerprint: '' }) })
         const container = await render()

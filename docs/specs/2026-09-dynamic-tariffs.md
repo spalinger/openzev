@@ -672,6 +672,33 @@ price points; source identity fields are read-only after creation.
 
 ### 10.4 Frontend
 
+Managers/admins discover and create sources from the energy-tariff form.
+Viewers read linked tariffs/history; existing-source maintenance is admin-only.
+
+`DynamicSourceSummary` in the tariff detail drawer shows the linked source's
+label, endpoint, protocol, component/product, fetch status, disabled state,
+last success, user-safe fetch error, stored range/point count and global
+linked-tariff/ZEV totals. A positive point count shows stored coverage and a gap
+hint; zero points show “No stored prices yet.” Last success is shown only when
+its timestamp is present. The history panel is scoped to the shown tariff's validity.
+Only admins see the maintenance link to `/admin/dynamic-sources?source=<id>`.
+
+`AdminDynamicSourcesPanel` presents source operations and global KPIs,
+uses the shared responsive stat grid and labels reuse counts as platform-wide.
+The optional `source` query filters the table, survives reload, and has a
+Show all sources control that removes only `source`, preserving query/hash.
+Unknown IDs show “Source not found.” Initial loading/failure uses
+`PageState` with skeleton/retry, avoiding false zero counts or an empty-source
+message on failure. Refetch failures retain cached source rows with a retry
+warning that identifies the last loaded sources. Activity loading/failure uses
+`PageState` with retry; a failed refetch
+keeps cached events visible with a warning. The activity modal links to the platform Audit tab
+with `target_type`/`target_id` filters for that source. The tariff creation
+picker explains that sources are shared and existing-source maintenance is
+performed by platform admins.
+`dynamic-source-summary.test.ts` covers empty coverage, optional last success,
+positive coverage and maintenance-link permissions.
+
 `frontend/src/features/tariffs/`:
 
 - **`TariffFormModal`** — an energy tariff (`billing_mode = 'energy'`) gets a

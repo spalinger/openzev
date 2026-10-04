@@ -109,6 +109,10 @@ billing hub. Its tabs are routes — each is directly linkable:
   failed-email banner, **View history** for the actual attempt log, and an
   inline **Retry** per failed latest attempt.
 
+Use the **Reports** link in the Billing header to open annual documents for
+the selected community, then choose the year. Viewers can download the available
+documents.
+
 The yearly whole-ZEV annual-statement ZIP is on **Reports** (see
 [Reports: Annual Report, Statements and Tax Overviews](#reports-annual-report-statements-and-tax-overviews)).
 The former `/billing/statements` address redirects there.

@@ -24,7 +24,7 @@ gap for operational investigations, incident analysis, and finance-sensitive
 change traceability.
 
 **Outcome:** OpenZEV gains a centralized append-only audit event stream for
-high-risk write workflows. Admins can search all events, ZEV owners can inspect
+high-risk write workflows. Admins can search all events, managers and viewers can inspect
 events scoped to their communities, and the system records who performed an
 action, which tenant it affected, whether it succeeded, and which business
 fields changed.
@@ -47,7 +47,7 @@ without introducing a full compliance ledger or low-value read-access logging.
 | Diff capture | Whitelisted before/after field diffs for audited models |
 | Workflow coverage | Auth, governance, participant, metering, tariff, invoice, import, and template write workflows |
 | Async outcomes | Audit records emitted from Celery tasks for email/import results and failures |
-| Audit API | List/detail endpoints with filters for admins and scoped read access for ZEV owners |
+| Audit API | List/detail endpoints with filters for admins and scoped read access for managers and viewers |
 | Frontend audit UI | Admin audit log page with filtering and event detail viewer |
 | Redaction policy | Explicit exclusion and masking rules for secrets and sensitive payloads |
 | Rollout phases | Incremental implementation slices starting with backend foundation and invoice/governance coverage |
@@ -67,8 +67,8 @@ without introducing a full compliance ledger or low-value read-access logging.
 | Actor | Capability |
 |---|---|
 | `admin` | Read all audit events, filter globally, inspect security and tenant events |
-| `zev_owner` | Read only audit events whose resolved `zev` belongs to the owner |
-| `participant` | No audit-log access in v1 |
+| Manager or viewer community access | Read only audit events in communities returned by `zev.access.viewable_zev_ids(user)` |
+| Participant link alone | No audit-log access |
 | `guest` | No audit-log access |
 | Celery/system | May emit audit events with `actor_user = null` and `source = system` or `source = celery` |
 
@@ -78,16 +78,16 @@ Audit endpoints are served under a new `audit` app.
 
 | Endpoint area | Permission |
 |---|---|
-| `GET /api/v1/audit/events/` | Authenticated admin or ZEV owner; queryset filtered by role |
+| `GET /api/v1/audit/events/` | `CanViewAuditEvents`: authenticated admin or account with manager/viewer community access; non-admin queryset limited to `viewable_zev_ids` |
 | `GET /api/v1/audit/events/{id}/` | Same as list; object-level ZEV scope enforced |
 | Audit creation | Internal only via service layer; no public POST endpoint |
 
 ### Frontend route protection
 
-| Route | ProtectedRoute roles |
+| Route | Guard |
 |---|---|
 | `/admin/audit` (`/admin/audit-logs` redirects) | `['admin']` |
-| `/zev-settings/audit` (`/audit-logs` redirects) | `['admin', 'zev_owner']` (guard on the parent settings hub) |
+| `/zev-settings/audit` (`/audit-logs` redirects) | `ZEV_SCOPE` (`admin`, `manager`, `viewer` shell roles), guarded on the parent settings hub |
 
 The same read-only audit view (`AuditLogsPage({ scope })`) is rendered in two
 hub tabs:
@@ -483,10 +483,36 @@ UI elements:
 The page follows the same admin CRUD/table conventions used by existing admin
 pages and should reuse shared components where available.
 
+The view names its platform or selected-community scope. Community Audit/Export
+navigation and draft retention are described in
+`2026-08-zev-transfer-archive.md` §9.
+
+`action_category`, `action_type`, `target_type` and `target_id` filters read
+from the URL and update via `usePageNavigation`. Category values validate
+against `AUDIT_ACTION_CATEGORIES`; other values are passed to the API
+filters. The three text inputs keep editable drafts and commit them to the URL
+on Enter or blur; category selection applies immediately. External URL changes
+synchronize the drafts. Pagination and other controls stay local.
+A change in effective URL filters or owner community scope resets pagination to page 1 and closes
+the selected event before the new query runs. Unrelated query/hash changes do
+not reset those states. Reload restores URL filters; edits replace history,
+so Back does not undo individual filter edits. Clear removes contextual keys,
+resets local filters and closes the drawer, retaining unrelated query/hash and
+the selected community.
+Source activity links supply `target_type=tariffs.DynamicTariffSource` and
+`target_id`; Backup links supply `action_category=system` (all system events,
+not exclusively backups).
+
+Initial event loading uses `PageSkeleton tableRows`; failure uses `Notice`
+with retry. Cached events remain visible on refetch failure, and a failed
+empty result is not also presented as an empty dataset.
+Each event summary is a keyboard-operable button opening its detail drawer;
+clicking the row remains available.
+
 **Deep-linking an actor** (`?actor=<id>&actorUsername=<username>`, admin scope
-only): consumed once in a mount effect — sets `filters.actorUser`, remembers
+only): consumed when received — sets `filters.actorUser`, resets page/selection, remembers
 `actorUsername` in local state, then strips both params from the URL
-(`setSearchParams(..., { replace: true })`), the same consume-then-clear
+(`usePageNavigation.updateParams`, replacing history and preserving hash), the same consume-then-clear
 pattern the Participants page uses for `?focus=`. `actorUsername` exists only
 to label the selection when the account has no audit history yet: the actor
 `<select>`'s options come from `fetchAuditFilterOptions`, which lists only
@@ -776,7 +802,12 @@ configuration invariants, including the Helm schema constraint on
 - `frontend/tests/audit-log-scope.test.ts` for the owner scope binding:
   request carries the selected community, switching rescopes and resets
   page/drawer, clearing filters keeps the scope, no request without a
-  selection, admin scope keeps its own selector.
+  selection, admin scope keeps its own selector, and source links supply visible
+  target filters from the first request. Mounted contextual-filter changes reset
+  pagination/drawer while unrelated URL edits retain them; Clear retains URL context.
+  Text typing remains local until Enter/blur, and new actor intents close details.
+- `frontend/tests/zev-settings-tabs.test.ts` checks that a community switch from
+  audit page 3 remounts the scoped view at page 1 and closes the old drawer.
 - Component/manual validation via `npm run lint`, `npm run build`, and
   `npm run test:unit`.
 

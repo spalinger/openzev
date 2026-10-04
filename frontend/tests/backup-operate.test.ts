@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MantineProvider } from '@mantine/core'
+import { MemoryRouter } from 'react-router-dom'
+import { waitForCondition } from './helpers/waitForCondition'
 import { BackupSettingsSection } from '../src/features/backups/BackupSettingsSection'
 import type { BackupDestination, BackupJob, BackupSchedule, BackupStatus } from '../src/types/api'
 
@@ -100,9 +102,10 @@ async function render() {
     cleanups.push(() => { act(() => root.unmount()); client.clear(); container.remove() })
     await act(async () => root.render(
         createElement(QueryClientProvider, { client },
-            createElement(MantineProvider, null, createElement(BackupSettingsSection))),
+            createElement(MemoryRouter, null, createElement(MantineProvider, null, createElement(BackupSettingsSection)))),
     ))
     await settle()
+    await waitForCondition(() => container.querySelector('input[type="time"]') !== null && client.isFetching() === 0, 'backup operations', 5000)
     return container
 }
 

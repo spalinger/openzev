@@ -2,7 +2,7 @@
 
 Back up the whole instance, or a single community, to a local directory or to
 S3-compatible storage. Administrators manage backups under
-**Platform → Settings → Backup**.
+**Platform → Settings → Backup** (`/admin/system-settings?tab=backup`).
 
 > **Two kinds of restore.** One **community** can be brought back to the state of a
 > backup from this page — see [Restoring one community](#restoring-one-community).
@@ -10,6 +10,13 @@ S3-compatible storage. Administrators manage backups under
 > [Restoring an instance](#restoring-an-instance). Either way, check your backups
 > regularly (see [Verifying a backup](#verifying-a-backup)), and let them run by
 > themselves (see [Scheduling and keeping backups](#scheduling-and-keeping-backups)).
+
+The Backup tab links to **System health** and **System activity**.
+The activity link opens the platform Audit tab filtered to system events;
+these include other system operations as well as backup and restore events.
+If backup status cannot load, use **Retry**. Destinations, Schedule, Jobs and
+Restore load independently and remain available. A failed status refresh
+keeps the last loaded status visible with a warning.
 
 ## What a backup contains
 

@@ -356,6 +356,9 @@ export job, polls its status, and downloads the artifact when it completes
 (§8.1, ADR 0017). The owner/admin branch also shows the annual ZEV report
 (`docs/specs/2026-09-annual-zev-report.md`).
 
+The Billing header opens `/reports` for annual documents; year selection is
+described in `2026-09-annual-zev-report.md`.
+
 | Method | URL | Permission | Frontend usage |
 |---|---|---|---|
 | `GET` | `/invoices/invoices/annual-statement/` | Authenticated (participant sees own, admin/owner ZEV-scoped) | `downloadAnnualStatement({year}, signal?)` (no `zev_id`, backend scopes by participant) behind the participant Annual Statement tab; owners/admins supply `participant_id` + `zev_id`, which this page does not do. The participant's own download calls `generate_annual_statement_pdf(..., sent_only=True)`, so its invoice table and totals count only invoices already sent to them (§6.1); an owner/admin-requested statement and the whole-ZEV export keep every non-cancelled invoice |

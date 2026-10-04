@@ -427,6 +427,11 @@ the platform invoice tab. Shared status/action cells retain DataTable sorting,
 complete-dataset pagination and the existing delete confirmation. Admin totals
 retain their existing trailing currency format (`114.94 CHF`).
 
+The Overview hub's header description follows the active tab and names the
+platform-wide scope. Embedded KPI sections
+link the invoice breakdown to `/admin/invoices` and email statistics to
+`/admin/health`.
+
 ### 9.3 AdminDashboardPage
 
 **File:** `frontend/src/pages/AdminDashboardPage.tsx`
@@ -530,7 +535,7 @@ retain their existing trailing currency format (`114.94 CHF`).
 
 **File:** `frontend/src/pages/ZevSettingsPage.tsx`
 
-Accessible to `admin` and `zev_owner` at `/zev-settings` (General) and
+Accessible to `admin`, community managers and viewers at `/zev-settings` (General) and
 `/zev-settings/:tab`. `ZevSettingsTabRoute` rejects unknown tabs. Uses the
 globally selected ZEV from `useManagedZev()`; the three editing tabs share one
 draft and saved baseline tied to a ZEV id and selection epoch, with derived dirty
@@ -566,9 +571,11 @@ Every validated control carries a `data-zev-field` anchor for focus jumps.
 - **Documents & emails** (`documents`): email template fields below, notes,
   local tariff notes and additional contract notes.
 - **Audit log** (`audit`): embedded `AuditLogsPage scope="owner"`, locked to
-  the selected ZEV; no platform-wide log or free-text search.
+  the selected ZEV with a community description and a link to Export;
+  no platform-wide log or free-text search.
 - **Export / transfer** (`export`): opens `ZevExportModal` for the selected
-  ZEV. Import remains on the platform ZEVs tab.
+  ZEV and links to Audit. Eligibility and draft retention are described in
+  `2026-08-zev-transfer-archive.md` §9. Import is on the platform ZEVs tab.
 
 **Cross-tab validation:** `attemptSave` runs `validateZevForm` over the whole
 draft first (required name/start date, IBAN checksum, required payment term 1–365

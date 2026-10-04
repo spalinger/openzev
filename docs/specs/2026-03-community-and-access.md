@@ -1454,6 +1454,22 @@ Legacy admin routes `/admin/settings/regional`, `/admin/settings/vat`,
 `/admin/features`, and `/admin/oauth` redirect into tabs on
 `/admin/system-settings` and remain admin-only.
 
+Aliases use `AliasNavigate`, `InvoiceDetailAlias` or `MeteringDataAlias`:
+redirects replace
+history and retain incoming query parameters/hash; destination-pinned query
+keys (System tabs) win over incoming values. Invoice IDs are encoded in the
+canonical detail path; legacy Metering removes only `tab`. Settings `access`
+and `parties` use `AliasNavigate` to `/zev-settings/people`, retaining
+`focus`, other query parameters and the hash. Destination guards remain
+responsible for access.
+
+Same-hub workflow links, including Community Audit/Export, replace history and
+retain query/hash/state. Cross-hub links open the destination's own context;
+Reports owns year selection, and source/audit links supply their documented
+filter parameters. Draft retention is described in
+`2026-08-zev-transfer-archive.md` §9; source filtering in
+`2026-09-dynamic-tariffs.md` §10.4.
+
 Shared hub URL edits use `usePageNavigation`: routed tabs in Billing, Metering,
 Admin Accounts, Admin Overview, Templates and ZEV Settings replace history and
 retain query parameters/hash. Templates updates `template`; Metering removes

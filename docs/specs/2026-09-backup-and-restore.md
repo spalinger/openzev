@@ -893,6 +893,16 @@ conflicts as such in the output.
 as `vat` renders `VatSettingsSection`. The route is already behind
 `ProtectedRoute allowedRoles={['admin']}`.
 
+`BackupSettingsSection` links to `/admin/health` and to the platform audit
+view at `/admin/audit?action_category=system`, labelled “System activity” because
+it includes other system operations. `PageState` wraps only the status card and
+stat grid; Destinations, Schedule, Jobs and Restore load independently and stay
+available during initial status loading or failure. Initial status loading uses a skeleton;
+initial failure offers retry and avoids presenting unknown values as "never"
+or zero. Failed status refetches retain the cached status with a
+retry warning that identifies the last known status. Initial errors identify
+the backup status request rather than showing a generic failure message.
+
 ### 7.2 Components (phase 1)
 
 All under `frontend/src/features/backups/`.
@@ -1262,13 +1272,15 @@ the dev worker.
 - Not verified against a real object store, as before; the beat process itself was not
   left running to watch a schedule fire.
 
-### Frontend (113 tests, phases 1, 3 and 4 plus fail-closed encryption policy)
+### Frontend (116 tests, phases 1, 3 and 4 plus fail-closed encryption policy and status recovery)
 
 - `tests/backup-helpers.test.ts` (17) — the payload contract: a blank edit never
   wipes a secret, a clear is explicit, switching kind clears the other kind's
   fields; target formatting; manifest reading; polling and download rules.
-- `tests/backup-settings-section.test.ts` (26) — the encryption banner in each of
-  its four states (encrypted; plaintext warning where permitted; "cannot run"
+- `tests/backup-settings-section.test.ts` (29) — independent destination,
+  schedule, job and restore access during status loading/failure; status retry,
+  cached refetch failure, and the encryption banner in its four states
+  (encrypted; plaintext warning where permitted; "cannot run"
   where required; rejected key evaluated first); the restore notice (server command for an instance, single-community restore not yet in the app); destination list and empty state;
   secret field disabled without a key; environment-credentials notice; create
   payload; server validation shown inside the form; start-backup rules (blocked
