@@ -342,7 +342,7 @@ def _build_template_context(
         **template_parties(invoice, issuer, recipient),
         "qr_svg": qr_svg,
         # A short, note-free invoice can share its first page with the standard
-        # QR payment part.  Larger invoices retain a separate final payment page
+        # QR payment part.  Larger invoices retain a separate payment page
         # so their line items can never overlap the payment slip.  The height
         # estimate accounts for savings-card size and category row count.
         "inline_qr_payment": bool(
@@ -440,8 +440,8 @@ def generate_pdf(
     when line-item descriptions wrap onto multiple lines; in that case the
     body overflows and the running slip would be duplicated.  We detect that
     on the real rendered layout (slip on more than one page) and fall back to
-    the dedicated payment page, which always places a single slip on its own
-    final page regardless of body length.
+    the dedicated payment page, which places a single slip after the invoice
+    body and before any insights page regardless of body length.
     """
     context = _build_template_context(invoice, period_context=period_context)
     html_string = _render_template(TEMPLATE_NAME, context)

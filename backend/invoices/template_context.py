@@ -54,6 +54,7 @@ def _sample_representative() -> dict:
 def build_sample_invoice_context() -> dict:
     tr = dict(INVOICE_TRANSLATIONS.get("en", INVOICE_TRANSLATIONS["de"]))
     tr["notes_question"] = tr["notes_question"].format(email="info@example.com")
+    address_line2 = "c/o Familie Beispiel"
     return {
         "invoice": _Obj(
             invoice_number="INV-2026-001",
@@ -96,7 +97,7 @@ def build_sample_invoice_context() -> dict:
         "representative": _sample_representative(),
         "recipient": {
             "name": "Hans Beispiel", "name_lines": ["Hans Beispiel"], "title": "", "first_name": "Hans",
-            "last_name": "Beispiel", "address_line1": "Musterstrasse 42", "address_line2": "",
+            "last_name": "Beispiel", "address_line1": "Musterstrasse 42", "address_line2": address_line2,
             "postal_code": "3000", "city": "Bern", "email": "hans@example.com",
         },
         "owner_participant": _Obj(
@@ -113,6 +114,7 @@ def build_sample_invoice_context() -> dict:
 
             name_addition="",
             address_line1="Musterstrasse 42",
+            address_line2=address_line2,
             postal_code="3000",
             city="Bern",
             email="hans@example.com",
