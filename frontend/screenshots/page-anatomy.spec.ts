@@ -159,7 +159,7 @@ for (const [path, endpoint, body] of [
 test('severity toggles support Tab, Enter and Space', async ({ page }) => {
   await mockApi(page)
   await page.goto('/metering/quality')
-  const meter = page.getByRole('cell', { name: 'MP-1', exact: true })
+  const meter = page.getByRole('cell', { name: 'MP-42', exact: true })
   await expect(meter).toBeVisible()
   const toggles = page.locator('main .stat-card--interactive')
   await expect(toggles).toHaveCount(3)
