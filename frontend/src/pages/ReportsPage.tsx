@@ -12,6 +12,7 @@ import { AnnualStatementsExportCard } from '../features/reports/AnnualStatements
 import { ParticipantYearDocuments } from '../features/reports/ParticipantYearDocuments'
 import { PageHeader } from '../components/PageHeader'
 import { ScopeGuard } from '../components/ScopeGuard'
+import { YearPicker } from '../components/YearPicker'
 
 const YEAR_COUNT = 5
 
@@ -51,18 +52,15 @@ export function ReportsPage() {
                 {isZevScopedRole && (
                     <>
                         <div className="actions-row">
-                            <label className="inline-form">
-                                <select
-                                    aria-label={t('pages.reports.year')}
-                                    value={selectedYear}
-                                    onChange={(e) => setYear(Number(e.target.value))}
-                                    disabled={financialSummaryMutation.isPending || zipBusy}
-                                >
-                                    {years.map((y) => (
-                                        <option key={y} value={y}>{y}</option>
-                                    ))}
-                                </select>
-                            </label>
+                            <YearPicker
+                                className="inline-form"
+                                label={t('pages.reports.year')}
+                                visibleLabel={false}
+                                years={years}
+                                value={selectedYear}
+                                onChange={setYear}
+                                disabled={financialSummaryMutation.isPending || zipBusy}
+                            />
                         </div>
 
                         <AnnualReportSection zevId={selectedZevId} year={selectedYear} />

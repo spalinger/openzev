@@ -1,9 +1,9 @@
 import { useTranslation } from 'react-i18next'
 import { Tabs } from '@mantine/core'
-import { useNavigate } from 'react-router-dom'
+import { usePageNavigation } from '../lib/usePageNavigation'
 import { AdminDashboardPage } from './AdminDashboardPage'
 import { ZevListPage } from './ZevListPage'
-import { AdminInvoicesPage } from './AdminInvoicesPage'
+import { AdminInvoicesContent } from './AdminInvoicesPage'
 import { AuditLogsPage } from './AdminAuditLogsPage'
 import { AdminSystemHealthPanel } from './AdminSystemHealthPanel'
 import { AdminDynamicSourcesPanel } from './AdminDynamicSourcesPanel'
@@ -23,10 +23,10 @@ export type AdminOverviewTab = 'overview' | 'zevs' | 'invoices' | 'dynamic-sourc
 
 export function AdminOverviewHubPage({ tab = 'overview' }: { tab?: AdminOverviewTab }) {
     const { t } = useTranslation()
-    const navigate = useNavigate()
+    const { navigateTab } = usePageNavigation()
 
     function handleTabChange(value: string | null) {
-        navigate(`/admin/${value ?? 'overview'}`, { replace: true })
+        navigateTab(`/admin/${value ?? 'overview'}`)
     }
 
     return (
@@ -59,7 +59,7 @@ export function AdminOverviewHubPage({ tab = 'overview' }: { tab?: AdminOverview
                     <ZevListPage embedded />
                 </Tabs.Panel>
                 <Tabs.Panel value="invoices">
-                    <AdminInvoicesPage embedded />
+                    <AdminInvoicesContent />
                 </Tabs.Panel>
                 <Tabs.Panel value="dynamic-sources">
                     <AdminDynamicSourcesPanel />

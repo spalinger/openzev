@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo, useState } from 'react'
+import { useEffect, useEffectEvent, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
 import { TariffCategorySections } from '../features/tariffs/TariffCategorySections'
@@ -23,6 +23,7 @@ import { queryKeys } from '../lib/api/queryKeys'
 import { todayBusinessIso } from '../lib/dates'
 import { downloadBlob } from '../lib/downloadBlob'
 import { useAppSettings } from '../lib/appSettings'
+import { useAuth } from '../lib/auth'
 import { useManagedZev } from '../lib/managedZev'
 import { useCommunityAccess } from '../lib/communityAccess'
 import { PageSkeleton } from '../components/PageSkeleton'
@@ -31,6 +32,7 @@ import { useToast } from '../lib/toast'
 import type { Tariff, TariffPeriod, TariffSeries } from '../types/api'
 import { PageHeader } from '../components/PageHeader'
 import { Notice } from '../components/Notice'
+import { ScopeGuard } from '../components/ScopeGuard'
 
 const TARIFF_PARAM = 'tariff'
 const VERSION_PARAM = 'version'
@@ -41,18 +43,20 @@ export function TariffsPage() {
     const queryClient = useQueryClient()
     const { pushToast } = useToast()
     const { dialog, confirm, handleConfirm, handleCancel, isLoading: dialogLoading } = useConfirmDialog()
+    const { user } = useAuth()
+    const cancelConfirmation = useEffectEvent(handleCancel)
     const { settings } = useAppSettings()
     const { selectedZevId, selectedZev } = useManagedZev()
     const { t } = useTranslation()
-    const { isZevScope, canManage } = useCommunityAccess()
+    const { isZevScope, canWriteSelectedCommunity } = useCommunityAccess()
     const isManagedScope = isZevScope
-    const readOnly = !canManage
+    const readOnly = !canWriteSelectedCommunity
     const [validityFilter, setValidityFilter] = useState<TariffValidityFilter>('valid')
     const [showImportModal, setShowImportModal] = useState(false)
     const [searchParams, setSearchParams] = useSearchParams()
     // Shared with the validity badge on each card, so the filter and the badge
     // can never disagree about whether a tariff is in force.
-    const today = useMemo(() => todayBusinessIso(), [])
+    const today = todayBusinessIso()
 
     // One query, not three: the series endpoint already groups versions, names
     // the active one, detects gaps, and nests each version's price bands. The
@@ -61,11 +65,12 @@ export function TariffsPage() {
     const seriesQuery = useQuery({
         queryKey: queryKeys.tariffs.series(selectedZevId || undefined),
         queryFn: () => fetchTariffSeries(isManagedScope ? selectedZevId || undefined : undefined),
+        enabled: !!selectedZevId && selectedZev?.id === selectedZevId,
     })
 
     const allSeries = useMemo(
         () => (seriesQuery.data ?? []).filter(
-            (series) => !isManagedScope || !selectedZevId || series.zev === selectedZevId,
+            (series) => !isManagedScope || series.zev === selectedZevId,
         ),
         [seriesQuery.data, isManagedScope, selectedZevId],
     )
@@ -218,6 +223,7 @@ export function TariffsPage() {
         confirmDeletePeriod,
     } = useTariffCrud({
         selectedZevId,
+        canWrite: !readOnly,
         tariffs,
         periods,
         bandableTariffs,
@@ -228,7 +234,12 @@ export function TariffsPage() {
         t,
     })
 
-    const versions = useTariffVersions({ selectedZevId, queryClient, pushToast, t })
+    const versions = useTariffVersions({ selectedZevId, canWrite: !readOnly, queryClient, pushToast, t })
+
+    useEffect(() => {
+        setShowImportModal(false)
+        cancelConfirmation()
+    }, [readOnly, selectedZevId, user?.id])
 
     // Scope follows the page's own validity filter, so the PDF matches what
     // the operator is currently looking at — "current tariffs" or "every
@@ -247,28 +258,13 @@ export function TariffsPage() {
         />
     )
 
-    if (seriesQuery.isLoading) {
-        return (
-            <div className="page-stack">
-                {header}
-                <PageSkeleton variant="table" />
-            </div>
-        )
-    }
-
-    if (seriesQuery.isError) {
-        return (
-            <div className="page-stack">
-                {header}
-                <Notice tone="error" onRetry={() => void seriesQuery.refetch()} isRetrying={seriesQuery.isFetching}>{t('common.error')}</Notice>
-            </div>
-        )
-    }
-
     return (
         <div className="page-stack">
             {header}
-
+            <ScopeGuard skeleton="table">
+            {seriesQuery.isLoading ? <PageSkeleton variant="table" /> : seriesQuery.isError ? (
+                <Notice tone="error" onRetry={() => void seriesQuery.refetch()} isRetrying={seriesQuery.isFetching}>{t('common.error')}</Notice>
+            ) : <>
             <TariffToolbar
                 tariffCount={tariffs.length}
                 energyTariffCount={energyTariffs.length}
@@ -373,6 +369,8 @@ export function TariffsPage() {
             {dialog && (
                 <ConfirmDialog {...dialog} isLoading={dialogLoading} onConfirm={handleConfirm} onCancel={handleCancel} />
             )}
+            </>}
+            </ScopeGuard>
         </div>
     )
 }

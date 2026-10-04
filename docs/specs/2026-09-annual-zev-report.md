@@ -206,7 +206,7 @@ export-job flow (ADR 0017); only its location in the UI changed.
 
 Order when `isZevScopedRole && hasValidZev`:
 
-1. Year `<select>` (last 5 years, default last year), disabled while the tax
+1. Shared `YearPicker` (last 5 years, default last year), disabled while the tax
    overview downloads or the ZIP card reports busy (`zipBusy` via
    `onBusyChange`).
 2. `<AnnualReportSection zevId={selectedZevId} year={selectedYear} />`
@@ -214,6 +214,12 @@ Order when `isZevScopedRole && hasValidZev`:
    the tax overview `YearDownloadCard` and `AnnualStatementsExportCard`.
 
 The `pages.reports.ownerComing` placeholder card and its keys are gone.
+
+`ReportsPage` supplies the year range/default and reconciles a stale selection
+to the previous year on a later render after rollover. `YearPicker` only
+renders the native control. `ParticipantYearDocuments` uses the same control
+with its associated visible Year label and existing id; changing year still
+aborts/disposes old document state and generates only the active document.
 
 ### 7.2 AnnualReportSection
 

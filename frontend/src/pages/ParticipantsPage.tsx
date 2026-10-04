@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
 import { ParticipantCardsSection } from '../features/participants/ParticipantCardsSection'
@@ -27,6 +27,7 @@ import {
 import { formatApiError } from '../lib/api/errors'
 import { useAppSettings } from '../lib/appSettings'
 import { useAuth } from '../lib/auth'
+import { useWriteScope } from '../lib/useWriteScope'
 import { useManagedZev } from '../lib/managedZev'
 import { useCommunityAccess } from '../lib/communityAccess'
 import { queryKeys } from '../lib/api/queryKeys'
@@ -39,6 +40,7 @@ import { getTitleLabelMap } from '../lib/participantTitle'
 import type { Participant, ParticipantInput } from '../types/api'
 import { PageHeader } from '../components/PageHeader'
 import { Notice } from '../components/Notice'
+import { ScopeGuard } from '../components/ScopeGuard'
 
 function getParticipantValidityState(participant: Participant, todayIso: string): ParticipantValidityState {
     if (participant.valid_from > todayIso) return 'upcoming'
@@ -52,18 +54,21 @@ export function ParticipantsPage() {
     const { dialog, confirm, handleConfirm, handleCancel, isLoading: dialogLoading } = useConfirmDialog()
     const { user } = useAuth()
     const { settings } = useAppSettings()
-    const { selectedZevId, selectedZev } = useManagedZev()
+    const { selectedZevId, selectedZev, isLoading: scopeLoading } = useManagedZev()
     const { t } = useTranslation()
     const [searchParams, setSearchParams] = useSearchParams()
     const focusId = searchParams.get('focus')
     const focusField = searchParams.get('field')
     const [highlightedId, setHighlightedId] = useState<string | null>(null)
-    const { isZevScope, canManage } = useCommunityAccess()
+    const { isZevScope, canWriteSelectedCommunity } = useCommunityAccess()
+    const { scope, isCurrent, assertWritable } = useWriteScope({ selectedZevId, canWrite: canWriteSelectedCommunity, accountId: user?.id }, t('common.error'))
+    const cancelConfirmation = useEffectEvent(handleCancel)
     const isManagedScope = isZevScope
     const accountLinking = useParticipantAccountLinking({ isAdmin: user?.role === 'admin', confirm })
     const { data, isLoading, isError, isFetching, refetch } = useQuery({
         queryKey: queryKeys.zev.participants(selectedZevId || undefined),
         queryFn: fetchParticipants,
+        enabled: !!selectedZevId && selectedZev?.id === selectedZevId,
     })
     // Off by default (#796) — the map section renders only once this is
     // confirmed true, rather than rendering with no data while loading or on
@@ -83,31 +88,47 @@ export function ParticipantsPage() {
     const titleLabelByValue = useMemo(() => getTitleLabelMap(t), [t])
 
     const createMutation = useMutation({
-        mutationFn: createParticipant,
-        onSuccess: () => {
+        mutationFn: ({ payload, scope: submittingScope }: { payload: ParticipantInput; scope: typeof scope }) => {
+            assertWritable(submittingScope)
+            return createParticipant(payload)
+        },
+        onSuccess: (_, variables) => {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(variables.scope.selectedZevId || undefined) })
+            if (!isCurrent(variables.scope)) return
             setShowModal(false)
             pushToast(t('pages.participants.messages.created'), 'success')
-            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(selectedZevId || undefined) })
         },
-        onError: (error) => pushToast(formatApiError(error, t('pages.participants.messages.createFailed')), 'error'),
+        onError: (error, variables) => {
+            if (isCurrent(variables.scope)) pushToast(formatApiError(error, t('pages.participants.messages.createFailed')), 'error')
+        },
     })
 
     const updateMutation = useMutation({
-        mutationFn: ({ id, payload }: { id: string; payload: Partial<ParticipantInput> }) => updateParticipant(id, payload),
-        onSuccess: () => {
+        mutationFn: ({ id, payload, scope: submittingScope }: { id: string; payload: Partial<ParticipantInput>; scope: typeof scope }) => {
+            assertWritable(submittingScope)
+            return updateParticipant(id, payload)
+        },
+        onSuccess: (_, variables) => {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(variables.scope.selectedZevId || undefined) })
+            if (!isCurrent(variables.scope)) return
             setEditingId(null)
             setShowModal(false)
             pushToast(t('pages.participants.messages.updated'), 'success')
-            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(selectedZevId || undefined) })
         },
-        onError: (error) => pushToast(formatApiError(error, t('pages.participants.messages.updateFailed')), 'error'),
+        onError: (error, variables) => {
+            if (isCurrent(variables.scope)) pushToast(formatApiError(error, t('pages.participants.messages.updateFailed')), 'error')
+        },
     })
 
     const deleteMutation = useMutation({
-        mutationFn: deleteParticipant,
-        onSuccess: () => {
+        mutationFn: ({ id, scope: submittingScope }: { id: string; scope: typeof scope }) => {
+            assertWritable(submittingScope)
+            return deleteParticipant(id)
+        },
+        onSuccess: (_, variables) => {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(variables.scope.selectedZevId || undefined) })
+            if (!isCurrent(variables.scope)) return
             pushToast(t('pages.participants.messages.deleted'), 'success')
-            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(selectedZevId || undefined) })
         },
     })
 
@@ -117,8 +138,14 @@ export function ParticipantsPage() {
     }
 
     const sendLinkMutation = useMutation({
-        mutationFn: sendOnboardingLink,
-        onSuccess: (result, participantId) => {
+        mutationFn: ({ participantId, scope: submittingScope }: { participantId: string; scope: typeof scope }) => {
+            assertWritable(submittingScope)
+            return sendOnboardingLink(participantId)
+        },
+        onSuccess: (result, variables) => {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(variables.scope.selectedZevId) })
+            if (!isCurrent(variables.scope)) return
+            const { participantId } = variables
             const participant = data?.find((entry) => entry.id === participantId)
             pushToast(
                 t('pages.participants.messages.onboardingLinkSent', { email: participant?.email || '' }),
@@ -130,32 +157,46 @@ export function ParticipantsPage() {
                 onboardingExpiresAt: result.onboarding_expires_at,
                 message: t('pages.participants.messages.onboardingLinkSentDetail'),
             })
-            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(selectedZevId || undefined) })
         },
-        onError: (error) => pushToast(formatApiError(error, t('pages.participants.messages.onboardingLinkFailed')), 'error'),
+        onError: (error, variables) => {
+            if (isCurrent(variables.scope)) pushToast(formatApiError(error, t('pages.participants.messages.onboardingLinkFailed')), 'error')
+        },
     })
 
     const copyLinkMutation = useMutation({
-        mutationFn: getOnboardingLink,
-        onSuccess: (result, participantId) => {
+        mutationFn: ({ participantId, scope: submittingScope }: { participantId: string; scope: typeof scope }) => {
+            assertWritable(submittingScope)
+            return getOnboardingLink(participantId)
+        },
+        onSuccess: (result, variables) => {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(variables.scope.selectedZevId) })
+            if (!isCurrent(variables.scope)) return
+            const { participantId } = variables
             setOnboardingNotice({
                 participantName: participantDisplayName(participantId),
                 onboardingUrl: result.onboarding_url,
                 onboardingExpiresAt: result.onboarding_expires_at,
                 message: t('pages.participants.messages.onboardingLinkCopiedDetail'),
             })
-            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(selectedZevId || undefined) })
         },
-        onError: (error) => pushToast(formatApiError(error, t('pages.participants.messages.onboardingLinkFailed')), 'error'),
+        onError: (error, variables) => {
+            if (isCurrent(variables.scope)) pushToast(formatApiError(error, t('pages.participants.messages.onboardingLinkFailed')), 'error')
+        },
     })
 
     const revokeLinkMutation = useMutation({
-        mutationFn: revokeOnboardingLink,
-        onSuccess: () => {
-            pushToast(t('pages.participants.messages.onboardingLinkRevoked'), 'success')
-            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(selectedZevId || undefined) })
+        mutationFn: ({ participantId, scope: submittingScope }: { participantId: string; scope: typeof scope }) => {
+            assertWritable(submittingScope)
+            return revokeOnboardingLink(participantId)
         },
-        onError: (error) => pushToast(formatApiError(error, t('pages.participants.messages.onboardingLinkFailed')), 'error'),
+        onSuccess: (_, variables) => {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(variables.scope.selectedZevId) })
+            if (!isCurrent(variables.scope)) return
+            pushToast(t('pages.participants.messages.onboardingLinkRevoked'), 'success')
+        },
+        onError: (error, variables) => {
+            if (isCurrent(variables.scope)) pushToast(formatApiError(error, t('pages.participants.messages.onboardingLinkFailed')), 'error')
+        },
     })
 
     const onboardingLinkPending = sendLinkMutation.isPending || copyLinkMutation.isPending || revokeLinkMutation.isPending
@@ -187,23 +228,35 @@ export function ParticipantsPage() {
         setModalFocusField(null)
     }
 
+    useLayoutEffect(() => {
+        setShowModal(false)
+        setEditingId(null)
+        setModalFocusField(null)
+        setOnboardingNotice(null)
+    }, [scope])
+
+    useEffect(() => {
+        cancelConfirmation()
+    }, [scope])
+
     // Destination contract (spec §7) for participant-validity links
     // (`?focus=<id>&field=valid_to`). Consuming the URL params (below) must
     // not tear down the highlight timers, so consumption and the scroll/
     // flash lifecycle are separate effects.
     useEffect(() => {
         if (!focusId || isLoading) return
+        if (focusField === 'valid_to' && (scopeLoading || (!!selectedZevId && !selectedZev))) return
         const inScope = (data ?? []).some(
             (participant) =>
                 participant.id === focusId
-                && (!isManagedScope || !selectedZevId || participant.zev === selectedZevId),
+                && (!isManagedScope || participant.zev === selectedZevId),
         )
         if (!inScope) return
         // A stale search/readiness filter may keep the card off the page.
         setSearchTerm('')
         setReadinessFilter('all')
         setHighlightedId(focusId)
-        if (focusField === 'valid_to') {
+        if (focusField === 'valid_to' && canWriteSelectedCommunity) {
             const target = (data ?? []).find((participant) => participant.id === focusId)
             if (target) {
                 setEditingId(target.id)
@@ -218,7 +271,7 @@ export function ParticipantsPage() {
         params.delete('field')
         setSearchParams(params, { replace: true })
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [focusId, focusField, isLoading, data, isManagedScope, selectedZevId])
+    }, [focusId, focusField, isLoading, data, isManagedScope, selectedZevId, selectedZev, scopeLoading, canWriteSelectedCommunity])
 
     useEffect(() => {
         if (!highlightedId) return
@@ -234,17 +287,18 @@ export function ParticipantsPage() {
     }, [highlightedId])
 
     function submit(payload: ParticipantInput) {
-        if (!selectedZevId) {
+        if (!isCurrent(scope)) return
+        if (!selectedZevId || !canWriteSelectedCommunity) {
             pushToast(t('pages.participants.messages.selectZev'), 'error')
             return
         }
 
         if (editingId) {
-            updateMutation.mutate({ id: editingId, payload: { ...payload, zev: selectedZevId } })
+            updateMutation.mutate({ id: editingId, payload: { ...payload, zev: selectedZevId }, scope })
             return
         }
 
-        createMutation.mutate({ ...payload, zev: selectedZevId })
+        createMutation.mutate({ payload: { ...payload, zev: selectedZevId }, scope })
     }
 
     function participantWarnings(participant: Participant): string[] {
@@ -272,21 +326,7 @@ export function ParticipantsPage() {
         />
     )
 
-    if (isLoading)
-        return (
-            <div className="page-stack">
-                {header}
-                <PageSkeleton variant="cardList" />
-            </div>
-        )
-    if (isError) return (
-        <div className="page-stack">
-            {header}
-            <Notice tone="error" onRetry={() => void refetch()} isRetrying={isFetching}>{t('common.error')}</Notice>
-        </div>
-    )
-
-    const participants = (data ?? []).filter((participant) => !isManagedScope || !selectedZevId || participant.zev === selectedZevId)
+    const participants = (data ?? []).filter((participant) => !isManagedScope || participant.zev === selectedZevId)
     const editingParticipant = participants.find((participant) => participant.id === editingId)
     const todayIso = todayBusinessIso()
     const participantCards = [...participants]
@@ -336,7 +376,8 @@ export function ParticipantsPage() {
 
     function downloadContract(participant: Participant) {
         // A viewer may read the issued contract but not issue a new version.
-        const download = canManage ? downloadParticipantContractPdf : downloadIssuedParticipantContractPdf
+        // Managers of a disabled ZEV keep read access only.
+        const download = canWriteSelectedCommunity ? downloadParticipantContractPdf : downloadIssuedParticipantContractPdf
         void download(
             participant.id,
             `contract_${participant.last_name}_${participant.first_name}.pdf`,
@@ -349,14 +390,19 @@ export function ParticipantsPage() {
             message: t('pages.participants.deleteMessage', { name: displayName }),
             confirmText: t('pages.participants.deleteConfirm'),
             isDangerous: true,
-            onConfirm: () => deleteMutation.mutate(participant.id),
+            onConfirm: () => {
+                if (scope.canWrite && isCurrent(scope)) deleteMutation.mutate({ id: participant.id, scope })
+            },
         })
     }
 
     return (
         <div className="page-stack">
             {header}
-
+            <ScopeGuard>
+            {isLoading ? <PageSkeleton variant="cardList" /> : isError ? (
+                <Notice tone="error" onRetry={() => void refetch()} isRetrying={isFetching}>{t('common.error')}</Notice>
+            ) : <>
             {onboardingNotice && <ParticipantOnboardingNotice notice={onboardingNotice} onDismiss={() => setOnboardingNotice(null)} />}
 
             <ParticipantToolbar
@@ -368,7 +414,7 @@ export function ParticipantsPage() {
                 onSearchTermChange={setSearchTerm}
                 onReadinessFilterChange={setReadinessFilter}
                 onOpenCreateModal={openCreateModal}
-                readOnly={!canManage}
+                readOnly={!canWriteSelectedCommunity}
             />
 
             <ParticipantFormModal
@@ -404,9 +450,9 @@ export function ParticipantsPage() {
                 onClearFilters={clearFilters}
                 onStartEdit={startEdit}
                 onDownloadContract={downloadContract}
-                onSendOnboardingLink={(participantId) => sendLinkMutation.mutate(participantId)}
-                onCopyOnboardingLink={(participantId) => copyLinkMutation.mutate(participantId)}
-                onRevokeOnboardingLink={(participantId) => revokeLinkMutation.mutate(participantId)}
+                onSendOnboardingLink={(participantId) => sendLinkMutation.mutate({ participantId, scope })}
+                onCopyOnboardingLink={(participantId) => copyLinkMutation.mutate({ participantId, scope })}
+                onRevokeOnboardingLink={(participantId) => revokeLinkMutation.mutate({ participantId, scope })}
                 onConfirmDelete={confirmDeleteParticipant}
                 canLinkAccount={accountLinking.canLink}
                 canUnlinkAccount={accountLinking.canUnlink}
@@ -417,7 +463,7 @@ export function ParticipantsPage() {
                 onboardingLinkPending={onboardingLinkPending}
                 deletePendingOrDialogLoading={deleteMutation.isPending || dialogLoading}
                 focusParticipantId={highlightedId}
-                readOnly={!canManage}
+                readOnly={!canWriteSelectedCommunity}
             />
 
             {accountLinking.linkModal}
@@ -430,6 +476,8 @@ export function ParticipantsPage() {
                     onCancel={handleCancel}
                 />
             )}
+            </>}
+            </ScopeGuard>
         </div>
     )
 }

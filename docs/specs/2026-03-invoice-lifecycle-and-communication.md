@@ -573,6 +573,13 @@ The field catalog (`field_catalog_data.py`) documents both the
 | manager / viewer grant | Every invoice of the ZEVs they hold an active grant for (`zev.access.viewable_zev_ids`, #761). A participant link adds the caller's own sent invoices of other ZEVs (union) |
 | participant link | Only invoices where `participant.user == user` **and** the invoice has been sent to them: `sent_at` is set, or `status` is `sent`/`paid` (`invoices.models.sent_to_participant()`, #861). Drafts, approved-but-unsent invoices and cancelled drafts are invisible — list, detail and every detail action (`/pdf` included) answer as for an out-of-scope invoice (404). A sent invoice that was later cancelled stays visible, shown as cancelled. Applied through `InvoiceViewSet.participant_visible`, so only the participant branch of the scoping is narrowed. `participant_access_survives_end = True`: a former participant (row `valid_to` in the past) keeps exactly these invoices (#761) |
 
+The personal invoice list applies both own-participant membership and sent
+visibility (`sent_at` set or status `sent`/`paid`) to the role-union API response.
+Previously sent, subsequently cancelled invoices remain visible. PDF polling
+runs only for pending PDFs on eligible personal rows. `Invoice.sent_at` mirrors
+the existing nullable timestamp in `InvoiceListSerializer`. Admin invoice
+emptiness renders only after a successful list result.
+
 ### 6.2 Action permissions
 
 | Action | `admin` | manager | viewer | `participant` |
@@ -1005,9 +1012,38 @@ historical alerts, ordering, running periods, independent community notices,
 invoice deduplication, backend-selected actions and delivery count deduplication.
 The former `/billing/periods` route still redirects to Overview.
 
-InvoicesPage keeps its standalone title outside ScopeGuard; embedded billing
-content inherits the hub title. Unresolved period dates and initial overview
-queries render a table skeleton, before any confirmed empty result.
+`InvoicesPage` renders its standalone title and `InvoicesContent`; the Billing
+hub consumes that header-free body directly. ScopeGuard stays in the body.
+`useBillingPeriodParams` waits for the selected ZEV record, then accepts exact
+calendar-valid URL ranges starting on/after community start, including
+historical periods before the current interval's aligned floor. Invalid or
+absent dates fall back to the previous complete period, bounded by the first
+aligned period. Scope/interval changes revalidate before issuing requests;
+period edits replace history and preserve unrelated query parameters/hash.
+Unresolved period dates and initial overview queries render a table skeleton,
+before any confirmed empty result. Failed refetches retain cached rows with
+a retry warning.
+
+The three invoice lists share presentation through
+`components/InvoicePresentation.tsx`. Each list retains its row model and pagination:
+period rows retain participants without invoices, metering details, eligibility
+and workflow actions; My invoices retains own invoices that have been sent
+(including later cancelled invoices) across memberships and read-only actions —
+the unscoped list is the union of management/viewer access and the caller's
+participant invoices, so the page keeps only rows whose participant matches
+the account's membership participant IDs; `AdminInvoicesContent`
+retains sorting, filtering, pagination, stable row IDs, and confirmed deletion. Invoice numbers link to detail;
+period links carry their exact return period, own links carry `/me/invoices`,
+and platform links return admins to `/admin/invoices`. Money cells use
+`formatChf`. Delivery cells prefer `last_email_status` and otherwise use the
+latest nested log, without embedding history controls. Shared PDF cells retain
+pending (including local inline generation), failed-without-file, missing and
+ready distinctions; a stored file remains usable after a failed render, and on
+My invoices also during regeneration (`keepExistingDuringPending`) — that
+query polls while pending PDFs exist.
+My invoices shows these states with labelled PDF actions and retains cached
+rows after refetch failure. Eligibility and read/write visibility stay with
+the existing action helpers and consumers.
 BillingEmailsPage keeps ScopeGuard mounted while its invoice query loads or
 fails, so cached-scope warnings and retry remain available.
 

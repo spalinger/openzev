@@ -238,7 +238,7 @@ describe('MyInvoicesPage (participant own invoices)', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         mockAuth.mockReturnValue({
-            user: { id: 5, role: 'user', username: 'p@example.com' },
+            user: { id: 5, role: 'user', username: 'p@example.com', memberships: [{ zev: 'z0', zev_name: 'Z', zev_disabled: false, access: null, participants: [{ id: 'p1', valid_from: '2026-01-01', valid_to: null, live: true }] }] },
         })
     })
 
@@ -247,6 +247,7 @@ describe('MyInvoicesPage (participant own invoices)', () => {
             {
                 id: '7',
                 invoice_number: 'RE-2026-001',
+                participant: 'p1',
                 period_start: '2026-08-01',
                 period_end: '2026-08-31',
                 total_chf: '42.00',
@@ -270,7 +271,7 @@ describe('MyInvoicesPage (participant own invoices)', () => {
 
     it('still lists invoices that have no PDF yet, with the PDF action hidden', async () => {
         mockFetchInvoices.mockResolvedValue([
-            { id: '8', invoice_number: 'RE-2026-002', status: 'draft', pdf_url: null, total_chf: '1', period_start: '2026-08-01', period_end: '2026-08-31' },
+            { id: '8', invoice_number: 'RE-2026-002', participant: 'p1', status: 'sent', pdf_url: null, total_chf: '1', period_start: '2026-08-01', period_end: '2026-08-31' },
         ])
         const page = render(createElement(MyInvoicesPage), true)
         await act(async () => {
@@ -279,7 +280,7 @@ describe('MyInvoicesPage (participant own invoices)', () => {
         })
         // List membership never depends on PDF availability.
         expect(page.text()).toContain('RE-2026-002')
-        expect(page.text()).toContain('invoice.status.draft')
+        expect(page.text()).toContain('invoice.status.sent')
         expect(page.container.querySelector('a[href="/billing/invoices/8"]')).not.toBeNull()
         expect(page.text()).not.toContain('pages.myInvoices.empty.title')
         // But the PDF button is conditional on a stored document.
@@ -304,7 +305,7 @@ describe('MyInvoicesPage (participant own invoices)', () => {
             user: {
                 id: 5, role: 'user', username: 'p@example.com',
                 memberships: ['First ZEV', 'Second ZEV'].map((name, index) => ({
-                    zev: `z${index}`, zev_name: name, zev_disabled: false, access: null, participants: [],
+                    zev: `z${index}`, zev_name: name, zev_disabled: false, access: null, participants: [{ id: 'p9', valid_from: '2026-01-01', valid_to: null, live: true }],
                 })),
             },
         })
@@ -312,6 +313,7 @@ describe('MyInvoicesPage (participant own invoices)', () => {
             {
                 id: '9',
                 invoice_number: 'RE-2026-009',
+                participant: 'p9',
                 period_start: '2026-08-01',
                 period_end: '2026-08-31',
                 total_chf: '42.00',

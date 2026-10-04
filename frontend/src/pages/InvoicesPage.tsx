@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { InvoicePeriodRowsTable } from '../features/invoices/InvoicePeriodRowsTable'
 import { InvoiceBatchToolbar } from '../features/invoices/InvoiceBatchToolbar'
@@ -16,10 +15,9 @@ import {
 import { PeriodSelector } from '../components/PeriodSelector'
 import {
     firstAlignedBillingPeriod,
-    getPreviousBillingPeriod,
-    invoiceRangeFromParams,
     type BillingInterval,
 } from '../lib/billingPeriod'
+import { useBillingPeriodParams } from '../lib/useBillingPeriodParams'
 import { fetchInvoicePeriodOverview } from '../lib/api/invoices'
 import { queryKeys } from '../lib/api/queryKeys'
 import { useAuth } from '../lib/auth'
@@ -30,15 +28,26 @@ import { Notice } from '../components/Notice'
 import { PageSkeleton } from '../components/PageSkeleton'
 import { ScopeGuard } from '../components/ScopeGuard'
 
-/**
- * The period-scoped invoice table (Billing hub → Invoices tab since phase 3).
- * `embedded` drops the page header because the hub renders it.
- */
-export function InvoicesPage({ embedded = false }: { embedded?: boolean }) {
+export function InvoicesPage() {
+    const { t } = useTranslation()
+    const { selectedZev } = useManagedZev()
+    return (
+        <div className="page-stack">
+            <PageHeader
+                eyebrow={selectedZev?.name}
+                title={t('pages.invoices.title')}
+                description={t('pages.invoices.description')}
+            />
+            <InvoicesContent />
+        </div>
+    )
+}
+
+/** Period-scoped billing body; its standalone page or hub owns the header. */
+export function InvoicesContent() {
     const { t } = useTranslation()
     const { selectedZevId, selectedZev } = useManagedZev()
     const { user } = useAuth()
-    const [searchParams, setSearchParams] = useSearchParams()
 
     const interval: BillingInterval = (selectedZev?.billing_interval as BillingInterval) ?? 'monthly'
     const communityStart = selectedZev?.start_date ?? null
@@ -47,10 +56,16 @@ export function InvoicesPage({ embedded = false }: { embedded?: boolean }) {
         [communityStart, interval],
     )
 
-    const [period, setPeriod] = useState<{ period_start: string; period_end: string }>({
-        period_start: '',
-        period_end: '',
+    const { period: range, setPeriod, isReady: periodReady } = useBillingPeriodParams({
+        interval,
+        ready: !!selectedZev,
+        scopeId: selectedZevId,
+        fallback: 'previous-complete',
+        minimumRangeStart: communityStart,
+        minimumFallback: minPeriod,
+        scopeChange: 'preserve-url',
     })
+    const period = { period_start: range.from, period_end: range.to }
 
     // Declared above the query because it paces it; the query's own rows are
     // what tell it when to stop, so the interval reads them from the query.
@@ -58,37 +73,12 @@ export function InvoicesPage({ embedded = false }: { embedded?: boolean }) {
 
     const [deleteModalInvoiceId, setDeleteModalInvoiceId] = useState<string | null>(null)
 
-    // Destination contract: the URL's exact period wins (cockpit + historical
-    // attention links); otherwise the latest completed period.
+    // A deletion dialog targets one community's invoice: never let it survive
+    // an account, community, write-access, or period change.
+    const { isZevScope: isManagedScope, canWriteSelectedCommunity } = useCommunityAccess()
     useEffect(() => {
-        if (!selectedZevId) {
-            setPeriod({ period_start: '', period_end: '' })
-            return
-        }
-        const fromParams = invoiceRangeFromParams(
-            searchParams.get('period_start'),
-            searchParams.get('period_end'),
-            communityStart,
-        )
-        if (fromParams) {
-            setPeriod({ period_start: fromParams.from, period_end: fromParams.to })
-            return
-        }
-        const previous = getPreviousBillingPeriod(interval)
-        const useFirst = !!minPeriod && previous.from < minPeriod.from
-        const fallback = useFirst && minPeriod
-            ? { period_start: minPeriod.from, period_end: minPeriod.to }
-            : { period_start: previous.from, period_end: previous.to }
-        setPeriod(fallback)
-    }, [selectedZevId, interval, searchParams, minPeriod, communityStart])
-
-    function handlePeriodChange(next: { period_start: string; period_end: string }) {
-        setPeriod(next)
-        const params = new URLSearchParams(searchParams)
-        params.set('period_start', next.period_start)
-        params.set('period_end', next.period_end)
-        setSearchParams(params, { replace: true })
-    }
+        setDeleteModalInvoiceId(null)
+    }, [user?.id, selectedZevId, canWriteSelectedCommunity, period.period_start, period.period_end])
 
     const periodOverviewQuery = useQuery({
         queryKey: queryKeys.invoices.periodOverview(selectedZevId, period.period_start, period.period_end),
@@ -98,7 +88,7 @@ export function InvoicesPage({ embedded = false }: { embedded?: boolean }) {
                 period_start: period.period_start,
                 period_end: period.period_end,
             }),
-        enabled: !!selectedZevId && !!period.period_start && !!period.period_end,
+        enabled: periodReady && !!selectedZevId,
         // Poll only while an action's queued PDFs are still outstanding, and
         // read that from the query's own latest rows rather than from state
         // derived below — otherwise the interval would lag a render behind.
@@ -156,12 +146,12 @@ export function InvoicesPage({ embedded = false }: { embedded?: boolean }) {
         return row.invoice.pdf_status === 'pending'
     }
 
-    const { isZevScope: isManagedScope, canManage } = useCommunityAccess()
     // A viewer sees the period and may download the PDFs, but generates,
     // approves, sends and deletes nothing (#761): only navigation stays.
+    // Managers of a disabled ZEV keep read access only.
     const READ_ONLY_ROW_ITEMS = new Set(['review-conflict'])
-    const primaryRowAction = canManage ? getPrimaryRowAction : () => null
-    const rowMenuItems = canManage
+    const primaryRowAction = canWriteSelectedCommunity ? getPrimaryRowAction : () => null
+    const rowMenuItems = canWriteSelectedCommunity
         ? getRowMenuItems
         : (row: Parameters<typeof getRowMenuItems>[0]) => getRowMenuItems(row).filter((item) => READ_ONLY_ROW_ITEMS.has(item.key))
 
@@ -182,26 +172,27 @@ export function InvoicesPage({ embedded = false }: { embedded?: boolean }) {
                     title={selectedZev?.name}
                     allowCustomRange={false}
                     minFrom={minPeriod?.from}
-                    onChange={({ from, to }) => handlePeriodChange({ period_start: from, period_end: to })}
+                    onChange={setPeriod}
                 />
             </section>
 
+            {periodOverviewQuery.isError && periodOverviewQuery.data && (
+                <Notice tone="warning" onRetry={() => void periodOverviewQuery.refetch()} isRetrying={periodOverviewQuery.isFetching}>{t('pages.invoices.failed')}</Notice>
+            )}
             {!period.period_start || !period.period_end || periodOverviewQuery.isLoading ? (
                 <PageSkeleton variant="table" />
-            ) : periodOverviewQuery.isError ? (
+            ) : periodOverviewQuery.isError && !periodOverviewQuery.data ? (
                 <Notice tone="error" onRetry={() => void periodOverviewQuery.refetch()} isRetrying={periodOverviewQuery.isFetching}>{t('pages.invoices.failed')}</Notice>
             ) : rows.length === 0 ? (
                 <InvoicesEmptyState />
             ) : (
                 <>
-                    {/* Defense-in-depth: the /invoices route is already
-                        owner/admin-only, but keep batch actions hidden from
-                        participant/guest roles even if routing changes. */}
+                    {/* Batch actions stay hidden from read-only roles even if routing changes. */}
                     {isManagedScope && (
                         <InvoiceBatchToolbar
                             stats={batchStats}
-                            recommendedAction={canManage ? recommendedBatchAction : null}
-                            menuItems={canManage ? batchMenuItems : []}
+                            recommendedAction={canWriteSelectedCommunity ? recommendedBatchAction : null}
+                            menuItems={canWriteSelectedCommunity ? batchMenuItems : []}
                             anyBatchPending={anyBatchPending}
                             pdfCount={stats.pdfCount}
                             onDownloadAll={() => downloadAllPdfsMutation.mutate()}
@@ -239,16 +230,5 @@ export function InvoicesPage({ embedded = false }: { embedded?: boolean }) {
         </>
     )
 
-    return (
-        <div className="page-stack">
-            {!embedded && (
-                <PageHeader
-                    eyebrow={selectedZev?.name}
-                    title={t('pages.invoices.title')}
-                    description={t('pages.invoices.description')}
-                />
-            )}
-            <ScopeGuard skeleton="tableRows">{content}</ScopeGuard>
-        </div>
-    )
+    return <ScopeGuard skeleton="tableRows">{content}</ScopeGuard>
 }

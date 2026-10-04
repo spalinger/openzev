@@ -21,7 +21,7 @@ vi.mock('../src/lib/api/invoices', async importOriginal => ({
     fetchInvoicePeriodOverview: vi.fn(() => new Promise(() => {})),
 }))
 
-import { InvoicesPage } from '../src/pages/InvoicesPage'
+import { InvoicesContent, InvoicesPage } from '../src/pages/InvoicesPage'
 
 const cleanups: Array<() => void> = []
 afterEach(() => cleanups.splice(0).forEach(cleanup => cleanup()))
@@ -39,7 +39,7 @@ async function render(embedded = false) {
                 skeleton: !!container.querySelector('.skeleton-block'),
             })
         })
-        return createElement(InvoicesPage, { embedded })
+        return createElement(embedded ? InvoicesContent : InvoicesPage)
     }
     await act(async () => root.render(
         createElement(MemoryRouter, null,
@@ -82,7 +82,7 @@ describe('invoice page states', () => {
         expect(page.container.querySelectorAll('h1')).toHaveLength(1)
     })
 
-    it('leaves the title to the host when embedded', async () => {
+    it('leaves the title to the host when rendering the shared body', async () => {
         state.scope = { selectedZevId: '', selectedZev: null, isLoading: false, isError: false, refetch: vi.fn() }
         const page = await render(true)
         expect(page.container.querySelector('h1')).toBeNull()

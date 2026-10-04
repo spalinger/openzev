@@ -1428,7 +1428,7 @@ reaches every ZEV-scope route and sees its pages read-only
 | `/metering-points` | ZEV scope, `participant` | alias → `/metering/points` |
 | `/metering/chart` | ZEV scope, `participant` | `MeteringChartPage` (`tab="chart"`, guarded against former participants; tab switches preserve state) |
 | `/metering/quality` | ZEV scope | `MeteringChartPage` (`tab="quality"`) — intentional participant restriction: quality shows whole-ZEV severity counts, participant names, and overlap warnings (operator view; backend role-scoping means no leak either way) |
-| `/metering/imports` | ZEV scope | `MeteringChartPage` (`tab="imports"`, embedding `ImportsPage embedded`) |
+| `/metering/imports` | ZEV scope | `MeteringChartPage` (`tab="imports"`, consuming the header-free `ImportsContent` body) |
 | `/metering-data` | any authenticated | alias → `/metering/chart`, except `?tab=quality` → guarded `/metering/quality`; `tab` is always stripped, remaining params preserved |
 | `/imports` | ZEV scope | alias → `/metering/imports` (query preserved) |
 | `/tariffs` | ZEV scope | `TariffsPage` |
@@ -1453,6 +1453,16 @@ reaches every ZEV-scope route and sees its pages read-only
 Legacy admin routes `/admin/settings/regional`, `/admin/settings/vat`,
 `/admin/features`, and `/admin/oauth` redirect into tabs on
 `/admin/system-settings` and remain admin-only.
+
+Shared hub URL edits use `usePageNavigation`: routed tabs in Billing, Metering,
+Admin Accounts, Admin Overview, Templates and ZEV Settings replace history and
+retain query parameters/hash. Templates updates `template`; Metering removes
+the obsolete `tab` parameter. Account and System keep query-based tabs and
+push changes into history while preserving unrelated parameters/hash. Account
+keeps hidden panels mounted for one-time secrets; existing active-panel and
+shared settings-draft behavior in the other hubs remains intact. Standalone
+invoice/import wrappers render a header plus the same body the hub consumes,
+so scope/loading failures retain one route title.
 
 ### 9.3 Navigation visibility
 
@@ -1580,10 +1590,13 @@ every page (`lib/managedZev.tsx`; the names were kept through #761).
   [ScopeGuard contract](2026-04-frontend-management-page-design.md#41-shared-components).
 
 **`useCommunityAccess()`** (`lib/communityAccess.ts`) turns the selected
-relation into `{shellRole, isZevScope, canManage, isParticipantScope,
-isAdmin}`: `admin` and `manager` have management access; writes also require
-the selected community to permit them. `viewer` only reads it (pages hide write
-controls); `participant` and `former` get the participant view; without a relation the shell role is
+relation into `{shellRole, isZevScope, canManage, canWriteSelectedCommunity,
+isParticipantScope, isAdmin}`: `canManage` is role capability (`admin` and
+`manager`); `canWriteSelectedCommunity` is the effective write availability
+(role capability plus a resolved selected community permitting writes — a manager
+keeps read access to a disabled ZEV but loses write access, an admin can
+still write; a manager without a resolved community record cannot write). `viewer` only reads it (pages hide write controls);
+`participant` and `former` get the participant view; without a relation the shell role is
 `none`. `shellRoleForZev(user, zevId)` answers for a record's own community
 (the invoice detail page). AuthProvider is required: provider errors propagate,
 and missing auth never grants manager access. The outer authentication route

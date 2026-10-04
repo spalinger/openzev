@@ -11,7 +11,7 @@ vi.mock('../src/lib/managedZev', () => {
     }
     return { ...context, useOptionalManagedZev: context.useManagedZev }
 })
-vi.mock('../src/pages/InvoicesPage', () => ({ InvoicesPage: () => createElement('div') }))
+vi.mock('../src/pages/InvoicesPage', () => ({ InvoicesContent: () => createElement('div') }))
 vi.mock('../src/pages/BillingEmailsPage', () => ({ BillingEmailsPage: () => createElement('div') }))
 
 import { BillingHubPage } from '../src/pages/BillingHubPage'

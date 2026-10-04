@@ -1,34 +1,28 @@
 import { useManagedZev } from '../lib/managedZev'
 import { Tabs } from '@mantine/core'
 import { useTranslation } from 'react-i18next'
-import { useNavigate, useSearchParams } from 'react-router-dom'
-import { InvoicesPage } from './InvoicesPage'
+import { usePageNavigation } from '../lib/usePageNavigation'
+import { InvoicesContent } from './InvoicesPage'
 import { BillingEmailsPage } from './BillingEmailsPage'
 import { PageHeader } from '../components/PageHeader'
 
 /**
  * Billing hub: tabs are routes — Invoices · Email delivery — each with its
- * own guard. Period work lives on Overview; the whole-ZEV annual-statement
- * ZIP moved to Reports with the other yearly documents.
- * The shell renders the hub header and the shared tab strip; tab bodies are
- * the existing components (InvoicesPage) or new tab pages riding the
- * phase-2 readiness/email-status payloads.
+ * own guard. The hub owns the header and tabs; each body owns its queries and guards.
  */
 
 export type BillingTab = 'invoices' | 'emails'
 
 export function BillingHubPage({ tab }: { tab: BillingTab }) {
     const { t } = useTranslation()
-    const navigate = useNavigate()
+    const { navigateTab } = usePageNavigation()
     const { selectedZev } = useManagedZev()
-    const [searchParams] = useSearchParams()
 
     // Tab switches navigate to the tab's route, preserving the query (e.g.
     // period_start/period_end deep links); replace keeps same-hub tab
     // switches out of back-button history.
     function handleTabChange(value: string | null) {
-        const qs = searchParams.toString()
-        navigate(`/billing/${value ?? 'invoices'}${qs ? `?${qs}` : ''}`, { replace: true })
+        navigateTab(`/billing/${value === 'emails' ? 'emails' : 'invoices'}`)
     }
 
     return (
@@ -51,7 +45,7 @@ export function BillingHubPage({ tab }: { tab: BillingTab }) {
                 </Tabs.List>
 
                 <Tabs.Panel value="invoices">
-                    <InvoicesPage embedded />
+                    <InvoicesContent />
                 </Tabs.Panel>
                 <Tabs.Panel value="emails">
                     <BillingEmailsPage />

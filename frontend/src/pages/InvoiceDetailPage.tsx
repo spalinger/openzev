@@ -84,6 +84,8 @@ export function InvoiceDetailPage() {
             : '/me/invoices'
         : origin?.from === '/'
             ? '/'
+            : user?.role === 'admin' && origin?.from === '/admin/invoices'
+                ? '/admin/invoices'
             : originPeriod ?? '/billing/invoices'
     const backLabel = isParticipant
         ? t('common.back')

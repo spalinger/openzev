@@ -365,7 +365,7 @@ The admin invoice page provides a searchable, sortable table of **every invoice 
 
 | Column | Description |
 |---|---|
-| **Number** | Invoice number (e.g. `INV-00001`) |
+| **Number** | Linked invoice number (e.g. `INV-00001`); details return to the platform invoice tab |
 | **ZEV** | The ZEV the invoice belongs to |
 | **Participant** | Participant name |
 | **Period** | Billing period date range |

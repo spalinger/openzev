@@ -266,7 +266,11 @@ No new backend endpoint required, but the frontend behaviour is specified here b
 - If `pdf_url` is null (rare — invoice created but `generate_pdf` not yet run), show a "Generate PDF" affordance that calls the existing `POST /api/v1/invoices/invoices/{id}/generate-pdf/` (`HasZevAccess`, returns `{ pdf_url }`) and then embeds the result. No new generate-if-missing endpoint — reuse the existing action.
 - This is a restructure, not a facsimile: no second HTML rendering of line items in the detail page that would drift from the PDF (rejected alternative §11).
 
-`ReportsPage` mounts `ParticipantYearDocuments` for participants. Annual Statement
+`ReportsPage` mounts `ParticipantYearDocuments` for participants. Both report
+views render `components/YearPicker.tsx`; range, previous-year default and
+rollover reconciliation stay in ReportsPage, management pending disabling
+stays with its mutations, and the participant control retains its visible
+associated label. Annual Statement
 generates on entry; Tax Overview generates on first selection. The shared year
 label sits beside its selector. Each tab keeps its PDF for Download, Open in new
 tab, and revisits. Retry refetches only that tab. Changing year or participant
@@ -367,10 +371,25 @@ The planned dev-only mockup routes `frontend/src/pages/design/PreviewDashboard.t
 | Dashboard | `frontend/src/pages/DashboardPage.tsx` (cards in `frontend/src/components/dashboard/`: `BalanceChart`, `ConsumptionSplitCard`, `EnergyFlowCard`, `HourlyProfileCard`, `ParticipantInvoicesCard`, `ParticipantTableCard`) | manager `/dashboard` (Energy balance) + participant `/` | `queryKeys.metering.dashboardSummary({…})` + `queryKeys.invoices.list()` (participant-only, top-level parallel fetch) + `queryKeys.metering.hourlyProfile(…)` (participant always; manager when a participant is selected) | none — read-only. Manager: ZEV-wide KPI row (5 `StatCard`s from `zev_totals`) → `EnergyFlowCard` → `BalanceChart` (both keep `selectedParticipantId` highlight/filter; the consumption chart carries a right-hand 0–100 % axis with a `from_zev_rate` line = locally consumed ÷ consumed, next to the production chart's self-consumption line) → `ParticipantTableCard` (row click sets the participant filter; the name button supports keyboard selection, and the table scrolls with a sticky header and name column) → `HourlyProfileCard` when a participant is selected and profile data is available. Participant: 4 `StatCard`s (consumed from ZEV, imported from grid, total consumption, and the from-ZEV share `consumed_from_zev_kwh / total_consumed_kwh`) → `EnergyFlowCard` (requires `current_participant_id`) → `ConsumptionSplitCard` (stacked from-ZEV/from-grid kWh bars plus a right-hand 0–100 % axis with a `from_zev_rate` line) → `HourlyProfileCard` → `ParticipantInvoicesCard` (role-scoped `fetchInvoices` filtered to `sent|paid` with `pdf_url`, details + PDF actions; includes all participant communities and labels that scope when multiple communities are selectable). Header eyebrow is the scope line: selected ZEV name for owners/admins, the selected membership entry's community name for participants; blank when no community is selected. Report exports live on Reports; participant invoice PDF actions remain on the dashboard. |
 | Reports | `frontend/src/pages/ReportsPage.tsx` + `frontend/src/features/reports/ParticipantYearDocuments.tsx` | `/reports` (participant branch also served at `/me/statement`) | none (manager mutation + local `usePdfObjectUrl` state) | `downloadAnnualStatement({year, zev_id?}, signal?)` behind the participant Annual Statement tab; `downloadFinancialSummary({year, zev_id?}, signal?)` — management requests use the selected ZEV; participant tabs supply it when there are multiple community entries. ScopeGuard gates the management content. Managers get the annual ZEV report (`AnnualReportSection`, spec `2026-09-annual-zev-report.md`), then an **Annual documents** grid with the tax-overview mutation card and the whole-ZEV ZIP card (`AnnualStatementsExportCard`; `/billing/statements` redirects here); participants get the document tabs (shared year selector above, per-document description + Download/new-tab row above one full-width viewer). Each tab's hook sits above its `Tabs.Panel` so inactive documents keep their state; panels are keyed by document/user/year, the feature by user id, and the fetcher identity changes with year, document descriptor, or retry attempt. |
 | Participant statement | `frontend/src/pages/ReportsPage.tsx` + `frontend/src/features/reports/ParticipantYearDocuments.tsx` | `/me/statement` (participant-only canonical host; `/reports` serves all three roles) | none (local `usePdfObjectUrl` state per document) | Statement generates on entry, tax overview on first selection; revisits, Download, and Open-in-new-tab reuse the loaded blob; per-document Retry; year change preserves the tab and fetches only the active document; user change/unmount disposes all participant document state. |
-| Invoices list | `frontend/src/pages/InvoicesPage.tsx` | `/billing/invoices` | `queryKeys.invoices.periodOverview(...)` = `['invoices', 'period-overview', zevId, periodStart, periodEnd]` (`queryKeys.ts:27-28`) | `generate/approve-all/send-all` invalidates period-overview |
+| Invoices list | `frontend/src/pages/InvoicesPage.tsx` (`InvoicesContent` shared with Billing hub) | `/billing/invoices` | `queryKeys.invoices.periodOverview(...)` = `['invoices', 'period-overview', zevId, periodStart, periodEnd]` (`lib/api/queryKeys.ts`) | `generate/approve-all/send-all` invalidates period-overview |
 | Invoice detail | `frontend/src/pages/InvoiceDetailPage.tsx` | `/billing/invoices/:invoiceId` (`AppRoutes.tsx:242`) | `queryKeys.invoices.detail(invoiceId)` = `['invoices', 'detail', invoiceId]` (`queryKeys.ts:48`) | `generate-pdf` → refresh `pdf_url`; `fetchInvoicePdfBlob` → `usePdfObjectUrl` → `PdfPreview` object URL |
 | Template editor | `frontend/src/pages/AdminPdfTemplatesPage.tsx` | `/admin/pdf-templates` | `queryKeys.admin.invoicePdfTemplate()` / `.contractPdfTemplate()` / `.annualStatementPdfTemplate()` = `['admin', 'pdf-template', <type>]` (`queryKeys.ts`) | `previewPdfTemplateBlob` debounced → object URL |
 | Participants etc. | existing | existing | existing | existing — re-skin only |
+
+Dashboard, Metering and invoice period URL state share `useBillingPeriodParams`
+(consumer policies are documented in the management-page reference §4.1).
+Dashboard accepts canonical period deep links and resets to the current period
+on community/interval changes; managed period requests wait for the ZEV record.
+Metering preserves custom and legacy ranges, and resolves the URL meter against
+the loaded current-scope list before querying it. Invoice URLs accept historical
+ranges from community start; their default remains the previous complete period
+bounded by the first aligned period. Shared URL navigation retains unrelated
+query parameters/hash and the hubs' existing history/mounting contracts.
+Invoice lists reuse `InvoicePresentation` cells and links, with `formatChf`
+amounts in personal/period lists, translated missing-day plurals and labelled
+PDF controls. Admin invoice totals retain the trailing currency format
+(`114.94 CHF`). Row models, permissions, workflow eligibility and pagination
+stay consumer-owned.
 
 ### 7.10 TypeScript types
 

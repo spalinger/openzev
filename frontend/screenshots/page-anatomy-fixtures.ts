@@ -6,6 +6,7 @@ const currentPeriod: [string, string] = ['2026-10-01', '2026-10-31']
 const defaultZev = { id: '42', name: 'Review ZEV' }
 export type ApiState = {
   role?: 'admin' | 'manager' | 'viewer' | 'participant' | 'former' | 'none'
+  roleByZev?: Record<string, 'manager' | 'viewer' | 'participant' | 'former'>
   zevs?: Array<{ id: string; name: string; disabled_at?: string | null }>
   membershipIds?: string[]
   preferred?: string | null
@@ -15,7 +16,16 @@ export type ApiState = {
   scopeEmpty?: boolean
   qualityEmpty?: boolean
   qualityPeriod?: [string, string]
+  period?: [string, string]
+  invoicePeriod?: [string, string]
+  interval?: 'monthly' | 'quarterly' | 'semi_annual' | 'annual'
+  communityStart?: string
   populated?: boolean
+  invoices?: Array<{
+    id: string; invoice_number: string; zev: string; zev_name: string;
+    participant: string; participant_name: string; status: string;
+    total_chf: string; pdf_url?: string | null
+  }>
   endpoint?: string
   failed?: boolean
   pending?: Promise<void>
@@ -39,18 +49,22 @@ export async function mockApi(page: Page, state: ApiState = {}) {
   await page.addInitScript(() => localStorage.setItem('openzev.language', 'en'))
   const zevs = () => state.scopeEmpty ? [] : state.zevs ?? [defaultZev]
   const user = () => ({
-    id: 1, role: !state.role || state.role === 'admin' ? 'admin' : 'user',
+    id: 1, role: state.role === 'admin' || (!state.role && !state.roleByZev) ? 'admin' : 'user',
     username: 'review', email: 'review@example.test', first_name: 'Review', last_name: 'User',
     must_change_password: false, preferred_zev: state.preferred ?? null, may_create_zev: false,
     memberships: state.role === 'none' ? [] : zevs()
       .filter(zev => !state.membershipIds || state.membershipIds.includes(zev.id))
-      .map(zev => ({
-        zev: zev.id, zev_name: zev.name, zev_disabled: !!zev.disabled_at,
-        access: ['participant', 'former'].includes(state.role ?? '') ? null : state.role === 'viewer' ? 'viewer' : 'manager',
-        participants: ['participant', 'former'].includes(state.role ?? '')
-          ? [{ id: `p${zev.id}`, valid_from: '2026-01-01', valid_to: state.role === 'former' ? '2026-09-30' : null, live: state.role !== 'former' }]
-          : [],
-      })),
+      .map(zev => {
+        const zevRole = state.roleByZev?.[zev.id] ?? state.role ?? 'admin'
+        const isParticipant = ['participant', 'former'].includes(zevRole)
+        return {
+          zev: zev.id, zev_name: zev.name, zev_disabled: !!zev.disabled_at,
+          access: isParticipant ? null : zevRole === 'viewer' ? 'viewer' : 'manager',
+          participants: isParticipant
+            ? [{ id: `p${zev.id}`, valid_from: '2026-01-01', valid_to: zevRole === 'former' ? '2026-09-30' : null, live: zevRole !== 'former' }]
+            : [],
+        }
+      }),
   })
   await page.route('**/api/v1/**', async route => {
     const request = route.request()
@@ -74,7 +88,8 @@ export async function mockApi(page: Page, state: ApiState = {}) {
     // Only removal scenarios allow an old-scope request during reconciliation.
     if (scope && scope !== selectedId && scope !== state.transitionScope) return failure(`Wrong scope for ${path}: ${scope}, expected ${selectedId}`)
     const requiredScope = ['/dashboard-summary/', '/hourly-profile/', '/data-quality-status/', '/annual-report/', '/invoices/invoices/', '/invoices/invoices/period-overview/', '/readiness/', '/attention/']
-    if (isManagement && requiredScope.some(endpoint => path.endsWith(endpoint)) && !scope) {
+    const personalList = !!state.roleByZev && path.endsWith('/invoices/invoices/')
+    if (isManagement && requiredScope.some(endpoint => path.endsWith(endpoint)) && !scope && !personalList) {
       return failure(`Missing scope for ${path}`)
     }
     // Point/participant lists and platform endpoints may be unscoped. Chart requests may select a meter instead of a ZEV.
@@ -83,11 +98,19 @@ export async function mockApi(page: Page, state: ApiState = {}) {
     for (const key of dated ? ['date_from', 'date_to'] : periodOverview ? ['period_start', 'period_end'] : []) {
       if (!params.has(key)) return failure(`Missing ${key} for ${path}`)
     }
+    if (['/dashboard-summary/', '/hourly-profile/'].some(endpoint => path.endsWith(endpoint))
+      && params.has('participant_id') && params.get('participant_id') !== `p${scope ?? selectedId}`) {
+      return failure(`Participant from another scope for ${path}: ${params.get('participant_id')}`)
+    }
+    if (params.has('metering_point') && params.get('metering_point') !== `mp${scope ?? selectedId}`) {
+      return failure(`Meter from another scope for ${path}: ${params.get('metering_point')}`)
+    }
     // Charts open the current month; meter health uses a rolling window.
     const [dateFrom, dateTo] = path.endsWith('/data-quality-status/')
       ? state.qualityPeriod ?? currentPeriod
-      : currentPeriod
-    for (const [key, expected] of Object.entries({ date_from: dateFrom, date_to: dateTo, period_start: '2026-09-01', period_end: '2026-09-30' })) {
+      : state.period ?? currentPeriod
+    const [invoiceFrom, invoiceTo] = state.invoicePeriod ?? ['2026-09-01', '2026-09-30']
+    for (const [key, expected] of Object.entries({ date_from: dateFrom, date_to: dateTo, period_start: invoiceFrom, period_end: invoiceTo })) {
       if (params.has(key) && params.get(key) !== expected) return failure(`Wrong ${key} for ${path}: ${params.get(key)}`)
     }
     if (path.endsWith('/annual-report/') && params.get('year') !== String(state.year ?? 2025)) {
@@ -116,7 +139,7 @@ export async function mockApi(page: Page, state: ApiState = {}) {
         expectedFailures.add(request.url())
         return route.fulfill({ status: 500, json: { detail: 'Test scope failure' } })
       }
-      const results = zevs().map(zev => ({ ...zev, updated_at: '2026-01-01T00:00:00Z', billing_interval: 'monthly', zev_type: 'zev', start_date: '2026-01-01' }))
+      const results = zevs().map(zev => ({ ...zev, updated_at: '2026-01-01T00:00:00Z', billing_interval: state.interval ?? 'monthly', zev_type: 'zev', start_date: state.communityStart ?? '2026-01-01' }))
       return route.fulfill({ json: { count: results.length, next: null, previous: null, results } })
     }
     if (path.endsWith('/dashboard-summary/')) return route.fulfill({ json: {
@@ -125,20 +148,27 @@ export async function mockApi(page: Page, state: ApiState = {}) {
         ? { consumed_from_zev_kwh: 35, imported_from_grid_kwh: 15, total_consumed_kwh: 50 }
         : { produced_kwh: 100, consumed_kwh: 80, imported_kwh: 20, exported_kwh: 40 },
       timeline: [], zev_totals: { produced_kwh: 100, consumed_kwh: 80, imported_kwh: 20, exported_kwh: 40 },
-      zev_participant_stats: [], participant_stats: [], current_participant_id: null,
+      zev_participant_stats: [],
+      participant_stats: state.populated ? [{ participant_id: `p${selectedId}`, participant_name: `Participant ${selectedId}`,
+        total_consumed_kwh: 80, total_produced_kwh: 0, from_zev_kwh: 60, from_grid_kwh: 20 }] : [],
+      current_participant_id: null,
     } })
     if (path.endsWith('/data-quality-status/')) return route.fulfill({ json: {
-      date_from: dateFrom, date_to: dateTo, metering_points: state.qualityEmpty ? [] : [{
-        id: 'mp1', meter_id: 'MP-1', participant_name: 'Review',
-        severity: 'red', data_completeness: 0, days_with_data: 0, total_days: 31,
-        gaps: [], unassigned_days: 0, unassigned_readings: 0, assignment_overlap: false,
-      }],
+      date_from: dateFrom, date_to: dateTo, metering_points: state.qualityEmpty ? [] : (() => {
+        const qualityScope = scope ?? selectedId ?? '42'
+        return [{
+          id: `mp${qualityScope}`, meter_id: `MP-${qualityScope}`, participant_name: 'Review',
+          severity: 'red', data_completeness: 0, days_with_data: 0, total_days: 31,
+          gaps: [], unassigned_days: 0, unassigned_readings: 0, assignment_overlap: false,
+        }]
+      })(),
     } })
     if (path.endsWith('/zev/grid-operators/')) return route.fulfill({ json: {
       source: 'Test', cube: '', licence: '', period: '2026', fetched_on: '2026-01-01', operators: [],
     } })
     if (path.endsWith('/hourly-profile/')) return route.fulfill({ json: { hourly_profile: null } })
     if (path.endsWith('/chart-data/')) return route.fulfill({ json: [] })
+    if (path.endsWith('/raw-data/')) return route.fulfill({ json: [] })
     if (path.endsWith('/annual-report/')) return route.fulfill({ json: { has_data: false, year: Number(params.get('year')) } })
     if (path.endsWith('/invoices/invoices/email-template/invoice_email/')) return route.fulfill({ json: {
       template_key: 'invoice_email', subject: 'Invoice {{ invoice_number }}', body: 'Dear participant', is_customized: false, fields: [],
@@ -147,14 +177,14 @@ export async function mockApi(page: Page, state: ApiState = {}) {
       zev_id: scope, periods: [], period: null, steps: [], next_action: 'none', awaiting_first_period: true,
     } })
     if (path.endsWith('/invoices/invoices/attention/')) return route.fulfill({ json: { zev_id: scope, items: [] } })
-    if (['/exports/jobs/', '/tariffs/dynamic-sources/'].some(endpoint => path.endsWith(endpoint))) return route.fulfill({ json: [] })
+    if (['/exports/jobs/', '/tariffs/dynamic-sources/', '/zev/parties/'].some(endpoint => path.endsWith(endpoint))) return route.fulfill({ json: [] })
     if (path.endsWith('/feasibility/enabled/')) return route.fulfill({ json: { enabled: false } })
     if (path.endsWith('/zev/participants/geocoding-enabled/')) return route.fulfill({ json: { enabled: false } })
     const ids = (state.zevs ?? [defaultZev]).map(zev => zev.id)
     const names = new Map(ids.map(id => [id, `Participant ${id === '42' ? 'A' : 'B'}`]))
     const invoice = { id: '1', invoice_number: 'R-1', zev: scope ?? '42', zev_name: 'Review ZEV',
       participant: `p${scope ?? '42'}`, participant_name: names.get(scope ?? '42'),
-      period_start: '2026-09-01', period_end: '2026-09-30', status: 'sent', total_chf: '10.00', pdf_url: null,
+      period_start: invoiceFrom, period_end: invoiceTo, status: 'sent', total_chf: '10.00', pdf_url: null,
     }
     if (path.endsWith('/invoices/invoices/1/')) return route.fulfill({ json: invoice })
     if (path.endsWith('/invoices/invoices/period-overview/')) return route.fulfill({ json: {
@@ -182,7 +212,9 @@ export async function mockApi(page: Page, state: ApiState = {}) {
         meter_type: 'consumption', is_active: true, has_behind_meter_generation: false,
         reading_count: 0, assignment_count: 0, first_reading_at: null, last_reading_at: null })),
       '/zev/metering-point-assignments/': [],
-      '/invoices/invoices/': [invoice],
+      '/invoices/invoices/': (state.invoices ?? [invoice]).map(entry => ({
+        period_start: invoiceFrom, period_end: invoiceTo, ...entry,
+      })),
       '/metering/import-logs/': [],
       '/auth/users/': [{ ...user(), id: 2, username: 'account@example.test', email: 'account@example.test',
         is_active: true, mfa_methods: [], mfa_compliance: null, last_login: null, date_joined: '2026-01-01T00:00:00Z',

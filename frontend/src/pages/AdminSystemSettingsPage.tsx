@@ -4,7 +4,7 @@ import { Skeleton, Switch, Tabs } from '@mantine/core'
 import { useReducedMotion } from '@mantine/hooks'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCheck, faPen, faPlus, faTrash, faXmark } from '@fortawesome/free-solid-svg-icons'
-import { useSearchParams } from 'react-router-dom'
+import { usePageNavigation } from '../lib/usePageNavigation'
 import { useTranslation } from 'react-i18next'
 import {
     createOAuthProviderConfig,
@@ -59,7 +59,7 @@ function getValidTab(value: string | null): SystemSettingsTab {
 export function AdminSystemSettingsPage() {
     const { t } = useTranslation()
     const animate = !useReducedMotion()
-    const [searchParams, setSearchParams] = useSearchParams()
+    const { searchParams, updateParams } = usePageNavigation()
     const queryClient = useQueryClient()
     const { pushToast } = useToast()
     const { settings, isLoading: appSettingsLoading } = useAppSettings()
@@ -150,7 +150,10 @@ export function AdminSystemSettingsPage() {
     const oauthMutationPending = createOAuthMutation.isPending || updateOAuthMutation.isPending
 
     function setActiveTab(tab: SystemSettingsTab) {
-        setSearchParams(tab === 'regional' ? {} : { tab })
+        updateParams(params => {
+            if (tab === 'regional') params.delete('tab')
+            else params.set('tab', tab)
+        }, { replace: false })
     }
 
     function openCreateOAuthForm() {
@@ -240,7 +243,7 @@ export function AdminSystemSettingsPage() {
                 onChange={(value) => setActiveTab(getValidTab(value ?? 'regional'))}
                 keepMounted={false}
             >
-                <Tabs.List>
+                <Tabs.List aria-label={t('adminSystemSettings.title')}>
                     <Tabs.Tab value="regional">{t('adminSystemSettings.tabs.regional.label')}</Tabs.Tab>
                     <Tabs.Tab value="features">{t('adminSystemSettings.tabs.features.label')}</Tabs.Tab>
                     <Tabs.Tab value="oauth">{t('adminSystemSettings.tabs.oauth.label')}</Tabs.Tab>

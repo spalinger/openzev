@@ -1,3 +1,4 @@
+import { waitForCondition } from './helpers/waitForCondition'
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { MantineProvider } from '@mantine/core'
@@ -15,11 +16,12 @@ const detectCalls: Array<{ vars: unknown }> = []
 // null = detection fails at once (defaults stay); 'pending' = never answers.
 let detectResult: unknown | 'pending' | null = null
 const pushToast = vi.fn()
+const invalidateQueries = vi.fn()
 const refetchLogs = vi.fn()
 const translate = vi.fn((key: string) => key)
 
 vi.mock('@tanstack/react-query', () => ({
-    useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+    useQueryClient: () => ({ invalidateQueries }),
     useQuery: () => ({ data: importLogsData, isLoading: false, isError: !!logsError, error: logsError, refetch: refetchLogs }),
     useMutation: (options: any) => {
         mutationOptions.push(options)
@@ -123,7 +125,7 @@ function succeedPreview(preview: ImportPreviewResult) {
 function succeedUpload(...logs: Array<Record<string, unknown>>) {
     const { files } = mutateCalls[mutateCalls.length - 1].vars as { files: File[] }
     act(() => {
-        mutationOptions[1].onSuccess(files.map((file, index) => ({ file, value: logs[index] ?? logs[0], error: null })))
+        mutationOptions[1].onSuccess(files.map((file, index) => ({ file, value: logs[index] ?? logs[0], error: null })), mutateCalls[mutateCalls.length - 1].vars)
     })
 }
 
@@ -165,6 +167,7 @@ beforeEach(() => {
     detectCalls.length = 0
     detectResult = null
     pushToast.mockClear()
+    invalidateQueries.mockClear()
     refetchLogs.mockClear()
     selectedZevId = 'zev-1'
     importLogsData = []
@@ -497,7 +500,7 @@ describe('ImportsPage wizard gating', () => {
             buttons('pages.imports.delete.confirmAction')[0].click()
         })
         expect(mutateCalls).toHaveLength(1)
-        expect(mutateCalls[0].vars).toEqual({
+        expect(mutateCalls[0].vars).toMatchObject({
             mode: 'period',
             dateFrom: '2026-03-01',
             dateTo: '2026-03-31',
@@ -551,8 +554,12 @@ describe('ImportsPage wizard gating', () => {
     })
 
     it('explains server rejection of single and bulk overwrite deletion', () => {
+        goToStep2()
+        loadPreview()
+        succeedPreview(cleanPreview())
+        act(() => startButton().click())
         for (const mutation of [mutationOptions[2], mutationOptions[3]]) {
-            act(() => mutation.onError({ response: { data: { code: 'overwrite_import_protected' } } }))
+            act(() => mutation.onError({ response: { data: { code: 'overwrite_import_protected' } } }, mutateCalls.at(-1)!.vars))
             expect(pushToast).toHaveBeenLastCalledWith('pages.imports.delete.overwriteProtected', 'error')
         }
     })
@@ -624,7 +631,7 @@ describe('ImportsPage wizard gating', () => {
         act(() => {
             mutationOptions[1].onSuccess([
                 { file: files[0], value: null, error: { response: { status: 429, data: { detail: 'throttled' } } } },
-            ])
+            ], mutateCalls[mutateCalls.length - 1].vars)
         })
         expect(pushToast).toHaveBeenCalledWith('pages.imports.messages.importThrottled', 'error')
         // A failed import keeps the wizard open for a retry.
@@ -829,7 +836,7 @@ describe('ImportsPage multi-file import', () => {
                 { file: files[0], value: { id: 'l1', rows_imported: 1, rows_skipped: 0, errors: [] }, error: null },
                 { file: files[1], value: null, error: { response: { status: 400, data: { error: 'Boom' } } } },
                 { file: files[2], value: { id: 'l3', rows_imported: 1, rows_skipped: 0, errors: [] }, error: null },
-            ])
+            ], mutateCalls[mutateCalls.length - 1].vars)
         })
         expect(pushToast).toHaveBeenCalledWith(
             'pages.imports.messages.importBatchPartial',
@@ -1021,4 +1028,98 @@ describe('ImportsPage settings detection', () => {
         act(() => { buttons('pages.imports.wizard.nextConfig')[0].click() })
         expect(detectCalls).toHaveLength(0)
     })
+})
+
+
+describe('import write ownership', () => {
+    it('cancels overwrite confirmation and resets drafts on a writable community switch', () => {
+        goToStep2()
+        const overwrite = container.querySelectorAll('input[type=checkbox]')[1] as HTMLInputElement
+        act(() => overwrite.click())
+        loadPreview()
+        succeedPreview(cleanPreview())
+        act(() => startButton().click())
+        expect(container.textContent).toContain('pages.imports.wizard.overwriteConfirmTitle')
+        selectedZevId = 'zev-2'
+        renderPage()
+        expect(container.textContent).not.toContain('pages.imports.wizard.overwriteConfirmTitle')
+        expect(container.textContent).not.toContain('pages.imports.wizard.title')
+        expect(mutateCalls).toHaveLength(1)
+        openWizard()
+        expect(buttons('pages.imports.wizard.nextConfig')[0].disabled).toBe(true)
+    })
+
+    it('ignores old upload UI updates after a writable community switch', () => {
+        goToStep2()
+        loadPreview()
+        succeedPreview(cleanPreview())
+        act(() => startButton().click())
+        selectedZevId = 'zev-2'
+        renderPage()
+        goToStep2()
+        pushToast.mockClear()
+        succeedUpload({ rows_imported: 1, rows_skipped: 0, errors: ['old issue'] })
+        expect(container.textContent).toContain('pages.imports.wizard.title')
+        expect(container.textContent).not.toContain('old issue')
+        expect(pushToast).not.toHaveBeenCalled()
+    })
+})
+
+
+describe('import deletion completion ownership', () => {
+    it.each(['single', 'bulk'])('keeps B’s protocol and deletion dialog after A’s delayed %s deletion', async mode => {
+        twoLogs()
+        const mutation = mutationOptions[mode === 'single' ? 2 : 3]
+        if (mode === 'single') {
+            await act(async () => buttons('pages.imports.actions.rowActions')[0].click())
+            await waitForCondition(() => !!document.querySelector('[role=menuitem]'), 'import action menu')
+            const item = Array.from(document.querySelectorAll<HTMLButtonElement>('[role=menuitem]'))
+                .find(button => button.textContent?.includes('pages.imports.actions.deleteImport'))!
+            act(() => item.click())
+            act(() => buttons('pages.imports.delete.confirmAction')[0].click())
+        } else {
+            act(() => buttons('pages.imports.actions.deleteImports')[0].click())
+            const dates = container.querySelectorAll<HTMLInputElement>('input[type=date]')
+            setInputValue(dates[0], '2026-03-01')
+            setInputValue(dates[1], '2026-03-31')
+            act(() => buttons('pages.imports.delete.reviewAction')[0].click())
+            act(() => buttons('pages.imports.delete.confirmAction')[0].click())
+        }
+        const variables = mutateCalls.at(-1)!.vars
+        selectedZevId = 'zev-2'
+        importLogsData = importLogsData.map(log => ({ ...log, id: `B-${log.id}`, zev: 'zev-2', filename: `B-${log.filename}` }))
+        renderPage()
+        act(() => buttons('pages.imports.actions.openProtocol')[0].click())
+        act(() => buttons('pages.imports.actions.deleteImports')[0].click())
+        const dates = container.querySelectorAll<HTMLInputElement>('input[type=date]')
+        setInputValue(dates[0], '2026-03-05')
+        setInputValue(dates[1], '2026-03-30')
+        pushToast.mockClear()
+        invalidateQueries.mockClear()
+        act(() => mutation.onSuccess({ deleted_logs: 1, deleted_readings: 10 }, variables))
+        expect(container.textContent).toContain('B-alpha.csv')
+        expect(container.textContent).toContain('pages.imports.delete.modeLabel')
+        expect(container.querySelector<HTMLInputElement>('input[type=date]')!.value).toBe('2026-03-05')
+        expect(pushToast).not.toHaveBeenCalled()
+        expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['metering'] })
+        act(() => mutation.onError(new Error('Old failure'), variables))
+        expect(pushToast).not.toHaveBeenCalled()
+    })
+})
+
+it.each([1, 2, 3])('rejects queued import mutation %s at API dispatch after a scope change', index => {
+    twoLogs()
+    const mutation = mutationOptions[index]
+    // Capture the submitting scope through the real bulk-delete flow; every
+    // write in this render shares it, even before its mutation function runs.
+    act(() => buttons('pages.imports.actions.deleteImports')[0].click())
+    const dates = container.querySelectorAll<HTMLInputElement>('input[type=date]')
+    setInputValue(dates[0], '2026-03-01')
+    setInputValue(dates[1], '2026-03-31')
+    act(() => buttons('pages.imports.delete.reviewAction')[0].click())
+    act(() => buttons('pages.imports.delete.confirmAction')[0].click())
+    const { scope } = mutateCalls[mutateCalls.length - 1].vars
+    selectedZevId = 'zev-2'
+    renderPage()
+    expect(() => mutation.mutationFn({ id: 'log-1', scope })).toThrow('common.error')
 })

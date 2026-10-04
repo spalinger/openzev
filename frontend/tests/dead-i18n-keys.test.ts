@@ -75,9 +75,24 @@ for (const m of corpus.matchAll(/(^|[^a-zA-Z0-9_])t\(`([^`]*?)\$\{[^}]*\}[^`]*`[
 // indirect: ... = `prefix.${expr}` (variable later passed to t)
 for (const m of corpus.matchAll(/[=:]\s*`([a-z][a-zA-Z0-9]*(?:\.[a-zA-Z0-9_]+)*)\.\$\{[^}]*\}[^`]*`/g)) addPrefixes(m[1])
 
+/** Tokenize once instead of rescanning the entire corpus for every locale key.
+ * A dot is allowed after a match, but never before one (the existing boundary
+ * contract), so full tokens and their dotted prefixes are exact candidates. */
+function collectUsedKeys(source: string): Set<string> {
+    const keys = new Set<string>()
+    for (const [token] of source.matchAll(/[a-zA-Z0-9_.]+/g)) {
+        keys.add(token)
+        for (let index = token.indexOf('.'); index >= 0; index = token.indexOf('.', index + 1)) {
+            keys.add(token.slice(0, index))
+        }
+    }
+    return keys
+}
+
+const usedKeys = collectUsedKeys(corpus)
+
 function used(k: string): boolean {
-    const escaped = k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    return new RegExp(`(^|[^a-zA-Z0-9_.])${escaped}([^a-zA-Z0-9_]|$)`).test(corpus)
+    return usedKeys.has(k)
 }
 
 function isLive(key: string): boolean {
@@ -109,5 +124,14 @@ describe('i18n locale keys', () => {
         expect(corpus).toContain('admin')
         expect(dynamicPrefixes['admin.']).toBeUndefined()
         expect(isLive('admin.__deadPrefixProbe__')).toBe(false)
+    })
+
+    it('preserves exact-key boundaries when indexing the corpus', () => {
+        const keys = collectUsedKeys("'common.retry' common.child.deep common.retries common.retry_other xcommon.retry .common.hidden")
+        expect(keys.has('common.retry')).toBe(true)
+        expect(keys.has('common.child')).toBe(true)
+        expect(keys.has('common.retr')).toBe(false)
+        expect(keys.has('common.hidden')).toBe(false)
+        expect(collectUsedKeys('xcommon.retry common.retry_other').has('common.retry')).toBe(false)
     })
 })

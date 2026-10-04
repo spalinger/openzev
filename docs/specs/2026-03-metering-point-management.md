@@ -411,9 +411,21 @@ Write controls and mutation dispatch require management access and an active
 community; admins may write to disabled communities. Account, community or
 effective write-access changes reset create/edit, assignment and deletion
 dialogs. Losing admin access also closes reading deletion. Meter submissions
-retain the draft's original ZEV and reject a selection mismatch. Writes already
-sent may complete on the server, but obsolete view callbacks neither notify
-nor invalidate the replacement view's queries.
+retain the draft's original ZEV and reject a selection mismatch. All five
+metering mutations carry the submitting `scope` in their variables and use it
+for dispatch-time write guards, mutation context and error notifications.
+An offline queued write cannot dispatch after scope replacement, even if the
+same mutation observer stays mounted and receives new options. Writes already
+sent may complete on the server. Successful metering writes invalidate the
+submitting community's affected keys and shared assignment/reading keys even
+after a community or capability remount; local dialogs and notifications require
+a current write scope (`useWriteScope`), revoked on account/community/capability
+changes or unmount. AuthProvider clears the mutation cache at account/session
+boundaries; completions whose mutation context is no longer in that cache skip invalidation, protecting the
+new session while allowing ordinary page navigation to refresh the original data.
+`frontend/tests/metering-draft-scope.test.ts` covers offline resume and delayed
+failures on an observer that stays mounted through a community switch, in
+addition to page remount and cache-invalidation cases.
 
 ### 8.3 Data quality
 
@@ -443,7 +455,24 @@ the participant card into view and flashes it (`.participant-card-focus`, a
 CSS-only highlight), then drops the parameters from the URL so a later
 refresh or another deep link re-triggers cleanly. URL consumption and the
 scroll/flash lifecycle are separate effects, so removing the parameters
-never cancels the highlight timers.
+never cancels the highlight timers. Edit-intent links wait for community loading
+to resolve before consumption; writable users get the edit modal and read-only
+users get the highlight alone. Participant create/edit and delete confirmations
+reset on account, selected community or effective write-capability changes,
+including a switch between two writable communities. Deferred delete callbacks
+check their original scope against the current scope before dispatch. Participant
+create/update/delete completions invalidate the submitting community’s participant
+query; obsolete completions leave replacement drafts and notifications untouched.
+Create/update failures also notify only in their submitting scope. All participant
+write mutations recheck current scope immediately before API dispatch; retained
+submit callbacks are inert after a scope change. Send/copy/revoke onboarding
+operations carry the submitting scope, invalidate its participant query after
+success, and show notices/toasts only while that scope remains current. Existing
+onboarding notices clear on account, community or effective write-access changes.
+Participants uses ScopeGuard beneath its header; its main query waits for a
+matching selected community record, and its management filter never treats a
+missing selection as all communities. Covered by
+`frontend/tests/participant-write-scope.test.ts`.
 
 ## 9. Observability, auditability, and security
 

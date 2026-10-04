@@ -2,6 +2,10 @@
 
 This guide covers adding, editing, and managing community members (participants) in OpenZEV.
 
+The list waits for the selected community to load. If loading fails, use **Retry**;
+when a community refresh fails after loading, your existing scope and draft remain available.
+Onboarding-link notices clear when you switch community or lose write access.
+
 ## What is a Participant?
 
 A **participant** is a member of a ZEV community:
@@ -15,6 +19,9 @@ A **participant** is a member of a ZEV community:
 ## Adding a Participant
 
 **Managers** add new participants in **Participants**.
+
+Switching community or losing write access closes open participant forms and delete confirmations. Save your draft before switching. A save already started can still finish in
+the original community; its completion leaves a new draft in another community open.
 
 1. Click **New Participant**
 2. Enter participant details:

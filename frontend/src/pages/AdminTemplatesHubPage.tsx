@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Tabs } from '@mantine/core'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { usePageNavigation } from '../lib/usePageNavigation'
 import { AdminPdfTemplatesPage, type PdfTemplateTab } from './AdminPdfTemplatesPage'
 import { AdminEmailTemplatesPage } from './AdminEmailTemplatesPage'
 import { EMAIL_TEMPLATE_KEYS, type EmailTemplateKey } from '../lib/emailTemplateFields'
@@ -23,8 +23,7 @@ const emailTemplates: EmailTemplateKey[] = [...EMAIL_TEMPLATE_KEYS]
  */
 export function AdminTemplatesHubPage({ tab = 'pdf' }: { tab?: AdminTemplatesTab }) {
     const { t } = useTranslation()
-    const navigate = useNavigate()
-    const [searchParams] = useSearchParams()
+    const { searchParams, updateParams } = usePageNavigation()
     const requested = searchParams.get('template')
     const pdf = pdfTemplates.find((key) => key === requested) ?? 'invoice'
     const email = emailTemplates.find((key) => key === requested) ?? 'invoice_email'
@@ -33,9 +32,7 @@ export function AdminTemplatesHubPage({ tab = 'pdf' }: { tab?: AdminTemplatesTab
     function handleTabChange(value: string | null) {
         if (!value || value === selected) return
         const category = pdfTemplates.some((key) => key === value) ? 'pdf' : 'email'
-        const params = new URLSearchParams(searchParams)
-        params.set('template', value)
-        navigate(`/admin/templates/${category}?${params}`, { replace: true })
+        updateParams(params => params.set('template', value), { pathname: `/admin/templates/${category}` })
     }
 
     return (

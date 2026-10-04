@@ -1,18 +1,9 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faEllipsis, faFileInvoice, faFilePdf, faSpinner } from '@fortawesome/free-solid-svg-icons'
-import { Link } from 'react-router-dom'
+import { faFileInvoice } from '@fortawesome/free-solid-svg-icons'
 import { useTranslation } from 'react-i18next'
-import { ActionMenu, type ActionMenuItem } from '../../components/ActionMenu'
-import { getLatestEmailLog } from './emailLogs'
-import { invoiceStatusBadgeClass } from './invoiceStatus'
-import { openInvoicePdf } from '../../lib/api/invoices'
+import type { ActionMenuItem } from '../../components/ActionMenu'
+import { InvoiceAmount, InvoiceDeliveryStatus, InvoiceLink, InvoicePdfCell, InvoiceRowActions, InvoiceStatusBadge } from '../../components/InvoicePresentation'
 import type { InvoicePeriodParticipantRow } from '../../types/api'
-
-function emailStatusBadgeClass(status: string): string {
-  if (status === 'sent') return 'badge badge-success'
-  if (status === 'failed') return 'badge badge-danger'
-  return 'badge badge-neutral'
-}
 
 type InvoicePeriodRowsTableProps = {
   rows: InvoicePeriodParticipantRow[]
@@ -49,7 +40,6 @@ export function InvoicePeriodRowsTable({
         <tbody>
           {rows.map((row) => {
             const invoice = row.invoice
-            const latestEmailLog = getLatestEmailLog(invoice)
             const primaryAction = getPrimaryRowAction(row)
             const rowMenuItems = getRowMenuItems(row)
             const pdfPending = isPdfPending(row)
@@ -77,7 +67,7 @@ export function InvoicePeriodRowsTable({
                           {row.missing_meter_details?.length
                             ? row.missing_meter_details.map((item) => (
                                 <li key={item.meter_id}>
-                                  {item.meter_id} ({item.missing_days} day{item.missing_days === 1 ? '' : 's'})
+                                  {item.meter_id} ({t('pages.invoices.metering.missingDays', { count: item.missing_days })})
                                 </li>
                               ))
                             : row.missing_meter_ids.map((meterId) => <li key={meterId}>{meterId}</li>)}
@@ -89,8 +79,8 @@ export function InvoicePeriodRowsTable({
                 <td>
                   {invoice ? (
                     <div className="invoice-cell-stack">
-                      <span>{invoice.invoice_number}</span>
-                      <span className={invoiceStatusBadgeClass(invoice.status)}>{t(`invoice.status.${invoice.status}`)}</span>
+                      <InvoiceLink invoice={invoice} from="/billing/invoices" period={period} />
+                      <InvoiceStatusBadge status={invoice.status} />
                     </div>
                   ) : row.generation_eligibility?.state === 'covered' ? (
                     <div className="invoice-cell-stack">
@@ -105,76 +95,24 @@ export function InvoicePeriodRowsTable({
                   )}
                 </td>
                 <td>
-                  {invoice && latestEmailLog ? (
-                    <span className={emailStatusBadgeClass(latestEmailLog.status)}>
-                      {t(`email.${latestEmailLog.status}`)}
-                    </span>
-                  ) : (
-                    <span className="muted">-</span>
-                  )}
+                  <InvoiceDeliveryStatus invoice={invoice} />
                 </td>
-                <td>{invoice ? `CHF ${invoice.total_chf}` : <span className="muted">-</span>}</td>
-                <td>
-                  {invoice ? (
-                    pdfPending ? (
-                      <span className="badge badge-info" role="status">
-                        <FontAwesomeIcon icon={faSpinner} spin fixedWidth />
-                        {t('pages.invoices.pdfGenerating')}
-                      </span>
-                    ) : invoice.pdf_status === 'failed' && !invoice.pdf_url ? (
-                      // Distinct from "Missing": nobody has to wonder whether
-                      // this one was ever asked for. Regenerate is the retry,
-                      // and it is already in the row's action menu.
-                      <span className="badge badge-danger" title={t('pages.invoices.pdfFailedHint')}>
-                        {t('pages.invoices.pdfFailed')}
-                      </span>
-                    ) : invoice.pdf_url ? (
-                      <div className="invoice-cell-stack">
-                        <button type="button" onClick={() => { if (invoice) openInvoicePdf(invoice.id) }} className="table-inline-link">
-                          <FontAwesomeIcon icon={faFilePdf} fixedWidth />
-                          {t('pages.invoices.openPdf')}
-                        </button>
-                        <span className="badge badge-success">{t('pages.invoices.pdfReady')}</span>
-                      </div>
-                    ) : (
-                      <span className="badge badge-neutral">{t('pages.invoices.pdfMissing')}</span>
-                    )
-                  ) : (
-                    <span className="muted">-</span>
-                  )}
-                </td>
+                <td className="numeric"><InvoiceAmount value={invoice?.total_chf ?? null} /></td>
+                <td><InvoicePdfCell invoice={invoice} pending={pdfPending} /></td>
                 <td className="invoice-actions-cell">
-                  <div className="invoice-row-actions">
-                    {primaryAction && (
-                      <button
-                        className="button button-primary button-compact"
-                        type="button"
-                        disabled={primaryAction.disabled}
-                        onClick={primaryAction.onClick}
-                      >
-                        {primaryAction.icon}
-                        {primaryAction.label}
-                      </button>
-                    )}
+                  <InvoiceRowActions primary={primaryAction} menuItems={rowMenuItems}>
                     {invoice && (
-                      <Link
+                      <InvoiceLink
+                        invoice={invoice}
+                        from="/billing/invoices"
+                        period={period}
                         className="button button-secondary button-compact"
-                        style={{ textDecoration: 'none' }}
-                        to={`/billing/invoices/${invoice.id}`}
-                        state={{ from: '/billing/invoices', period_start: period.period_start, period_end: period.period_end }}
                       >
                         <FontAwesomeIcon icon={faFileInvoice} fixedWidth />
                         {t('pages.invoices.openDetails')}
-                      </Link>
+                      </InvoiceLink>
                     )}
-                    {rowMenuItems.length > 0 && (
-                      <ActionMenu
-                        label={t('pages.invoices.moreActions')}
-                        icon={<FontAwesomeIcon icon={faEllipsis} fixedWidth />}
-                        items={rowMenuItems}
-                      />
-                    )}
-                  </div>
+                  </InvoiceRowActions>
                 </td>
               </tr>
             )

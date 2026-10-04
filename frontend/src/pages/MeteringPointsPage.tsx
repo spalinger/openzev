@@ -20,9 +20,8 @@ import { soleCommunityName } from '../lib/membership'
 export function MeteringPointsPage() {
     const { user } = useAuth()
     const { selectedZevId, selectedZev, entries } = useManagedZev()
-    const { canManage, isAdmin, isZevScope } = useCommunityAccess()
+    const { canWriteSelectedCommunity: canWrite, isAdmin, isZevScope } = useCommunityAccess()
     const { t } = useTranslation()
-    const canWrite = canManage && (isAdmin || !selectedZev?.disabled_at)
     // Drafts survive a failed refresh, but never cross accounts, communities or write access.
     return (
         <div className="page-stack">
@@ -51,6 +50,7 @@ function MeteringPointsView({ canWrite, canDeleteData }: { canWrite: boolean; ca
 
     const {
         meteringPointsQuery,
+        scope,
         saveMpMutation,
         deleteMpMutation,
         saveAssignMutation,
@@ -219,8 +219,8 @@ function MeteringPointsView({ canWrite, canDeleteData }: { canWrite: boolean; ca
                             onOpenEditMeteringPoint={openEditMpModal}
                             onOpenDeleteDataModal={openDeleteDataModal}
                             onOpenEditAssignment={openEditAssignModal}
-                            onDeleteMeteringPoint={(id) => deleteMpMutation.mutate(id)}
-                            onDeleteAssignment={(id) => deleteAssignMutation.mutate(id)}
+                            onDeleteMeteringPoint={(id) => deleteMpMutation.mutate({ id, scope })}
+                            onDeleteAssignment={(id) => deleteAssignMutation.mutate({ id, scope })}
                         />
                     )}
                 </div>

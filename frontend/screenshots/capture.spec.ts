@@ -482,6 +482,8 @@ test.describe('User Guide Screenshots', () => {
   // 23 — Reports (owner view on the demo ZEV)
   test('23-reports', async ({ page }) => {
     await navigateTo(page, '/reports')
+    // Demo readings belong to this year; the product defaults to the previous year.
+    await page.getByRole('combobox', { name: 'Jahr', exact: true }).selectOption(String(new Date().getFullYear()))
     // The annual report aggregates a year of readings; wait for its figures.
     await page.waitForSelector('.kpi-row', { timeout: 30_000 })
     await screenshotFull(page, '23-reports')
@@ -494,6 +496,7 @@ test.describe('User Guide Screenshots', () => {
       return
     }
     await navigateTo(page, '/me/statement')
+    await page.getByRole('combobox', { name: 'Jahr', exact: true }).selectOption(String(new Date().getFullYear()))
     await page.waitForSelector('#yearly-documents-preview iframe[title]', { timeout: 30_000 })
     await assertPdfPainted(page)
     await closePdfSidebar(page)

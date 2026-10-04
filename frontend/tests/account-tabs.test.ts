@@ -56,7 +56,7 @@ describe('resolveAccountTab', () => {
 function RoutedPage() {
     const location = useLocation()
     return createElement('div', null,
-        createElement('output', null, location.pathname + location.search),
+        createElement('output', null, location.pathname + location.search + location.hash),
         createElement(AccountProfilePage),
     )
 }
@@ -119,11 +119,11 @@ describe('account page tabs', () => {
     })
 
     it('switches tabs and records the choice in the URL', async () => {
-        const container = await render('/account')
+        const container = await render('/account?source=bookmark#security')
 
         await act(async () => { tab(container, 'security').click() })
 
-        expect(container.querySelector('output')?.textContent).toBe('/account?tab=security')
+        expect(container.querySelector('output')?.textContent).toBe('/account?source=bookmark&tab=security#security')
         expect(visibleText(container)).toContain('two-factor-card')
     })
 

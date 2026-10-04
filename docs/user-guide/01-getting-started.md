@@ -344,6 +344,16 @@ If logged in as a community's manager:
 
 ![Manager Energy balance](screenshots/02c-energy-balance.png)
 
+Energy-flow cards name the selected community in both Energy balance and the
+participant dashboard.
+
+The **Energy balance** and participant dashboard date selectors update the
+page URL. Bookmark or share a link with `period_start` and `period_end` to
+return to that exact range, including a custom range, after reload or browser
+Back. Without a valid range the page opens the current period. Switching
+community or changing its billing interval resets the dashboard to the current
+period. Switching community also clears any selected participant.
+
 In the participant table, Tab to a name and press Enter or Space to filter the
 charts; swipe the table horizontally on narrow screens to see every column.
 

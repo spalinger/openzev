@@ -21,8 +21,8 @@ type ParticipantOnboardingNoticeProps = {
  * Shows the onboarding link after it was sent or copied.
  *
  * Unlike the credentials it replaces, nothing here is secret in the sense a
- * password is — but it is still a bearer link, so it is shown once and left
- * to the operator to dismiss, the same way a temporary password was.
+ * password is — but it is still a bearer link. The operator can dismiss it;
+ * the owning page also clears it when account, community or write access changes.
  */
 export function ParticipantOnboardingNotice({ notice, onDismiss }: ParticipantOnboardingNoticeProps) {
   const { t } = useTranslation()

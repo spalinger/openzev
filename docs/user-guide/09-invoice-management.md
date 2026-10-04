@@ -65,7 +65,12 @@ the details. An invoice appears here once it has been sent: drafts and
 approved invoices that haven't gone out yet stay with the operator, and the
 participant's annual statement counts only sent invoices too. A sent invoice
 that is cancelled later stays listed, marked as cancelled. The PDF button
-appears only on rows that have a document.
+appears only on rows that have a document. This sent-only list also applies
+when you manage another community where you are a participant.
+Click the invoice number or **View details** to open the invoice. **Open PDF**
+has a text label; invoices without a document show whether the PDF is being
+prepared, failed, or missing. A failed refresh keeps the last loaded invoices
+visible with a warning and **Retry**.
 Participants with several communities see which community issued each invoice.
 The list is read-only; the deep link `/billing/invoices/{id}` shows a
 participant only their own invoice (enforced by the backend), and its return
@@ -162,6 +167,11 @@ The period is automatically set based on the selected ZEV's billing interval.
   offering Generate, while partly overlapping locked invoices surface as a
   generation conflict with a link to the blocking invoices.
 
+Choosing a period updates the URL without changing other filters. Reload and browser Back read the period from that URL. Switching
+community checks the same range against the new community's start date before
+loading its invoices. A failed refresh retains the loaded period rows with
+**Retry**.
+
 ![Invoice period overview](screenshots/08-invoices.png)
 
 ### Period Overview Table
@@ -172,11 +182,10 @@ Each row in the table represents one **participant** who had active metering-poi
 |---|---|
 | **Participant** | Name and email address. |
 | **Metering Data** | Green "complete" badge if all assigned metering points have daily readings for the full period. Red "missing" badge otherwise, with a count of points with data vs. total and a list of missing meter IDs with the number of missing days each. |
-| **Invoice** | The invoice number, or "Not created" if no invoice exists yet. |
-| **Status** | Badge showing the invoice status (`Draft`, `Approved`, `Sent`, `Paid`, `Cancelled`), or a neutral "Not created" badge. |
+| **Invoice** | Linked invoice number and its status badge (`Draft`, `Approved`, `Sent`, `Paid`, `Cancelled`), or "Not created"/"Already billed" for a row without an invoice. Opening details retains the period for the return link. |
 | **Email** | Latest email delivery status badge (`pending`, `sent`, `failed`). Open **Billing → Emails** for attempt history, errors, and retry. |
 | **Total** | Invoice total in CHF. |
-| **PDF** | **Generate PDF** button (or **Open PDF** + **Regenerate** if a PDF already exists). |
+| **PDF** | Preparing, failed, missing or ready state; **Open PDF** when ready. Generation/regeneration actions remain in the row actions. |
 | **Actions** | Per-invoice action buttons (see below). |
 
 ### Empty State
