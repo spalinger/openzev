@@ -3,7 +3,7 @@ import { Tabs } from '@mantine/core'
 import { usePageNavigation } from '../lib/usePageNavigation'
 import { AdminDashboardPage } from './AdminDashboardPage'
 import { ZevListPage } from './ZevListPage'
-import { AdminInvoicesPage } from './AdminInvoicesPage'
+import { AdminInvoicesContent } from './AdminInvoicesPage'
 import { AuditLogsPage } from './AdminAuditLogsPage'
 import { AdminSystemHealthPanel } from './AdminSystemHealthPanel'
 import { AdminDynamicSourcesPanel } from './AdminDynamicSourcesPanel'
@@ -59,7 +59,7 @@ export function AdminOverviewHubPage({ tab = 'overview' }: { tab?: AdminOverview
                     <ZevListPage embedded />
                 </Tabs.Panel>
                 <Tabs.Panel value="invoices">
-                    <AdminInvoicesPage embedded />
+                    <AdminInvoicesContent />
                 </Tabs.Panel>
                 <Tabs.Panel value="dynamic-sources">
                     <AdminDynamicSourcesPanel />

@@ -9,18 +9,28 @@ import { deleteInvoice, fetchInvoices } from '../lib/api/invoices'
 import { formatApiError } from '../lib/api/errors'
 import { queryKeys } from '../lib/api/queryKeys'
 import { useToast } from '../lib/toast'
-import { invoiceStatusBadgeClass } from '../features/invoices/invoiceStatus'
+import { InvoiceActionButton, InvoiceAmount, InvoiceLink, InvoiceStatusBadge } from '../components/InvoicePresentation'
 import type { Invoice } from '../types/api'
 import { PageHeader } from '../components/PageHeader'
 
 // Stable empty array so the useMemo below keeps a consistent dependency reference.
 const EMPTY_INVOICES: Invoice[] = []
 
-/**
- * `embedded` drops the page header (mounted inside the admin Overview hub
- * since phase 3; /admin/invoices stays as a deep-link alias).
- */
-export function AdminInvoicesPage({ embedded = false }: { embedded?: boolean }) {
+export function AdminInvoicesPage() {
+    const { t } = useTranslation()
+    return (
+        <div className="page-stack">
+            <PageHeader
+                eyebrow={t('nav.platformScope')}
+                title={t('adminInvoices.title')}
+                description={t('adminInvoices.description')}
+            />
+            <AdminInvoicesContent />
+        </div>
+    )
+}
+
+export function AdminInvoicesContent() {
     const { t } = useTranslation()
     const queryClient = useQueryClient()
     const { pushToast } = useToast()
@@ -90,7 +100,7 @@ export function AdminInvoicesPage({ embedded = false }: { embedded?: boolean }) 
             {
                 accessorKey: 'invoice_number',
                 header: t('adminInvoices.number'),
-                cell: (ctx) => <code>{ctx.getValue<string>()}</code>,
+                cell: (ctx) => <InvoiceLink invoice={ctx.row.original} from="/admin/invoices"><code>{ctx.getValue<string>()}</code></InvoiceLink>,
             },
             {
                 accessorKey: 'zev_name',
@@ -109,7 +119,7 @@ export function AdminInvoicesPage({ embedded = false }: { embedded?: boolean }) 
                 accessorKey: 'total_value',
                 header: t('adminInvoices.total'),
                 meta: { numeric: true },
-                cell: (ctx) => `${ctx.row.original.total_chf} CHF`,
+                cell: (ctx) => <InvoiceAmount value={ctx.row.original.total_chf} />,
             },
             {
                 accessorKey: 'status',
@@ -117,7 +127,7 @@ export function AdminInvoicesPage({ embedded = false }: { embedded?: boolean }) 
                 filterFn: 'equalsString',
                 cell: (ctx) => {
                     const status = String(ctx.getValue() ?? '')
-                    return <span className={invoiceStatusBadgeClass(status)}>{status ? t(`invoice.status.${status}`) : ''}</span>
+                    return <InvoiceStatusBadge status={status} />
                 },
             },
             {
@@ -126,15 +136,12 @@ export function AdminInvoicesPage({ embedded = false }: { embedded?: boolean }) 
                 enableSorting: false,
                 meta: { numeric: false },
                 cell: (ctx) => (
-                    <button
-                        type="button"
-                        className="button button-danger"
-                        onClick={() => handleDelete(ctx.row.original)}
-                        disabled={deleteMutation.isPending}
-                        title={t('adminInvoices.delete')}
-                    >
-                        {t('adminInvoices.delete')}
-                    </button>
+                    <InvoiceActionButton compact={false} action={{
+                        label: t('adminInvoices.delete'),
+                        onClick: () => handleDelete(ctx.row.original),
+                        disabled: deleteMutation.isPending,
+                        danger: true,
+                    }} />
                 ),
             },
         ],
@@ -143,18 +150,10 @@ export function AdminInvoicesPage({ embedded = false }: { embedded?: boolean }) 
 
     return (
         <div className="page-stack">
-            {!embedded && (
-            <PageHeader
-                eyebrow={t('nav.platformScope')}
-                title={t('adminInvoices.title')}
-                description={t('adminInvoices.description')}
-            />
-            )}
-
             <section className="card">
                 {invoicesQuery.isLoading && <p>{t('adminInvoices.loading')}</p>}
                 {invoicesQuery.isError && <p className="text-error">{t('adminInvoices.loadError')}</p>}
-                {!invoicesQuery.isLoading && invoices.length === 0 && (
+                {invoicesQuery.isSuccess && invoices.length === 0 && (
                     <p className="muted">{t('adminInvoices.empty')}</p>
                 )}
                 {invoices.length > 0 && (

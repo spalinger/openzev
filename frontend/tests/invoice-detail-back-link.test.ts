@@ -124,6 +124,13 @@ describe('InvoiceDetailPage return link', () => {
         container.remove()
     })
 
+    it('returns platform administrators to their invoice list origin', async () => {
+        mockAuth.mockReturnValue({ user: { id: 1, role: 'admin' } })
+        const container = await renderDetail([{ pathname: '/billing/invoices/1', state: { from: '/admin/invoices' } }])
+        expect(container.querySelector('header a.button')?.getAttribute('href')).toBe('/admin/invoices')
+        container.remove()
+    })
+
     it('returns owners to the invoice period they came from', async () => {
         mockRole('manager')
         const container = await renderDetail([{

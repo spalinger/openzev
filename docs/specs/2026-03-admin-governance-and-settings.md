@@ -404,7 +404,7 @@ The admin console is organized into four hubs with routed sections; legacy URLs 
 | `/admin` | `AdminOverviewHubPage` | Overview hub (default tab `overview`) |
 | `/admin/overview` | `AdminOverviewHubPage tab="overview"` | KPIs dashboard (embedded `AdminDashboardPage`, see §9.3) |
 | `/admin/zevs` | `AdminOverviewHubPage tab="zevs"` | ZEV list (embedded `ZevListPage`; “Missing or invalid IBAN” badge when `bank_iban` is missing or invalid — IBAN status only, not overall setup or period readiness) |
-| `/admin/invoices` | `AdminOverviewHubPage tab="invoices"` | All invoices (embedded `AdminInvoicesPage`) |
+| `/admin/invoices` | `AdminOverviewHubPage tab="invoices"` | All invoices (`AdminInvoicesContent`; the standalone `AdminInvoicesPage` wrapper adds its header) |
 | `/admin/dynamic-sources` | `AdminOverviewHubPage tab="dynamic-sources"` | Global dynamic price-source health and operations (`AdminDynamicSourcesPanel`; see the dynamic-tariff spec §10) |
 | `/admin/audit` | `AdminOverviewHubPage tab="audit"` | Platform audit log (embedded `AuditLogsPage scope="admin"`) |
 | `/admin/health` | `AdminOverviewHubPage tab="health"` | System health (`AdminSystemHealthPanel`, see §9.3a) |
@@ -422,6 +422,9 @@ corresponding hub tab or `/admin/system-settings` tab.
 Hub tab navigation uses `usePageNavigation`, retaining unrelated query
 parameters and the hash. Routed hubs keep replace history; System keeps
 query-based push history (the default Regional tab removes only `tab`).
+Admin invoice numbers use the shared invoice link; detail returns admins to
+the platform invoice tab. Shared amount/status/action cells retain DataTable
+sorting, complete-dataset pagination and the existing delete confirmation.
 
 ### 9.3 AdminDashboardPage
 

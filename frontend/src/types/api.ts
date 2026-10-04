@@ -967,6 +967,7 @@ export interface Invoice {
     total_grid_kwh?: string
     total_feed_in_kwh?: string
     status: string
+    sent_at?: string | null
     pdf_url?: string | null
     /**
      * Where the document is, as distinct from the invoice's own `status`.

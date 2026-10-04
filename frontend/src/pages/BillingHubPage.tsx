@@ -2,7 +2,7 @@ import { useManagedZev } from '../lib/managedZev'
 import { Tabs } from '@mantine/core'
 import { useTranslation } from 'react-i18next'
 import { usePageNavigation } from '../lib/usePageNavigation'
-import { InvoicesPage } from './InvoicesPage'
+import { InvoicesContent } from './InvoicesPage'
 import { BillingEmailsPage } from './BillingEmailsPage'
 import { PageHeader } from '../components/PageHeader'
 
@@ -45,7 +45,7 @@ export function BillingHubPage({ tab }: { tab: BillingTab }) {
                 </Tabs.List>
 
                 <Tabs.Panel value="invoices">
-                    <InvoicesPage embedded />
+                    <InvoicesContent />
                 </Tabs.Panel>
                 <Tabs.Panel value="emails">
                     <BillingEmailsPage />

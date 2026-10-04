@@ -93,8 +93,9 @@ defined by shared frontend primitives and CSS contracts.
 | `frontend/src/components/ActionMenu.tsx` | `ActionMenu` | Overflow action trigger for lower-priority row/card actions. Uses labelled menu items, optional icons, section headers, and danger styling. Default button class: `button button-secondary button-compact`. |
 | `frontend/src/components/ConfirmDialog.tsx` | `useConfirmDialog`, `ConfirmDialog` | Required wrapper for destructive or high-impact actions. Supports `title`, `message`, `isDangerous`, and async confirm handlers. `confirmText` and `cancelText` are optional and default to `common.confirm` / `common.cancel` i18n keys. Async errors surface via a toast (uses `useToast` internally). |
 | `frontend/src/components/FormModal.tsx` | `FormModal` | Generic modal shell for CRUD forms and small workflow dialogs. |
-| `frontend/src/components/BillingPeriodSelector.tsx` | `BillingPeriodSelector` | Specialized period-navigation control for invoice workflows; uses the same button language as management-page actions. |
+| `frontend/src/components/PeriodSelector.tsx` | `PeriodSelector` | Billing-interval navigation and optional custom ranges. Callers own period URL state and the aligned navigation floor. |
 | `frontend/src/components/YearPicker.tsx` | `YearPicker` | Native year control with `years`, `value`, `onChange`, optional `disabled`, required translated `label`, optional `id`, `visibleLabel` (default true), and `className`. It generates an associated id when omitted; hidden labels use `aria-label`. Range/default/rollover policy stays with the caller. |
+| `frontend/src/components/InvoicePresentation.tsx` | `InvoiceLink`, `InvoiceStatusBadge`, `InvoiceDeliveryStatus`, `InvoiceAmount`, `InvoicePdfCell`, `InvoiceActionButton`, `InvoiceRowActions` | Typed invoice cells/actions shared by period rows, own invoices, and the admin DataTable. Callers own row models, eligibility and permission checks; no shared pagination layer. |
 | `frontend/src/components/PageHeader.tsx` | `PageHeader` | Page title (`h1`), optional `eyebrow`, `description`, and `actions`. Keep it outside data/scope state branches. Embedded pages use the host page title. |
 | `frontend/src/components/Notice.tsx` | `Notice` | Errors use `alert`, warnings use `status`; optional role override and retry with busy feedback. |
 | `frontend/src/components/PageState.tsx` | `PageState` | Blocking error → skeleton → content, with translated fallback error text and optional retry. |
@@ -144,6 +145,11 @@ interval data exists. Canonical parameters are `period_start`/`period_end`;
 `legacyParams: true` also reads `from`/`to` only if neither canonical key is
 present. Dates must be real ISO calendar days with `from <= to`.
 
+- `InvoicesContent`: `fallback: 'previous-complete'`, `minimumRangeStart`
+  equals community start, `minimumFallback` is the first aligned period,
+  `scopeChange: 'preserve-url'`. Historical/custom URL ranges from community
+  start remain valid even before today's aligned floor. A scope/interval change
+  revalidates the URL before querying the new scope.
 - `MeteringChartPage`: `fallback: 'current'`, no minimum URL range,
   legacy reads enabled, `scopeChange: 'preserve-url'`. Valid custom ranges
   survive scope and interval changes; absent/invalid dates use the new current
@@ -171,6 +177,10 @@ Templates retains its combined PDF/email strip and template query parameter;
 ZEV Settings retains its shared draft, Access tab and dirty-navigation guard.
 Mantine tab lists and panels stay under the same root.
 
+Billing, admin invoices and Metering imports consume `InvoicesContent`,
+`AdminInvoicesContent` and `ImportsContent` directly; standalone page wrappers
+render `PageHeader` plus the same body. These bodies have no header-hiding
+`embedded` prop and keep their independent fetch states and feature toolbars.
 
 ### 4.2 CSS contracts
 
@@ -395,8 +405,8 @@ These pages define the current management-page reference set.
 
 - File: `frontend/src/pages/InvoicesPage.tsx`
 - Route: `/billing/invoices` (`/invoices` stays as alias)
-- Query key: `['invoice-period-overview', selectedZevId, period.period_start, period.period_end]`
-- Pattern: period navigation via `BillingPeriodSelector`, batch toolbar,
+- Query key: `['invoices', 'period-overview', selectedZevId, period.period_start, period.period_end]`
+- Pattern: period navigation via `PeriodSelector` and `useBillingPeriodParams`, batch toolbar,
   compact structured table rows, primary/secondary/overflow actions. The email
   column carries only the latest delivery-state badge; delivery history is
   owned by `BillingEmailsPage`.
@@ -438,6 +448,7 @@ These pages define the current management-page reference set.
 - Frozen terms (`ZEV`, `vZEV`, `SDAT-CH`, `CSV / Excel`, format specifiers, unit symbols) are never translated. Each locale file documents them in a header comment block.
 - `frontend/src/@types/i18next.d.ts` sets `CustomTypeOptions.defaultNS` for future compile-time key checking. Strict `resources` typing is deferred until computed-key patterns are migrated.
 - `frontend/tests/locale-parity.test.ts` enforces exact leaf-key structure across all four locales, rejects empty/whitespace-only values, verifies interpolation placeholder names match, and asserts every leaf is a string.
+- The dead-key guard includes source, tests, screenshot specs and dynamic key prefixes. Consolidate into `common.*` only when meaning, grammar and interpolation match in all locales; identical values alone are informational. Invoice PDF controls share `common.openPdf`; missing-meter day counts use translated plural keys.
 
 ### 7.7 Responsive rules
 
@@ -477,6 +488,7 @@ These pages define the current management-page reference set.
 - Browser behavior: `frontend/screenshots/page-anatomy.spec.ts`, via `npm run test:browser`, covers page states, scope transitions, retained drafts, keyboard filtering and narrow layouts. Fixtures validate scoped requests; removal scenarios explicitly allow old-scope requests during reconciliation, then require the remaining scope. Captured images are manual-review artifacts, not baseline comparisons.
 - Meter drafts: `frontend/tests/metering-draft-scope.test.ts` — dialog retention/reset and obsolete write completions across account, community and permission changes.
 - Email history/retry: `frontend/tests/billing-email-history.test.ts` — request ordering, close/reopen, and obsolete read/write completions across account/community changes.
+- Shared behavior: `billing-period-params.test.ts` covers calendar validation, canonical/legacy precedence, page defaults/minima, readiness, scope/interval reconciliation, reload/back navigation, query/hash preservation and history policy. `invoice-presentation.test.ts` covers PDF states, missing-invoice rows, delivery annotation precedence, read-only rows, return context, cached failures and admin sorting/filtering/pagination.
 - Invoice states: `frontend/tests/invoices-page.test.ts` — standalone titles during scope loading/error/empty states, embedded heading ownership, and a skeleton before initial period/query resolution.
 - Retired CSS classes: `npx vitest run tests/retired-css-classes.test.ts` — classes with no rule must not survive in markup
 - Manual verification on the reference pages:

@@ -1461,7 +1461,7 @@ the obsolete `tab` parameter. Account and System keep query-based tabs and
 push changes into history while preserving unrelated parameters/hash. Account
 keeps hidden panels mounted for one-time secrets; existing active-panel and
 shared settings-draft behavior in the other hubs remains intact. Standalone
-import wrappers render a header plus the same body the hub consumes,
+invoice/import wrappers render a header plus the same body the hub consumes,
 so scope/loading failures retain one route title.
 
 ### 9.3 Navigation visibility
