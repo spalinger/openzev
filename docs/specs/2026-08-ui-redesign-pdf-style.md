@@ -376,6 +376,14 @@ The planned dev-only mockup routes `frontend/src/pages/design/PreviewDashboard.t
 | Template editor | `frontend/src/pages/AdminPdfTemplatesPage.tsx` | `/admin/pdf-templates` | `queryKeys.admin.invoicePdfTemplate()` / `.contractPdfTemplate()` / `.annualStatementPdfTemplate()` = `['admin', 'pdf-template', <type>]` (`queryKeys.ts`) | `previewPdfTemplateBlob` debounced → object URL |
 | Participants etc. | existing | existing | existing | existing — re-skin only |
 
+Dashboard and Metering period URL state share `useBillingPeriodParams`
+(consumer policies are documented in the management-page reference §4.1).
+Dashboard accepts canonical period deep links and resets to the current period
+on community/interval changes; managed period requests wait for the ZEV record.
+Metering preserves custom and legacy ranges, and resolves the URL meter against
+the loaded current-scope list before querying it. Shared URL navigation retains unrelated
+query parameters/hash and the hubs' existing history/mounting contracts.
+
 ### 7.10 TypeScript types
 
 No new API response shape besides the `output` param and the authenticated ``GET …/pdf/`` blob endpoint (see §6.3). The existing `frontend/src/types/api.ts` types `PdfTemplateResponse` (`template_name`, `content`, `is_customized`, `is_stale`, `detail?`) and `InvoiceSerializer.pdf_url` are unchanged. `PdfPreviewProps` (above) lives in `frontend/src/components/PdfPreview.tsx`, not in `types/api.ts`.

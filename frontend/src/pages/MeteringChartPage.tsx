@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Tabs } from '@mantine/core'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
 import { DataTable, type ColumnDef } from '../components/DataTable'
 import { EmptyState } from '../components/EmptyState'
 import { PageSkeleton } from '../components/PageSkeleton'
@@ -28,11 +27,11 @@ import { useAuth } from '../lib/auth'
 import { useManagedZev } from '../lib/managedZev'
 import { useCommunityAccess } from '../lib/communityAccess'
 import {
-    billingRangeFromParams,
     firstAlignedBillingPeriod,
     type BillingInterval,
-    getCurrentBillingPeriod,
 } from '../lib/billingPeriod'
+import { readBillingPeriodParams, useBillingPeriodParams } from '../lib/useBillingPeriodParams'
+import { usePageNavigation } from '../lib/usePageNavigation'
 import { formatShortDate, useAppSettings } from '../lib/appSettings'
 import { daysInPeriod, formatBusinessIsoDate } from '../lib/dates'
 import { formatKwh } from '../lib/numbers'
@@ -125,12 +124,7 @@ export function filterAndRankQualityRows(
  * canonical key is present, that pair wins rather than mixing formats.
  */
 export function readPeriodFromSearchParams(searchParams: URLSearchParams): { from: string; to: string } | null {
-    const canonicalFrom = searchParams.get('period_start')
-    const canonicalTo = searchParams.get('period_end')
-    if (canonicalFrom !== null || canonicalTo !== null) {
-        return billingRangeFromParams(canonicalFrom, canonicalTo)
-    }
-    return billingRangeFromParams(searchParams.get('from'), searchParams.get('to'))
+    return readBillingPeriodParams(searchParams, true)
 }
 
 /**
@@ -171,22 +165,48 @@ export function peakChartPoint(
 
 /**
  * Sentinel `<select>` value for "every meter in the managed ZEV, summed" —
- * distinct from both a real metering-point UUID and the "" empty selection,
- * so it round-trips through the URL and query keys the same way a real
- * metering point does (#650). Offered only in managed scope with a ZEV
- * selected; a participant has no single "their ZEV" to aggregate by.
+ * a community aggregate, not a meter ID.
  */
-const ALL_METERING_POINTS_VALUE = '__zev_total__'
+export const ALL_METERING_POINTS_VALUE = '__zev_total__'
+
+/**
+ * Resolve `?metering_point=` against scope and the meter inventory. The
+ * whole-community sentinel needs only management scope and a selected
+ * community; real meter IDs need the resolved list. While a requested real
+ * meter is still resolving, callers show loading — never "no point selected".
+ */
+export function resolveMeterSelection({
+    requestedMpId,
+    meterListResolved,
+    meteringPointIds,
+    isManagedScope,
+    selectedZevId,
+}: {
+    requestedMpId: string
+    meterListResolved: boolean
+    meteringPointIds: ReadonlyArray<string>
+    isManagedScope: boolean
+    selectedZevId: string
+}): { selectedMpId: string; isResolving: boolean; valid: boolean } {
+    const isSentinel = requestedMpId === ALL_METERING_POINTS_VALUE
+    const valid = isSentinel
+        ? isManagedScope && !!selectedZevId
+        : !requestedMpId || (meterListResolved && meteringPointIds.includes(requestedMpId))
+    return {
+        valid,
+        selectedMpId: valid ? requestedMpId : '',
+        isResolving: !!requestedMpId && !isSentinel && !meterListResolved,
+    }
+}
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports' }) {
-    const navigate = useNavigate()
-    const [searchParams, setSearchParams] = useSearchParams()
+    const { searchParams, updateParams } = usePageNavigation()
     const { t } = useTranslation()
     const { user } = useAuth()
     const { settings } = useAppSettings()
-    const { selectedZevId, selectedZev } = useManagedZev()
+    const { selectedZevId, selectedZev, isLoading: scopeLoading, isError: scopeError } = useManagedZev()
     const participantScopeName = soleCommunityName(user)
     const { isZevScope: isManagedScope } = useCommunityAccess()
     const interval: BillingInterval = (selectedZev?.billing_interval as BillingInterval) ?? 'monthly'
@@ -197,14 +217,19 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
         () => firstAlignedBillingPeriod(selectedZev?.start_date ?? null, interval),
         [selectedZev?.start_date, interval],
     )
-    const [selectedMpId, setSelectedMpId] = useState<string>(searchParams.get('metering_point') ?? '')
-    const [period, setPeriod] = useState<{ from: string; to: string }>(() =>
-        readPeriodFromSearchParams(searchParams) ?? getCurrentBillingPeriod(interval),
-    )
+    const { period, setPeriod: handlePeriodChange, isReady: periodReady } = useBillingPeriodParams({
+        interval,
+        ready: isManagedScope ? !!selectedZev : !!user,
+        scopeId: selectedZevId,
+        fallback: 'current',
+        legacyParams: true,
+        scopeChange: 'preserve-url',
+    })
     const [bucket, setBucket] = useState<'day' | 'hour' | 'month'>('day')
 
     const periodDays = daysInPeriod(period.from, period.to)
     const hourlyResolutionAvailable = periodDays <= MAX_HOURLY_RESOLUTION_DAYS
+    const effectiveBucket = bucket === 'hour' && !hourlyResolutionAvailable ? 'day' : bucket
 
     // Fall back to daily if the period grows past the hourly cap (e.g. a
     // billing-interval switch, or navigating to a longer period) while
@@ -215,34 +240,32 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
         }
     }, [bucket, hourlyResolutionAvailable])
 
-    // The URL is the period truth (shared with the invoice pages): re-derive
-    // the state from period_start/period_end whenever the scope or the URL
-    // changes, so ZEV/interval switches and shared links land correctly.
-    useEffect(() => {
-        setPeriod(
-            readPeriodFromSearchParams(searchParams) ?? getCurrentBillingPeriod(interval),
-        )
-    }, [selectedZevId, interval, searchParams])
-
-    const handlePeriodChange = useCallback((next: { from: string; to: string }) => {
-        setPeriod(next)
-        const nextParams = new URLSearchParams(searchParams)
-        nextParams.set('period_start', next.from)
-        nextParams.set('period_end', next.to)
-        nextParams.delete('from')
-        nextParams.delete('to')
-        setSearchParams(nextParams, { replace: true })
-    }, [searchParams, setSearchParams])
-
     // Data queries
     // Operator-only lookup; /zevs/ is 403 for participants.
     const zevsQuery = useQuery({ queryKey: queryKeys.zev.list(), queryFn: fetchZevs, enabled: isManagedScope })
     const mpQuery = useQuery({
         queryKey: queryKeys.metering.points(selectedZevId || undefined),
         queryFn: () => fetchMeteringPoints(selectedZevId || undefined),
-        enabled: !isManagedScope || !!selectedZevId,
+        enabled: periodReady && tab !== 'imports',
     })
 
+    const meteringPoints = (mpQuery.data ?? []).filter(
+        (meteringPoint) => !isManagedScope || !selectedZevId || meteringPoint.zev === selectedZevId,
+    )
+    const requestedMpId = searchParams.get('metering_point') ?? ''
+    // The sentinel resolves from scope; real IDs resolve against the inventory (URL untouched until then).
+    const isSentinelRequested = requestedMpId === ALL_METERING_POINTS_VALUE
+    const meterListResolved = mpQuery.data !== undefined
+    const meterListPending = mpQuery.isPending || mpQuery.isFetching
+    const { selectedMpId, isResolving: selectionUnresolved, valid: validMpSelection } = resolveMeterSelection({
+        requestedMpId,
+        meterListResolved,
+        meteringPointIds: meteringPoints.map(mp => mp.id),
+        isManagedScope,
+        selectedZevId,
+    })
+    const isResolvingMpSelection = selectionUnresolved && meterListPending
+    const qualityBlockedOnMeterList = tab === 'quality' && !!requestedMpId && !isSentinelRequested && !meterListResolved
     const isZevTotal = selectedMpId === ALL_METERING_POINTS_VALUE
     const chartQuery = useQuery({
         // Distinct cache entry per ZEV, since the "meteringPointId" slot of
@@ -252,13 +275,13 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
             isZevTotal ? `zev:${selectedZevId}` : selectedMpId,
             period.from,
             period.to,
-            bucket,
+            effectiveBucket,
         ),
         queryFn: () =>
             isZevTotal
-                ? fetchChartData({ zevId: selectedZevId, dateFrom: period.from, dateTo: period.to, bucket })
-                : fetchChartData({ meteringPoint: selectedMpId, dateFrom: period.from, dateTo: period.to, bucket }),
-        enabled: tab === 'chart' && (isZevTotal ? !!selectedZevId : !!selectedMpId),
+                ? fetchChartData({ zevId: selectedZevId, dateFrom: period.from, dateTo: period.to, bucket: effectiveBucket })
+                : fetchChartData({ meteringPoint: selectedMpId, dateFrom: period.from, dateTo: period.to, bucket: effectiveBucket }),
+        enabled: periodReady && tab === 'chart' && (isZevTotal ? !!selectedZevId : !!selectedMpId),
     })
 
     // The Data Quality tab has no concept of "whole ZEV total" — it already
@@ -280,12 +303,9 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
         // Expensive (one query per visible metering point server-side) and
         // only shown on the Data Quality tab — don't run it just because the
         // Chart tab happened to be open (#638).
-        enabled: tab === 'quality' && (!isManagedScope || !!selectedZevId),
+        enabled: periodReady && (!requestedMpId || isSentinelRequested || meterListResolved) && tab === 'quality' && (!isManagedScope || !!selectedZevId),
     })
 
-    const meteringPoints = (mpQuery.data ?? []).filter(
-        (meteringPoint) => !isManagedScope || !selectedZevId || meteringPoint.zev === selectedZevId,
-    )
     const zevNameById = new Map((zevsQuery.data ?? []).map((z) => [z.id, z.name]))
 
     const data: ChartDataPoint[] = chartQuery.data ?? []
@@ -298,51 +318,42 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
 
     // Sync the selected metering point to the URL
     const handleMpChange = useCallback((id: string) => {
-        setSelectedMpId(id)
-        const next = new URLSearchParams(searchParams)
-        if (id) {
-            next.set('metering_point', id)
-        } else {
-            next.delete('metering_point')
-        }
-        setSearchParams(next, { replace: true })
-    }, [searchParams, setSearchParams])
+        updateParams(params => {
+            if (id) params.set('metering_point', id)
+            else params.delete('metering_point')
+        })
+    }, [updateParams])
 
     // Retain query parameters when switching route-based tabs.
     const handleTabChange = (value: string | null) => {
-        const next = new URLSearchParams(searchParams)
-        next.delete('tab')
-        const qs = next.toString()
-        navigate(`/metering/${value === 'quality' ? 'quality' : value === 'imports' ? 'imports' : 'chart'}${qs ? `?${qs}` : ''}`, { replace: true })
+        updateParams(params => params.delete('tab'), {
+            pathname: `/metering/${value === 'quality' ? 'quality' : value === 'imports' ? 'imports' : 'chart'}`,
+        })
     }
 
     // Jumping from a Data Quality row to that meter's chart changes both the
     // route and ?metering_point= at once (#648). Keep the remaining filters so
     // the period survives the route-based tab switch.
     const handleJumpToChart = useCallback((meteringPointId: string) => {
-        setSelectedMpId(meteringPointId)
-        const next = new URLSearchParams(searchParams)
-        next.set('metering_point', meteringPointId)
-        next.delete('tab')
-        const qs = next.toString()
-        navigate(`/metering/chart${qs ? `?${qs}` : ''}`, { replace: true })
-    }, [navigate, searchParams])
+        updateParams(params => {
+            params.set('metering_point', meteringPointId)
+            params.delete('tab')
+        }, { pathname: '/metering/chart' })
+    }, [updateParams])
 
     // Data Quality: click a severity card to filter the table to it; click
     // the active one again to clear (#648). Persisted in the URL like the
     // other filters/selectors on this page.
     const severityFilter = readSeverityFilter(searchParams)
     const handleSeverityFilterChange = useCallback((next: DataQualitySeverity | 'all') => {
-        setSearchParams((previous) => {
-            const nextParams = new URLSearchParams(previous)
+        updateParams(nextParams => {
             if (next === 'all') {
                 nextParams.delete('quality_severity')
             } else {
                 nextParams.set('quality_severity', next)
             }
-            return nextParams
-        }, { replace: true })
-    }, [setSearchParams])
+        })
+    }, [updateParams])
 
     const toggleSeverity = useCallback(
         (severity: DataQualitySeverity) =>
@@ -369,26 +380,14 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
     const selectedMpDataRange = meteringPointDataRange(selectedMp)
 
     useEffect(() => {
-        if (!isManagedScope || !selectedZevId) {
-            return
-        }
-        if (!selectedMpId || selectedMpId === ALL_METERING_POINTS_VALUE) {
-            return
-        }
-        // Wait for the real list before reconciling — meteringPoints is []
-        // while mpQuery is still loading, which would otherwise read as
-        // "not visible" and clear a `?metering_point=` deep link before it
-        // ever had a chance to match (#674).
-        if (!mpQuery.isSuccess) {
-            return
-        }
-        const stillVisible = meteringPoints.some((meteringPoint) => meteringPoint.id === selectedMpId)
-        if (!stillVisible) {
-            handleMpChange('')
-        }
-    }, [isManagedScope, selectedZevId, selectedMpId, meteringPoints, handleMpChange, mpQuery.isSuccess])
+        // ScopeGuard cannot stop this parent effect. A cold or failed scope
+        // lookup has not established whether the aggregate link is valid.
+        const scopeResolved = !isManagedScope || (!scopeLoading && (!scopeError || !!selectedZev))
+        const resolvable = isSentinelRequested ? scopeResolved : meterListResolved
+        if (requestedMpId && !validMpSelection && resolvable) handleMpChange('')
+    }, [requestedMpId, validMpSelection, handleMpChange, meterListResolved, isSentinelRequested, scopeLoading, scopeError, selectedZev, isManagedScope])
 
-    const tickFormatter = (value: string) => formatMeteringBucketLabel(value, bucket, settings)
+    const tickFormatter = (value: string) => formatMeteringBucketLabel(value, effectiveBucket, settings)
 
     // Data Quality table rows: filtered to the active severity card, with a
     // sortable numeric rank alongside the string severity (#648).
@@ -537,6 +536,11 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
                         gap: '1rem',
                     }}
                 >
+                    {mpQuery.isError && (
+                        <Notice tone={meterListResolved ? 'warning' : 'error'} onRetry={() => void mpQuery.refetch()} isRetrying={mpQuery.isFetching}>
+                            {formatApiError(mpQuery.error)}
+                        </Notice>
+                    )}
                     <PeriodSelector
                         interval={interval}
                         from={period.from}
@@ -633,32 +637,21 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
 
                 <Tabs.Panel value="chart">
                     <div className="page-stack">
-                        {!selectedMpId && (
+                        {isResolvingMpSelection ? (
+                            <PageSkeleton variant="card" />
+                        ) : !selectedMpId && !requestedMpId ? (
                             <EmptyState
                                 titleKey="pages.meteringData.noPointSelectedTitle"
                                 descriptionKey="pages.meteringData.noPointSelected"
                             />
-                        )}
-
-                        {/* "Whole ZEV total" is only offered when isManagedScope && selectedZevId
-                            (see the dropdown below), but the selection is shareable via URL
-                            (#647) — a participant, or an owner with no ZEV selected, can land
-                            here with the sentinel set and no ZEV to total. chartQuery stays
-                            disabled in that case, so without this branch nothing renders at
-                            all (#673). */}
-                        {isZevTotal && !selectedZevId && (
-                            <EmptyState
-                                titleKey="pages.meteringData.zevTotalUnavailableTitle"
-                                descriptionKey="pages.meteringData.zevTotalUnavailable"
-                            />
-                        )}
+                        ) : null}
 
                         {selectedMpId && chartQuery.isLoading && <PageSkeleton variant="card" />}
                         {selectedMpId && chartQuery.isError && (
                             <Notice tone="error" onRetry={() => void chartQuery.refetch()} isRetrying={chartQuery.isFetching}>{formatApiError(chartQuery.error)}</Notice>
                         )}
 
-                        {selectedMpId && chartQuery.isSuccess && (
+                        {selectedMpId && chartQuery.data && (
                             <>
                                 <div className="stat-grid">
                                     <StatCard
@@ -685,7 +678,7 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
                                         />
                                     )}
                                     <StatCard
-                                        label={t(BUCKET_COUNT_LABEL_KEY[bucket])}
+                                        label={t(BUCKET_COUNT_LABEL_KEY[effectiveBucket])}
                                         value={String(data.length)}
                                     />
                                 </div>
@@ -730,7 +723,7 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
                                                     tickFormatter={(v: number) => formatKwh(v)}
                                                 />
                                                 <Tooltip
-                                                    content={<CustomTooltip resolution={bucket} settings={settings} />}
+                                                    content={<CustomTooltip resolution={effectiveBucket} settings={settings} />}
                                                 />
                                                 <Legend />
                                                 <Bar
@@ -772,11 +765,15 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
 
                 <Tabs.Panel value="quality">
                     <div className="page-stack">
+                        {qualityBlockedOnMeterList ? (
+                            meterListPending ? <PageSkeleton variant="table" /> : null
+                        ) : (
+                        <>
                         {qualityQuery.isLoading && <PageSkeleton variant="table" />}
                         {qualityQuery.isError && (
                             <Notice tone="error" onRetry={() => void qualityQuery.refetch()} isRetrying={qualityQuery.isFetching}>{formatApiError(qualityQuery.error)}</Notice>
                         )}
-                        {qualityQuery.isSuccess && qualityQuery.data && (
+                        {qualityQuery.data && (
                             <>
                                 {qualityQuery.data.metering_points.length === 0 ? (
                                     <EmptyState
@@ -827,12 +824,12 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
                                 )}
                             </>
                         )}
+                        </>
+                        )}
                     </div>
                 </Tabs.Panel>
 
-                {/* Import history (phase 3): the existing ImportsPage body mounted
-                    as a tab of the Metering hub — it carries its own wizard,
-                    queries and guards. */}
+                {/* Import history owns its wizard, queries and guards. */}
                 {isManagedScope && (
                     <Tabs.Panel value="imports">
                         <ImportsPage embedded />

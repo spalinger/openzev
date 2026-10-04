@@ -26,7 +26,7 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('../src/lib/auth', () => ({
     useAuth: () => ({
-        user: { role: 'user' },
+        user: { role: 'user', memberships: [{ zev: 'z1', participants: [{ id: 'me', valid_from: '2026-01-01', valid_to: null, live: true }] }] },
     }),
 }))
 
@@ -35,7 +35,7 @@ vi.mock('../src/lib/managedZev', () => {
         useManagedZev: () => ({
             managedZevs: [{ id: 'z1', name: 'Z1' }],
             selectedZevId: 'z1',
-            selectedZev: { id: 'z1', name: 'Z1', billing_interval: 'monthly' },
+            selectedZev: mockState.relation === 'participant' ? null : { id: 'z1', name: 'Z1', billing_interval: 'monthly' },
             relation: mockState.relation,
             entries: [{ id: 'z1', name: 'Z1', relation: mockState.relation }],
             isLoading: false,
@@ -339,7 +339,7 @@ describe('dashboard behavior preservation', () => {
 
         mockState.summary = participantSummary('me')
         const withId = await renderDashboard()
-        expect(withId.textContent).toContain('pages.dashboard.energyFlow.title')
+        expect(withId.textContent).toContain('pages.dashboard.energyFlow.title — Z1')
 
         // From-ZEV share KPI: 35 of 50 kWh = 70 %.
         expect(withId.textContent).toContain('pages.dashboard.participantStats.fromZevShare')
@@ -353,11 +353,11 @@ describe('dashboard behavior preservation', () => {
         mockState.summaryCalls = []
         mockState.invoiceCalls = []
         mockState.invoices = [
-            { id: '1', invoice_number: 'INV-1', status: 'approved', pdf_url: 'http://x/1', period_start: '2026-01-01', period_end: '2026-01-31', total_chf: '100.00' },
-            { id: '2', invoice_number: 'INV-2', status: 'draft', pdf_url: 'http://x/2', period_start: '2026-01-01', period_end: '2026-01-31', total_chf: '50.00' },
-            { id: '3', invoice_number: 'INV-3', status: 'sent', pdf_url: 'http://x/3', period_start: '2026-01-01', period_end: '2026-01-31', total_chf: '75.00' },
-            { id: '4', invoice_number: 'INV-4', status: 'paid', pdf_url: null, period_start: '2026-01-01', period_end: '2026-01-31', total_chf: '20.00' },
-            { id: '5', invoice_number: 'INV-5', status: 'paid', pdf_url: 'http://x/5', period_start: '2026-01-01', period_end: '2026-01-31', total_chf: '30.00' },
+            { id: '1', invoice_number: 'INV-1', participant: 'me', status: 'approved', pdf_url: 'http://x/1', period_start: '2026-01-01', period_end: '2026-01-31', total_chf: '100.00' },
+            { id: '2', invoice_number: 'INV-2', participant: 'me', status: 'draft', pdf_url: 'http://x/2', period_start: '2026-01-01', period_end: '2026-01-31', total_chf: '50.00' },
+            { id: '3', invoice_number: 'INV-3', participant: 'me', status: 'sent', pdf_url: 'http://x/3', period_start: '2026-01-01', period_end: '2026-01-31', total_chf: '75.00' },
+            { id: '4', invoice_number: 'INV-4', participant: 'me', status: 'paid', pdf_url: null, period_start: '2026-01-01', period_end: '2026-01-31', total_chf: '20.00' },
+            { id: '5', invoice_number: 'INV-5', participant: 'me', status: 'paid', pdf_url: 'http://x/5', period_start: '2026-01-01', period_end: '2026-01-31', total_chf: '30.00' },
         ]
         // Defer the summary so the test proves invoices start loading independently.
         let resolveSummary!: (value: unknown) => void

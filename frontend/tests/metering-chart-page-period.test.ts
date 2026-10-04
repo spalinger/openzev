@@ -1,10 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
+  ALL_METERING_POINTS_VALUE,
   filterAndRankQualityRows,
   meteringPointDataRange,
   peakChartPoint,
   readPeriodFromSearchParams,
   readSeverityFilter,
+  resolveMeterSelection,
 } from '../src/pages/MeteringChartPage'
 import type { MeteringPointDataQuality } from '../src/types/api'
 
@@ -139,8 +141,7 @@ describe('readSeverityFilter', () => {
   })
 })
 
-describe('filterAndRankQualityRows', () => {
-  const mp = (id: string, severity: MeteringPointDataQuality['severity']): MeteringPointDataQuality => ({
+describe('filterAndRankQualityRows', () => {  const mp = (id: string, severity: MeteringPointDataQuality['severity']): MeteringPointDataQuality => ({
     id,
     meter_id: `CH-${id}`,
     participant_name: 'Someone',
@@ -170,5 +171,65 @@ describe('filterAndRankQualityRows', () => {
 
   it('returns an empty array when nothing matches', () => {
     expect(filterAndRankQualityRows([mp('1', 'green')], 'red')).toEqual([])
+  })
+})
+
+describe('resolveMeterSelection', () => {
+  const base = {
+    meteringPointIds: ['mp42'],
+    isManagedScope: true,
+    selectedZevId: '42',
+  }
+
+  it('resolves no requested meter immediately without the list', () => {
+    expect(resolveMeterSelection({ requestedMpId: '', meterListResolved: false, ...base })).toEqual({
+      valid: true,
+      selectedMpId: '',
+      isResolving: false,
+    })
+  })
+
+  it('marks a requested meter as resolving until the list arrives (never a false empty state)', () => {
+    expect(resolveMeterSelection({ requestedMpId: 'mp42', meterListResolved: false, ...base })).toEqual({
+      valid: false,
+      selectedMpId: '',
+      isResolving: true,
+    })
+  })
+
+  it('resolves a listed meter and rejects an unknown one once the list arrives', () => {
+    expect(resolveMeterSelection({ requestedMpId: 'mp42', meterListResolved: true, ...base }).selectedMpId).toBe('mp42')
+    expect(resolveMeterSelection({ requestedMpId: 'mp99', meterListResolved: true, ...base })).toMatchObject({
+      valid: false,
+      selectedMpId: '',
+      isResolving: false,
+    })
+  })
+
+  it('resolves the whole-community total from scope alone, without the meter list', () => {
+    expect(resolveMeterSelection({
+      requestedMpId: ALL_METERING_POINTS_VALUE,
+      meterListResolved: false,
+      meteringPointIds: [],
+      isManagedScope: true,
+      selectedZevId: '42',
+    })).toEqual({ valid: true, selectedMpId: ALL_METERING_POINTS_VALUE, isResolving: false })
+  })
+
+  it('rejects the sentinel without management scope or a selected community', () => {
+    expect(resolveMeterSelection({
+      requestedMpId: ALL_METERING_POINTS_VALUE,
+      meterListResolved: false,
+      meteringPointIds: [],
+      isManagedScope: false,
+      selectedZevId: '42',
+    })).toMatchObject({ valid: false, selectedMpId: '', isResolving: false })
+    expect(resolveMeterSelection({
+      requestedMpId: ALL_METERING_POINTS_VALUE,
+      meterListResolved: false,
+      meteringPointIds: [],
+      isManagedScope: true,
+      selectedZevId: '',
+    })).toMatchObject({ valid: false, selectedMpId: '', isResolving: false })
   })
 })

@@ -13,6 +13,15 @@ export function relationOf(membership: Membership): CommunityRelation {
     return membership.participants.some((row) => row.live) ? 'participant' : 'former'
 }
 
+/** Every participant row ID the account holds across communities, current or ended. */
+export function ownParticipantIds(user: Pick<User, 'memberships'> | null | undefined): Set<string> {
+    const ids = new Set<string>()
+    for (const membership of user?.memberships ?? []) {
+        for (const row of membership.participants ?? []) ids.add(row.id)
+    }
+    return ids
+}
+
 /**
  * The account's community when it relates to exactly one — the label for
  * pages that list across every membership, where one name would otherwise

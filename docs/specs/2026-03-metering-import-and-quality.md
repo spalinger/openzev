@@ -741,13 +741,14 @@ and `/metering/quality` (`admin`/`manager`/`viewer`, same `MeteringChartPage` mo
 share the `ProtectedRoute` shell so tab switches don't remount the page
 (period/resolution persist); legacy `/metering-data?tab=quality` redirects
 to the guarded quality route with `tab` stripped. The quality query only
-fires on the quality tab with a selected management community and `zev_id`.
+fires on the quality tab after period/scope readiness and explicit meter
+resolution, with a selected management community and `zev_id`.
 `ScopeGuard` handles community loading, failures and empty scope before the
 tab controls and content. An empty filtered result links permitted readers
 to `/metering/points`; only admins and managers can add points. Points without
 readings appear as Missing.
 
-**URL period state:** `MeteringChartPage` initialises its selected period
+**URL period state:** `MeteringChartPage` uses `useBillingPeriodParams` for its period
 from canonical `?period_start` + `?period_end` parameters. Legacy metering
 links using `?from` + `?to` remain readable when neither canonical key is
 present; if either canonical key is present, that pair takes precedence and
@@ -760,7 +761,20 @@ metering-point changes verbatim. Only malformed input falls back: missing,
 non-ISO, impossible dates (e.g. `2026-02-30`) or a reversed range reset to the
 current period. The community's earliest billable period (see the
 navigation-regroup spec §7 floor rule) disables the previous-period button at
-the boundary, so a selection can never flash a pre-start period and jump away.
+the boundary. This floor limits period navigation; it does not clamp a valid
+custom URL range to the aligned floor.
+
+Management period queries wait for the selected ZEV record and its interval;
+participants retain the monthly fallback without needing a management-only
+ZEV record. Valid custom ranges remain unchanged on community/interval
+switches. URL edits retain unrelated filters and the hash. The meter selection
+also follows the URL on navigation: requests with an explicit meter selection
+wait for the current scope's meter list; unfiltered quality remains independent
+of that list's fetch state. An unavailable meter (or a whole-ZEV sentinel outside
+management scope) is cleared only after that list resolves. A cached list and
+chart/quality data survive failed refetches, with an error notice; meter-list
+failure has Retry. Import history does not request the meter list or period
+data.
 
 Import history is the third tab of the same hub —
 `/metering/imports` renders `MeteringChartPage tab="imports"`, which
@@ -1152,7 +1166,9 @@ Deletion policy regressions in `ImportLogDeletionTests` cover both CSV profiles,
 - Settings detection (frontend side of §4.3.1): entering step 2 of a CSV import calls `detectCsvSettings` (`frontend/src/lib/api/metering.ts`) for the first selected file — once per selection, tracked by a signature of the selection, so moving back and forth never overwrites manual edits; SDAT-CH skips it. A detected result is applied through `settingsFromDetection` (`importUtils.ts`): header, delimiter (a tab shown as the `\t` escape the field accepts), profile, timestamp format, interval, values count and the column map, where a field the backend left `null` keeps the default for the detected layout (direction and the unused energy field become empty) and the previews are cleared. `DetectionState` drives a notice above the settings: loading (Load Preview disabled), done (info; warning naming `undetected` fields via the existing field labels), or failed (defaults kept, preview not blocked), each with a **Detect again** button that re-runs and overwrites edits; with several files the notice says the settings apply to all of them. Locale keys: `pages.imports.detection.*`. Covered by `imports-wizard.test.ts` (`ImportsPage settings detection`) and `api-metering.test.ts`.
 - Multi-file import (frontend only; the backend contract is unchanged — one file per request, one `ImportLog` per file): the wizard's file input is `multiple` and a pick replaces the selection (`files: File[]` in `ImportsPage`; per-file cards with their own Remove button and per-file `fileErrors` for `.xls`/50 MB, any of which blocks Next). All files share one configuration. `frontend/src/lib/api/metering.ts` adds `previewCsvImports` / `uploadMeteringFiles`, which call the single-file endpoints sequentially (not in parallel: one transaction per file, and each call counts against the per-user `import` throttle, preview and import alike) and return `BatchFileOutcome<T>[]` (`{ file, value, error }`) so one failing file never stops the rest. The preview stamp carries `files: StampFile[]` (name/size/lastModified per file) instead of a single file; previews are `FilePreview[]` (one per file, `preview` or a per-file request `error`) and the wizard renders one `FilePreviewBlock` per file (with a filename heading when there are several). Start Import needs every file previewed under the current stamp, no per-file request error or preview error, and no missing meters; missing meters are unioned across files by `aggregateMissingMeters` (a meter missing from several files counts once; each file's truncated remainder is added), feeding one banner with copy/download. Overwrite confirmation uses `overwriteConfirmMessageMulti[WithCount]` (existing-reading estimate summed over files). Result handling: all files imported → wizard resets, one summary toast (`importBatchSuccess`, or `importBatchSuccessWithIssues` when any file had row errors); the protocol modal opens on the first log with errors (else warnings); some files failed → wizard stays open with only the failed files selected and their previews kept (`importBatchPartial` names them), so a retry does not re-import the rest; all failed → `importBatchAllFailed` plus the first error, wizard open. A single-file import keeps its previous toasts. Covered by `frontend/tests/imports-wizard.test.ts` (`ImportsPage multi-file import`) and `frontend/tests/api-metering.test.ts` (batch upload).
 - Chart data and raw data display
-- Dashboard summary role-differentiated behavior
+- Dashboard summary role-differentiated behavior; energy-flow headings identify
+  the selected community for management and participant views. Participant
+  headings use the membership’s community name when no community record is loaded.
 - Data quality severity indicators and gap display
 - Locale parity: every new `pages.imports.*` leaf exists in `frontend/src/i18n/locales/{en,de,fr,it}.ts` (`selectZevForCsv`, `selectZevFirst`, `previewOutdated`, `overwriteConfirm*`, `preview.missingIdsLabel`, `preview.andMore_one`, `preview.andMore_other`, `wizard.fileSummary*`/`supportedExtensions`/`sizeLimit`/`sample*`/`xlsRejected`/`fileTooLarge`/`*Invalid` config keys, `messages.fixConfigFirst`/`importSuccessWithIssues`, `preview.copy*`/`downloadMissingIds`/`createMetersCta`, `columns.zev`/`importedBy`, `protocol.zev`/`importedBy`/`batchId`/`meter`, `delete.reviewAction`/`visibleImpact`/`readingImpactUnknown`, `delete.bulkDescriptionAll`/`bulkPeriodMessageAll`/`bulkAllMessageAll`, `sdatchNoPreview`, `history.searchFilename`/`filterSource`/`allSources`, `actions.rowActions`, `messages.importTooLarge`/`importThrottled`, `messages.previewLoadedWithIssues_one`/`_other`, `messages.deleteSuccess_one`/`_other`) — `frontend/tests/locale-parity.test.ts` enforces it; `frontend/tests/dead-i18n-keys.test.ts` guards against orphaned keys (e.g. the retired stacked-confirm `bulkTitle`). Wizard behavior is covered by `frontend/tests/imports-wizard.test.ts` (gating, reset, overwrite confirm, file feedback, config validation including year-less timestamp formats, tab delimiter escape and `%Y-%j` acceptance, and overwrite-warning success, protocol auto-open, bulk-delete armed flow including the all-ZEV copy, history search/filter/sort, row action menu, 413/429 mapping); `FormModal` dialog semantics, Escape, top-most-only Escape for stacked dialogs, top-most-only Tab/Escape traps, Shift+Tab wrap from outside, confirmation focus trap + dialog semantics, focus restoration, and focus stability across re-renders with a fresh `onClose` are covered by `frontend/tests/form-modal.test.ts` and `frontend/tests/modal-stack.test.ts` (inner close returns focus to the outer dialog; background modal stays inert under a confirmation); `importUtils` stamp strictness and the timestamp-format rule are covered by `frontend/tests/imports-samples.test.ts`. The page composes `frontend/src/features/imports/` presentational components (`ImportWizardModal`, `ImportHistoryTable`, `ImportProtocolModal`, `BulkDeleteModal`) with shared config in `importUtils.ts`; repeated layout patterns use shared CSS (`.field-error`, `.imports-history-filters`, `.actions-row`).
 - Build and type checks: `npm run build`

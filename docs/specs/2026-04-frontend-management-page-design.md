@@ -135,6 +135,32 @@ Usage rules:
   Tile rows use `.stat-grid` plus optional `.stat-grid--wide`; form grids,
   legends and compact pill counters retain their feature layouts.
 
+#### Shared period and navigation behavior
+
+`frontend/src/lib/useBillingPeriodParams.ts` derives `{ period: { from, to },
+setPeriod, isReady }` from the URL and explicit consumer policy. `ready: false`
+returns empty dates and makes selector edits inert until necessary scope and
+interval data exists. Canonical parameters are `period_start`/`period_end`;
+`legacyParams: true` also reads `from`/`to` only if neither canonical key is
+present. Dates must be real ISO calendar days with `from <= to`.
+
+- `MeteringChartPage`: `fallback: 'current'`, no minimum URL range,
+  legacy reads enabled, `scopeChange: 'preserve-url'`. Valid custom ranges
+  survive scope and interval changes; absent/invalid dates use the new current
+  period. The selected meter is resolved from the URL against the current
+  scope's loaded list before chart/quality requests; unavailable selections
+  are cleared after resolution. Cached meter lists remain usable on refetch
+  failure. Unfiltered quality does not depend on the meter-list request. The
+  `__zev_total__` sentinel resolves from community scope alone; initial scope
+  loading or failure preserves it until scope resolves. Confirmed participant
+  scope or confirmed absence of a community clears it.
+- `DashboardPage`: `fallback: 'current'`, no legacy reads or minimum range,
+  `scopeChange: 'reset'`. Deep links are honoured on entry, reload and history
+  navigation; a community/interval change resets to the current period and
+  replaces the URL. The reset remains in effect until that URL update commits,
+  preventing a transient old-range request in the new scope. Participant
+  selection clears before a new-scope request.
+
 `frontend/src/lib/usePageNavigation.ts` provides `searchParams`, `updateParams`
 and `navigateTab`. URL edits retain unrelated parameters, hash and location
 state. Period edits and routed hub tabs replace history; Account and System

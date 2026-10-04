@@ -106,7 +106,7 @@ Assignment validity affects:
 Unsaved metering and assignment forms close if your account, selected
 community or write access changes. A failed refresh of the same community
 keeps your draft open. Disabling the community also closes managers' dialogs.
-A save already sent may finish even if you switch communities; check its
+Switching communities does not cancel a submitted save; check its
 original community for the result.
 
 ![Assign participant modal](screenshots/04b-metering-points-assign.png)

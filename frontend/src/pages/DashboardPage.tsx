@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useQuery } from '@tanstack/react-query'
 import { fetchHourlyProfile, fetchMeteringDashboardSummary } from '../lib/api/metering'
@@ -10,6 +10,7 @@ import { formatMeteringBucketLabel } from '../lib/meteringLabels'
 import { useAppSettings } from '../lib/appSettings'
 import { useCommunityAccess } from '../lib/communityAccess'
 import { useAuth } from '../lib/auth'
+import { ownParticipantIds } from '../lib/membership'
 import { useManagedZev } from '../lib/managedZev'
 import { PageSkeleton } from '../components/PageSkeleton'
 import { ScopeGuard } from '../components/ScopeGuard'
@@ -23,7 +24,8 @@ import { EnergyFlowCard } from '../components/dashboard/EnergyFlowCard'
 import { HourlyProfileCard } from '../components/dashboard/HourlyProfileCard'
 import { ParticipantInvoicesCard } from '../components/dashboard/ParticipantInvoicesCard'
 import { ParticipantTableCard } from '../components/dashboard/ParticipantTableCard'
-import { type BillingInterval, getCurrentBillingPeriod } from '../lib/billingPeriod'
+import { type BillingInterval } from '../lib/billingPeriod'
+import { useBillingPeriodParams } from '../lib/useBillingPeriodParams'
 
 export function DashboardPage() {
     const { t } = useTranslation()
@@ -33,20 +35,25 @@ export function DashboardPage() {
     const { isZevScope: isZevScopedRole, isParticipantScope } = useCommunityAccess()
 
     const interval: BillingInterval = (selectedZev?.billing_interval as BillingInterval) ?? 'monthly'
-    const [period, setPeriod] = useState<{ from: string; to: string }>(() => getCurrentBillingPeriod(interval))
+    const { period, setPeriod, isReady: periodReady } = useBillingPeriodParams({
+        interval,
+        ready: isZevScopedRole ? !!selectedZev : isParticipantScope,
+        scopeId: selectedZevId,
+        fallback: 'current',
+        scopeChange: 'reset',
+    })
     const [bucket, setBucket] = useState<'day' | 'hour' | 'month'>('day')
-    const [selectedParticipantId, setSelectedParticipantId] = useState('')
+    const [participantSelection, setParticipantSelection] = useState({ scopeId: selectedZevId, id: '' })
+    if (participantSelection.scopeId !== selectedZevId) {
+        setParticipantSelection({ scopeId: selectedZevId, id: '' })
+    }
+    // Derive before queries run, so a community switch cannot request the old participant.
+    const selectedParticipantId = participantSelection.scopeId === selectedZevId ? participantSelection.id : ''
+    const setSelectedParticipantId = (id: string) => setParticipantSelection({ scopeId: selectedZevId, id })
 
     const participantZevId = isParticipantScope && (entries?.length ?? 0) > 1 ? selectedZevId : undefined
     const formatBucketLabel = (value: string) => formatMeteringBucketLabel(value, bucket, settings)
     const formatBucketTooltipLabel = (label: unknown) => formatBucketLabel(String(label ?? ''))
-
-    useEffect(() => {
-        setSelectedParticipantId('')
-    }, [selectedZevId])
-    useEffect(() => {
-        setPeriod(getCurrentBillingPeriod(interval))
-    }, [selectedZevId, interval])
 
     const summaryQuery = useQuery({
         queryKey: queryKeys.metering.dashboardSummary({
@@ -65,7 +72,7 @@ export function DashboardPage() {
                 zevId: isZevScopedRole ? selectedZevId : participantZevId,
                 participantId: isZevScopedRole && selectedParticipantId ? selectedParticipantId : undefined,
             }),
-        enabled: isParticipantScope || (isZevScopedRole && !!selectedZevId),
+        enabled: periodReady && (isParticipantScope || (isZevScopedRole && !!selectedZevId)),
     })
     const invoicesQuery = useQuery({
         queryKey: queryKeys.invoices.list(),
@@ -83,7 +90,7 @@ export function DashboardPage() {
                 zevId: isZevScopedRole ? selectedZevId : participantZevId,
                 participantId: isZevScopedRole && selectedParticipantId ? selectedParticipantId : undefined,
             }),
-        enabled: isParticipantScope || (isZevScopedRole && !!selectedParticipantId),
+        enabled: periodReady && (isParticipantScope || (isZevScopedRole && !!selectedParticipantId)),
     })
 
     const summary = summaryQuery.data
@@ -140,11 +147,13 @@ export function DashboardPage() {
         [hourlyProfile],
     )
     const participantInvoicesWithPdf = useMemo(
-        () =>
-            (invoicesQuery.data ?? []).filter(
-                (invoice) => ['sent', 'paid'].includes(invoice.status) && !!invoice.pdf_url,
-            ),
-        [invoicesQuery.data],
+        () => {
+            const ownIds = ownParticipantIds(user)
+            return (invoicesQuery.data ?? []).filter(
+                (invoice) => ownIds.has(invoice.participant) && ['sent', 'paid'].includes(invoice.status) && !!invoice.pdf_url,
+            )
+        },
+        [invoicesQuery.data, user],
     )
     const ownerSelfConsumption = useMemo(() => {
         if (summary?.summary_kind !== 'zev') return null
@@ -300,6 +309,7 @@ export function DashboardPage() {
                                 totals={summary.zev_totals}
                                 participantStats={summary.zev_participant_stats}
                                 highlightParticipantId={summary.current_participant_id}
+                                zevName={selectedZevName ?? participantScopeName}
                             />
                         )}
                         <ConsumptionSplitCard
