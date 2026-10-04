@@ -480,7 +480,7 @@ export interface ZevWizardResult {
 
 // The real OSM building footprint (its actual, possibly angled, outline) —
 // GeoJSON coordinate order is always [longitude, latitude].
-export interface ParticipantBuildingFootprint {
+export interface BuildingFootprint {
     type: 'Polygon' | 'MultiPolygon'
     coordinates: number[][][] | number[][][][]
 }
@@ -541,9 +541,37 @@ export interface ZevPartyRole {
     role: PartyRoleName
     valid_from: string
     valid_to: string | null
+    /** The building a landowner owns (#890); null is "not specified" and for other roles. */
+    building: string | null
+    building_name: string | null
     created_at: string
     updated_at: string
 }
+
+/** A site of a ZEV: where its metering points are (#890). */
+export interface Building {
+    id: string
+    zev: string
+    name: string
+    address_line1: string
+    address_line2: string
+    postal_code: string
+    city: string
+    egid: number | null
+    notes: string
+    metering_point_count: number
+    /** Cached OSM outline of the building, for the participants map (null: not located). */
+    building_footprint: BuildingFootprint | null
+    /** Participants with an assignment active today on the building's meters. */
+    current_participants: { id: string; display_name: string }[]
+    created_at: string
+    updated_at: string
+}
+
+export type BuildingInput = Pick<
+    Building,
+    'zev' | 'name' | 'address_line1' | 'address_line2' | 'postal_code' | 'city' | 'egid' | 'notes'
+>
 
 export interface Participant {
     id: string
@@ -576,7 +604,6 @@ export interface Participant {
     valid_to?: string | null
     metering_points?: MeteringPoint[]
     has_metering_point_assignment?: boolean
-    building_footprint?: ParticipantBuildingFootprint | null
     /** The party's roles active today or later. */
     roles?: PartyRoleWindow[]
     allocation_weight: string
@@ -625,6 +652,8 @@ export interface MeteringPoint {
     meter_type: 'consumption' | 'production' | 'bidirectional'
     is_active: boolean
     location_description?: string
+    building: string
+    building_name: string
     /** PV (or other generation) sits behind this meter: it records only the
      * surplus fed in and the residual grid draw (net / surplus metering). */
     has_behind_meter_generation: boolean
@@ -642,6 +671,8 @@ export interface MeteringPointInput {
     meter_type: 'consumption' | 'production' | 'bidirectional'
     is_active: boolean
     location_description?: string
+    /** Omitted: the ZEV's only building (the backend asks for a choice when it has several). */
+    building?: string
     has_behind_meter_generation?: boolean
 }
 

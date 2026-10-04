@@ -4,14 +4,19 @@ import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { useConfirmDialog } from '../../components/ConfirmDialog'
 import {
+    createBuilding,
     createMeteringPoint,
     createMeteringPointAssignment,
+    deleteBuilding,
     deleteMeteringPoint,
     deleteMeteringPointReadings,
     deleteMeteringPointAssignment,
+    fetchBuildings,
     fetchMeteringPointAssignments,
     fetchMeteringPoints,
+    fetchPartyRoles,
     fetchParticipants,
+    updateBuilding,
     updateMeteringPoint,
     updateMeteringPointAssignment,
 } from '../../lib/api/zev'
@@ -34,16 +39,20 @@ import {
     METERING_POINT_FILTER_KEYS,
     meteringPointNeedsAttention,
     readMeteringPointAssignmentFilter,
+    readMeteringPointBuildingFilter,
     readMeteringPointAttentionFilter,
     readMeteringPointStatusFilter,
     readMeteringPointTypeFilter,
     type MeteringPointAssignmentFilter,
+    type MeteringPointBuildingFilter,
     type MeteringPointAttentionFilter,
     type MeteringPointHealth,
     type MeteringPointStatusFilter,
     type MeteringPointTypeFilter,
 } from './useMeteringPointForms'
 import type {
+    Building,
+    BuildingInput,
     MeteringPoint,
     MeteringPointAssignment,
     MeteringPointAssignmentInput,
@@ -62,6 +71,7 @@ export function getScopedAndFilteredMeteringPoints(
         attentionFilter = 'all',
         needsAttentionByMeteringPoint,
         assignmentFilter = 'all',
+        buildingFilter = 'all',
         isAssignedByMeteringPoint,
         participantNamesByMeteringPoint,
     }: {
@@ -74,6 +84,8 @@ export function getScopedAndFilteredMeteringPoints(
         /** Only consulted when `attentionFilter` is `'attention'`; a missing entry does not match. */
         needsAttentionByMeteringPoint?: Map<string, boolean>
         assignmentFilter?: MeteringPointAssignmentFilter
+        /** `'all'`, or a building id (#890). */
+        buildingFilter?: MeteringPointBuildingFilter
         /** Only consulted when `assignmentFilter` isn't `'all'`; a missing entry counts as unassigned. */
         isAssignedByMeteringPoint?: Map<string, boolean>
         /** Space-joined names of every participant ever assigned to the meter, so search can match "which meter is Anna's?". */
@@ -93,7 +105,9 @@ export function getScopedAndFilteredMeteringPoints(
         const matchesSearch = !normalizedSearch
             || point.meter_id.toLowerCase().includes(normalizedSearch)
             || (point.location_description ?? '').toLowerCase().includes(normalizedSearch)
+            || (point.building_name ?? '').toLowerCase().includes(normalizedSearch)
             || (participantNamesByMeteringPoint?.get(point.id) ?? '').toLowerCase().includes(normalizedSearch)
+        const matchesBuilding = buildingFilter === 'all' || point.building === buildingFilter
         const matchesAttention = attentionFilter === 'all'
             || !!needsAttentionByMeteringPoint?.get(point.id)
         const isAssigned = !!isAssignedByMeteringPoint?.get(point.id)
@@ -101,7 +115,7 @@ export function getScopedAndFilteredMeteringPoints(
             || (assignmentFilter === 'assigned' && isAssigned)
             || (assignmentFilter === 'unassigned' && !isAssigned)
 
-        return matchesStatus && matchesType && matchesSearch && matchesAttention && matchesAssignment
+        return matchesStatus && matchesType && matchesSearch && matchesAttention && matchesAssignment && matchesBuilding
     })
 
     return { scopedMeteringPoints, meteringPoints }
@@ -201,6 +215,10 @@ export function useMeteringPointActions({
         () => readMeteringPointAssignmentFilter(searchParams.get(FILTER.assignment)),
     )
 
+    const [buildingFilter, setBuildingFilterState] = useState<MeteringPointBuildingFilter>(
+        () => readMeteringPointBuildingFilter(searchParams.get(FILTER.building)),
+    )
+
     /** Sets or removes one query param, without touching the others already there. */
     function writeFilterParam(key: string, value: string, isDefault: boolean) {
         setSearchParams((previous) => {
@@ -232,12 +250,18 @@ export function useMeteringPointActions({
         writeFilterParam(FILTER.assignment, value, value === 'all')
     }
 
+    function setBuildingFilter(value: MeteringPointBuildingFilter) {
+        setBuildingFilterState(value)
+        writeFilterParam(FILTER.building, value, value === 'all')
+    }
+
     function clearFilters() {
         setSearchTermState('')
         setStatusFilterState('all')
         setTypeFilterState('all')
         setAttentionFilterState('all')
         setAssignmentFilterState('all')
+        setBuildingFilterState('all')
         setSearchParams((previous) => {
             const next = new URLSearchParams(previous)
             Object.values(FILTER).forEach((key) => next.delete(key))
@@ -250,6 +274,95 @@ export function useMeteringPointActions({
         queryFn: fetchParticipants,
         enabled: isManagedScope && !!selectedZevId,
     })
+    // The building select and filter only exist for a ZEV with several (#890).
+    const buildingsQuery = useQuery({
+        queryKey: queryKeys.zev.buildings(selectedZevId || ''),
+        queryFn: () => fetchBuildings(selectedZevId || ''),
+        enabled: isManagedScope && !!selectedZevId,
+    })
+    const buildings = buildingsQuery.data ?? []
+    // Which landowners own which building (their role row names it).
+    const partyRolesQuery = useQuery({
+        queryKey: queryKeys.zev.partyRoles(selectedZevId || '', false),
+        queryFn: () => fetchPartyRoles(selectedZevId || ''),
+        enabled: isManagedScope && !!selectedZevId,
+    })
+    const landownersOf = (building: Building): string[] => [
+        ...new Set(
+            (partyRolesQuery.data ?? [])
+                .filter((row) => row.role === 'landowner' && row.building === building.id && (row.valid_to === null || row.valid_to >= todayIso))
+                .map((row) => row.party_display_name),
+        ),
+    ]
+
+    // Building modal
+    const [editingBuilding, setEditingBuilding] = useState<Building | null>(null)
+    const [showBuildingModal, setShowBuildingModal] = useState(false)
+    function openCreateBuildingModal() {
+        if (!isCurrent(scope) || !canWrite) return
+        setEditingBuilding(null)
+        setShowBuildingModal(true)
+    }
+    function openEditBuildingModal(building: Building) {
+        if (!isCurrent(scope) || !canWrite) return
+        setEditingBuilding(building)
+        setShowBuildingModal(true)
+    }
+    function closeBuildingModal() {
+        setShowBuildingModal(false)
+        setEditingBuilding(null)
+    }
+    function afterBuildingChange(zevId: string | null) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.zev.buildings(zevId || '') })
+        void queryClient.invalidateQueries({ queryKey: ['zev', 'partyRoles'] })
+        void queryClient.invalidateQueries({ queryKey: queryKeys.metering.points(zevId || undefined) })
+    }
+    const saveBuildingMutation = useMutation({
+        mutationFn: ({ id, input, scope: submittingScope }: { id?: string; input: BuildingInput; scope: typeof scope }) => {
+            requireWriteAccess(submittingScope)
+            return id ? updateBuilding(id, input) : createBuilding({ ...input, zev: submittingScope.selectedZevId || '' })
+        },
+        onMutate: (variables) => ({ selectedZevId: variables.scope.selectedZevId, scope: variables.scope }),
+        onSuccess: (_, _variables, submittedScope) => {
+            if (!ownsCurrentSession(submittedScope)) return
+            afterBuildingChange(submittedScope.selectedZevId)
+            if (!isCurrent(submittedScope.scope)) return
+            closeBuildingModal()
+            pushToast(t('pages.meteringPoints.buildings.saved'), 'success')
+        },
+        onError: (error, variables) => {
+            if (isCurrent(variables.scope) && variables.scope.canWrite) pushToast(formatApiError(error, t('pages.meteringPoints.buildings.saveFailed')), 'error')
+        },
+    })
+    function submitBuilding(input: BuildingInput) {
+        saveBuildingMutation.mutate({ id: editingBuilding?.id, input, scope })
+    }
+    const deleteBuildingMutation = useMutation({
+        mutationFn: ({ id, scope: submittingScope }: { id: string; scope: typeof scope }) => {
+            requireWriteAccess(submittingScope)
+            return deleteBuilding(id)
+        },
+        onMutate: (variables) => ({ selectedZevId: variables.scope.selectedZevId, scope: variables.scope }),
+        onSuccess: (_, _variables, submittedScope) => {
+            if (!ownsCurrentSession(submittedScope)) return
+            afterBuildingChange(submittedScope.selectedZevId)
+            if (!isCurrent(submittedScope.scope)) return
+            pushToast(t('pages.meteringPoints.buildings.deleted'), 'success')
+        },
+        onError: (error, variables) => {
+            if (isCurrent(variables.scope) && variables.scope.canWrite) pushToast(formatApiError(error, t('pages.meteringPoints.buildings.saveFailed')), 'error')
+        },
+    })
+    function confirmDeleteBuilding(building: Building) {
+        const submittingScope = scope
+        confirm({
+            title: t('pages.meteringPoints.buildings.deleteTitle'),
+            message: t('pages.meteringPoints.buildings.deleteMessage', { name: building.name }),
+            confirmText: t('common.delete'),
+            isDangerous: true,
+            onConfirm: () => deleteBuildingMutation.mutateAsync({ id: building.id, scope: submittingScope }).then(() => undefined),
+        })
+    }
     const meteringPointsQuery = useQuery({
         queryKey: queryKeys.metering.points(selectedZevId || undefined),
         queryFn: () => fetchMeteringPoints(selectedZevId || undefined),
@@ -289,6 +402,8 @@ export function useMeteringPointActions({
         onSuccess: (_, variables, submittedScope) => {
             if (!ownsCurrentSession(submittedScope)) return
             void queryClient.invalidateQueries({ queryKey: queryKeys.metering.points(submittedScope.selectedZevId || undefined) })
+            // A building's metering-point count (and whether it can be deleted) follows its points.
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.buildings(submittedScope.selectedZevId || '') })
             if (!isCurrent(submittedScope.scope)) return
             closeMpModal()
             pushToast(
@@ -314,6 +429,7 @@ export function useMeteringPointActions({
             // metering_point), so every reading-derived view is stale too —
             // invalidate the whole metering namespace rather than enumerating keys.
             void queryClient.invalidateQueries({ queryKey: ['metering'] })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.buildings(submittedScope.selectedZevId || '') })
             if (!isCurrent(submittedScope.scope)) return
             pushToast(t('pages.meteringPoints.messages.deleted'), 'success')
         },
@@ -335,6 +451,8 @@ export function useMeteringPointActions({
             // Participants derive has_metering_point_assignment / metering_points
             // from these rows, so their readiness state changes too.
             void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(submittedScope.selectedZevId || undefined) })
+            // The map lists each building's current participants.
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.buildings(submittedScope.selectedZevId || '') })
             if (!isCurrent(submittedScope.scope)) return
             closeAssignModal()
             pushToast(
@@ -360,6 +478,8 @@ export function useMeteringPointActions({
             void queryClient.invalidateQueries({ queryKey: queryKeys.metering.pointAssignments() })
             void queryClient.invalidateQueries({ queryKey: queryKeys.metering.points(submittedScope.selectedZevId || undefined) })
             void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(submittedScope.selectedZevId || undefined) })
+            // The map lists each building's current participants.
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.buildings(submittedScope.selectedZevId || '') })
             if (!isCurrent(submittedScope.scope)) return
             pushToast(t('pages.meteringPoints.messages.assignmentRemoved'), 'success')
         },
@@ -417,6 +537,14 @@ export function useMeteringPointActions({
         setShowMpModal(true)
     }
 
+    /** "Add metering point" from a building's header: that building is preselected. */
+    function openCreateMpModalInBuilding(buildingId: string) {
+        if (!isCurrent(scope) || !canWrite) return
+        setEditingMpId(null)
+        setMpForm({ ...defaultMeteringPointForm(), zev: selectedZevId || '', building: buildingId })
+        setShowMpModal(true)
+    }
+
     function openEditMpModal(point: MeteringPoint) {
         if (!isCurrent(scope) || !canWrite) return
         setEditingMpId(point.id)
@@ -427,6 +555,7 @@ export function useMeteringPointActions({
             is_active: point.is_active,
             location_description: point.location_description ?? '',
             has_behind_meter_generation: point.has_behind_meter_generation,
+            building: point.building,
         })
         setShowMpModal(true)
     }
@@ -662,6 +791,7 @@ export function useMeteringPointActions({
         attentionFilter,
         needsAttentionByMeteringPoint,
         assignmentFilter,
+        buildingFilter,
         isAssignedByMeteringPoint,
         participantNamesByMeteringPoint,
     })
@@ -683,6 +813,7 @@ export function useMeteringPointActions({
         || typeFilter !== 'all'
         || attentionFilter !== 'all'
         || assignmentFilter !== 'all'
+        || buildingFilter !== 'all'
 
     return {
         // Queries
@@ -726,6 +857,20 @@ export function useMeteringPointActions({
         setAttentionFilter,
         assignmentFilter,
         setAssignmentFilter,
+        buildingFilter,
+        setBuildingFilter,
+        buildings,
+        landownersOf,
+        editingBuilding,
+        showBuildingModal,
+        openCreateBuildingModal,
+        openEditBuildingModal,
+        closeBuildingModal,
+        saveBuildingMutation,
+        submitBuilding,
+        deleteBuildingMutation,
+        confirmDeleteBuilding,
+        openCreateMpModalInBuilding,
         clearFilters,
         // Form handlers
         openCreateMpModal,

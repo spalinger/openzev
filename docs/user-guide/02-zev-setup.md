@@ -145,7 +145,7 @@ always name whoever held a role on their own date:
 |---|---|---|
 | **Issuer** | Invoices, contracts and annual statements are from this party: its name and address head the document, and it is the creditor on the QR bill. Its login manages the community | An invoice: the last day of its period. A contract: the day it is issued. An annual statement: 31 December |
 | **Representative toward the grid operator** | Who acts for the community toward the grid operator (VNB). Its login manages the community | — |
-| **Landowners** | The owners of the plots or buildings in the community — several when it spans several plots, as a vZEV usually does | — |
+| **Landowners** | The owners of the plots or buildings in the community — several when it spans several plots, as a vZEV usually does. Each landowner can be linked to the [building](04-metering-points.md#buildings) it owns | — |
 
 - **Change from…** on the issuer or the representative picks a party and a
   date. The current holder ends the day before. Invoices for earlier periods
@@ -162,8 +162,11 @@ always name whoever held a role on their own date:
   other participants' data.
 - Without an issuer, documents carry only the community's name. The page says
   so until one is set.
-- **Add landowner** adds a party from a date; **End** sets a landowner's last
-  day. Ending a role before it started removes it.
+- **Add landowner** adds a party from a date, optionally with the building it
+  owns; **Set building** / **Change building** on a landowner's row links or
+  re-links it, and **End** sets a landowner's last day. A party that owns two
+  buildings has two landowner rows. Ending a role before it started removes
+  it.
 - Whoever a ZEV is created for — through self-registration or the admin
   wizard — is its issuer and a landowner from the start date, and manages it
   through the issuer role. A ZEV that starts later gives them manager access

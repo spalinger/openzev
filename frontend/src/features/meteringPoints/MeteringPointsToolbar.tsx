@@ -1,11 +1,13 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faPlus } from '@fortawesome/free-solid-svg-icons'
+import { faBuilding, faPlus } from '@fortawesome/free-solid-svg-icons'
 import { useTranslation } from 'react-i18next'
 import { Toolbar } from '../../components/Toolbar'
 import { METER_TYPE_OPTIONS } from '../../lib/options'
+import type { Building } from '../../types/api'
 import type {
   MeteringPointAssignmentFilter,
   MeteringPointAttentionFilter,
+  MeteringPointBuildingFilter,
   MeteringPointStatusFilter,
   MeteringPointTypeFilter,
 } from './useMeteringPointForms'
@@ -23,6 +25,10 @@ type MeteringPointsToolbarProps = {
   typeFilter: MeteringPointTypeFilter
   attentionFilter: MeteringPointAttentionFilter
   assignmentFilter: MeteringPointAssignmentFilter
+  /** The ZEV's buildings; the filter shows only when there is more than one (#890). */
+  buildings?: Building[]
+  buildingFilter?: MeteringPointBuildingFilter
+  onChangeBuildingFilter?: (value: MeteringPointBuildingFilter) => void
   onChangeSearchTerm: (value: string) => void
   onChangeStatusFilter: (value: MeteringPointStatusFilter) => void
   onChangeTypeFilter: (value: MeteringPointTypeFilter) => void
@@ -30,6 +36,8 @@ type MeteringPointsToolbarProps = {
   onChangeAssignmentFilter: (value: MeteringPointAssignmentFilter) => void
   onClearFilters: () => void
   onOpenCreateModal: () => void
+  /** Managers: add a building (secondary action next to adding a metering point). */
+  onOpenCreateBuildingModal?: () => void
 }
 
 export function MeteringPointsToolbar({
@@ -45,6 +53,9 @@ export function MeteringPointsToolbar({
   typeFilter,
   attentionFilter,
   assignmentFilter,
+  buildings = [],
+  buildingFilter = 'all',
+  onChangeBuildingFilter,
   onChangeSearchTerm,
   onChangeStatusFilter,
   onChangeTypeFilter,
@@ -52,6 +63,7 @@ export function MeteringPointsToolbar({
   onChangeAssignmentFilter,
   onClearFilters,
   onOpenCreateModal,
+  onOpenCreateBuildingModal,
 }: MeteringPointsToolbarProps) {
   const { t } = useTranslation()
 
@@ -60,10 +72,18 @@ export function MeteringPointsToolbar({
       <Toolbar
         actions={
           isManagedScope && !readOnly ? (
-            <button className="button button-primary" type="button" onClick={onOpenCreateModal}>
-              <FontAwesomeIcon icon={faPlus} fixedWidth />
-              {t('pages.meteringPoints.newMeteringPoint')}
-            </button>
+            <div className="actions-row actions-row-wrap">
+              {onOpenCreateBuildingModal && (
+                <button className="button button-secondary" type="button" onClick={onOpenCreateBuildingModal}>
+                  <FontAwesomeIcon icon={faBuilding} fixedWidth />
+                  {t('pages.meteringPoints.buildings.add')}
+                </button>
+              )}
+              <button className="button button-primary" type="button" onClick={onOpenCreateModal}>
+                <FontAwesomeIcon icon={faPlus} fixedWidth />
+                {t('pages.meteringPoints.newMeteringPoint')}
+              </button>
+            </div>
           ) : null
         }
       >
@@ -150,6 +170,17 @@ export function MeteringPointsToolbar({
             ))}
           </select>
         </label>
+        {buildings.length > 1 && onChangeBuildingFilter && (
+          <label>
+            <span>{t('pages.meteringPoints.filters.building')}</span>
+            <select value={buildingFilter} onChange={(event) => onChangeBuildingFilter(event.target.value)}>
+              <option value="all">{t('pages.meteringPoints.filters.allBuildings')}</option>
+              {buildings.map((building) => (
+                <option key={building.id} value={building.id}>{building.name}</option>
+              ))}
+            </select>
+          </label>
+        )}
         <label>
           <span>{t('pages.meteringPoints.filters.attention')}</span>
           <select value={attentionFilter} onChange={(event) => onChangeAttentionFilter(event.target.value as MeteringPointAttentionFilter)}>
