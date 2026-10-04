@@ -16,6 +16,9 @@ A **participant** is a member of a ZEV community:
 
 **Managers** add new participants in **Participants**.
 
+Switching community or losing write access closes open participant forms and delete confirmations. Save your draft before switching. A save already started can still finish in
+the original community; its completion leaves a new draft in another community open.
+
 1. Click **New Participant**
 2. Enter participant details:
    - **Type** — a **Person**, or an **Organisation** (a company, an association).

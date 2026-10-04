@@ -24,21 +24,42 @@ export interface CommunityAccess {
     shellRole: ShellRole
     /** Show the selected community's management view (read): admin, manager, viewer. */
     isZevScope: boolean
-    /** Offer writes in the selected community: admin or manager. A viewer reads only. */
+    /** Role capability: admin or manager. Does not consider whether the selected community permits writes. */
     canManage: boolean
+    /** Effective write availability in the selected community: role capability plus community state. */
+    canWriteSelectedCommunity: boolean
     /** Show the participant view: participant, or former participant (invoices only). */
     isParticipantScope: boolean
     isAdmin: boolean
 }
 
 export function accessFor(shellRole: ShellRole): CommunityAccess {
+    const canManage = shellRole === 'admin' || shellRole === 'manager'
+    const isAdmin = shellRole === 'admin'
     return {
         shellRole,
         isZevScope: shellRole === 'admin' || shellRole === 'manager' || shellRole === 'viewer',
-        canManage: shellRole === 'admin' || shellRole === 'manager',
+        canManage,
+        // Without a ZEV record there is nothing to disable; callers with a
+        // record use canWriteInSelectedCommunity() instead.
+        canWriteSelectedCommunity: canManage,
         isParticipantScope: shellRole === 'participant' || shellRole === 'former',
-        isAdmin: shellRole === 'admin',
+        isAdmin,
     }
+}
+
+/**
+ * Effective write availability for a selected community: role capability,
+ * plus the community permitting writes. A manager keeps read access to a
+ * disabled ZEV but loses write access; an admin can still write. A missing
+ * record is not writable for a manager: callers must have a resolved
+ * community before offering writes.
+ */
+export function canWriteInSelectedCommunity(
+    access: Pick<CommunityAccess, 'canManage' | 'isAdmin'>,
+    selectedZev: { disabled_at?: string | null } | null | undefined,
+): boolean {
+    return access.canManage && (access.isAdmin || (!!selectedZev && !selectedZev.disabled_at))
 }
 
 /**
@@ -48,7 +69,11 @@ export function useCommunityAccess(): CommunityAccess {
     const auth = useAuth()
     // The outer authentication route runs before ManagedZevProvider mounts.
     const managed = useOptionalManagedZev()
-    return accessFor(shellRoleFor(auth.user, managed?.relation))
+    const base = accessFor(shellRoleFor(auth.user, managed?.relation))
+    return {
+        ...base,
+        canWriteSelectedCommunity: canWriteInSelectedCommunity(base, managed?.selectedZev ?? null),
+    }
 }
 
 /**

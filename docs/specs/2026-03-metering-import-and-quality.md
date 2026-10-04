@@ -778,8 +778,9 @@ data.
 
 Import history is the third tab of the same hub —
 `/metering/imports` renders `MeteringChartPage tab="imports"`, which
-mounts `ImportsPage embedded` (header stripped, `PeriodSelector` hidden on
-that tab); `admin`/`zev_owner` only. The standalone nav entry is gone; the
+mounts `ImportsContent` (header-free body shared with `ImportsPage`, `PeriodSelector` hidden on
+that tab); admin, manager and viewer reads, with imports/deletes restricted to
+`canWriteSelectedCommunity` (admin, or a manager of a non-disabled community). The standalone nav entry is gone; the
 legacy `/imports` alias still redirects with its query preserved.
 
 ### 5.6 Import endpoints
@@ -1159,6 +1160,14 @@ Deletion policy regressions in `ImportLogDeletionTests` cover both CSV profiles,
 
 ### Frontend
 
+- Account, community or effective write-capability changes reset the wizard,
+  bulk-delete modal and pending confirmations, including writable-to-writable
+  switches. Delete/overwrite confirmations verify current scope at dispatch.
+  Upload completions always invalidate metering data, but obsolete scope or
+  wizard completions do not alter file selection, previews, protocols or toasts.
+  Single/bulk deletion completions also invalidate metering data, but only the
+  submitting scope may close dialogs/protocols, reset fields or receive success
+  or error toasts.
 - Import wizard: ZEV taken from the global header selector for both CSV and SDAT-CH (step 2 shows it as a disabled read-only display, not a picker; the wizard cannot advance past step 1 or load a preview without one — `selectZevFirst` hint names the header selector), file summary card with size/extension feedback (legacy `.xls` rejected with the backend guidance, 50 MB cap; Remove clears the native file input so the same file can be re-picked; switching source clears file/preview and resets to step 1), string-kept numeric config with inline range validation (`valuesCount` 1–1440, `intervalMinutes` ≥ 1, tab-aware delimiter (`\t` escape accepted, mirroring the backend), full-date timestamp preflight incl. `%Y-%j` and week formats with a weekday plus matching calendar/ISO year (the backend round-trip probe remains authoritative); preview and import stay disabled until fixed), fingerprint-guarded preview (the stamp includes overwrite mode; every file selection clears the preview even for identical metadata, and closing the wizard or replacing a file invalidates in-flight preview callbacks; stale preview table, banners, and error list are suppressed while `previewOutdated`; the stamp normalizes numeric strings so "096" equals "96" but strictly rejects non-numeric input like "96foo"), bounded `missing_meter_ids` list with a pluralized +N overflow (`andMore_one`/`andMore_other`, hidden when the count is exact) plus copy/download and a Metering Points CTA, profile-aware defaults factory `csvConfigFor(hasHeader, profile)` (headed daily resolves `meter_id/date/00:00` against the daily sample; headed standard resolves `meter_id/timestamp/energy_kwh`; switching profile or header re-derives mappings and clears the preview), error- and missing-gated Start Import, overwrite confirmation dialog (stacked above the wizard: Escape/Tab belong only to the top-most dialog; confirmation has its own dialog semantics and focus trap, and cancellation restores focus to its opener), full wizard reset on success, protocol auto-open on errors or warnings (warnings alone stay success with a success toast), single-state bulk-delete modal with an armed confirmation step, shared `CivilDateInput` selectors with explicit UTC day labels plus a UTC note, and a backend-scoped count (0 until both period dates parse; table search never narrows deletion; count uses the half-open UTC range; copy names the selected ZEV or "all visible ZEVs" when none is selected), and metering + import-log query invalidation on success and after deletion — `frontend/src/pages/ImportsPage.tsx`, covered by `frontend/tests/imports-wizard.test.ts`.
 - Import history shows localized source labels plus serializer `zev_name`/`imported_by_display`; the protocol shows ZEV, imported-by, batch ID, and per-error meter IDs. Sample files live in `frontend/public/samples/` and are linked from wizard step 1. History offers filename search and source filtering using the API values `csv` and `sdatch` with raw-value sorting (`created_at`, `filename`, `rows_total` accessors + display cells, `created_at` desc default); row actions use a compact Protocol button plus an `ActionMenu` delete. The protocol renders errors in a `DataTable` (row/meter/reason). Upload and preview map HTTP 413/429 to localized `importTooLarge`/`importThrottled` messages. `previewLoadedWithIssues` and `deleteSuccess` use `_one`/`_other` plural pairs (the latter keyed on the log count).
 - Types: `frontend/src/types/api.ts:ImportPreviewResult.missing_meter_ids: string[]` and preview `zevId` required payload in `frontend/src/lib/api/metering.ts:previewCsvImport`.

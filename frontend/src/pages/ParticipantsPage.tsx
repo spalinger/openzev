@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
 import { ParticipantCardsSection } from '../features/participants/ParticipantCardsSection'
@@ -52,13 +52,16 @@ export function ParticipantsPage() {
     const { dialog, confirm, handleConfirm, handleCancel, isLoading: dialogLoading } = useConfirmDialog()
     const { user } = useAuth()
     const { settings } = useAppSettings()
-    const { selectedZevId, selectedZev } = useManagedZev()
+    const { selectedZevId, selectedZev, isLoading: scopeLoading } = useManagedZev()
     const { t } = useTranslation()
     const [searchParams, setSearchParams] = useSearchParams()
     const focusId = searchParams.get('focus')
     const focusField = searchParams.get('field')
     const [highlightedId, setHighlightedId] = useState<string | null>(null)
-    const { isZevScope, canManage } = useCommunityAccess()
+    const { isZevScope, canWriteSelectedCommunity } = useCommunityAccess()
+    const scope = useMemo(() => ({ selectedZevId, canWrite: canWriteSelectedCommunity, accountId: user?.id }), [selectedZevId, canWriteSelectedCommunity, user?.id])
+    const currentScope = useRef<typeof scope | null>(scope)
+    const cancelConfirmation = useEffectEvent(handleCancel)
     const isManagedScope = isZevScope
     const accountLinking = useParticipantAccountLinking({ isAdmin: user?.role === 'admin', confirm })
     const { data, isLoading, isError, isFetching, refetch } = useQuery({
@@ -83,31 +86,38 @@ export function ParticipantsPage() {
     const titleLabelByValue = useMemo(() => getTitleLabelMap(t), [t])
 
     const createMutation = useMutation({
-        mutationFn: createParticipant,
-        onSuccess: () => {
+        mutationFn: ({ payload }: { payload: ParticipantInput; scope: typeof scope }) => createParticipant(payload),
+        onSuccess: (_, variables) => {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(variables.scope.selectedZevId || undefined) })
+            if (currentScope.current !== variables.scope) return
             setShowModal(false)
             pushToast(t('pages.participants.messages.created'), 'success')
-            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(selectedZevId || undefined) })
         },
-        onError: (error) => pushToast(formatApiError(error, t('pages.participants.messages.createFailed')), 'error'),
+        onError: (error, variables) => {
+            if (currentScope.current === variables.scope) pushToast(formatApiError(error, t('pages.participants.messages.createFailed')), 'error')
+        },
     })
 
     const updateMutation = useMutation({
-        mutationFn: ({ id, payload }: { id: string; payload: Partial<ParticipantInput> }) => updateParticipant(id, payload),
-        onSuccess: () => {
+        mutationFn: ({ id, payload }: { id: string; payload: Partial<ParticipantInput>; scope: typeof scope }) => updateParticipant(id, payload),
+        onSuccess: (_, variables) => {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(variables.scope.selectedZevId || undefined) })
+            if (currentScope.current !== variables.scope) return
             setEditingId(null)
             setShowModal(false)
             pushToast(t('pages.participants.messages.updated'), 'success')
-            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(selectedZevId || undefined) })
         },
-        onError: (error) => pushToast(formatApiError(error, t('pages.participants.messages.updateFailed')), 'error'),
+        onError: (error, variables) => {
+            if (currentScope.current === variables.scope) pushToast(formatApiError(error, t('pages.participants.messages.updateFailed')), 'error')
+        },
     })
 
     const deleteMutation = useMutation({
-        mutationFn: deleteParticipant,
-        onSuccess: () => {
+        mutationFn: ({ id }: { id: string; scope: typeof scope }) => deleteParticipant(id),
+        onSuccess: (_, variables) => {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(variables.scope.selectedZevId || undefined) })
+            if (currentScope.current !== variables.scope) return
             pushToast(t('pages.participants.messages.deleted'), 'success')
-            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(selectedZevId || undefined) })
         },
     })
 
@@ -187,12 +197,25 @@ export function ParticipantsPage() {
         setModalFocusField(null)
     }
 
+    useLayoutEffect(() => {
+        currentScope.current = scope
+        setShowModal(false)
+        setEditingId(null)
+        setModalFocusField(null)
+        return () => { currentScope.current = null }
+    }, [scope])
+
+    useEffect(() => {
+        cancelConfirmation()
+    }, [scope])
+
     // Destination contract (spec §7) for participant-validity links
     // (`?focus=<id>&field=valid_to`). Consuming the URL params (below) must
     // not tear down the highlight timers, so consumption and the scroll/
     // flash lifecycle are separate effects.
     useEffect(() => {
         if (!focusId || isLoading) return
+        if (focusField === 'valid_to' && (scopeLoading || (!!selectedZevId && !selectedZev))) return
         const inScope = (data ?? []).some(
             (participant) =>
                 participant.id === focusId
@@ -203,7 +226,7 @@ export function ParticipantsPage() {
         setSearchTerm('')
         setReadinessFilter('all')
         setHighlightedId(focusId)
-        if (focusField === 'valid_to') {
+        if (focusField === 'valid_to' && canWriteSelectedCommunity) {
             const target = (data ?? []).find((participant) => participant.id === focusId)
             if (target) {
                 setEditingId(target.id)
@@ -218,7 +241,7 @@ export function ParticipantsPage() {
         params.delete('field')
         setSearchParams(params, { replace: true })
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [focusId, focusField, isLoading, data, isManagedScope, selectedZevId])
+    }, [focusId, focusField, isLoading, data, isManagedScope, selectedZevId, selectedZev, scopeLoading, canWriteSelectedCommunity])
 
     useEffect(() => {
         if (!highlightedId) return
@@ -234,17 +257,17 @@ export function ParticipantsPage() {
     }, [highlightedId])
 
     function submit(payload: ParticipantInput) {
-        if (!selectedZevId) {
+        if (!selectedZevId || !canWriteSelectedCommunity) {
             pushToast(t('pages.participants.messages.selectZev'), 'error')
             return
         }
 
         if (editingId) {
-            updateMutation.mutate({ id: editingId, payload: { ...payload, zev: selectedZevId } })
+            updateMutation.mutate({ id: editingId, payload: { ...payload, zev: selectedZevId }, scope })
             return
         }
 
-        createMutation.mutate({ ...payload, zev: selectedZevId })
+        createMutation.mutate({ payload: { ...payload, zev: selectedZevId }, scope })
     }
 
     function participantWarnings(participant: Participant): string[] {
@@ -336,7 +359,8 @@ export function ParticipantsPage() {
 
     function downloadContract(participant: Participant) {
         // A viewer may read the issued contract but not issue a new version.
-        const download = canManage ? downloadParticipantContractPdf : downloadIssuedParticipantContractPdf
+        // Managers of a disabled ZEV keep read access only.
+        const download = canWriteSelectedCommunity ? downloadParticipantContractPdf : downloadIssuedParticipantContractPdf
         void download(
             participant.id,
             `contract_${participant.last_name}_${participant.first_name}.pdf`,
@@ -349,7 +373,9 @@ export function ParticipantsPage() {
             message: t('pages.participants.deleteMessage', { name: displayName }),
             confirmText: t('pages.participants.deleteConfirm'),
             isDangerous: true,
-            onConfirm: () => deleteMutation.mutate(participant.id),
+            onConfirm: () => {
+                if (scope.canWrite && currentScope.current === scope) deleteMutation.mutate({ id: participant.id, scope })
+            },
         })
     }
 
@@ -368,7 +394,7 @@ export function ParticipantsPage() {
                 onSearchTermChange={setSearchTerm}
                 onReadinessFilterChange={setReadinessFilter}
                 onOpenCreateModal={openCreateModal}
-                readOnly={!canManage}
+                readOnly={!canWriteSelectedCommunity}
             />
 
             <ParticipantFormModal
@@ -417,7 +443,7 @@ export function ParticipantsPage() {
                 onboardingLinkPending={onboardingLinkPending}
                 deletePendingOrDialogLoading={deleteMutation.isPending || dialogLoading}
                 focusParticipantId={highlightedId}
-                readOnly={!canManage}
+                readOnly={!canWriteSelectedCommunity}
             />
 
             {accountLinking.linkModal}

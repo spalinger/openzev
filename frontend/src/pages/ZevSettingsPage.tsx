@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faBan, faDownload, faPlay, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
 import { Tabs } from '@mantine/core'
-import { Navigate, useBlocker, useNavigate, useParams } from 'react-router-dom'
+import { Navigate, useBlocker, useParams } from 'react-router-dom'
 import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
 import { PageSkeleton } from '../components/PageSkeleton'
 import { ZevEmailTemplateFields } from '../components/ZevEmailTemplateFields'
@@ -35,6 +35,7 @@ import { NotFoundPage } from './NotFoundPage'
 import type { Zev, ZevInput } from '../types/api'
 import { PageHeader } from '../components/PageHeader'
 import { ScopeGuard } from '../components/ScopeGuard'
+import { usePageNavigation } from '../lib/usePageNavigation'
 
 /**
  * ZEV settings hub (nav-regroup phase 3, spec §5): one draft feeds the three
@@ -82,7 +83,7 @@ export function ZevSettingsTabRoute() {
 
 export function ZevSettingsPage({ tab = 'general' }: { tab?: ZevSettingsTab }) {
     const { t } = useTranslation()
-    const navigate = useNavigate()
+    const { navigateTab } = usePageNavigation()
     const queryClient = useQueryClient()
     const { pushToast } = useToast()
     const { user } = useAuth()
@@ -102,13 +103,12 @@ export function ZevSettingsPage({ tab = 'general' }: { tab?: ZevSettingsTab }) {
 
     const isAdmin = user?.role === 'admin'
     const isDisabled = Boolean(selectedZev?.disabled_at)
-    const { canManage } = useCommunityAccess()
+    const { canWriteSelectedCommunity } = useCommunityAccess()
     // A manager keeps read access to a disabled ZEV but loses write access
     // (backend: BaseZevScopedPermission.has_object_permission) — an admin
     // can still edit. A viewer never writes (#761). Mirrored here across every
     // control; the backend enforces it regardless.
-    const disabledForMe = isDisabled && !isAdmin
-    const readOnly = disabledForMe || !canManage
+    const readOnly = !canWriteSelectedCommunity
 
     const selectedZevIdRef = useRef(selectedZevId)
     const draftRef = useRef(draft)
@@ -220,7 +220,7 @@ export function ZevSettingsPage({ tab = 'general' }: { tab?: ZevSettingsTab }) {
                 const targetTab = ZEV_FIELD_TABS[first]
                 pendingFocusRef.current = first
                 if (targetTab !== tab) {
-                    navigate(`/zev-settings/${targetTab}`, { replace: true })
+                    navigateTab(`/zev-settings/${targetTab}`)
                 }
             }
         },
@@ -290,7 +290,7 @@ export function ZevSettingsPage({ tab = 'general' }: { tab?: ZevSettingsTab }) {
             const targetTab = ZEV_FIELD_TABS[first]
             pendingFocusRef.current = first
             if (targetTab !== tab) {
-                navigate(`/zev-settings/${targetTab}`, { replace: true })
+                navigateTab(`/zev-settings/${targetTab}`)
             }
             return
         }
@@ -311,7 +311,7 @@ export function ZevSettingsPage({ tab = 'general' }: { tab?: ZevSettingsTab }) {
     }
 
     function handleTabChange(value: string | null) {
-        navigate(`/zev-settings/${value ?? 'general'}`, { replace: true })
+        navigateTab(`/zev-settings/${value ?? 'general'}`)
     }
 
     function updateForm(patch: Partial<ZevInput>) {
@@ -448,7 +448,7 @@ export function ZevSettingsPage({ tab = 'general' }: { tab?: ZevSettingsTab }) {
                 </Tabs.Panel>
 
                 <Tabs.Panel value="people">
-                    <ZevPeopleSection zevId={selectedZevId} canManage={canManage && !disabledForMe} />
+                    <ZevPeopleSection zevId={selectedZevId} canManage={canWriteSelectedCommunity} />
                 </Tabs.Panel>
 
 
@@ -479,7 +479,7 @@ export function ZevSettingsPage({ tab = 'general' }: { tab?: ZevSettingsTab }) {
                         </div>
                     </section>
 
-                    {!isDisabled && canManage && (
+                    {!isDisabled && canWriteSelectedCommunity && (
                         <section className="card page-stack">
                             <div>
                                 <h3 style={{ marginTop: 0 }}>{t('pages.zevSettings.lifecycle.disableSectionTitle')}</h3>

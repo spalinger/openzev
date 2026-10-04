@@ -5,7 +5,7 @@ import { DataTable, type ColumnDef } from '../components/DataTable'
 import { EmptyState } from '../components/EmptyState'
 import { PageSkeleton } from '../components/PageSkeleton'
 import { StatCard } from '../components/StatCard'
-import { ImportsPage } from './ImportsPage'
+import { ImportsContent } from './ImportsPage'
 import { useTranslation } from 'react-i18next'
 import {
     Bar,
@@ -832,7 +832,7 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
                 {/* Import history owns its wizard, queries and guards. */}
                 {isManagedScope && (
                     <Tabs.Panel value="imports">
-                        <ImportsPage embedded />
+                        <ImportsContent />
                     </Tabs.Panel>
                 )}
             </Tabs>

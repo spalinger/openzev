@@ -443,7 +443,16 @@ the participant card into view and flashes it (`.participant-card-focus`, a
 CSS-only highlight), then drops the parameters from the URL so a later
 refresh or another deep link re-triggers cleanly. URL consumption and the
 scroll/flash lifecycle are separate effects, so removing the parameters
-never cancels the highlight timers.
+never cancels the highlight timers. Edit-intent links wait for community loading
+to resolve before consumption; writable users get the edit modal and read-only
+users get the highlight alone. Participant create/edit and delete confirmations
+reset on account, selected community or effective write-capability changes,
+including a switch between two writable communities. Deferred delete callbacks
+check their original scope against the current scope before dispatch. Participant
+create/update/delete completions invalidate the submitting community’s participant
+query; obsolete completions leave replacement drafts and notifications untouched.
+Create/update failures also notify only in their submitting scope. Covered by
+`frontend/tests/participant-write-scope.test.ts`.
 
 ## 9. Observability, auditability, and security
 

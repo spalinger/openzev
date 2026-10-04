@@ -1093,6 +1093,17 @@ one.
 
 ---
 
+### Frontend write dialogs
+
+Tariff create/edit, price-band, version/duplicate/rename and import dialogs reset
+when account, selected community or effective write capability changes. Pending
+delete confirmations are cancelled and recheck current scope before dispatch.
+CRUD and version completions invalidate the submitting community's series; an
+obsolete completion does not close replacement dialogs or show a toast. The
+validity filter and badges use the business date calculated on each render.
+Tariff and price-band submissions both require a selected community as well as
+effective write capability, including for admins.
+
 ## 7. Invoice line-item construction
 
 ### 7.1 Item type mapping

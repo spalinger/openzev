@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
     faEye,
@@ -21,6 +21,7 @@ import {
 import { queryKeys } from '../lib/api/queryKeys'
 import { formatDateTime, useAppSettings } from '../lib/appSettings'
 import { businessDayStartMs, nextIsoDate } from '../lib/dates'
+import { useAuth } from '../lib/auth'
 import { useManagedZev } from '../lib/managedZev'
 import { useCommunityAccess } from '../lib/communityAccess'
 import { useTranslation } from 'react-i18next'
@@ -54,22 +55,36 @@ import { downloadBlob } from '../lib/downloadBlob'
 import { PageHeader } from '../components/PageHeader'
 import { Notice } from '../components/Notice'
 
-/**
- * Metering import wizard + history log.
- *
- * Phase-3 nav regroup: mounted as the "Import history" tab of the Metering
- * hub (`/metering/imports`, `tab="imports"`). `embedded` drops the page
- * header because the hub renders it; standalone alias renders keep it.
- */
-export function ImportsPage({ embedded = false }: { embedded?: boolean }) {
+export function ImportsPage() {
+    const { t } = useTranslation()
+    const { selectedZev } = useManagedZev()
+    return (
+        <div className="page-stack">
+            <PageHeader
+                eyebrow={selectedZev?.name}
+                title={t('pages.imports.title')}
+                description={t('pages.imports.description')}
+            />
+            <ImportsContent />
+        </div>
+    )
+}
+
+/** Metering import wizard and history, consumed directly by the Metering hub. */
+export function ImportsContent() {
     const queryClient = useQueryClient()
     const { pushToast } = useToast()
     const { dialog, confirm, handleConfirm, handleCancel, isLoading: dialogLoading } = useConfirmDialog()
     const { settings } = useAppSettings()
     const { selectedZevId, selectedZev } = useManagedZev()
     // A viewer sees the import history and its protocols, but imports and
-    // deletes nothing (#761).
-    const { canManage } = useCommunityAccess()
+    // deletes nothing (#761). Managers of a disabled ZEV keep read access only.
+    const { canWriteSelectedCommunity } = useCommunityAccess()
+    const { user } = useAuth()
+    const scope = useMemo(() => ({ selectedZevId, canWrite: canWriteSelectedCommunity, accountId: user?.id }), [selectedZevId, canWriteSelectedCommunity, user?.id])
+    const currentScope = useRef<typeof scope | null>(scope)
+    const wizardGeneration = useRef(0)
+    const cancelConfirmation = useEffectEvent(handleCancel)
     const { t } = useTranslation()
 
     const { data, isLoading, isError, isFetching, error: logsError, refetch: refetchLogs } = useQuery({ queryKey: queryKeys.metering.importLogs(), queryFn: fetchImportLogs })
@@ -181,10 +196,11 @@ export function ImportsPage({ embedded = false }: { embedded?: boolean }) {
         return data?.error || data?.detail || fallback || t('pages.imports.messages.importFailed')
     }
 
-    function handleUploadOutcomes(outcomes: BatchFileOutcome<ImportLog>[]) {
+    function handleUploadOutcomes(outcomes: BatchFileOutcome<ImportLog>[], variables: Parameters<typeof uploadMeteringFiles>[0] & { scope: typeof scope; generation: number }) {
         const imported = outcomes.filter((outcome) => outcome.value !== null)
         const failed = outcomes.filter((outcome) => outcome.value === null)
         void queryClient.invalidateQueries({ queryKey: ['metering'] })
+        if (currentScope.current !== variables.scope || wizardGeneration.current !== variables.generation) return
 
         if (imported.length === 0) {
             // Nothing landed: keep the wizard open so the user can retry.
@@ -271,14 +287,17 @@ export function ImportsPage({ embedded = false }: { embedded?: boolean }) {
     }
 
     const uploadMutation = useMutation({
-        mutationFn: uploadMeteringFiles,
+        mutationFn: (variables: Parameters<typeof uploadMeteringFiles>[0] & { scope: typeof scope; generation: number }) => uploadMeteringFiles(variables),
         onSuccess: handleUploadOutcomes,
     })
 
     const deleteImportMutation = useMutation({
-        mutationFn: deleteImportLog,
-        onSuccess: (result, importId) => {
-            if (selectedLog?.id === importId) {
+        mutationFn: ({ id }: { id: string; scope: typeof scope }) => deleteImportLog(id),
+        onSuccess: (result, variables) => {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.metering.importLogs() })
+            void queryClient.invalidateQueries({ queryKey: ['metering'] })
+            if (currentScope.current !== variables.scope) return
+            if (selectedLog?.id === variables.id) {
                 setSelectedLog(null)
             }
             pushToast(
@@ -289,18 +308,20 @@ export function ImportsPage({ embedded = false }: { embedded?: boolean }) {
                 }),
                 'success',
             )
-            void queryClient.invalidateQueries({ queryKey: queryKeys.metering.importLogs() })
-            void queryClient.invalidateQueries({ queryKey: ['metering'] })
         },
-        onError: (error) => {
+        onError: (error, variables) => {
+            if (currentScope.current !== variables.scope) return
             const code = (error as { response?: { data?: { code?: string } } })?.response?.data?.code
             pushToast(t(code === 'overwrite_import_protected' ? 'pages.imports.delete.overwriteProtected' : 'pages.imports.messages.deleteFailed'), 'error')
         },
     })
 
     const bulkDeleteMutation = useMutation({
-        mutationFn: bulkDeleteImportLogs,
-        onSuccess: (result) => {
+        mutationFn: (variables: Parameters<typeof bulkDeleteImportLogs>[0] & { scope: typeof scope }) => bulkDeleteImportLogs(variables),
+        onSuccess: (result, variables) => {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.metering.importLogs() })
+            void queryClient.invalidateQueries({ queryKey: ['metering'] })
+            if (currentScope.current !== variables.scope) return
             setShowBulkDeleteModal(false)
             setBulkDeleteMode('period')
             setBulkDeleteFrom('')
@@ -315,10 +336,9 @@ export function ImportsPage({ embedded = false }: { embedded?: boolean }) {
                 }),
                 'success',
             )
-            void queryClient.invalidateQueries({ queryKey: queryKeys.metering.importLogs() })
-            void queryClient.invalidateQueries({ queryKey: ['metering'] })
         },
-        onError: (error) => {
+        onError: (error, variables) => {
+            if (currentScope.current !== variables.scope) return
             const code = (error as { response?: { data?: { code?: string } } })?.response?.data?.code
             pushToast(t(code === 'overwrite_import_protected' ? 'pages.imports.delete.overwriteProtected' : 'pages.imports.messages.deleteFailed'), 'error')
         },
@@ -437,7 +457,9 @@ export function ImportsPage({ embedded = false }: { embedded?: boolean }) {
                                     }),
                                     confirmText: t('pages.imports.delete.confirmAction'),
                                     isDangerous: true,
-                                    onConfirm: () => deleteImportMutation.mutate(ctx.row.original.id),
+                                    onConfirm: () => {
+                                        if (scope.canWrite && currentScope.current === scope) deleteImportMutation.mutate({ id: ctx.row.original.id, scope })
+                                    },
                                 }),
                             },
                         ]}
@@ -445,9 +467,9 @@ export function ImportsPage({ embedded = false }: { embedded?: boolean }) {
                 ),
             },
         ]
-            return canManage ? columns : columns.filter((column) => column.id !== 'actions')
+            return canWriteSelectedCommunity ? columns : columns.filter((column) => column.id !== 'actions')
         },
-        [t, settings, confirm, deleteImportMutation, dialogLoading, canManage],
+        [t, settings, confirm, deleteImportMutation, dialogLoading, canWriteSelectedCommunity, scope],
     )
 
     function clearDetection() {
@@ -490,6 +512,7 @@ export function ImportsPage({ embedded = false }: { embedded?: boolean }) {
     }
 
     function resetWizard() {
+        wizardGeneration.current += 1
         clearDetection()
         previewReqId.current += 1
         const cfg = csvConfigFor(true, 'daily_15min')
@@ -517,6 +540,20 @@ export function ImportsPage({ embedded = false }: { embedded?: boolean }) {
         setBulkDeleteTo('')
         setBulkDeleteArmed(false)
     }
+
+    const resetWriteDialogs = useEffectEvent(() => {
+        resetWizard()
+        closeBulkDeleteModal()
+        setSelectedLog(null)
+        cancelConfirmation()
+    })
+    useLayoutEffect(() => {
+        currentScope.current = scope
+        return () => { currentScope.current = null }
+    }, [scope])
+    useEffect(() => {
+        resetWriteDialogs()
+    }, [scope])
 
     function handleSourceChange(nextSource: 'csv' | 'sdatch') {
         clearDetection()
@@ -655,6 +692,10 @@ export function ImportsPage({ embedded = false }: { embedded?: boolean }) {
     }
 
     function startImport() {
+        if (!canWriteSelectedCommunity) {
+            pushToast(t('common.error'), 'error')
+            return
+        }
         if (!hasFiles || hasFileError) {
             pushToast(t('pages.imports.messages.chooseFileFirst'), 'error')
             return
@@ -681,8 +722,11 @@ export function ImportsPage({ embedded = false }: { embedded?: boolean }) {
                 pushToast(t('pages.imports.messages.fixConfigFirst'), 'error')
                 return
             }
-            const doUpload = () =>
+            const doUpload = () => {
+                if (!scope.canWrite || currentScope.current !== scope) return
                 uploadMutation.mutate({
+                    scope,
+                    generation: wizardGeneration.current,
                     source,
                     zevId: scopedZevId,
                     files,
@@ -696,6 +740,7 @@ export function ImportsPage({ embedded = false }: { embedded?: boolean }) {
                     valuesCount: parsedValuesCount,
                     overwriteExisting,
                 })
+            }
             if (overwriteExisting) {
                 const existingCount = previews.reduce((sum, entry) => sum + (entry.preview?.summary.readings_existing ?? 0), 0)
                 // One file is named; several are counted, so the message stays short.
@@ -722,7 +767,7 @@ export function ImportsPage({ embedded = false }: { embedded?: boolean }) {
             return
         }
 
-        uploadMutation.mutate({ source, zevId: scopedZevId, files })
+        uploadMutation.mutate({ source, zevId: scopedZevId, files, scope, generation: wizardGeneration.current })
     }
 
     const bulkDeleteScopeLogs = useMemo(() => {
@@ -773,35 +818,24 @@ export function ImportsPage({ embedded = false }: { embedded?: boolean }) {
     }
 
     function confirmBulkDelete() {
+        if (!canWriteSelectedCommunity || !selectedZevId) {
+            pushToast(t('common.error'), 'error')
+            return
+        }
         bulkDeleteMutation.mutate({
+            scope,
             mode: bulkDeleteMode,
             dateFrom: bulkDeleteMode === 'period' ? bulkDeleteFrom : undefined,
             dateTo: bulkDeleteMode === 'period' ? bulkDeleteTo : undefined,
-            zevId: selectedZevId || undefined,
+            zevId: selectedZevId,
         })
     }
 
-    const header = !embedded && (
-        <PageHeader
-            eyebrow={selectedZev?.name}
-            title={t('pages.imports.title')}
-            description={t('pages.imports.description')}
-        />
-    )
-
     if (isLoading)
-        return embedded ? (
-            <PageSkeleton variant="table" />
-        ) : (
-            <div className="page-stack">
-                {header}
-                <PageSkeleton variant="table" />
-            </div>
-        )
+        return <PageSkeleton variant="table" />
     if (isError)
         return (
             <div className="page-stack">
-                {header}
                 <Notice tone="error" onRetry={() => void refetchLogs()} isRetrying={isFetching}>
                     {t('pages.imports.loadFailed')}
                     {logsErrorMessage ? ` — ${logsErrorMessage}` : ''}
@@ -811,9 +845,7 @@ export function ImportsPage({ embedded = false }: { embedded?: boolean }) {
 
     return (
         <div className="page-stack">
-            {header}
-
-            {canManage && (
+            {canWriteSelectedCommunity && (
             <section className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
                 <div>
                     <h3 style={{ marginBottom: '0.3rem' }}>{t('pages.imports.startTitle')}</h3>
@@ -894,7 +926,7 @@ export function ImportsPage({ embedded = false }: { embedded?: boolean }) {
                 getRowId={(row) => row.id}
                 filters={historyFilters}
                 onFiltersChange={setHistoryFilters}
-                onNewImport={canManage ? () => setWizardOpen(true) : undefined}
+                onNewImport={canWriteSelectedCommunity ? () => setWizardOpen(true) : undefined}
             />
 
             <BulkDeleteModal

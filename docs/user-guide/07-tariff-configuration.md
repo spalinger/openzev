@@ -23,6 +23,8 @@ Each tariff has:
 
 **Managers** create tariffs in **Tariffs**.
 
+Switching community or losing write access closes open tariff, version and import dialogs, including delete confirmations. Save your draft before switching.
+
 1. Click **New Tariff**
 2. Enter details:
    - **Name** — Tariff identifier, printed on invoice lines (e.g., "Local solar")

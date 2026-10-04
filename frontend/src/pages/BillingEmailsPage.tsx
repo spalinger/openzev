@@ -42,7 +42,8 @@ export function BillingEmailsPage() {
 
 function BillingEmailsContent() {
     // Retrying a delivery is a write: a viewer sees the history only (#761).
-    const { canManage } = useCommunityAccess()
+    // Managers of a disabled ZEV keep read access only.
+    const { canWriteSelectedCommunity } = useCommunityAccess()
     const { t } = useTranslation()
     const { settings } = useAppSettings()
     const { selectedZevId } = useManagedZev()
@@ -93,7 +94,7 @@ function BillingEmailsContent() {
 
     const retryMutation = useMutation({
         mutationFn: ({ invoice, emailLogId }: RetryRequest) => {
-            if (!mounted.current || !canManage) throw new Error(t('common.error'))
+            if (!mounted.current || !canWriteSelectedCommunity) throw new Error(t('common.error'))
             return retryFailedEmail(invoice.id, emailLogId)
         },
         onSuccess: (_data, { invoice, emailLogId }) => {
@@ -190,7 +191,7 @@ function BillingEmailsContent() {
                                                     ? t('common.loading')
                                                     : t('pages.billingEmails.viewHistory')}
                                             </button>
-                                            {canManage && invoice.last_email_status === 'failed' && invoice.last_email_log_id && (
+                                            {canWriteSelectedCommunity && invoice.last_email_status === 'failed' && invoice.last_email_log_id && (
                                                 <button
                                                     type="button"
                                                     className="button button-primary button-compact"
@@ -223,7 +224,7 @@ function BillingEmailsContent() {
                     setHistoryLogs([])
                     setHistoryLoadingId(null)
                 }}
-                onRetry={canManage ? (emailLogId) => {
+                onRetry={canWriteSelectedCommunity ? (emailLogId) => {
                     if (historyInvoice) retryMutation.mutate({ invoice: historyInvoice, emailLogId })
                 } : undefined}
                 isRetrying={retryMutation.isPending}

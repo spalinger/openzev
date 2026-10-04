@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { accessFor, relationToZev, shellRoleFor, shellRoleForZev } from '../src/lib/communityAccess'
+import { accessFor, canWriteInSelectedCommunity, relationToZev, shellRoleFor, shellRoleForZev } from '../src/lib/communityAccess'
 import { communityEntries, resolveCommunitySelection } from '../src/lib/managedZev'
-import { relationOf } from '../src/lib/membership'
+import { relationOf, ownParticipantIds } from '../src/lib/membership'
 import type { Membership, User, Zev } from '../src/types/api'
 
 // What the shell shows for the selected community (#761, SPEC-2026-10-zev-access-grants §9).
@@ -61,6 +61,10 @@ describe('accessFor', () => {
         expect(accessFor('admin')).toMatchObject({ canManage: true, isAdmin: true })
     })
 
+    it('keeps canManage as role capability: it does not consider a disabled community', () => {
+        expect(accessFor('manager')).toMatchObject({ canManage: true, canWriteSelectedCommunity: true })
+    })
+
     it('gives participants and former participants the participant view', () => {
         expect(accessFor('participant')).toMatchObject({ isZevScope: false, isParticipantScope: true })
         expect(accessFor('former')).toMatchObject({ isZevScope: false, isParticipantScope: true })
@@ -68,6 +72,45 @@ describe('accessFor', () => {
     })
 })
 
+describe('canWriteInSelectedCommunity', () => {
+    const manager = accessFor('manager')
+    const viewer = accessFor('viewer')
+    const admin = accessFor('admin')
+
+    it('allows a manager on an active community', () => {
+        expect(canWriteInSelectedCommunity(manager, { disabled_at: null })).toBe(true)
+    })
+
+    it('is not writable for a manager without a resolved community record', () => {
+        expect(canWriteInSelectedCommunity(manager, null)).toBe(false)
+        expect(canWriteInSelectedCommunity(manager, undefined)).toBe(false)
+    })
+
+    it('keeps a manager readable but not writable on a disabled community', () => {
+        expect(canWriteInSelectedCommunity(manager, { disabled_at: '2026-01-01T00:00:00Z' })).toBe(false)
+    })
+
+    it('lets an admin still write to a disabled community', () => {
+        expect(canWriteInSelectedCommunity(admin, { disabled_at: '2026-01-01T00:00:00Z' })).toBe(true)
+    })
+
+    it('never lets a viewer write', () => {
+        expect(canWriteInSelectedCommunity(viewer, { disabled_at: null })).toBe(false)
+        expect(canWriteInSelectedCommunity(viewer, { disabled_at: '2026-01-01T00:00:00Z' })).toBe(false)
+    })
+})
+
+describe('ownParticipantIds', () => {
+    it('collects participant rows across communities, including ended ones', () => {
+        const someone = user({ memberships: [
+            membership('a', { access: 'manager' }),
+            membership('b', { participants: [row(true)] }),
+            membership('c', { participants: [row(false)] }),
+        ] })
+        expect([...ownParticipantIds(someone)].sort()).toEqual(['p-false', 'p-true'])
+        expect(ownParticipantIds(null).size).toBe(0)
+    })
+})
 describe('relationToZev', () => {
     const someone = user({ memberships: [membership('a', { access: 'manager' }), membership('b', { participants: [row(true)] })] })
 

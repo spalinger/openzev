@@ -20,7 +20,7 @@ import { soleCommunityName } from '../lib/membership'
 export function MeteringPointsPage() {
     const { user } = useAuth()
     const { selectedZevId, selectedZev, entries } = useManagedZev()
-    const { canManage: canWrite, isAdmin, isZevScope } = useCommunityAccess()
+    const { canWriteSelectedCommunity: canWrite, isAdmin, isZevScope } = useCommunityAccess()
     const { t } = useTranslation()
     // Drafts survive a failed refresh, but never cross accounts, communities or write access.
     return (
