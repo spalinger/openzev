@@ -423,8 +423,9 @@ Hub tab navigation uses `usePageNavigation`, retaining unrelated query
 parameters and the hash. Routed hubs keep replace history; System keeps
 query-based push history (the default Regional tab removes only `tab`).
 Admin invoice numbers use the shared invoice link; detail returns admins to
-the platform invoice tab. Shared amount/status/action cells retain DataTable
-sorting, complete-dataset pagination and the existing delete confirmation.
+the platform invoice tab. Shared status/action cells retain DataTable sorting,
+complete-dataset pagination and the existing delete confirmation. Admin totals
+retain their existing trailing currency format (`114.94 CHF`).
 
 ### 9.3 AdminDashboardPage
 

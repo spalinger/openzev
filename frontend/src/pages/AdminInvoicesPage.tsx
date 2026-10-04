@@ -9,7 +9,7 @@ import { deleteInvoice, fetchInvoices } from '../lib/api/invoices'
 import { formatApiError } from '../lib/api/errors'
 import { queryKeys } from '../lib/api/queryKeys'
 import { useToast } from '../lib/toast'
-import { InvoiceActionButton, InvoiceAmount, InvoiceLink, InvoiceStatusBadge } from '../components/InvoicePresentation'
+import { InvoiceActionButton, InvoiceLink, InvoiceStatusBadge } from '../components/InvoicePresentation'
 import type { Invoice } from '../types/api'
 import { PageHeader } from '../components/PageHeader'
 
@@ -119,7 +119,7 @@ export function AdminInvoicesContent() {
                 accessorKey: 'total_value',
                 header: t('adminInvoices.total'),
                 meta: { numeric: true },
-                cell: (ctx) => <InvoiceAmount value={ctx.row.original.total_chf} />,
+                cell: (ctx) => `${ctx.row.original.total_chf} CHF`,
             },
             {
                 accessorKey: 'status',

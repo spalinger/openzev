@@ -386,8 +386,10 @@ ranges from community start; their default remains the previous complete period
 bounded by the first aligned period. Shared URL navigation retains unrelated
 query parameters/hash and the hubs' existing history/mounting contracts.
 Invoice lists reuse `InvoicePresentation` cells and links, with `formatChf`
-amounts, translated missing-day plurals and labelled PDF controls; their row
-models, permissions, workflow eligibility and pagination stay consumer-owned.
+amounts in personal/period lists, translated missing-day plurals and labelled
+PDF controls. Admin invoice totals retain the trailing currency format
+(`114.94 CHF`). Row models, permissions, workflow eligibility and pagination
+stay consumer-owned.
 
 ### 7.10 TypeScript types
 
