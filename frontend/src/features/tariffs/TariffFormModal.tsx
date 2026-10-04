@@ -223,6 +223,7 @@ export function TariffFormModal({
                     : t('pages.tariffs.form.dynamicSourceHint')}
               </small>
             </label>
+            <p className="muted" style={{ margin: 0 }}>{t('pages.tariffs.form.sharedSourceHint')}</p>
             {energyType === 'feed_in' && dynamicSourceId && (
               <label>
                 <span>{t('pages.tariffs.form.minimumPrice')}</span>

@@ -7,6 +7,8 @@ import { queryKeys } from '../lib/api/queryKeys'
 import { formatChf } from '../lib/numbers'
 import { PageHeader } from '../components/PageHeader'
 import { Notice } from '../components/Notice'
+import { Link } from 'react-router-dom'
+import { Toolbar } from '../components/Toolbar'
 
 /**
  * `embedded` drops the page header (mounted as the Overview tab of the
@@ -66,7 +68,9 @@ export function AdminDashboardPage({ embedded = false }: { embedded?: boolean })
             </div>
 
             <div className="card">
-                <h2>{t('invoice.statusBreakdown')}</h2>
+                <Toolbar actions={<Link to="/admin/invoices">{t('nav.adminInvoices')}</Link>}>
+                    <h2>{t('invoice.statusBreakdown')}</h2>
+                </Toolbar>
                 <div className="stat-grid">
                     {[
                         { key: 'draft', label: t('invoice.status.draft'), value: stats.invoices.draft },
@@ -84,7 +88,9 @@ export function AdminDashboardPage({ embedded = false }: { embedded?: boolean })
             </div>
 
             <div className="card">
-                <h2>{t('email.statistics')}</h2>
+                <Toolbar actions={<Link to="/admin/health">{t('pages.adminOverview.tabs.health')}</Link>}>
+                    <h2>{t('email.statistics')}</h2>
+                </Toolbar>
                 <div className="grid grid-4">
                     <StatCard label={t('email.totalEmails')} value={stats.emails.total} flat />
                     <StatCard label={t('email.sent')} value={stats.emails.sent} flat tone={stats.emails.sent > 0 ? 'success' : undefined} />

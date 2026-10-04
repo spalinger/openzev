@@ -8,6 +8,9 @@ import { BackupDestinationsSection } from './BackupDestinationsSection'
 import { BackupJobsSection } from './BackupJobsSection'
 import { BackupScheduleSection } from './BackupScheduleSection'
 import { BackupRestoreSection } from './BackupRestoreSection'
+import { PageState } from '../../components/PageState'
+import { Notice } from '../../components/Notice'
+import { Link } from 'react-router-dom'
 
 /** The `backup` tab of System Settings: is it safe, where does it go, what has run. */
 export function BackupSettingsSection() {
@@ -18,73 +21,89 @@ export function BackupSettingsSection() {
 
     return (
         <div className="page-stack">
-            <section className="card page-stack">
-                <p className="muted" style={{ margin: 0 }}>{t('pages.backups.intro')}</p>
+            <div className="actions-row actions-row-wrap">
+                <Link to="/admin/health">{t('pages.adminOverview.tabs.health')}</Link>
+                <Link to="/admin/audit?action_category=system">{t('pages.backups.activity')}</Link>
+            </div>
+            <PageState
+                isLoading={statusQuery.isLoading}
+                isError={statusQuery.isError && !status}
+                error={t('pages.backups.loadError')}
+                onRetry={() => void statusQuery.refetch()}
+                isRetrying={statusQuery.isFetching}
+            >
+                {statusQuery.isError && status && (
+                    <Notice tone="warning" onRetry={() => void statusQuery.refetch()} isRetrying={statusQuery.isFetching}>
+                        {t('pages.backups.refreshError')}
+                    </Notice>
+                )}
+                <section className="card page-stack">
+                    <p className="muted" style={{ margin: 0 }}>{t('pages.backups.intro')}</p>
 
-                {status?.encryption_key_problem ? (
-                    <div className="error-banner">
-                        {t('pages.backups.status.keyProblem', { problem: status.encryption_key_problem })}
-                    </div>
-                ) : status && !status.encrypted && status.encryption_required ? (
-                    <div className="error-banner">
-                        <strong>{t('pages.backups.status.blockedTitle')}</strong>
-                        <div>{t('pages.backups.status.blocked')}</div>
-                    </div>
-                ) : status && !status.encrypted ? (
-                    <div className="warning-banner">
-                        <strong>{t('pages.backups.status.unencryptedTitle')}</strong>
-                        <div>{t('pages.backups.status.unencrypted')}</div>
-                    </div>
-                ) : status ? (
-                    <div className="info-banner">
-                        {t('pages.backups.status.encrypted', { fingerprint: status.encryption_key_fingerprint })}
-                    </div>
-                ) : null}
-
-                {status?.stale && (
-                    <div className="error-banner">
-                        <strong>{t('pages.backups.status.staleTitle')}</strong>
-                        <div>
-                            {status.age_hours == null
-                                ? t('pages.backups.status.staleNever')
-                                : t('pages.backups.status.stale', {
-                                      hours: Math.round(status.age_hours),
-                                      interval: status.schedule_interval_hours ?? 0,
-                                  })}
+                    {status?.encryption_key_problem ? (
+                        <div className="error-banner">
+                            {t('pages.backups.status.keyProblem', { problem: status.encryption_key_problem })}
                         </div>
-                    </div>
-                )}
+                    ) : status && !status.encrypted && status.encryption_required ? (
+                        <div className="error-banner">
+                            <strong>{t('pages.backups.status.blockedTitle')}</strong>
+                            <div>{t('pages.backups.status.blocked')}</div>
+                        </div>
+                    ) : status && !status.encrypted ? (
+                        <div className="warning-banner">
+                            <strong>{t('pages.backups.status.unencryptedTitle')}</strong>
+                            <div>{t('pages.backups.status.unencrypted')}</div>
+                        </div>
+                    ) : status ? (
+                        <div className="info-banner">
+                            {t('pages.backups.status.encrypted', { fingerprint: status.encryption_key_fingerprint })}
+                        </div>
+                    ) : null}
 
-                <p className="muted" style={{ margin: 0 }}>
-                    {t('pages.backups.restoreNotice', {
-                        restoreCommand: 'python manage.py openzev_restore --mode instance --from <archive>',
-                        command: 'python manage.py openzev_backup_verify',
-                    })}
-                </p>
-            </section>
+                    {status?.stale && (
+                        <div className="error-banner">
+                            <strong>{t('pages.backups.status.staleTitle')}</strong>
+                            <div>
+                                {status.age_hours == null
+                                    ? t('pages.backups.status.staleNever')
+                                    : t('pages.backups.status.stale', {
+                                          hours: Math.round(status.age_hours),
+                                          interval: status.schedule_interval_hours ?? 0,
+                                      })}
+                            </div>
+                        </div>
+                    )}
 
-            <section className="stat-grid stat-grid--wide">
-                <StatCard
-                    label={t('pages.backups.status.lastSuccess')}
-                    value={
-                        status?.last_successful
-                            ? formatDateTime(status.last_successful.completed_at, settings)
-                            : t('pages.backups.status.never')
-                    }
-                    hint={status?.last_successful?.destination_name || undefined}
-                    tone={status?.last_successful ? 'success' : 'warning'}
-                />
-                {status?.last_failed && (
+                    <p className="muted" style={{ margin: 0 }}>
+                        {t('pages.backups.restoreNotice', {
+                            restoreCommand: 'python manage.py openzev_restore --mode instance --from <archive>',
+                            command: 'python manage.py openzev_backup_verify',
+                        })}
+                    </p>
+                </section>
+
+                <section className="stat-grid stat-grid--wide">
                     <StatCard
-                        label={t('pages.backups.status.lastFailed')}
-                        value={formatDateTime(status.last_failed.completed_at ?? status.last_failed.created_at, settings)}
-                        hint={status.last_failed.error_message || undefined}
-                        tone="danger"
+                        label={t('pages.backups.status.lastSuccess')}
+                        value={
+                            status?.last_successful
+                                ? formatDateTime(status.last_successful.completed_at, settings)
+                                : t('pages.backups.status.never')
+                        }
+                        hint={status?.last_successful?.destination_name || undefined}
+                        tone={status?.last_successful ? 'success' : 'warning'}
                     />
-                )}
-                <StatCard label={t('pages.backups.status.enabledDestinations')} value={status?.destinations_enabled ?? 0} />
-            </section>
-
+                    {status?.last_failed && (
+                        <StatCard
+                            label={t('pages.backups.status.lastFailed')}
+                            value={formatDateTime(status.last_failed.completed_at ?? status.last_failed.created_at, settings)}
+                            hint={status.last_failed.error_message || undefined}
+                            tone="danger"
+                        />
+                    )}
+                    <StatCard label={t('pages.backups.status.enabledDestinations')} value={status?.destinations_enabled ?? 0} />
+                </section>
+            </PageState>
             <BackupDestinationsSection status={status} />
             <BackupScheduleSection status={status} />
             <BackupJobsSection status={status} />

@@ -371,6 +371,20 @@ Current application:
 - Tab strips use Mantine `Tabs` with the `.app-tabs` contract and render their content as `Tabs.Panel` inside the same root; hand-rolled tab strips are not permitted.
 - `AdminSystemSettingsPage` uses the standard tab strip with panels in the same root; its tab remains query-based.
 
+#### Contextual workflow links within existing hubs
+
+Hub descriptions name their platform or community scope. Secondary workflow
+links use canonical destinations and the history/context policy in
+`2026-03-community-and-access.md` §9.2. Shared-source metadata distinguishes
+global totals from the linked tariff's validity/history (§10.4 of
+`2026-09-dynamic-tariffs.md`). Export is primary with a clean settings draft
+and secondary while the Save bar owns the primary action; draft retention and
+eligibility are described in `2026-08-zev-transfer-archive.md` §9.
+
+`hub-workflow-links.spec.ts` checks navigation, controls, URL state, headings and
+document overflow at desktop/400px widths. Captured screenshots are inspection
+artifacts, not visual regression assertions or proof of internal drawer clipping.
+
 ### 7.3 Action hierarchy
 
 Each record or page should expose actions in priority order:

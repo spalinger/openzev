@@ -5,6 +5,9 @@ import { usePageNavigation } from '../lib/usePageNavigation'
 import { InvoicesContent } from './InvoicesPage'
 import { BillingEmailsPage } from './BillingEmailsPage'
 import { PageHeader } from '../components/PageHeader'
+import { Link } from 'react-router-dom'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { faFileLines } from '@fortawesome/free-solid-svg-icons'
 
 /**
  * Billing hub: tabs are routes — Invoices · Email delivery — each with its
@@ -31,6 +34,7 @@ export function BillingHubPage({ tab }: { tab: BillingTab }) {
                 eyebrow={selectedZev?.name}
                 title={t('nav.billing')}
                 description={t('pages.billingHub.description')}
+                actions={<Link className="button button-secondary" to="/reports"><FontAwesomeIcon icon={faFileLines} fixedWidth />{t('nav.reports')}</Link>}
             />
 
             <Tabs

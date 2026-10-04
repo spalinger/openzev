@@ -46,7 +46,12 @@ export async function mockApi(page: Page, state: ApiState = {}) {
     }
   })
   await page.clock.setFixedTime(new Date('2026-10-02T12:00:00Z'))
-  await page.addInitScript(() => localStorage.setItem('openzev.language', 'en'))
+  await page.addInitScript(() => {
+    // Only the app needs this preference; Chromium's PDF frames may lack storage.
+    if (window === window.top && location.protocol.startsWith('http')) {
+      localStorage.setItem('openzev.language', 'en')
+    }
+  })
   const zevs = () => state.scopeEmpty ? [] : state.zevs ?? [defaultZev]
   const user = () => ({
     id: 1, role: state.role === 'admin' || (!state.role && !state.roleByZev) ? 'admin' : 'user',
