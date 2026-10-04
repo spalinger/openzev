@@ -1,7 +1,8 @@
 import { useMutation, type QueryClient } from '@tanstack/react-query'
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useLayoutEffect, useState } from 'react'
 import { createTariffVersion, duplicateTariff, renameTariffSeries } from '../../lib/api/tariffs'
 import { useAuth } from '../../lib/auth'
+import { useWriteScope } from '../../lib/useWriteScope'
 import { formatApiError } from '../../lib/api/errors'
 import { invalidateTariffQueries } from './invalidate'
 import type { TariffSeries, TariffVersion, TariffVersionInput } from '../../types/api'
@@ -23,54 +24,58 @@ type Params = {
 
 export function useTariffVersions({ selectedZevId, canWrite = true, queryClient, pushToast, t }: Params) {
   const { user } = useAuth()
-  const scope = useMemo(() => ({ selectedZevId, canWrite, accountId: user?.id }), [selectedZevId, canWrite, user?.id])
-  const currentScope = useRef<typeof scope | null>(scope)
+  const { scope, isCurrent, assertWritable } = useWriteScope({ selectedZevId, canWrite, accountId: user?.id }, t('common.error'))
   const [dialog, setDialog] = useState<VersionDialog>(null)
 
   useLayoutEffect(() => {
-    currentScope.current = scope
     setDialog(null)
-    return () => { currentScope.current = null }
   }, [scope])
 
   const newVersionMutation = useMutation({
-    mutationFn: ({ id, payload }: { id: string, payload: TariffVersionInput; scope: typeof scope }) =>
-      createTariffVersion(id, payload),
+    mutationFn: ({ id, payload, scope: submittingScope }: { id: string, payload: TariffVersionInput; scope: typeof scope }) => {
+      assertWritable(submittingScope)
+      return createTariffVersion(id, payload)
+    },
     onSuccess: (_, variables) => {
       invalidateTariffQueries(queryClient, variables.scope.selectedZevId)
-      if (currentScope.current !== variables.scope) return
+      if (!isCurrent(variables.scope)) return
       setDialog(null)
       pushToast(t('pages.tariffs.messages.versionCreated'), 'success')
     },
     onError: (error, variables) => {
-      if (currentScope.current === variables.scope) pushToast(formatApiError(error, t('pages.tariffs.messages.versionFailed')), 'error')
+      if (isCurrent(variables.scope)) pushToast(formatApiError(error, t('pages.tariffs.messages.versionFailed')), 'error')
     },
   })
 
   const duplicateMutation = useMutation({
-    mutationFn: ({ id, payload }: { id: string, payload: TariffVersionInput & { name: string }; scope: typeof scope }) =>
-      duplicateTariff(id, payload),
+    mutationFn: ({ id, payload, scope: submittingScope }: { id: string, payload: TariffVersionInput & { name: string }; scope: typeof scope }) => {
+      assertWritable(submittingScope)
+      return duplicateTariff(id, payload)
+    },
     onSuccess: (_, variables) => {
       invalidateTariffQueries(queryClient, variables.scope.selectedZevId)
-      if (currentScope.current !== variables.scope) return
+      if (!isCurrent(variables.scope)) return
       setDialog(null)
       pushToast(t('pages.tariffs.messages.duplicated'), 'success')
     },
     onError: (error, variables) => {
-      if (currentScope.current === variables.scope) pushToast(formatApiError(error, t('pages.tariffs.messages.duplicateFailed')), 'error')
+      if (isCurrent(variables.scope)) pushToast(formatApiError(error, t('pages.tariffs.messages.duplicateFailed')), 'error')
     },
   })
 
   const renameMutation = useMutation({
-    mutationFn: ({ id, name }: { id: string, name: string; scope: typeof scope }) => renameTariffSeries(id, name),
+    mutationFn: ({ id, name, scope: submittingScope }: { id: string, name: string; scope: typeof scope }) => {
+      assertWritable(submittingScope)
+      return renameTariffSeries(id, name)
+    },
     onSuccess: (_, variables) => {
       invalidateTariffQueries(queryClient, variables.scope.selectedZevId)
-      if (currentScope.current !== variables.scope) return
+      if (!isCurrent(variables.scope)) return
       setDialog(null)
       pushToast(t('pages.tariffs.messages.renamed'), 'success')
     },
     onError: (error, variables) => {
-      if (currentScope.current === variables.scope) pushToast(formatApiError(error, t('pages.tariffs.messages.renameFailed')), 'error')
+      if (isCurrent(variables.scope)) pushToast(formatApiError(error, t('pages.tariffs.messages.renameFailed')), 'error')
     },
   })
 
@@ -84,13 +89,13 @@ export function useTariffVersions({ selectedZevId, canWrite = true, queryClient,
     openRename: (series: TariffSeries, source: TariffVersion) =>
       setDialog({ kind: 'rename', series, source }),
     submitNewVersion: (id: string, payload: TariffVersionInput) => {
-      if (canWrite) newVersionMutation.mutate({ id, payload, scope })
+      if (canWrite && selectedZevId && isCurrent(scope)) newVersionMutation.mutate({ id, payload, scope })
     },
     submitDuplicate: (id: string, payload: TariffVersionInput & { name: string }) => {
-      if (canWrite) duplicateMutation.mutate({ id, payload, scope })
+      if (canWrite && selectedZevId && isCurrent(scope)) duplicateMutation.mutate({ id, payload, scope })
     },
     submitRename: (id: string, name: string) => {
-      if (canWrite) renameMutation.mutate({ id, name, scope })
+      if (canWrite && selectedZevId && isCurrent(scope)) renameMutation.mutate({ id, name, scope })
     },
     isPending: newVersionMutation.isPending || duplicateMutation.isPending || renameMutation.isPending,
   }

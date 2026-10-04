@@ -1,12 +1,13 @@
+import { queryKeys } from '../src/lib/api/queryKeys'
 import { waitForCondition } from './helpers/waitForCondition'
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter } from 'react-router-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { onlineManager, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MantineProvider } from '@mantine/core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { useMeteringPointActions } from '../src/features/meteringPoints/useMeteringPointActions'
+import { useMeteringPointActions } from '../src/features/meteringPoints/useMeteringPointActions'
 
 const state = vi.hoisted(() => ({
     zevId: '42', relation: 'manager', userId: 1, disabled: false, role: 'user', scopeFailed: false,
@@ -99,6 +100,7 @@ beforeEach(async () => {
 afterEach(() => {
     act(() => root.unmount())
     client.clear()
+    onlineManager.setOnline(true)
     container.remove()
 })
 
@@ -108,8 +110,10 @@ describe('metering draft context', () => {
             it(`closes a ${mode} draft when ${change} changes`, async () => {
                 await openDraft(mode)
                 if (change === 'community') state.zevId = '43'
-                else if (change === 'account') state.userId = 2
-                else state.relation = 'viewer'
+                else if (change === 'account') {
+                    state.userId = 2
+                    client.clear() // AuthProvider resets both query and mutation caches at session boundaries.
+                } else state.relation = 'viewer'
                 await render()
                 expect(document.querySelector('[role="dialog"]')).toBeNull()
                 expect(container.textContent).toContain(`MP-${state.zevId}`)
@@ -123,17 +127,21 @@ describe('metering draft context', () => {
 
 const writes = [
     { name: 'meter create', run: (actions: ReturnType<typeof useMeteringPointActions>) => actions.saveMpMutation.mutateAsync({
+        scope: actions.scope,
         payload: { zev: '42', meter_id: 'draft', meter_type: 'consumption', is_active: true, has_behind_meter_generation: false },
     }) },
     { name: 'meter edit', run: (actions: ReturnType<typeof useMeteringPointActions>) => actions.saveMpMutation.mutateAsync({
+        scope: actions.scope,
         id: 'mp42', payload: { zev: '42', meter_id: 'edited', meter_type: 'consumption', is_active: true, has_behind_meter_generation: false },
     }) },
-    { name: 'meter delete', run: (actions: ReturnType<typeof useMeteringPointActions>) => actions.deleteMpMutation.mutateAsync('mp42') },
+    { name: 'meter delete', run: (actions: ReturnType<typeof useMeteringPointActions>) => actions.deleteMpMutation.mutateAsync({ id: 'mp42', scope: actions.scope }) },
     { name: 'assignment save', run: (actions: ReturnType<typeof useMeteringPointActions>) => actions.saveAssignMutation.mutateAsync({
+        scope: actions.scope,
         payload: { metering_point: 'mp42', participant: 'p42', valid_from: '2026-01-01', valid_to: null, allocation_mode: 'normal' },
     }) },
-    { name: 'assignment delete', run: (actions: ReturnType<typeof useMeteringPointActions>) => actions.deleteAssignMutation.mutateAsync('assignment42') },
+    { name: 'assignment delete', run: (actions: ReturnType<typeof useMeteringPointActions>) => actions.deleteAssignMutation.mutateAsync({ id: 'assignment42', scope: actions.scope }) },
     { name: 'reading delete', run: (actions: ReturnType<typeof useMeteringPointActions>) => actions.deleteMeteringDataMutation.mutateAsync({
+        scope: actions.scope,
         meteringPointId: 'mp42', payload: { delete_all: true },
     }) },
 ]
@@ -192,7 +200,7 @@ describe('metering write ownership', () => {
 
     for (const change of ['account', 'community'] as const) {
         for (const outcome of ['success', 'failure'] as const) {
-            it.each(writes)(`ignores an obsolete $name ${outcome} after changing ${change}`, async ({ run }) => {
+            it.each(writes)(`ignores an obsolete $name ${outcome} after changing ${change}`, async ({ name, run }) => {
                 state.role = 'admin'
                 await render()
                 let resolve!: (value: { deleted_count: number }) => void
@@ -204,10 +212,14 @@ describe('metering write ownership', () => {
                 const settled = operation.catch(() => undefined)
                 await waitForCondition(() => state.write.mock.calls.length === 1, 'original write')
                 const submitted = state.write.mock.calls[0]
-                if (change === 'account') state.userId = 2
-                else state.zevId = '43'
+                if (change === 'account') {
+                    state.userId = 2
+                    client.clear() // AuthProvider resets both query and mutation caches at session boundaries.
+                } else state.zevId = '43'
                 await render()
                 const invalidate = vi.spyOn(client, 'invalidateQueries')
+                await openDraft('create')
+                const replacement = document.querySelector('[role="dialog"]')
                 await act(async () => {
                     if (outcome === 'success') resolve({ deleted_count: 1 })
                     else reject(new Error('Old write failed'))
@@ -215,9 +227,76 @@ describe('metering write ownership', () => {
                 })
                 expect(state.write.mock.calls).toEqual([submitted])
                 expect(state.toast).not.toHaveBeenCalled()
-                expect(invalidate).not.toHaveBeenCalled()
-                expect(document.querySelector('[role="dialog"]')).toBeNull()
+                if (change === 'community' && outcome === 'success') {
+                    const keys = name.includes('assignment')
+                        ? [queryKeys.metering.pointAssignments(), queryKeys.metering.points('42'), queryKeys.zev.participants('42')]
+                        : name === 'meter delete' || name === 'reading delete'
+                            ? [['metering']]
+                            : [queryKeys.metering.points('42')]
+                    expect(invalidate.mock.calls.map(([filters]) => filters?.queryKey)).toEqual(keys)
+                } else {
+                    expect(invalidate).not.toHaveBeenCalled()
+                }
+                expect(document.querySelector('[role="dialog"]')).toBe(replacement)
             })
         }
     }
+})
+
+it.each(writes)('refreshes the original caches after a successful $name while another page is open', async ({ run }) => {
+    state.role = 'admin'
+    await render()
+    let resolve!: (value: { deleted_count: number }) => void
+    state.write.mockReturnValue(new Promise(done => { resolve = done }))
+    let operation!: Promise<unknown>
+    act(() => { operation = run(state.actions!) })
+    await waitForCondition(() => state.write.mock.calls.length === 1, 'original write')
+    act(() => root.render(createElement(QueryClientProvider, { client }, createElement('p', null, 'Another page'))))
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    await act(async () => { resolve({ deleted_count: 1 }); await operation })
+    expect(invalidate).toHaveBeenCalled()
+    expect(container.textContent).toBe('Another page')
+    expect(state.toast).not.toHaveBeenCalled()
+})
+
+
+// Keep one observer mounted so React Query replaces pending mutation options.
+// The keyed page tests above cover remounts, which otherwise hide this race.
+function UnkeyedHarness() {
+    useMeteringPointActions({ selectedZevId: state.zevId, isManagedScope: true, canWrite: true, canDeleteData: true })
+    return null
+}
+async function renderUnkeyed() {
+    await act(async () => root.render(createElement(MemoryRouter, null,
+        createElement(QueryClientProvider, { client }, createElement(UnkeyedHarness)),
+    )))
+}
+
+it.each(writes)('rejects offline queued $name after a community switch on the same observer', async ({ run }) => {
+    await renderUnkeyed()
+    onlineManager.setOnline(false)
+    let operation!: Promise<unknown>
+    act(() => { operation = run(state.actions!) })
+    const settled = operation.catch(error => error)
+    await waitForCondition(() => client.getMutationCache().getAll().some(mutation => mutation.state.isPaused), 'offline write')
+    state.zevId = '43'
+    await renderUnkeyed()
+    await act(async () => { onlineManager.setOnline(true); await client.resumePausedMutations(); await settled })
+    expect(await settled).toBeInstanceOf(Error)
+    expect(state.write).not.toHaveBeenCalled()
+    expect(state.toast).not.toHaveBeenCalled()
+})
+
+it.each(writes)('suppresses delayed $name failure after a community switch on the same observer', async ({ run }) => {
+    await renderUnkeyed()
+    let reject!: (error: Error) => void
+    state.write.mockReturnValue(new Promise((_, no) => { reject = no }))
+    let operation!: Promise<unknown>
+    act(() => { operation = run(state.actions!) })
+    const settled = operation.catch(() => undefined)
+    await waitForCondition(() => state.write.mock.calls.length === 1, 'original write')
+    state.zevId = '43'
+    await renderUnkeyed()
+    await act(async () => { reject(new Error('A failed')); await settled })
+    expect(state.toast).not.toHaveBeenCalled()
 })

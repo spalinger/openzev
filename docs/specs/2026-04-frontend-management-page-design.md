@@ -127,8 +127,8 @@ Usage rules:
   guard branch is defense-in-depth for revoke races and routes mounted
   outside the layout — one shared wording, no diverging explanations.
   Dashboard, Overview, Reports, Invoices, BillingEmails,
-  ZevSettings, MeteringChart and MeteringPoints use this policy; BillingPeriods
-  inherits Overview's guard. Other pages retain their local query-state policy.
+  ZevSettings, MeteringChart, MeteringPoints, Participants and Tariffs use this
+  policy; BillingPeriods inherits Overview's guard. Other pages retain their local query-state policy.
 - Parent queries still need scoped keys and `enabled` conditions; backend
   permissions enforce access.
 - Use `StatCard` for KPI tiles. Interactive contents use phrasing elements;
@@ -165,11 +165,14 @@ present. Dates must be real ISO calendar days with `from <= to`.
   navigation; a community/interval change resets to the current period and
   replaces the URL. The reset remains in effect until that URL update commits,
   preventing a transient old-range request in the new scope. Participant
-  selection clears before a new-scope request.
+  selection clears before a new-scope request. Consumers combining reset with
+  `minimumRangeStart` must supply a fallback that passes that minimum, otherwise
+  the reset URL update cannot settle.
 
 `frontend/src/lib/usePageNavigation.ts` provides `searchParams`, `updateParams`
 and `navigateTab`. URL edits retain unrelated parameters, hash and location
-state. Period edits and routed hub tabs replace history; Account and System
+state, including settings/account query parameters such as `focus`. Period edits
+and routed hub tabs replace history; Account and System
 query-tab changes push history. Callers retain their tab resolution, route
 guards and mounting policy: Account keeps hidden panels mounted for one-time
 secrets, while the other audited hubs keep their existing active-panel model.
@@ -279,7 +282,25 @@ No Celery, integration, or backend workflow changes are introduced here.
 
 Frontend interaction rules relevant to async work:
 
+- `frontend/src/lib/useWriteScope.ts` owns the shared write lifetime for
+  Participants, Imports, tariff CRUD/versioning and metering-point actions.
+  `scope` identity changes with account ID, selected community or write
+  capability; layout-effect cleanup revokes it on replacement/unmount.
+  `isCurrent(scope)` gates local completion effects and retained callbacks;
+  `assertWritable(scope)` rejects obsolete, read-only or unresolved-community
+  writes immediately before API dispatch, including queued mutations. Each
+  mutation carries the submitting scope in its variables; dispatch/error
+  callbacks read that scope rather than their latest render closure, because
+  React Query can replace pending mutation options on re-render. Only
+  operations that support an all-community context pass `false` as its second
+  argument (import deletion and unscoped metering management). Page-specific
+  dialog resets and successful cache invalidation remain in the consumers.
+
 - A mutation must invalidate the page’s canonical query key(s) after success.
+  Metering mutations retain their submitting community in mutation context:
+  community switches and ordinary page navigation preserve cache maintenance,
+  while the mutation-cache reset at account/session boundaries suppresses it.
+  Local dialogs and notifications require current UI ownership.
 - Destructive or long-running flows should display a confirmation or modal before execution.
 - Buttons must reflect pending state through disabled state and, when already implemented by the page, pending labels.
 - Disabled is reserved for transient unavailability (a mutation in flight).
@@ -373,7 +394,7 @@ Rules:
 **File:** `frontend/src/pages/TariffsPage.tsx`
 
 - Route: `/tariffs`
-- Query keys: `['tariffs']`, `['tariff-periods']`
+- Query keys: `queryKeys.tariffs.series(selectedZevId)` and `queryKeys.tariffs.dynamicSources()`; versions and periods are nested in the series response.
 - Structure:
   - summary toolbar at top
   - category sections in the order `energy`, `grid_fees`, `levies`, `metering`
@@ -391,15 +412,15 @@ These pages define the current management-page reference set.
 
 - File: `frontend/src/pages/ParticipantsPage.tsx`
 - Route: `/participants`
-- Query keys: `['participants']`, `['zevs']`
+- Query keys: `queryKeys.zev.participants(selectedZevId)` and `queryKeys.zev.participantGeocodingEnabled()`; scope comes from `queryKeys.zev.list()`.
 - Pattern: summary toolbar, filters, participant cards, primary/secondary/overflow actions, badges, invitation handling.
 
 #### `MeteringPointsPage`
 
 - File: `frontend/src/pages/MeteringPointsPage.tsx`
 - Route: `/metering/points` (`/metering-points` stays as alias)
-- Query keys: `['participants']`, `['metering-points']`, `['metering-point-assignments']`
-- Pattern: summary toolbar, filters, metering-point cards, nested assignment rows, direct and overflow actions, confirm flows.
+- Query keys: `queryKeys.zev.participants(selectedZevId)`, `queryKeys.metering.points(selectedZevId)`, `queryKeys.metering.pointAssignments()` and `queryKeys.metering.qualityStatus(...)`.
+- Pattern: `ScopeGuard` mounts the query-owning view; `PageState` blocks initial list loading/failure, while cached list failures show a warning. Summary toolbar, filters, metering-point cards, nested assignment rows, direct and overflow actions, confirm flows.
 
 #### `InvoicesPage`
 
@@ -436,8 +457,8 @@ These pages define the current management-page reference set.
 
 - File: `frontend/src/pages/ImportsPage.tsx`
 - Route: `/metering/imports` (`/imports` stays as alias)
-- Query keys: `['imports']`, `['zevs']`
-- Pattern: top-level action card, `DataTable` for import logs, per-row protocol/delete actions, destructive bulk-delete modal, import wizard modal.
+- Query key: `queryKeys.metering.importLogs()`; history is filtered by selected community.
+- Pattern: header-free `ImportsContent` is mounted in the Metering hub beneath its scope guard; the standalone `ImportsPage` wrapper adds `PageHeader`. The body owns the action card, import-log `DataTable`, protocol/delete actions, destructive bulk-delete modal and import wizard.
 
 ### 7.6 I18n rules
 
@@ -486,9 +507,10 @@ These pages define the current management-page reference set.
 - Retired scope copy: `npx vitest run tests/retired-scope-copy.test.ts` — prevents retired selection advice from returning.
 - Page primitives: `npx vitest run tests/page-primitives.test.ts` — notice roles, loading/error precedence and fallback text, initial/cached scope failures and retry, toolbar clusters, and toggle markup.
 - Browser behavior: `frontend/screenshots/page-anatomy.spec.ts`, via `npm run test:browser`, covers page states, scope transitions, retained drafts, keyboard filtering and narrow layouts. Fixtures validate scoped requests; removal scenarios explicitly allow old-scope requests during reconciliation, then require the remaining scope. Captured images are manual-review artifacts, not baseline comparisons.
-- Meter drafts: `frontend/tests/metering-draft-scope.test.ts` — dialog retention/reset and obsolete write completions across account, community and permission changes.
+- Meter drafts: `frontend/tests/metering-draft-scope.test.ts` — dialog retention/reset, original-community cache invalidation after remount or navigation, and suppression after account/session cache resets.
 - Email history/retry: `frontend/tests/billing-email-history.test.ts` — request ordering, close/reopen, and obsolete read/write completions across account/community changes.
-- Shared behavior: `billing-period-params.test.ts` covers calendar validation, canonical/legacy precedence, page defaults/minima, readiness, scope/interval reconciliation, reload/back navigation, query/hash preservation and history policy. `invoice-presentation.test.ts` covers PDF states, missing-invoice rows, delivery annotation precedence, read-only rows, return context, cached failures and admin sorting/filtering/pagination. `screenshots/shared-page-behavior.spec.ts` checks period deep links, reload/back navigation, delayed interval data, routed tabs, console errors and desktop/400px layouts through the real app.
+- Write lifetime: `frontend/tests/write-scope.test.ts` covers stable identity, StrictMode replay, account/community/capability changes and return transitions, unmount and explicit all-community writes. Consumer tests retain coverage for dialog resets and delayed completions; `imports-wizard.test.ts` also rejects queued upload/single-delete/bulk-delete dispatch after scope replacement.
+- Shared behavior: `billing-period-params.test.ts` covers calendar validation, canonical/legacy precedence, page defaults/minima, readiness, scope/interval reconciliation, reload/back navigation, query/hash preservation and history policy. `invoice-presentation.test.ts` covers PDF states, missing-invoice rows, delivery annotation precedence, read-only rows, return context, cached failures and admin sorting/filtering/pagination. `screenshots/shared-page-behavior.spec.ts` checks period deep links, reload/back navigation, delayed interval data, routed tabs, Participants/Tariffs scope loading/failure/empty and cached-refresh states, console errors and desktop/400px layouts through the real app.
 - Invoice states: `frontend/tests/invoices-page.test.ts` — standalone titles during scope loading/error/empty states, embedded heading ownership, and a skeleton before initial period/query resolution.
 - Retired CSS classes: `npx vitest run tests/retired-css-classes.test.ts` — classes with no rule must not survive in markup
 - Manual verification on the reference pages:

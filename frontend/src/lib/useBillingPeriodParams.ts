@@ -21,7 +21,8 @@ type BillingPeriodParamsPolicy = {
     /** Only the default period is bounded by this aligned range. */
     minimumFallback?: BillingRange | null
     legacyParams?: boolean
-    /** Dashboard resets on community/interval changes; billing and chart re-read the URL. */
+    /** Dashboard resets on community/interval changes; billing and chart re-read the URL.
+     * With reset, the fallback must pass minimumRangeStart or URL reconciliation cannot settle. */
     scopeChange: 'preserve-url' | 'reset'
 }
 

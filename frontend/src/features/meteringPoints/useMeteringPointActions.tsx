@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { useConfirmDialog } from '../../components/ConfirmDialog'
@@ -21,6 +21,8 @@ import { queryKeys } from '../../lib/api/queryKeys'
 import { formatShortDate, useAppSettings } from '../../lib/appSettings'
 import { todayBusinessIso } from '../../lib/dates'
 import { useToast } from '../../lib/toast'
+import { useAuth } from '../../lib/auth'
+import { useWriteScope } from '../../lib/useWriteScope'
 import {
     defaultAssignmentForm,
     defaultMeteringPointForm,
@@ -147,16 +149,17 @@ export function useMeteringPointActions({
     const { t } = useTranslation()
     const { dialog, confirm, handleConfirm, handleCancel, isLoading: dialogLoading } = useConfirmDialog()
 
-    // A remount changes operation ownership; old writes may finish on the server,
-    // but must not notify or invalidate queries in the new view.
-    const mounted = useRef(false)
-    useEffect(() => {
-        mounted.current = true
-        return () => { mounted.current = false }
-    }, [])
+    const { user } = useAuth()
+    const { scope, isCurrent, assertWritable } = useWriteScope({ selectedZevId, canWrite, accountId: user?.id }, t('common.error'))
 
-    function requireWriteAccess() {
-        if (!mounted.current || !canWrite) throw new Error(t('common.error'))
+    function ownsCurrentSession(submittedScope: { selectedZevId: string | null }) {
+        // AuthProvider clears the mutation cache on account/session changes.
+        // Community switches and ordinary navigation leave this operation there.
+        return queryClient.getMutationCache().getAll().some(mutation => mutation.state.context === submittedScope)
+    }
+
+    function requireWriteAccess(submittingScope: typeof scope) {
+        assertWritable(submittingScope, isManagedScope)
     }
 
     const todayIso = todayBusinessIso()
@@ -278,50 +281,61 @@ export function useMeteringPointActions({
     })
 
     const saveMpMutation = useMutation({
-        mutationFn: ({ id, payload }: { id?: string; payload: MeteringPointInput }) => {
-            requireWriteAccess()
+        mutationFn: ({ id, payload, scope: submittingScope }: { id?: string; payload: MeteringPointInput; scope: typeof scope }) => {
+            requireWriteAccess(submittingScope)
             return id ? updateMeteringPoint(id, payload) : createMeteringPoint(payload)
         },
-        onSuccess: (_, variables) => {
-            if (!mounted.current) return
+        onMutate: (variables) => ({ selectedZevId: variables.scope.selectedZevId, scope: variables.scope }),
+        onSuccess: (_, variables, submittedScope) => {
+            if (!ownsCurrentSession(submittedScope)) return
+            void queryClient.invalidateQueries({ queryKey: queryKeys.metering.points(submittedScope.selectedZevId || undefined) })
+            if (!isCurrent(submittedScope.scope)) return
             closeMpModal()
             pushToast(
                 variables.id ? t('pages.meteringPoints.messages.updated') : t('pages.meteringPoints.messages.created'),
                 'success',
             )
-            void queryClient.invalidateQueries({ queryKey: queryKeys.metering.points(selectedZevId || undefined) })
         },
-        onError: (error) => {
-            if (mounted.current && canWrite) pushToast(formatApiError(error, t('pages.meteringPoints.messages.saveFailed')), 'error')
+        onError: (error, variables) => {
+            if (isCurrent(variables.scope) && variables.scope.canWrite) pushToast(formatApiError(error, t('pages.meteringPoints.messages.saveFailed')), 'error')
         },
     })
 
     const deleteMpMutation = useMutation({
-        mutationFn: (id: string) => {
-            requireWriteAccess()
+        mutationFn: ({ id, scope: submittingScope }: { id: string; scope: typeof scope }) => {
+            requireWriteAccess(submittingScope)
             return deleteMeteringPoint(id)
         },
-        onSuccess: () => {
-            if (!mounted.current) return
-            pushToast(t('pages.meteringPoints.messages.deleted'), 'success')
+        onMutate: (variables) => ({ selectedZevId: variables.scope.selectedZevId, scope: variables.scope }),
+        onSuccess: (_, _variables, submittedScope) => {
+            if (!ownsCurrentSession(submittedScope)) return
             // Deleting a metering point cascades to its readings and assignment
             // history (MeterReading/MeteringPointAssignment both CASCADE on
             // metering_point), so every reading-derived view is stale too —
             // invalidate the whole metering namespace rather than enumerating keys.
             void queryClient.invalidateQueries({ queryKey: ['metering'] })
+            if (!isCurrent(submittedScope.scope)) return
+            pushToast(t('pages.meteringPoints.messages.deleted'), 'success')
         },
-        onError: (error) => {
-            if (mounted.current && canWrite) pushToast(formatApiError(error, t('pages.meteringPoints.messages.deleteFailed')), 'error')
+        onError: (error, variables) => {
+            if (isCurrent(variables.scope) && variables.scope.canWrite) pushToast(formatApiError(error, t('pages.meteringPoints.messages.deleteFailed')), 'error')
         },
     })
 
     const saveAssignMutation = useMutation({
-        mutationFn: ({ id, payload }: { id?: string; payload: MeteringPointAssignmentInput }) => {
-            requireWriteAccess()
+        mutationFn: ({ id, payload, scope: submittingScope }: { id?: string; payload: MeteringPointAssignmentInput; scope: typeof scope }) => {
+            requireWriteAccess(submittingScope)
             return id ? updateMeteringPointAssignment(id, payload) : createMeteringPointAssignment(payload)
         },
-        onSuccess: (_, variables) => {
-            if (!mounted.current) return
+        onMutate: (variables) => ({ selectedZevId: variables.scope.selectedZevId, scope: variables.scope }),
+        onSuccess: (_, variables, submittedScope) => {
+            if (!ownsCurrentSession(submittedScope)) return
+            void queryClient.invalidateQueries({ queryKey: queryKeys.metering.pointAssignments() })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.metering.points(submittedScope.selectedZevId || undefined) })
+            // Participants derive has_metering_point_assignment / metering_points
+            // from these rows, so their readiness state changes too.
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(submittedScope.selectedZevId || undefined) })
+            if (!isCurrent(submittedScope.scope)) return
             closeAssignModal()
             pushToast(
                 variables.id
@@ -329,31 +343,28 @@ export function useMeteringPointActions({
                     : t('pages.meteringPoints.messages.assignmentCreated'),
                 'success',
             )
-            void queryClient.invalidateQueries({ queryKey: queryKeys.metering.pointAssignments() })
-            void queryClient.invalidateQueries({ queryKey: queryKeys.metering.points(selectedZevId || undefined) })
-            // Participants derive has_metering_point_assignment / metering_points
-            // from these rows, so their readiness state changes too.
-            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(selectedZevId || undefined) })
         },
-        onError: (error) => {
-            if (mounted.current && canWrite) pushToast(formatApiError(error, t('pages.meteringPoints.messages.assignmentSaveFailed')), 'error')
+        onError: (error, variables) => {
+            if (isCurrent(variables.scope) && variables.scope.canWrite) pushToast(formatApiError(error, t('pages.meteringPoints.messages.assignmentSaveFailed')), 'error')
         },
     })
 
     const deleteAssignMutation = useMutation({
-        mutationFn: (id: string) => {
-            requireWriteAccess()
+        mutationFn: ({ id, scope: submittingScope }: { id: string; scope: typeof scope }) => {
+            requireWriteAccess(submittingScope)
             return deleteMeteringPointAssignment(id)
         },
-        onSuccess: () => {
-            if (!mounted.current) return
-            pushToast(t('pages.meteringPoints.messages.assignmentRemoved'), 'success')
+        onMutate: (variables) => ({ selectedZevId: variables.scope.selectedZevId, scope: variables.scope }),
+        onSuccess: (_, _variables, submittedScope) => {
+            if (!ownsCurrentSession(submittedScope)) return
             void queryClient.invalidateQueries({ queryKey: queryKeys.metering.pointAssignments() })
-            void queryClient.invalidateQueries({ queryKey: queryKeys.metering.points(selectedZevId || undefined) })
-            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(selectedZevId || undefined) })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.metering.points(submittedScope.selectedZevId || undefined) })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.zev.participants(submittedScope.selectedZevId || undefined) })
+            if (!isCurrent(submittedScope.scope)) return
+            pushToast(t('pages.meteringPoints.messages.assignmentRemoved'), 'success')
         },
-        onError: (error) => {
-            if (mounted.current && canWrite) pushToast(formatApiError(error, t('pages.meteringPoints.messages.assignmentRemoveFailed')), 'error')
+        onError: (error, variables) => {
+            if (isCurrent(variables.scope) && variables.scope.canWrite) pushToast(formatApiError(error, t('pages.meteringPoints.messages.assignmentRemoveFailed')), 'error')
         },
     })
 
@@ -361,24 +372,28 @@ export function useMeteringPointActions({
         mutationFn: ({
             meteringPointId,
             payload,
+            scope: submittingScope,
         }: {
             meteringPointId: string
+            scope: typeof scope
             payload: { delete_all: boolean; date_from?: string; date_to?: string }
         }) => {
-            requireWriteAccess()
+            requireWriteAccess(submittingScope)
             if (!canDeleteData) throw new Error(t('common.error'))
             return deleteMeteringPointReadings(meteringPointId, payload)
         },
-        onSuccess: (result) => {
-            if (!mounted.current) return
-            pushToast(t('pages.meteringPoints.deleteData.success', { count: result.deleted_count }), 'success')
-            closeDeleteDataModal()
+        onMutate: (variables) => ({ selectedZevId: variables.scope.selectedZevId, scope: variables.scope }),
+        onSuccess: (result, _variables, submittedScope) => {
+            if (!ownsCurrentSession(submittedScope)) return
             // Deleted readings affect every reading-derived view (chart, raw
             // data, dashboard summary, data-quality status).
             void queryClient.invalidateQueries({ queryKey: ['metering'] })
+            if (!isCurrent(submittedScope.scope)) return
+            pushToast(t('pages.meteringPoints.deleteData.success', { count: result.deleted_count }), 'success')
+            closeDeleteDataModal()
         },
-        onError: (error) => {
-            if (mounted.current && canWrite) pushToast(formatApiError(error, t('pages.meteringPoints.deleteData.failed')), 'error')
+        onError: (error, variables) => {
+            if (isCurrent(variables.scope) && variables.scope.canWrite) pushToast(formatApiError(error, t('pages.meteringPoints.deleteData.failed')), 'error')
         },
     })
 
@@ -393,7 +408,7 @@ export function useMeteringPointActions({
     }, [assignmentsQuery.data])
 
     function openCreateMpModal() {
-        if (!mounted.current || !canWrite) return
+        if (!isCurrent(scope) || !canWrite) return
         setEditingMpId(null)
         setMpForm((previous) => ({
             ...defaultMeteringPointForm(),
@@ -403,7 +418,7 @@ export function useMeteringPointActions({
     }
 
     function openEditMpModal(point: MeteringPoint) {
-        if (!mounted.current || !canWrite) return
+        if (!isCurrent(scope) || !canWrite) return
         setEditingMpId(point.id)
         setMpForm({
             zev: point.zev,
@@ -424,7 +439,7 @@ export function useMeteringPointActions({
 
     function submitMpForm(event: FormEvent<HTMLFormElement>) {
         event.preventDefault()
-        if (!mounted.current || !canWrite) return
+        if (!isCurrent(scope) || !canWrite) return
         const zevForSubmit = mpForm.zev
         if (!zevForSubmit || (isManagedScope && zevForSubmit !== selectedZevId)) {
             pushToast(t('pages.meteringPoints.messages.selectZev'), 'error')
@@ -434,11 +449,11 @@ export function useMeteringPointActions({
             ...mpForm,
             zev: zevForSubmit,
         }
-        saveMpMutation.mutate({ id: editingMpId ?? undefined, payload })
+        saveMpMutation.mutate({ id: editingMpId ?? undefined, payload, scope })
     }
 
     function openCreateAssignModal(meteringPointId: string) {
-        if (!mounted.current || !canWrite) return
+        if (!isCurrent(scope) || !canWrite) return
         setSelectedMpId(meteringPointId)
         setEditingAssignId(null)
         const existingAssignments = assignmentsByMeteringPoint.get(meteringPointId) ?? []
@@ -449,7 +464,7 @@ export function useMeteringPointActions({
     }
 
     function openEditAssignModal(assignment: MeteringPointAssignment) {
-        if (!mounted.current || !canWrite) return
+        if (!isCurrent(scope) || !canWrite) return
         setSelectedMpId(assignment.metering_point)
         setEditingAssignId(assignment.id)
         setAssignForm({
@@ -473,7 +488,7 @@ export function useMeteringPointActions({
 
     function submitAssignForm(event: FormEvent<HTMLFormElement>) {
         event.preventDefault()
-        if (!mounted.current || !canWrite) return
+        if (!isCurrent(scope) || !canWrite) return
         if (!assignForm.participant) {
             pushToast(t('pages.meteringPoints.messages.selectParticipant'), 'error')
             return
@@ -486,11 +501,11 @@ export function useMeteringPointActions({
             ...assignForm,
             valid_to: assignForm.valid_to || null,
         }
-        saveAssignMutation.mutate({ id: editingAssignId ?? undefined, payload })
+        saveAssignMutation.mutate({ id: editingAssignId ?? undefined, payload, scope })
     }
 
     function openDeleteDataModal(point: MeteringPoint) {
-        if (!mounted.current || !canWrite || !canDeleteData) return
+        if (!isCurrent(scope) || !canWrite || !canDeleteData) return
         setDeleteDataTarget(point)
         setDeleteDataMode('all')
         setDeleteDataFrom('')
@@ -507,7 +522,7 @@ export function useMeteringPointActions({
     }
 
     function submitDeleteData() {
-        if (!mounted.current || !canWrite || !canDeleteData || !deleteDataTarget) return
+        if (!isCurrent(scope) || !canWrite || !canDeleteData || !deleteDataTarget) return
 
         let payload: { delete_all: boolean; date_from?: string; date_to?: string }
         let confirmMessage: string
@@ -546,11 +561,12 @@ export function useMeteringPointActions({
             onConfirm: async () => {
                 try {
                     await deleteMeteringDataMutation.mutateAsync({
+                        scope,
                         meteringPointId: deleteDataTarget.id,
                         payload,
                     })
                 } catch (error) {
-                    if (mounted.current) throw error
+                    if (isCurrent(scope)) throw error
                 }
             },
         })
@@ -675,6 +691,7 @@ export function useMeteringPointActions({
         assignmentsQuery,
         dataQualityQuery,
         // Mutations
+        scope,
         saveMpMutation,
         deleteMpMutation,
         saveAssignMutation,

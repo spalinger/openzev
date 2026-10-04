@@ -1104,6 +1104,12 @@ validity filter and badges use the business date calculated on each render.
 Tariff and price-band submissions both require a selected community as well as
 effective write capability, including for admins.
 
+The tariff series query waits for a matching selected community record. ScopeGuard
+keeps the header visible during scope loading/failure/empty states and retains
+usable cached scope after refresh failures. Missing selection never means all
+communities in the management series filter. Retained tariff/period/version submit
+callbacks and each mutation's API dispatch check the current scope token.
+
 ## 7. Invoice line-item construction
 
 ### 7.1 Item type mapping

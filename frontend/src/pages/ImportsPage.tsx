@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type FormEvent } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
     faEye,
@@ -22,6 +22,7 @@ import { queryKeys } from '../lib/api/queryKeys'
 import { formatDateTime, useAppSettings } from '../lib/appSettings'
 import { businessDayStartMs, nextIsoDate } from '../lib/dates'
 import { useAuth } from '../lib/auth'
+import { useWriteScope } from '../lib/useWriteScope'
 import { useManagedZev } from '../lib/managedZev'
 import { useCommunityAccess } from '../lib/communityAccess'
 import { useTranslation } from 'react-i18next'
@@ -80,12 +81,11 @@ export function ImportsContent() {
     // A viewer sees the import history and its protocols, but imports and
     // deletes nothing (#761). Managers of a disabled ZEV keep read access only.
     const { canWriteSelectedCommunity } = useCommunityAccess()
+    const { t } = useTranslation()
     const { user } = useAuth()
-    const scope = useMemo(() => ({ selectedZevId, canWrite: canWriteSelectedCommunity, accountId: user?.id }), [selectedZevId, canWriteSelectedCommunity, user?.id])
-    const currentScope = useRef<typeof scope | null>(scope)
+    const { scope, isCurrent, assertWritable } = useWriteScope({ selectedZevId, canWrite: canWriteSelectedCommunity, accountId: user?.id }, t('common.error'))
     const wizardGeneration = useRef(0)
     const cancelConfirmation = useEffectEvent(handleCancel)
-    const { t } = useTranslation()
 
     const { data, isLoading, isError, isFetching, error: logsError, refetch: refetchLogs } = useQuery({ queryKey: queryKeys.metering.importLogs(), queryFn: fetchImportLogs })
     const logsErrorDetail = (logsError as { response?: { data?: { error?: string; detail?: string } } } | null)?.response?.data
@@ -200,7 +200,7 @@ export function ImportsContent() {
         const imported = outcomes.filter((outcome) => outcome.value !== null)
         const failed = outcomes.filter((outcome) => outcome.value === null)
         void queryClient.invalidateQueries({ queryKey: ['metering'] })
-        if (currentScope.current !== variables.scope || wizardGeneration.current !== variables.generation) return
+        if (!isCurrent(variables.scope) || wizardGeneration.current !== variables.generation) return
 
         if (imported.length === 0) {
             // Nothing landed: keep the wizard open so the user can retry.
@@ -287,16 +287,22 @@ export function ImportsContent() {
     }
 
     const uploadMutation = useMutation({
-        mutationFn: (variables: Parameters<typeof uploadMeteringFiles>[0] & { scope: typeof scope; generation: number }) => uploadMeteringFiles(variables),
+        mutationFn: (variables: Parameters<typeof uploadMeteringFiles>[0] & { scope: typeof scope; generation: number }) => {
+            assertWritable(variables.scope)
+            return uploadMeteringFiles(variables)
+        },
         onSuccess: handleUploadOutcomes,
     })
 
     const deleteImportMutation = useMutation({
-        mutationFn: ({ id }: { id: string; scope: typeof scope }) => deleteImportLog(id),
+        mutationFn: ({ id, scope: submittingScope }: { id: string; scope: typeof scope }) => {
+            assertWritable(submittingScope, false)
+            return deleteImportLog(id)
+        },
         onSuccess: (result, variables) => {
             void queryClient.invalidateQueries({ queryKey: queryKeys.metering.importLogs() })
             void queryClient.invalidateQueries({ queryKey: ['metering'] })
-            if (currentScope.current !== variables.scope) return
+            if (!isCurrent(variables.scope)) return
             if (selectedLog?.id === variables.id) {
                 setSelectedLog(null)
             }
@@ -310,18 +316,21 @@ export function ImportsContent() {
             )
         },
         onError: (error, variables) => {
-            if (currentScope.current !== variables.scope) return
+            if (!isCurrent(variables.scope)) return
             const code = (error as { response?: { data?: { code?: string } } })?.response?.data?.code
             pushToast(t(code === 'overwrite_import_protected' ? 'pages.imports.delete.overwriteProtected' : 'pages.imports.messages.deleteFailed'), 'error')
         },
     })
 
     const bulkDeleteMutation = useMutation({
-        mutationFn: (variables: Parameters<typeof bulkDeleteImportLogs>[0] & { scope: typeof scope }) => bulkDeleteImportLogs(variables),
+        mutationFn: (variables: Parameters<typeof bulkDeleteImportLogs>[0] & { scope: typeof scope }) => {
+            assertWritable(variables.scope, false)
+            return bulkDeleteImportLogs(variables)
+        },
         onSuccess: (result, variables) => {
             void queryClient.invalidateQueries({ queryKey: queryKeys.metering.importLogs() })
             void queryClient.invalidateQueries({ queryKey: ['metering'] })
-            if (currentScope.current !== variables.scope) return
+            if (!isCurrent(variables.scope)) return
             setShowBulkDeleteModal(false)
             setBulkDeleteMode('period')
             setBulkDeleteFrom('')
@@ -338,7 +347,7 @@ export function ImportsContent() {
             )
         },
         onError: (error, variables) => {
-            if (currentScope.current !== variables.scope) return
+            if (!isCurrent(variables.scope)) return
             const code = (error as { response?: { data?: { code?: string } } })?.response?.data?.code
             pushToast(t(code === 'overwrite_import_protected' ? 'pages.imports.delete.overwriteProtected' : 'pages.imports.messages.deleteFailed'), 'error')
         },
@@ -458,7 +467,7 @@ export function ImportsContent() {
                                     confirmText: t('pages.imports.delete.confirmAction'),
                                     isDangerous: true,
                                     onConfirm: () => {
-                                        if (scope.canWrite && currentScope.current === scope) deleteImportMutation.mutate({ id: ctx.row.original.id, scope })
+                                        if (scope.canWrite && isCurrent(scope)) deleteImportMutation.mutate({ id: ctx.row.original.id, scope })
                                     },
                                 }),
                             },
@@ -469,7 +478,7 @@ export function ImportsContent() {
         ]
             return canWriteSelectedCommunity ? columns : columns.filter((column) => column.id !== 'actions')
         },
-        [t, settings, confirm, deleteImportMutation, dialogLoading, canWriteSelectedCommunity, scope],
+        [t, settings, confirm, deleteImportMutation, dialogLoading, canWriteSelectedCommunity, scope, isCurrent],
     )
 
     function clearDetection() {
@@ -547,10 +556,6 @@ export function ImportsContent() {
         setSelectedLog(null)
         cancelConfirmation()
     })
-    useLayoutEffect(() => {
-        currentScope.current = scope
-        return () => { currentScope.current = null }
-    }, [scope])
     useEffect(() => {
         resetWriteDialogs()
     }, [scope])
@@ -723,7 +728,7 @@ export function ImportsContent() {
                 return
             }
             const doUpload = () => {
-                if (!scope.canWrite || currentScope.current !== scope) return
+                if (!scope.canWrite || !isCurrent(scope)) return
                 uploadMutation.mutate({
                     scope,
                     generation: wizardGeneration.current,

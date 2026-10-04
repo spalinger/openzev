@@ -1,5 +1,5 @@
 import { useMutation, type QueryClient } from '@tanstack/react-query'
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useState } from 'react'
 import {
   createTariff,
   createTariffPeriod,
@@ -9,6 +9,7 @@ import {
   updateTariffPeriod,
 } from '../../lib/api/tariffs'
 import { useAuth } from '../../lib/auth'
+import { useWriteScope } from '../../lib/useWriteScope'
 import { formatApiError } from '../../lib/api/errors'
 import { invalidateTariffQueries } from './invalidate'
 import type { Tariff, TariffInput, TariffPeriod, TariffPeriodInput } from '../../types/api'
@@ -51,8 +52,7 @@ export function useTariffCrud({
   t,
 }: TariffCrudParams) {
   const { user } = useAuth()
-  const scope = useMemo(() => ({ selectedZevId, canWrite, accountId: user?.id }), [selectedZevId, canWrite, user?.id])
-  const currentScope = useRef<typeof scope | null>(scope)
+  const { scope, isCurrent, assertWritable } = useWriteScope({ selectedZevId, canWrite, accountId: user?.id }, t('common.error'))
   const [editingTariffId, setEditingTariffId] = useState<string | null>(null)
   const [editingPeriodId, setEditingPeriodId] = useState<string | null>(null)
   const [periodModalTariffId, setPeriodModalTariffId] = useState<string | undefined>(undefined)
@@ -60,13 +60,11 @@ export function useTariffCrud({
   const [showPeriodModal, setShowPeriodModal] = useState(false)
 
   useLayoutEffect(() => {
-    currentScope.current = scope
     setShowTariffModal(false)
     setShowPeriodModal(false)
     setEditingTariffId(null)
     setEditingPeriodId(null)
     setPeriodModalTariffId(undefined)
-    return () => { currentScope.current = null }
   }, [scope])
 
   const editingTariff = useMemo(
@@ -80,7 +78,8 @@ export function useTariffCrud({
   )
 
   const tariffMutation = useMutation({
-    mutationFn: ({ id, payload }: { id?: string; payload: TariffInput; scope: typeof scope }) => {
+    mutationFn: ({ id, payload, scope: submittingScope }: { id?: string; payload: TariffInput; scope: typeof scope }) => {
+      assertWritable(submittingScope)
       if (id) {
         return updateTariff(id, payload)
       }
@@ -88,7 +87,7 @@ export function useTariffCrud({
     },
     onSuccess: (_, variables) => {
       invalidateTariffQueries(queryClient, variables.scope.selectedZevId)
-      if (currentScope.current !== variables.scope) return
+      if (!isCurrent(variables.scope)) return
       setEditingTariffId(null)
       setShowTariffModal(false)
       pushToast(
@@ -97,24 +96,28 @@ export function useTariffCrud({
       )
     },
     onError: (error, variables) => {
-      if (currentScope.current === variables.scope) pushToast(formatApiError(error, t('pages.tariffs.messages.saveFailed')), 'error')
+      if (isCurrent(variables.scope)) pushToast(formatApiError(error, t('pages.tariffs.messages.saveFailed')), 'error')
     },
   })
 
   const deleteTariffMutation = useMutation({
-    mutationFn: ({ id }: { id: string; scope: typeof scope }) => deleteTariff(id),
+    mutationFn: ({ id, scope: submittingScope }: { id: string; scope: typeof scope }) => {
+      assertWritable(submittingScope)
+      return deleteTariff(id)
+    },
     onSuccess: (_, variables) => {
       invalidateTariffQueries(queryClient, variables.scope.selectedZevId)
-      if (currentScope.current !== variables.scope) return
+      if (!isCurrent(variables.scope)) return
       pushToast(t('pages.tariffs.messages.deleted'), 'success')
     },
     onError: (error, variables) => {
-      if (currentScope.current === variables.scope) pushToast(formatApiError(error, t('pages.tariffs.messages.deleteFailed')), 'error')
+      if (isCurrent(variables.scope)) pushToast(formatApiError(error, t('pages.tariffs.messages.deleteFailed')), 'error')
     },
   })
 
   const periodMutation = useMutation({
-    mutationFn: ({ id, payload }: { id?: string; payload: TariffPeriodInput; scope: typeof scope }) => {
+    mutationFn: ({ id, payload, scope: submittingScope }: { id?: string; payload: TariffPeriodInput; scope: typeof scope }) => {
+      assertWritable(submittingScope)
       if (id) {
         return updateTariffPeriod(id, payload)
       }
@@ -122,7 +125,7 @@ export function useTariffCrud({
     },
     onSuccess: (_, variables) => {
       invalidateTariffQueries(queryClient, variables.scope.selectedZevId)
-      if (currentScope.current !== variables.scope) return
+      if (!isCurrent(variables.scope)) return
       setEditingPeriodId(null)
       setPeriodModalTariffId(undefined)
       setShowPeriodModal(false)
@@ -132,23 +135,27 @@ export function useTariffCrud({
       )
     },
     onError: (error, variables) => {
-      if (currentScope.current === variables.scope) pushToast(formatApiError(error, t('pages.tariffs.messages.periodSaveFailed')), 'error')
+      if (isCurrent(variables.scope)) pushToast(formatApiError(error, t('pages.tariffs.messages.periodSaveFailed')), 'error')
     },
   })
 
   const deletePeriodMutation = useMutation({
-    mutationFn: ({ id }: { id: string; scope: typeof scope }) => deleteTariffPeriod(id),
+    mutationFn: ({ id, scope: submittingScope }: { id: string; scope: typeof scope }) => {
+      assertWritable(submittingScope)
+      return deleteTariffPeriod(id)
+    },
     onSuccess: (_, variables) => {
       invalidateTariffQueries(queryClient, variables.scope.selectedZevId)
-      if (currentScope.current !== variables.scope) return
+      if (!isCurrent(variables.scope)) return
       pushToast(t('pages.tariffs.messages.periodDeleted'), 'success')
     },
     onError: (error, variables) => {
-      if (currentScope.current === variables.scope) pushToast(formatApiError(error, t('pages.tariffs.messages.periodDeleteFailed')), 'error')
+      if (isCurrent(variables.scope)) pushToast(formatApiError(error, t('pages.tariffs.messages.periodDeleteFailed')), 'error')
     },
   })
 
   function submitTariff(payload: TariffInput) {
+    if (!isCurrent(scope)) return
     if (!selectedZevId || !canWrite) {
       pushToast(t('pages.tariffs.messages.selectZevBeforeSave'), 'error')
       return
@@ -157,6 +164,7 @@ export function useTariffCrud({
   }
 
   function submitPeriod(payload: TariffPeriodInput) {
+    if (!isCurrent(scope)) return
     if (!selectedZevId || !canWrite) {
       pushToast(t('pages.tariffs.messages.periodSaveFailed'), 'error')
       return
@@ -214,7 +222,7 @@ export function useTariffCrud({
       confirmText: t('pages.tariffs.deleteConfirm'),
       isDangerous: true,
       onConfirm: () => {
-        if (scope.canWrite && currentScope.current === scope) deleteTariffMutation.mutate({ id: tariff.id, scope })
+        if (scope.canWrite && isCurrent(scope)) deleteTariffMutation.mutate({ id: tariff.id, scope })
       },
     })
   }
@@ -226,7 +234,7 @@ export function useTariffCrud({
       confirmText: t('pages.tariffs.deletePeriodConfirm'),
       isDangerous: true,
       onConfirm: () => {
-        if (scope.canWrite && currentScope.current === scope) deletePeriodMutation.mutate({ id: period.id, scope })
+        if (scope.canWrite && isCurrent(scope)) deletePeriodMutation.mutate({ id: period.id, scope })
       },
     })
   }

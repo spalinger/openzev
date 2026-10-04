@@ -50,6 +50,7 @@ function MeteringPointsView({ canWrite, canDeleteData }: { canWrite: boolean; ca
 
     const {
         meteringPointsQuery,
+        scope,
         saveMpMutation,
         deleteMpMutation,
         saveAssignMutation,
@@ -218,8 +219,8 @@ function MeteringPointsView({ canWrite, canDeleteData }: { canWrite: boolean; ca
                             onOpenEditMeteringPoint={openEditMpModal}
                             onOpenDeleteDataModal={openDeleteDataModal}
                             onOpenEditAssignment={openEditAssignModal}
-                            onDeleteMeteringPoint={(id) => deleteMpMutation.mutate(id)}
-                            onDeleteAssignment={(id) => deleteAssignMutation.mutate(id)}
+                            onDeleteMeteringPoint={(id) => deleteMpMutation.mutate({ id, scope })}
+                            onDeleteAssignment={(id) => deleteAssignMutation.mutate({ id, scope })}
                         />
                     )}
                 </div>

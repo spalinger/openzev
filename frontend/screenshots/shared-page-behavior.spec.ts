@@ -360,3 +360,68 @@ for (const [label, state] of [
     expect(errors).toEqual([])
   })
 }
+
+for (const [path, endpoint, body] of [
+  ['/participants', '/zev/participants/', '.participant-toolbar'],
+  ['/tariffs', '/tariffs/tariffs/series/', '.tariff-toolbar'],
+] as const) {
+  test(`${path} waits for resolved scope through loading, failure and empty results`, async ({ page }) => {
+    let release!: () => void
+    const state: ApiState = { populated: true, scopeFailed: true, endpoint: '/zev/zevs/', pending: new Promise<void>(resolve => { release = resolve }) }
+    const errors = await mockApi(page, state)
+    const requests: string[] = []
+    page.on('request', request => {
+      if (new URL(request.url()).pathname.endsWith(endpoint)) requests.push(request.url())
+    })
+    await page.goto(path)
+    await expect(page.locator('main h1')).toHaveCount(1)
+    await expect(page.locator('main .skeleton-block').first()).toBeVisible()
+    await expect(page.locator(body)).toHaveCount(0)
+    expect(requests).toEqual([])
+    release()
+    const failure = page.locator('main .error-banner')
+    await expect(failure).toBeVisible({ timeout: 20_000 })
+    await expect(page.locator(body)).toHaveCount(0)
+    expect(requests).toEqual([])
+    state.scopeFailed = false
+    state.scopeEmpty = true
+    await failure.getByRole('button', { name: 'Retry', exact: true }).click()
+    await expect(page.locator('main .empty-state')).toBeVisible()
+    await expect(page.locator('main .empty-state a')).toHaveAttribute('href', '/admin/zevs')
+    await expect(page.locator(body)).toHaveCount(0)
+    expect(requests).toEqual([])
+    state.scopeEmpty = false
+    await page.reload()
+    await expect(page.locator(body)).toBeVisible()
+    expect(requests.length).toBeGreaterThan(0)
+    if (path === '/tariffs') expect(requests.every(url => new URL(url).searchParams.get('zev_id') === '42')).toBe(true)
+    expect(errors).toEqual([])
+  })
+
+  test(`${path} retains its draft after a failed refresh of usable scope`, async ({ page }, testInfo) => {
+    const state: ApiState = { populated: true }
+    const errors = await mockApi(page, state)
+    await page.goto(path)
+    await expect(page.locator(body)).toBeVisible()
+    await page.getByRole('button', { name: path === '/participants' ? 'New Participant' : 'New Tariff', exact: true }).click()
+    const draft = page.getByRole('dialog')
+    const name = draft.getByRole('textbox').first()
+    await name.fill('Retained draft')
+    state.scopeFailed = true
+    await page.evaluate(() => {
+      for (const value of ['hidden', 'visible']) {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, value })
+        window.dispatchEvent(new Event('visibilitychange'))
+      }
+    })
+    await expect(page.locator('main .warning-banner')).toBeVisible({ timeout: 20_000 })
+    await expect(page.locator(body)).toBeVisible()
+    await expect(name).toHaveValue('Retained draft')
+    for (const width of [1440, 400]) {
+      await page.setViewportSize({ width, height: 900 })
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+      await page.screenshot({ path: testInfo.outputPath(`scope-refresh-${width}.png`), fullPage: true })
+    }
+    expect(errors).toEqual([])
+  })
+}

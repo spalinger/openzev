@@ -2,6 +2,10 @@
 
 This guide covers adding, editing, and managing community members (participants) in OpenZEV.
 
+The list waits for the selected community to load. If loading fails, use **Retry**;
+when a community refresh fails after loading, your existing scope and draft remain available.
+Onboarding-link notices clear when you switch community or lose write access.
+
 ## What is a Participant?
 
 A **participant** is a member of a ZEV community:

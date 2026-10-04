@@ -32,6 +32,7 @@ import { useToast } from '../lib/toast'
 import type { Tariff, TariffPeriod, TariffSeries } from '../types/api'
 import { PageHeader } from '../components/PageHeader'
 import { Notice } from '../components/Notice'
+import { ScopeGuard } from '../components/ScopeGuard'
 
 const TARIFF_PARAM = 'tariff'
 const VERSION_PARAM = 'version'
@@ -64,11 +65,12 @@ export function TariffsPage() {
     const seriesQuery = useQuery({
         queryKey: queryKeys.tariffs.series(selectedZevId || undefined),
         queryFn: () => fetchTariffSeries(isManagedScope ? selectedZevId || undefined : undefined),
+        enabled: !!selectedZevId && selectedZev?.id === selectedZevId,
     })
 
     const allSeries = useMemo(
         () => (seriesQuery.data ?? []).filter(
-            (series) => !isManagedScope || !selectedZevId || series.zev === selectedZevId,
+            (series) => !isManagedScope || series.zev === selectedZevId,
         ),
         [seriesQuery.data, isManagedScope, selectedZevId],
     )
@@ -256,28 +258,13 @@ export function TariffsPage() {
         />
     )
 
-    if (seriesQuery.isLoading) {
-        return (
-            <div className="page-stack">
-                {header}
-                <PageSkeleton variant="table" />
-            </div>
-        )
-    }
-
-    if (seriesQuery.isError) {
-        return (
-            <div className="page-stack">
-                {header}
-                <Notice tone="error" onRetry={() => void seriesQuery.refetch()} isRetrying={seriesQuery.isFetching}>{t('common.error')}</Notice>
-            </div>
-        )
-    }
-
     return (
         <div className="page-stack">
             {header}
-
+            <ScopeGuard skeleton="table">
+            {seriesQuery.isLoading ? <PageSkeleton variant="table" /> : seriesQuery.isError ? (
+                <Notice tone="error" onRetry={() => void seriesQuery.refetch()} isRetrying={seriesQuery.isFetching}>{t('common.error')}</Notice>
+            ) : <>
             <TariffToolbar
                 tariffCount={tariffs.length}
                 energyTariffCount={energyTariffs.length}
@@ -382,6 +369,8 @@ export function TariffsPage() {
             {dialog && (
                 <ConfirmDialog {...dialog} isLoading={dialogLoading} onConfirm={handleConfirm} onCancel={handleCancel} />
             )}
+            </>}
+            </ScopeGuard>
         </div>
     )
 }

@@ -1106,3 +1106,20 @@ describe('import deletion completion ownership', () => {
         expect(pushToast).not.toHaveBeenCalled()
     })
 })
+
+it.each([1, 2, 3])('rejects queued import mutation %s at API dispatch after a scope change', index => {
+    twoLogs()
+    const mutation = mutationOptions[index]
+    // Capture the submitting scope through the real bulk-delete flow; every
+    // write in this render shares it, even before its mutation function runs.
+    act(() => buttons('pages.imports.actions.deleteImports')[0].click())
+    const dates = container.querySelectorAll<HTMLInputElement>('input[type=date]')
+    setInputValue(dates[0], '2026-03-01')
+    setInputValue(dates[1], '2026-03-31')
+    act(() => buttons('pages.imports.delete.reviewAction')[0].click())
+    act(() => buttons('pages.imports.delete.confirmAction')[0].click())
+    const { scope } = mutateCalls[mutateCalls.length - 1].vars
+    selectedZevId = 'zev-2'
+    renderPage()
+    expect(() => mutation.mutationFn({ id: 'log-1', scope })).toThrow('common.error')
+})

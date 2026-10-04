@@ -1163,6 +1163,10 @@ Deletion policy regressions in `ImportLogDeletionTests` cover both CSV profiles,
 - Account, community or effective write-capability changes reset the wizard,
   bulk-delete modal and pending confirmations, including writable-to-writable
   switches. Delete/overwrite confirmations verify current scope at dispatch.
+  Upload, single-delete and bulk-delete mutation functions use the shared
+  `useWriteScope.assertWritable` guard immediately before API dispatch, so queued
+  writes also reject a replaced scope. Upload requires a selected community;
+  deletions retain the supported all-visible-community context.
   Upload completions always invalidate metering data, but obsolete scope or
   wizard completions do not alter file selection, previews, protocols or toasts.
   Single/bulk deletion completions also invalidate metering data, but only the

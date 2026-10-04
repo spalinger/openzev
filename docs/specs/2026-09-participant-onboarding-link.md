@@ -236,7 +236,12 @@ alongside `onboarding_url`, which the Participants page shows under the link
   link has been sent). A badge shows `onboarding_status` on every card,
   with the latest non-revoked link's expiry beside it (`sent`/`active`:
   "expires on"; `expired`: "expired on") so the operator sees when a dead
-  link died without reopening the notice.
+  link died without reopening the notice. Send/copy/revoke operations capture
+  the submitting account/community/write-capability scope and recheck it before
+  dispatch. Successful requests invalidate that community's participant query;
+  obsolete completions do not display a URL or notify. Existing notices clear
+  on scope changes, including manager-to-viewer transitions. Delayed success/error
+  and notice-reset coverage is in `frontend/tests/participant-write-scope.test.ts`.
 - `ParticipantOnboardingNotice` replaces `ParticipantCredentialsNotice`
   (deleted): shows the link with a copy button instead of a
   username/password pair, used identically from both the Participants page

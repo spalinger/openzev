@@ -19,6 +19,9 @@ Each tariff has:
 
 ![Tariffs page](screenshots/07-tariffs.png)
 
+The list waits for the selected community to load. If loading fails, use **Retry**;
+a failed community refresh keeps the loaded scope and your open draft available.
+
 ## Creating a Tariff
 
 **Managers** create tariffs in **Tariffs**.

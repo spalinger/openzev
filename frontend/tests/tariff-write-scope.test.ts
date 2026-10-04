@@ -105,3 +105,37 @@ it('does not save a tariff period without a resolved community, even with admin 
     expect(api.save).not.toHaveBeenCalled()
     expect(toast).toHaveBeenCalledWith('pages.tariffs.messages.periodSaveFailed', 'error')
 })
+
+const submissions = ['tariff', 'period', 'version', 'duplicate', 'rename'].map(name => ({ name }))
+for (const change of ['community', 'permission', 'account'] as const) {
+    it.each(submissions)(`rejects a retained $name submission after a ${change} change`, async ({ name }) => {
+        const previousCrud = crud
+        const previousVersions = versions
+        const submit = () => {
+            if (name === 'tariff') previousCrud.submitTariff({ name: 'A' } as TariffInput)
+            if (name === 'period') previousCrud.submitPeriod({ tariff: tariff.id } as TariffPeriodInput)
+            if (name === 'version') previousVersions.submitNewVersion(tariff.id, {} as Parameters<typeof versions.submitNewVersion>[1])
+            if (name === 'duplicate') previousVersions.submitDuplicate(tariff.id, { name: 'copy' } as Parameters<typeof versions.submitDuplicate>[1])
+            if (name === 'rename') previousVersions.submitRename(tariff.id, 'renamed')
+        }
+        if (change === 'community') zevId = 'B'
+        if (change === 'permission') canWrite = false
+        if (change === 'account') api.userId = 2
+        await render()
+        await act(async () => submit())
+        expect(api.save).not.toHaveBeenCalled()
+        expect(api.rename).not.toHaveBeenCalled()
+        expect(toast).not.toHaveBeenCalled()
+    })
+}
+
+it('rejects a tariff write queued before its submitting scope changes', async () => {
+    act(() => {
+        crud.submitTariff({ name: 'A' } as TariffInput)
+        zevId = 'B'
+        root.render(createElement(QueryClientProvider, { client }, createElement(Harness)))
+    })
+    await act(async () => undefined)
+    expect(api.save).not.toHaveBeenCalled()
+    expect(toast).not.toHaveBeenCalled()
+})
