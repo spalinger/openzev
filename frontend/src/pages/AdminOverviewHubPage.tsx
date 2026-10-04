@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Tabs } from '@mantine/core'
-import { useNavigate } from 'react-router-dom'
+import { usePageNavigation } from '../lib/usePageNavigation'
 import { AdminDashboardPage } from './AdminDashboardPage'
 import { ZevListPage } from './ZevListPage'
 import { AdminInvoicesPage } from './AdminInvoicesPage'
@@ -23,10 +23,10 @@ export type AdminOverviewTab = 'overview' | 'zevs' | 'invoices' | 'dynamic-sourc
 
 export function AdminOverviewHubPage({ tab = 'overview' }: { tab?: AdminOverviewTab }) {
     const { t } = useTranslation()
-    const navigate = useNavigate()
+    const { navigateTab } = usePageNavigation()
 
     function handleTabChange(value: string | null) {
-        navigate(`/admin/${value ?? 'overview'}`, { replace: true })
+        navigateTab(`/admin/${value ?? 'overview'}`)
     }
 
     return (

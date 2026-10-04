@@ -1454,6 +1454,13 @@ Legacy admin routes `/admin/settings/regional`, `/admin/settings/vat`,
 `/admin/features`, and `/admin/oauth` redirect into tabs on
 `/admin/system-settings` and remain admin-only.
 
+Shared hub URL edits use `usePageNavigation`: routed tabs in Billing, Metering,
+Admin Accounts, Admin Overview, Templates and ZEV Settings replace history and
+retain query parameters/hash. Templates updates `template`; Metering removes
+the obsolete `tab` parameter. Account and System keep query-based tabs and
+push changes into history while preserving unrelated parameters/hash. Account
+keeps hidden panels mounted for one-time secrets; existing active-panel and
+shared settings-draft behavior in the other hubs remains intact.
 ### 9.3 Navigation visibility
 
 The sidebar (`Layout.tsx`) shows sections conditionally:

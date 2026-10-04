@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Tabs } from '@mantine/core'
-import { useNavigate } from 'react-router-dom'
+import { usePageNavigation } from '../lib/usePageNavigation'
 import { AdminAccountsPage } from './AdminAccountsPage'
 import { AdminApiKeysPage } from './AdminApiKeysPage'
 import { PageHeader } from '../components/PageHeader'
@@ -18,10 +18,10 @@ export type AdminAccountsTab = 'users' | 'api-keys'
 
 export function AdminAccountsHubPage({ tab = 'users' }: { tab?: AdminAccountsTab }) {
     const { t } = useTranslation()
-    const navigate = useNavigate()
+    const { navigateTab } = usePageNavigation()
 
     function handleTabChange(value: string | null) {
-        navigate(`/admin/accounts/${value ?? 'users'}`, { replace: true })
+        navigateTab(`/admin/accounts/${value === 'api-keys' ? 'api-keys' : 'users'}`)
     }
 
     return (

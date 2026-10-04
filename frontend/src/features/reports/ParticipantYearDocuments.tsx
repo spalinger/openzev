@@ -4,6 +4,7 @@ import { Tabs } from '@mantine/core'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faDownload } from '@fortawesome/free-solid-svg-icons'
 import { PdfPreview } from '../../components/PdfPreview'
+import { YearPicker } from '../../components/YearPicker'
 import { PageSkeleton } from '../../components/PageSkeleton'
 import { downloadBlob } from '../../lib/downloadBlob'
 import { downloadAnnualStatement, downloadFinancialSummary } from '../../lib/api/invoices'
@@ -169,18 +170,14 @@ export function ParticipantYearDocuments({ userId, zevId, year, years, onYearCha
   return (
     <div className="page-stack">
       <div className="actions-row">
-        <label className="participant-document-year" htmlFor="participant-year-select">
-          <span>{t('pages.reports.year')}</span>
-          <select
-            id="participant-year-select"
-            value={year}
-            onChange={(e) => onYearChange(Number(e.target.value))}
-          >
-            {years.map((y) => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
-        </label>
+        <YearPicker
+          className="participant-document-year"
+          id="participant-year-select"
+          label={t('pages.reports.year')}
+          years={years}
+          value={year}
+          onChange={onYearChange}
+        />
       </div>
 
       <section id="yearly-documents-preview" aria-label={t('pages.reports.participantDescription')}>

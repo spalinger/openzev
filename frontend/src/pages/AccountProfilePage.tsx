@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useSearchParams } from 'react-router-dom'
+import { usePageNavigation } from '../lib/usePageNavigation'
 import { Tabs } from '@mantine/core'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../lib/auth'
@@ -24,7 +24,7 @@ import { PageHeader } from '../components/PageHeader'
  */
 export function AccountProfilePage() {
     const { t } = useTranslation()
-    const [searchParams, setSearchParams] = useSearchParams()
+    const { searchParams, updateParams } = usePageNavigation()
     const { user } = useAuth()
     const { pushToast } = useToast()
     const queryClient = useQueryClient()
@@ -40,22 +40,22 @@ export function AccountProfilePage() {
         if (linked === 'true') {
             void queryClient.invalidateQueries({ queryKey: queryKeys.auth.socialAccounts() })
             pushToast(t('account.linkSuccess'), 'success')
-            const next = new URLSearchParams(searchParams)
-            next.delete('oauth_linked')
-            next.set('tab', 'security')
-            setSearchParams(next, { replace: true })
+            updateParams(params => {
+                params.delete('oauth_linked')
+                params.set('tab', 'security')
+            })
         } else if (oauthError) {
             pushToast(t('auth.oauth.errors.generic', { code: oauthError }), 'error')
-            const next = new URLSearchParams(searchParams)
-            next.delete('oauth_error')
-            next.set('tab', 'security')
-            setSearchParams(next, { replace: true })
+            updateParams(params => {
+                params.delete('oauth_error')
+                params.set('tab', 'security')
+            })
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
     function setActiveTab(tab: AccountTab) {
-        setSearchParams({ tab })
+        updateParams(params => params.set('tab', tab), { replace: false })
     }
 
     return (
@@ -78,7 +78,7 @@ export function AccountProfilePage() {
                 // be lost the moment the user clicked another tab.
                 keepMounted
             >
-                <Tabs.List>
+                <Tabs.List aria-label={t('account.title')}>
                     <Tabs.Tab value="profile">{t('account.tabs.profile')}</Tabs.Tab>
                     <Tabs.Tab value="security">{t('account.tabs.security')}</Tabs.Tab>
                     <Tabs.Tab value="api-keys">{t('account.tabs.apiKeys')}</Tabs.Tab>

@@ -16,7 +16,7 @@ vi.mock('../src/pages/AdminEmailTemplatesPage', () => ({
 function RoutedHub() {
     const location = useLocation()
     return createElement('div', null,
-        createElement('output', null, location.pathname + location.search),
+        createElement('output', null, location.pathname + location.search + location.hash),
         createElement(AdminTemplatesHubPage, { tab: location.pathname.endsWith('/email') ? 'email' : 'pdf' }),
     )
 }
@@ -62,11 +62,12 @@ describe('templates tab strip', () => {
     })
 
     it('switches documents across categories and preserves unrelated query parameters', async () => {
-        const container = await render('/admin/templates/pdf?template=contract&source=bookmark')
+        const container = await render('/admin/templates/pdf?template=contract&source=bookmark#editor')
         for (const value of ['participant_magic_link', 'annual_statement']) {
             await act(async () => { tab(container, value).click() })
             expect(container.querySelector('main')?.textContent).toBe(value)
             expect(container.querySelector('output')?.textContent).toContain(`template=${value}&source=bookmark`)
+            expect(container.querySelector('output')?.textContent).toContain('#editor')
             expect(container.querySelector('output')?.textContent).toContain(
                 value === 'annual_statement' ? '/admin/templates/pdf?' : '/admin/templates/email?',
             )

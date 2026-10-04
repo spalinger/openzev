@@ -94,6 +94,7 @@ defined by shared frontend primitives and CSS contracts.
 | `frontend/src/components/ConfirmDialog.tsx` | `useConfirmDialog`, `ConfirmDialog` | Required wrapper for destructive or high-impact actions. Supports `title`, `message`, `isDangerous`, and async confirm handlers. `confirmText` and `cancelText` are optional and default to `common.confirm` / `common.cancel` i18n keys. Async errors surface via a toast (uses `useToast` internally). |
 | `frontend/src/components/FormModal.tsx` | `FormModal` | Generic modal shell for CRUD forms and small workflow dialogs. |
 | `frontend/src/components/BillingPeriodSelector.tsx` | `BillingPeriodSelector` | Specialized period-navigation control for invoice workflows; uses the same button language as management-page actions. |
+| `frontend/src/components/YearPicker.tsx` | `YearPicker` | Native year control with `years`, `value`, `onChange`, optional `disabled`, required translated `label`, optional `id`, `visibleLabel` (default true), and `className`. It generates an associated id when omitted; hidden labels use `aria-label`. Range/default/rollover policy stays with the caller. |
 | `frontend/src/components/PageHeader.tsx` | `PageHeader` | Page title (`h1`), optional `eyebrow`, `description`, and `actions`. Keep it outside data/scope state branches. Embedded pages use the host page title. |
 | `frontend/src/components/Notice.tsx` | `Notice` | Errors use `alert`, warnings use `status`; optional role override and retry with busy feedback. |
 | `frontend/src/components/PageState.tsx` | `PageState` | Blocking error → skeleton → content, with translated fallback error text and optional retry. |
@@ -133,6 +134,17 @@ Usage rules:
   other values remain `h3`. Tones color values and selection uses an outline.
   Tile rows use `.stat-grid` plus optional `.stat-grid--wide`; form grids,
   legends and compact pill counters retain their feature layouts.
+
+`frontend/src/lib/usePageNavigation.ts` provides `searchParams`, `updateParams`
+and `navigateTab`. URL edits retain unrelated parameters, hash and location
+state. Period edits and routed hub tabs replace history; Account and System
+query-tab changes push history. Callers retain their tab resolution, route
+guards and mounting policy: Account keeps hidden panels mounted for one-time
+secrets, while the other audited hubs keep their existing active-panel model.
+Templates retains its combined PDF/email strip and template query parameter;
+ZEV Settings retains its shared draft, Access tab and dirty-navigation guard.
+Mantine tab lists and panels stay under the same root.
+
 
 ### 4.2 CSS contracts
 
@@ -300,7 +312,7 @@ Current application:
 - The Templates hub renders all seven template editors as one standard tab strip with two labelled rows: PDF on one line, Email on the next, both left-bound via a fixed tag column — with no icons and no nested category/document tab bars. The active tab identifies the document; the editor does not repeat it as a heading.
 - Template editors use a shared source/status presentation. The persisted source badge and local unsaved cue are separate; platform resets require confirmation and ZEV email inheritance changes wait for the settings save.
 - Tab strips use Mantine `Tabs` with the `.app-tabs` contract and render their content as `Tabs.Panel` inside the same root; hand-rolled tab strips are not permitted.
-- `AdminSystemSettingsPage` predates this contract (default-styled `Tabs` embedded in a card, panels rendered outside the root) and is pending migration.
+- `AdminSystemSettingsPage` uses the standard tab strip with panels in the same root; its tab remains query-based.
 
 ### 7.3 Action hierarchy
 

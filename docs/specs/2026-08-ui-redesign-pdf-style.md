@@ -266,7 +266,11 @@ No new backend endpoint required, but the frontend behaviour is specified here b
 - If `pdf_url` is null (rare — invoice created but `generate_pdf` not yet run), show a "Generate PDF" affordance that calls the existing `POST /api/v1/invoices/invoices/{id}/generate-pdf/` (`HasZevAccess`, returns `{ pdf_url }`) and then embeds the result. No new generate-if-missing endpoint — reuse the existing action.
 - This is a restructure, not a facsimile: no second HTML rendering of line items in the detail page that would drift from the PDF (rejected alternative §11).
 
-`ReportsPage` mounts `ParticipantYearDocuments` for participants. Annual Statement
+`ReportsPage` mounts `ParticipantYearDocuments` for participants. Both report
+views render `components/YearPicker.tsx`; range, previous-year default and
+rollover reconciliation stay in ReportsPage, management pending disabling
+stays with its mutations, and the participant control retains its visible
+associated label. Annual Statement
 generates on entry; Tax Overview generates on first selection. The shared year
 label sits beside its selector. Each tab keeps its PDF for Download, Open in new
 tab, and revisits. Retry refetches only that tab. Changing year or participant

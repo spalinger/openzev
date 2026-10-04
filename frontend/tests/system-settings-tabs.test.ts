@@ -45,7 +45,7 @@ vi.mock('../src/features/backups/BackupSettingsSection', () => ({
 function RoutedPage() {
     const location = useLocation()
     return createElement('div', null,
-        createElement('output', null, location.pathname + location.search),
+        createElement('output', null, location.pathname + location.search + location.hash),
         createElement(AdminSystemSettingsPage),
     )
 }
@@ -119,5 +119,13 @@ describe('system settings tab strip', () => {
         const container = await render('/admin/system-settings?tab=backup')
         expect(tab(container, 'backup').hasAttribute('data-active')).toBe(true)
         expect(activePanel(container).textContent).toContain('backup-stub')
+    })
+
+    it('retains unrelated parameters and hash when changing tabs or returning to the default', async () => {
+        const container = await render('/admin/system-settings?tab=backup&source=bookmark#settings')
+        await act(async () => tab(container, 'security').click())
+        expect(container.querySelector('output')?.textContent).toBe('/admin/system-settings?tab=security&source=bookmark#settings')
+        await act(async () => tab(container, 'regional').click())
+        expect(container.querySelector('output')?.textContent).toBe('/admin/system-settings?source=bookmark#settings')
     })
 })

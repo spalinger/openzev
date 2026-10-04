@@ -419,6 +419,10 @@ Legacy routes `/admin/settings/regional`, `/admin/settings/vat`, `/admin/feature
 and `/admin/email-templates` remain available as redirects into the
 corresponding hub tab or `/admin/system-settings` tab.
 
+Hub tab navigation uses `usePageNavigation`, retaining unrelated query
+parameters and the hash. Routed hubs keep replace history; System keeps
+query-based push history (the default Regional tab removes only `tab`).
+
 ### 9.3 AdminDashboardPage
 
 **File:** `frontend/src/pages/AdminDashboardPage.tsx`
