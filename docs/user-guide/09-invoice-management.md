@@ -288,6 +288,9 @@ These actions appear in the **PDF** column and under **More** for any invoice
 that exists. **Download all PDFs** in the batch toolbar downloads the period's
 documents together.
 
+For custom templates that omit the second address line, ask an admin to
+[update the PDF template](14-admin-console.md#invoice-pdf-templates), then regenerate the affected PDFs.
+
 ## Participant Access Links
 
 Only relevant if you turned on **Participant QR code on the invoice** — see [ZEV Setup → Participant Access from the Invoice](02-zev-setup.md#participant-access-from-the-invoice). It is off by default.

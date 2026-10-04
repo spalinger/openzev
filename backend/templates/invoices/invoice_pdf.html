@@ -28,6 +28,7 @@
         .recipient-block {
             flex: 1 1 auto;
             min-width: 0;
+            overflow-wrap: anywhere;
         }
 
         .fact dt {
@@ -736,6 +737,7 @@
                     <strong class="recipient-name">{{ participant.full_name }}</strong>{% if participant.name_addition %}<div class="recipient-name-addition">{{ participant.name_addition }}</div>{% endif %}
                     <div class="recipient-address">
                         {{ participant.address_line1 }}<br>
+                        {% if participant.address_line2 %}{{ participant.address_line2 }}<br>{% endif %}
                         {{ participant.postal_code }} {{ participant.city }}
                     </div>
                     {% if participant.email %}
@@ -863,7 +865,7 @@
         </div>
     </main>
 
-    {# ── QR payment slip: always page 2 when it is a separate page ── #}
+    {# ── Dedicated QR payment page follows the invoice body ── #}
     {% if qr_svg and not inline_qr_payment %}
     <section class="payment-page">
         <div class="payment-notice">

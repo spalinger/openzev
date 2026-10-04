@@ -36,6 +36,7 @@ _INVOICE_FIELDS = [
             {"variable": "{{ participant.full_name }}", "description_key": "admin.fields.fullName", "sample_path": "participant.full_name"},
             {"variable": "{{ participant.name_addition }}", "description_key": "admin.fields.nameAddition", "sample_path": "participant.name_addition"},
             {"variable": "{{ participant.address_line1 }}", "description_key": "admin.fields.addressLine1", "sample_path": "participant.address_line1"},
+            {"variable": "{{ participant.address_line2 }}", "description_key": "admin.fields.addressLine2", "sample_path": "participant.address_line2"},
             {"variable": "{{ participant.postal_code }}", "description_key": "admin.fields.postalCode", "sample_path": "participant.postal_code"},
             {"variable": "{{ participant.city }}", "description_key": "admin.fields.city", "sample_path": "participant.city"},
             {"variable": "{{ participant.email }}", "description_key": "admin.fields.email", "sample_path": "participant.email"},

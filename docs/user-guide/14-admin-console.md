@@ -261,6 +261,14 @@ Admins can manage the HTML/CSS template used for invoice PDF generation in **Pla
   unchanged until **regenerated** — individual invoices can be regenerated, and
   administrators can regenerate PDFs for an entire billing period.
 
+The default invoice PDF includes the recipient's optional second address line.
+For custom templates, insert this after the first address line, or reset the
+template to the default:
+
+```html
+{% if participant.address_line2 %}{{ participant.address_line2 }}<br>{% endif %}
+```
+
 ## Email Templates
 
 Admins manage system-wide default email templates in **Platform → Templates → Email templates** (`/admin/templates/email`).

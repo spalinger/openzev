@@ -41,6 +41,11 @@ class BuildSampleInvoiceContextTests(SimpleTestCase):
         for key in ("invoice_date", "period_start", "period_end", "due_date"):
             self.assertIn(key, dates)
 
+    def test_preview_has_matching_address_line2(self):
+        address_line2 = self.ctx["recipient"]["address_line2"]
+        self.assertTrue(address_line2)
+        self.assertEqual(self.ctx["participant"].address_line2, address_line2)
+
 
 class BuildSampleContractContextTests(SimpleTestCase):
     def setUp(self):

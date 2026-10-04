@@ -54,6 +54,13 @@ def _render_invoice_markup(invoice):
     return _STYLE_BLOCK_RE.sub("", html)
 
 
+def _boxes_with_class(root, class_name):
+    return [
+        box for box in root.descendants()
+        if box.element is not None and class_name in box.element.get("class", "").split()
+    ]
+
+
 class InvoicePdfQrTests(TestCase):
     def setUp(self):
         self.owner = User.objects.create_user(
@@ -887,7 +894,7 @@ class InvoicePdfVatLabelTests(TestCase):
 
 
 class InvoicePdfRenderingTests(TestCase):
-    """Integration tests that render actual PDFs and verify page counts."""
+    """Template and integration tests for invoice PDF content and layout."""
 
     def setUp(self):
         self.owner = User.objects.create_user(
@@ -934,6 +941,36 @@ class InvoicePdfRenderingTests(TestCase):
                 unit_price_chf=Decimal("0.12"), total_chf=Decimal("1.20"),
             )
 
+    def test_address_line2_renders_from_frozen_copy(self):
+        from .workflow import approve_invoice
+
+        address_line2 = "c/o Muster & Partner <Haus B>"
+        self.participant.address_line2 = address_line2
+        self.participant.save(update_fields=["address_line2"])
+        invoice = self._invoice()
+        approve_invoice(invoice)
+        self.participant.address_line2 = "New address after approval"
+        self.participant.save(update_fields=["address_line2"])
+
+        invoice = Invoice.objects.get(pk=invoice.pk)
+        self.assertEqual(invoice.recipient["address_line2"], address_line2)
+        self.assertEqual(invoice.participant.address_line2, "New address after approval")
+        markup = _render_invoice_markup(invoice)
+        block = re.search(r'<div class="recipient-address">(.*?)</div>', markup, re.DOTALL)
+        self.assertIsNotNone(block)
+        self.assertHTMLEqual(
+            block.group(1),
+            "Musterweg 3<br>c/o Muster &amp; Partner &lt;Haus B&gt;<br>3000 Bern",
+        )
+
+    def test_blank_address_line2_adds_no_break(self):
+        self.participant.address_line2 = ""
+        self.participant.save(update_fields=["address_line2"])
+        markup = _render_invoice_markup(self._invoice())
+        block = re.search(r'<div class="recipient-address">(.*?)</div>', markup, re.DOTALL)
+        self.assertIsNotNone(block)
+        self.assertHTMLEqual(block.group(1), "Musterweg 3<br>3000 Bern")
+
     @pytest.mark.slow
     def test_short_invoice_renders_two_pages(self):
         """Short invoice: page 1 = invoice+inline QR, page 2 = insights."""
@@ -945,8 +982,81 @@ class InvoicePdfRenderingTests(TestCase):
         self.assertEqual(self._page_count(pdf), 2)
 
     @pytest.mark.slow
+    def test_long_recipient_text_stays_inside_its_column(self):
+        from django.template.loader import render_to_string
+        from weasyprint import HTML
+
+        cases = {
+            "words": ("Stockwerkeigentümergemeinschaft Musterstrasse " * 5)[:200],
+            "unbroken": "W" * 200,
+        }
+        tolerance = 0.1  # CSS pixels; allow layout rounding.
+        for label, text in cases.items():
+            with self.subTest(case=label):
+                context = build_sample_invoice_context()
+                fields = {name: f"{name}: {text}"[:200] for name in (
+                    "full_name", "name_addition", "address_line1", "address_line2",
+                )}
+                email_domain = "@example.ch"
+                fields["email"] = "e" * (254 - len(email_domain)) + email_domain
+                for name, value in fields.items():
+                    setattr(context["participant"], name, value)
+                document = HTML(string=render_to_string("invoices/invoice_pdf.html", context)).render()
+                # Private layout boxes expose overflow that PDF text extraction misses.
+                recipients = [
+                    (page._page_box, box) for page in document.pages
+                    for box in _boxes_with_class(page._page_box, "recipient-block")
+                ]
+                self.assertEqual(len(recipients), 1)
+                page_box, recipient = recipients[0]
+                recipient_right = recipient.position_x + recipient.width
+                recipient_bottom = recipient.position_y + recipient.height
+                neighbors = _boxes_with_class(page_box, "facts") + _boxes_with_class(page_box, "amount-card")
+                self.assertTrue(neighbors)
+                self.assertLessEqual(recipient_right, min(box.position_x for box in neighbors) + tolerance)
+                text_boxes = [box for box in recipient.descendants() if hasattr(box, "text")]
+                for box in text_boxes:
+                    self.assertGreaterEqual(box.position_x, recipient.position_x - tolerance)
+                    self.assertLessEqual(box.position_x + box.width, recipient_right + tolerance)
+                    self.assertLessEqual(box.position_y + box.height, recipient_bottom + tolerance)
+                tables = _boxes_with_class(page_box, "line-items")
+                if tables:
+                    self.assertGreaterEqual(tables[0].position_y, recipient_bottom - tolerance)
+                rendered_text = "".join("".join(box.text.split()) for box in text_boxes)
+                for name, value in fields.items():
+                    self.assertIn("".join(value.split()), rendered_text, msg=name)
+
+    @pytest.mark.slow
+    def test_long_address_forces_dedicated_payment_slip(self):
+        from pypdf import PdfReader
+
+        self.participant.address_line2 = "W" * 200
+        self.participant.save(update_fields=["address_line2"])
+        invoice = self._invoice()
+        self._make_items(invoice, 9)
+        # Exercise the render-time fallback after the estimate allows inline payment.
+        self.assertTrue(_build_template_context(invoice)["inline_qr_payment"])
+
+        pdf = generate_pdf(invoice)
+        reader = PdfReader(io.BytesIO(pdf))
+        payment_pages = [page for page in reader.pages if _find_qr_clip_rect(page) is not None]
+        self.assertEqual(len(payment_pages), 1)
+        self.assertIsNone(_find_qr_clip_rect(reader.pages[0]))
+        payment_text = payment_pages[0].extract_text()
+        self.assertIn(INVOICE_TRANSLATIONS["de"]["payment_page_title"], payment_text)
+        rect = self._find_payment_slip_rect(reader)
+        top_y, height_css, page_h = rect
+        self.assertAlmostEqual(height_css, self._QR_HEIGHT_CSS, delta=self._TOLERANCE_CSS)
+        self.assertLessEqual(page_h - (top_y + height_css), self._TOLERANCE_CSS)
+        text = "".join(page.extract_text() for page in reader.pages)
+        self.assertIn("W" * 200, "".join(text.split()))
+        for i in range(9):
+            self.assertIn(f"Item {i}", text)
+            self.assertNotIn(f"Item {i}", payment_text)
+
+    @pytest.mark.slow
     def test_long_invoice_forces_three_pages(self):
-        """Long invoice: page 1 = invoice, page 2 = insights, page 3 = payment+QR."""
+        """Long invoice: page 1 = invoice, page 2 = payment+QR, page 3 = insights."""
         invoice = self._invoice()
         self._make_items(invoice, 10)
 
@@ -985,7 +1095,7 @@ class InvoicePdfRenderingTests(TestCase):
     def test_realistic_many_levies_invoice_paginates_with_single_slip(self):
         """Maintainer concern: an EVU-style invoice with ~5 Abgaben no longer
         fits on one page. The layout must paginate the line items across pages
-        while keeping exactly one QR-Rechnung slip on the final payment page."""
+        while keeping exactly one QR-Rechnung slip on its payment page."""
         invoice = self._invoice(
             invoice_number="Q-00030",
             period_start=date(2026, 1, 1),
@@ -1247,7 +1357,7 @@ class InvoicePdfRenderingTests(TestCase):
         )
 
     @pytest.mark.slow
-    def test_many_rows_render_single_qr_on_final_page(self):
+    def test_many_rows_render_single_qr_on_payment_page(self):
         """A long invoice (dedicated payment page) must carry exactly one
         slip, flush with the bottom of its page."""
         from pypdf import PdfReader

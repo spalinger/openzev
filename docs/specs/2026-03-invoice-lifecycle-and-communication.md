@@ -832,6 +832,12 @@ The invoice PDF template receives:
 Custom templates must use `vat_rate_percent` for the VAT label or be reset to
 the default. Stored PDFs keep the old label until regenerated.
 
+The default recipient block renders optional `participant.address_line2` on
+its own line, without a blank line when empty. Recipient text wraps within its
+column; QR pagination follows §8.4. The field is available in the invoice field
+catalog and preview. Custom overrides require updating or resetting;
+regenerate stored PDFs to apply the change.
+
 ### 8.3 Localization
 
 PDF content is rendered in the ZEV's `invoice_language` (de/fr/it/en).
@@ -856,7 +862,7 @@ QR slip is placed into the 106 mm bottom-margin area of the invoice page via a
 CSS running element (`position: running(qr-slip)` +
 `@page invoice-payment { margin-bottom: 106mm; @bottom-center { content: element(qr-slip) } }`),
 so invoice and payment slip share page 1 and content physically cannot enter
-the slip zone. Otherwise it renders on a dedicated final payment page
+the slip zone. Otherwise it renders on a dedicated payment page before insights
 (`@page payment`).
 
 **Render-time guard against slip duplication.** The inline layout reserves the
@@ -869,8 +875,8 @@ renders once, then inspects the PDF content stream (via `_count_qr_slips()`,
 which reuses the same `_find_qr_clip_rect()` clip-rect detection as the tests)
 and counts pages carrying a slip. If `inline_qr_payment` was `true` but more
 than one slip is present, it flips the flag to `false` and re-renders, moving
-the slip to a clean dedicated final page. The estimate therefore stays a cheap
-optimisation while the layout engine is the source of truth for correctness.
+the slip to a dedicated payment page before insights. The estimate stays a
+cheap optimisation while the layout engine determines pagination.
 
 ### 8.5 Energy comparison chart
 
@@ -1129,7 +1135,7 @@ the cockpit readiness and attention caches.
 | `exports/tests.py` | `ExportJobCreateTests` (17), `ExportJobListTests` (4), `ExportJobRunnerTests` (11), `ExportJobDownloadTests` (6), `ExportJobSweepTests` (5), `AnnualStatementExportBuilderTests` (13), `AnnualStatementExportRealRenderTests` (1, slow) | §5.4/§8.1 (ADR 0017): `202` creation with year/participant validation and `queued` audit, unknown or malformed `zev_id` → `404`, in-flight dedupe on the full validated params dict across any matching active job (not just the newest), per-type audit display/summaries/metadata from `ExportDefinition`, enqueue-after-commit wiring, enqueue failure → `503` + `failed`, requester-scoped list/status/download (including loss of ZEV ownership), task-level soft/hard time limits, one-claim duplicate delivery, retention anchored at completion, late completion never resurrecting a swept-failed job, soft time limits aborting a mid-batch render without publishing a (partial) ZIP, partial → completed with `omitted.txt` manifest and counts, all-fail / unexpected / publish failures → `failed` without an artifact, expired → `410` + `expired` flag, sweep file deletion with metadata retention, stale running / lost queued recovery that never fails a job claimed meanwhile (backlog-safe queued window), ZIP entry byte-budget + sanitization rules with pk appended only on collisions (including a final guard against readable names mimicking a pk-suffixed entry), storage roundtrip, and one real-render end-to-end job |
 | `test_invoice_numbering.py` | `TestNumberingIsScopedToTheZev`, `TestDuplicatesWithinOneZevAreStillRejected` | §4.1: two ZEVs on the default `INV` prefix both bill and each counts from 1; a duplicate number within one ZEV is refused at the database level (`bulk_create` bypasses `save()`) |
 | `test_serializers.py` | `InvoiceDescriptionSerializationTests` | §8.9: period suffix stripping in serializer |
-| `test_template_context.py` | `BuildSampleInvoiceContextTests`, `BuildSampleContractContextTests`, `BuildSampleAnnualStatementContextTests` | §5.7 preview: sample context required keys, invoice number/totals, `grouped_items` structure, formatted dates, annual-statement monthly data and chart |
+| `test_template_context.py` | `BuildSampleInvoiceContextTests`, `BuildSampleContractContextTests`, `BuildSampleAnnualStatementContextTests` | §5.7 preview: sample context required keys, invoice number/totals, `grouped_items` structure, formatted dates, recipient address-line preview parity, annual-statement monthly data and chart |
 | `test_field_catalog.py` | `PdfCatalogResolutionTests` (7), `EmailCatalogResolutionTests` (2), `CatalogPayloadShapeTests` (5) | §5.7/§7.4: sample-path resolution, default-template output coverage, unique/current catalog coverage, four shared production email contexts, payload shape, unknown keys, null SVG/translation examples, and representative preview/example parity |
 | `test_template_admin.py` | `TemplateAdminPermissionTests` (10), `EmailTemplateAdminTests` (4), `TemplateFieldCatalogEndpointTests` (5), plus PDF admin/preview/override/download coverage | §5.7/§7.4: declarative permissions and mutation audits; admin email reads, owner invoice-email read only; participant/unauthenticated read denials (`403`/`401`, no audit event); participant mutation denials (`403`, recorded as `DENIED`); CRUD validation; `fields` on single-template GET responses, and reduced PATCH/DELETE responses |
 | `test_public_invoice_access.py` | `MagicLinkTemplateTests` | §7.4: language-specific shipped magic-link defaults, one global override for every language, and invalid-placeholder fallback |
@@ -1144,7 +1150,7 @@ the cockpit readiness and attention caches.
 | `PeriodParticipantStatsTests` | §8.6: per-timestamp participant stats — mid-period transfer splits readings between both holders, gap readings appear on no participant, stats reconcile with engine invoice totals |
 | `SaveInvoicePdfConcurrencyTests` | §8.1: concurrent approval survives the PDF save (only `pdf_file`/`updated_at` written back); concurrent delete raises instead of resurrecting the row, without orphaning items or files |
 | `AnnualStatementMonthlyDataTests` | Annual-statement monthly data: per-timestamp attribution across assignment changes, gap readings excluded |
-| `InvoicePdfRenderingTests` | Full WeasyPrint rendering: short invoice → 2 pages, long invoice → 3 pages, savings + many items → 3 pages, all four languages render without error; inline QR and separate payment slip geometry (106 mm height, bottom-aligned with page bottom) via PDF content-stream inspection; no QR clip rect on the insights page. Regression coverage for the render-time guard: wrapping multi-line descriptions that overflow the inline height estimate still produce exactly one slip (`_count_qr_slips`), and a long dedicated-payment invoice keeps a single bottom-aligned slip on its final page; a realistic EVU-style invoice with ~5 Abgaben across all four cost categories (energy, grid fees, levies, metering) paginates to ≥3 pages with exactly one slip |
+| `InvoicePdfRenderingTests` | Full WeasyPrint rendering: short invoice → 2 pages, long invoice → 3 pages, savings + many items → 3 pages, all four languages render without error; recipient address-line rendering, escaping and frozen-copy preservation; long-recipient wrapping and QR fallback; inline QR and separate payment slip geometry (106 mm height, bottom-aligned with page bottom) via PDF content-stream inspection; no QR clip rect on the insights page. Regression coverage for the render-time guard: wrapping multi-line descriptions that overflow the inline height estimate still produce exactly one slip (`_count_qr_slips`), and a long dedicated-payment invoice keeps a single bottom-aligned slip on its payment page; a realistic EVU-style invoice with ~5 Abgaben across all four cost categories (energy, grid fees, levies, metering) paginates to ≥3 pages with exactly one slip |
 | `TranslationParityTests` | §8.3: all four locales have identical, non-empty translation keys and identical `status_values` keys |
 | `PaletteConsistencyTests` | Chart color constants in `pdf_charts.py` match the CSS variables in the default template |
 | `StatusTranslationTests` | §8.2: `status_display` is localized from `tr["status_values"]` in the template context |
