@@ -613,7 +613,9 @@ Triggered by a grant create whose email matches no account (§7.1):
    role=user, is_active=False, may_create_zev=False)`
    with `set_unusable_password()`.
 2. Create the grant (`granted_by = request.user`).
-3. Create `EmailVerificationToken(user, purpose="invitation", token=token_urlsafe(48))`.
+3. Create `EmailVerificationToken(user, purpose="invitation", token=token_urlsafe(48))`
+   through `zev.services.issue_invitation`, which also marks earlier unused invitation
+   tokens of the account consumed (resending and `seed_demo` reuse it).
 4. Send the `zev_access_invitation` email (`zev.views_access.send_invitation`).
 
 Accepting reuses `POST /api/v1/auth/verify-email/` (activates the account,
