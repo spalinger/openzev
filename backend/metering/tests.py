@@ -361,6 +361,67 @@ class DashboardMidPeriodTransferTests(TestCase):
 			self.assertEqual(float(profile[h]["from_grid_kwh"]), 0.0)
 
 
+class DashboardCivilBoundsTests(TestCase):
+	"""A reading just after local midnight belongs to the civil day it falls on.
+
+	Assignment validity is date-granular in civil time, so the window a
+	dashboard derives from its readings must be civil dates as well: a UTC-based
+	bound is one day early for every reading after local 22:00/23:00, which
+	drops the holder of that reading from the attribution (ADR 0026).
+	"""
+
+	def setUp(self):
+		self.client = APIClient()
+		self.owner = make_user("bounds_owner", UserRole.USER)
+		self.alice_user = make_user("bounds_alice", UserRole.USER)
+		self.bob_user = make_user("bounds_bob", UserRole.USER)
+
+		self.zev = create_managed_zev(name="Bounds ZEV", owner=self.owner, zev_type="vzev", invoice_prefix="BB")
+		self.alice = Participant.objects.create(
+			zev=self.zev, user=self.alice_user, first_name="Alice", last_name="A",
+			email="alice.b@example.com", valid_from=date(2026, 1, 1),
+		)
+		self.bob = Participant.objects.create(
+			zev=self.zev, user=self.bob_user, first_name="Bob", last_name="B",
+			email="bob.b@example.com", valid_from=date(2026, 2, 1),
+		)
+
+		self.metering_point = MeteringPoint.objects.create(
+			zev=self.zev, meter_id="CH-BB-1", meter_type=MeteringPointType.CONSUMPTION,
+		)
+		MeteringPointAssignment.objects.create(
+			metering_point=self.metering_point, participant=self.alice,
+			valid_from=date(2026, 1, 1), valid_to=date(2026, 1, 31),
+		)
+		MeteringPointAssignment.objects.create(
+			metering_point=self.metering_point, participant=self.bob,
+			valid_from=date(2026, 2, 1),
+		)
+
+		# 00:30 Swiss time on 1 February is 23:30 UTC on 31 January, so the
+		# UTC date of the only reading is the day before its civil date.
+		MeterReading.objects.create(
+			metering_point=self.metering_point,
+			timestamp=datetime(2026, 2, 1, 0, 30, tzinfo=ZURICH),
+			energy_kwh=Decimal("5.0000"), direction=ReadingDirection.IN,
+			resolution=ReadingResolution.FIFTEEN_MIN,
+		)
+
+	def test_reading_after_local_midnight_is_attributed_to_the_new_holder(self):
+		auth(self.client, self.owner)
+		resp = self.client.get(
+			"/api/v1/metering/readings/dashboard-summary/",
+			{"zev_id": str(self.zev.id), "bucket": "day"},
+		)
+
+		self.assertEqual(resp.status_code, 200)
+		stats = {s["participant_id"]: s for s in resp.data["participant_stats"]}
+		self.assertNotIn(str(self.alice.id), stats)
+		self.assertIn(str(self.bob.id), stats)
+		self.assertAlmostEqual(float(stats[str(self.bob.id)]["total_consumed_kwh"]), 5.0, places=6)
+		self.assertAlmostEqual(float(resp.data["totals"]["consumed_kwh"]), 5.0, places=6)
+
+
 class ParticipantImportRestrictionTests(TestCase):
 	def setUp(self):
 		self.client = APIClient()
