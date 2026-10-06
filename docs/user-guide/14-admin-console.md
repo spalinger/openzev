@@ -167,6 +167,33 @@ Configure external OAuth login providers in **Platform → Settings → OAuth**:
 - **Scope** — Space-separated OIDC scopes (default `openid email profile`)
 - **Enabled** — Toggle to activate or deactivate the provider
 
+New accounts and email-based account matching require the provider to return
+`email_verified: true` by default. **Allow missing email-verification
+claim** permits new accounts when a trusted provider verifies email ownership
+but omits the claim. Leave it off unless that guarantee has been verified.
+An explicit false claim is always refused, and the option never enables
+email-based matching to an existing account. Users can instead register or
+sign in through email first and link the provider from their account page.
+Token and userinfo endpoints require HTTPS in production and public addresses
+(operators of an in-cluster identity provider can set `OAUTH_ALLOW_PRIVATE_HOSTS=true`);
+configure their final URLs because redirects are refused. The address check
+happens when the request is made and cannot rule out DNS rebinding, so restrict
+outbound traffic at the network level as well.
+
+**When upgrading:** these rules can stop new provisioning through providers
+that omit the verification claim, and stop login through private, HTTP, or
+redirecting endpoints. Already-linked identities bypass the provisioning claim
+check, but still need reachable, allowed endpoints. Review the provider's final
+HTTPS URLs and the trust option before upgrading, and verify that an admin has
+a working alternative login. Compose deployments pass
+`OAUTH_ALLOW_PRIVATE_HOSTS=True` through `backend/.env`; Helm deployments use
+`backend.extraEnv.OAUTH_ALLOW_PRIVATE_HOSTS: "True"`. The private-host option
+applies to every provider and does not permit production HTTP.
+
+The address check uses the application's DNS; an environment-configured proxy
+can resolve the destination again. Use a trusted proxy and restrict outbound
+traffic rather than relying on the address check alone.
+
 > **Note:** The legacy routes `/admin/features`, `/admin/oauth`, and `/admin/settings/vat` redirect to
 > the matching tab on the Settings page.
 

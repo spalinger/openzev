@@ -99,7 +99,7 @@ export const de = {
                 title: 'Anmeldung fehlgeschlagen',
                 generic: 'OAuth-Fehler: {{code}}',
                 email_not_verified:
-                    "Ihr Identitätsanbieter hat diese E-Mail-Adresse nicht verifiziert. Sie kann daher nicht für die Anmeldung an einem bestehenden Konto verwendet werden. Melden Sie sich mit Ihrem Passwort an und verknüpfen Sie den Anbieter auf Ihrer Kontoseite.",
+                    "Ihr Anbieter hat Ihre E-Mail-Adresse nicht verifiziert. Registrieren oder melden Sie sich zuerst an und verknüpfen Sie den Anbieter dann im Konto.",
                 missingCode: 'Fehlender Autorisierungscode.',
                 exchangeFailed: 'Anmeldung konnte nicht abgeschlossen werden. Bitte versuchen Sie es erneut.',
                 initFailed: 'OAuth-Anmeldung konnte nicht gestartet werden. Bitte versuchen Sie es erneut.',
@@ -3583,5 +3583,7 @@ export const de = {
         fieldEnabled: 'Aktiv',
         fieldRequireMfaClaim: 'MFA-Bestätigung des Anbieters verlangen',
         fieldRequireMfaClaimHint: 'Verweigert die Anmeldung, sofern die Userinfo-Antwort des Anbieters keine Zwei-Faktor-Bestätigung enthält. Nur aktivieren, wenn geprüft wurde, dass der Anbieter dies sendet.',
+        fieldTrustMissingEmailVerified: 'Fehlende E-Mail-Verifizierungsangabe zulassen',
+        fieldTrustMissingEmailVerifiedHint: 'Nur für neue Konten. Nur aktivieren, wenn der Anbieter den Besitz der E-Mail-Adresse prüft, aber email_verified nicht sendet.',
     },
 } as const

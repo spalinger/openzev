@@ -6,16 +6,21 @@ validates CSRF state, talks to the provider, links accounts and auto-provisions
 local users — had none, despite being the most security-sensitive code in the
 project.
 
-Provider HTTP is faked by patching ``urllib.request.urlopen``, which is what the
-two provider helpers call.
+Provider HTTP is faked at the opener's transport boundary; public DNS is
+faked separately so the address guard still runs.
 """
 
 import io
 import json
+import socket
+import urllib.error
+import urllib.request
+import urllib.response
+from contextlib import contextmanager
 from datetime import timedelta
 from unittest.mock import patch
 
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -45,14 +50,22 @@ class _FakeResponse(io.BytesIO):
         return False
 
 
+PUBLIC_DNS = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+
+
+@contextmanager
 def fake_provider_http(*payloads):
-    """Patch target returning ``payloads`` in order, one per urlopen() call."""
+    """Return ``payloads`` in order, one per opener.open() call."""
     responses = iter(payloads)
 
-    def _urlopen(request, timeout=None):
+    def _open(opener, request, data=None, timeout=None):
         return _FakeResponse(json.dumps(next(responses)).encode())
 
-    return patch("urllib.request.urlopen", _urlopen)
+    with (
+        patch("urllib.request.OpenerDirector.open", _open),
+        patch("config.net.socket.getaddrinfo", return_value=PUBLIC_DNS),
+    ):
+        yield
 
 
 def make_provider(name="testidp", *, enabled=True, **overrides) -> OAuthProvider:
@@ -67,6 +80,82 @@ def make_provider(name="testidp", *, enabled=True, **overrides) -> OAuthProvider
         enabled=enabled,
         **overrides,
     )
+
+
+class OAuthEndpointSafetyTests(SimpleTestCase):
+    def setUp(self):
+        self.provider = OAuthProvider(
+            token_url="https://idp.example/token", userinfo_url="https://idp.example/userinfo",
+            client_id="client", client_secret="secret",
+        )
+
+    def _call(self, endpoint):
+        from .views_oauth import _exchange_code_for_tokens, _fetch_user_info
+
+        if endpoint == "token_url":
+            return _exchange_code_for_tokens(self.provider, "code", "https://app.example/callback")
+        return _fetch_user_info(self.provider, "access-token")
+
+    @override_settings(OAUTH_ALLOW_PRIVATE_HOSTS=False)
+    def test_private_endpoints_are_refused_before_any_request(self):
+        for endpoint in ("token_url", "userinfo_url"):
+            with self.subTest(endpoint=endpoint), patch("urllib.request.OpenerDirector.open") as transport:
+                setattr(self.provider, endpoint, "https://127.0.0.1/endpoint")
+                with self.assertRaises(ValueError):
+                    self._call(endpoint)
+                transport.assert_not_called()
+
+    @override_settings(OAUTH_ALLOW_PRIVATE_HOSTS=True)
+    def test_private_endpoints_are_reachable_when_the_operator_opts_in(self):
+        self.provider.token_url = "https://127.0.0.1/token"
+        with patch("urllib.request.OpenerDirector.open", return_value=_FakeResponse(b'{"access_token": "t"}')):
+            self.assertEqual(self._call("token_url"), {"access_token": "t"})
+
+    @override_settings(DEBUG=False)
+    def test_http_endpoints_are_refused_in_production_before_any_request(self):
+        for endpoint in ("token_url", "userinfo_url"):
+            with self.subTest(endpoint=endpoint), patch("urllib.request.OpenerDirector.open") as transport:
+                setattr(self.provider, endpoint, "http://idp.example/endpoint")
+                with self.assertRaises(ValueError):
+                    self._call(endpoint)
+                transport.assert_not_called()
+
+    def test_redirects_do_not_send_a_second_request_or_forward_credentials(self):
+        for endpoint in ("token_url", "userinfo_url"):
+            with self.subTest(endpoint=endpoint):
+                response = urllib.response.addinfourl(
+                    io.BytesIO(), {"Location": "https://127.0.0.1/private"}, getattr(self.provider, endpoint), code=302,
+                )
+                response.msg = "Redirect"
+                with (
+                    patch("config.net.socket.getaddrinfo", return_value=PUBLIC_DNS),
+                    patch("urllib.request.OpenerDirector._open", return_value=response) as transport,
+                ):
+                    with self.assertRaises(urllib.error.HTTPError):
+                        self._call(endpoint)
+                    transport.assert_called_once()
+
+    def test_non_object_json_is_refused(self):
+        for endpoint in ("token_url", "userinfo_url"):
+            for value in ([], None, "profile", 42):
+                with self.subTest(endpoint=endpoint, value=value), fake_provider_http(value):
+                    with self.assertRaisesRegex(ValueError, "JSON object"):
+                        self._call(endpoint)
+
+    def test_response_size_is_bounded(self):
+        from .views_oauth import MAX_OAUTH_RESPONSE_BYTES
+
+        for endpoint in ("token_url", "userinfo_url"):
+            response = _FakeResponse(b" " * (MAX_OAUTH_RESPONSE_BYTES + 100))
+            with (
+                self.subTest(endpoint=endpoint),
+                patch("config.net.socket.getaddrinfo", return_value=PUBLIC_DNS),
+                patch("urllib.request.OpenerDirector.open", return_value=response),
+                patch.object(response, "read", wraps=response.read) as read,
+            ):
+                with self.assertRaisesRegex(ValueError, "size limit"):
+                    self._call(endpoint)
+                read.assert_called_once_with(MAX_OAUTH_RESPONSE_BYTES + 1)
 
 
 class OAuthTestCase(TestCase):
@@ -143,6 +232,62 @@ class InitiateTests(OAuthTestCase):
 
 
 class CallbackGuardTests(OAuthTestCase):
+    def test_invalid_access_tokens_are_refused_before_userinfo(self):
+        for data in ({}, *({"access_token": value} for value in (None, [], {}, 123, True, "", "   "))):
+            self.start_state()
+            with (
+                self.subTest(data=data),
+                fake_provider_http(data),
+                patch("accounts.views_oauth._fetch_user_info") as fetch,
+            ):
+                response = self.callback(code="c", state="state-token")
+            self.assertEqual(response.url, f"{FRONTEND}/login?oauth_error=token_exchange_failed")
+            fetch.assert_not_called()
+        self.assertFalse(User.objects.exists())
+
+    def test_malformed_profile_fields_are_controlled_errors(self):
+        invalid = [
+            {"sub": value} for value in ([], {}, 123, True, "x" * 501, "   ")
+        ] + [
+            {"sub": None, "id": value} for value in ([], {}, True, 1.5, "x" * 501)
+        ] + [
+            {"email": value} for value in ([], {}, 123, True, "invalid", "x" * 255)
+        ] + [
+            {claim: value} for claim in ("given_name", "family_name")
+            for value in ([], {}, 123, "x" * 151)
+        ]
+        for fields in invalid:
+            self.start_state()
+            info = {"sub": "uid", "email": "person@example.com", "email_verified": True, **fields}
+            with self.subTest(fields=fields), fake_provider_http({"access_token": "at"}, info):
+                response = self.callback(code="c", state="state-token")
+            self.assertEqual(response.url, f"{FRONTEND}/login?oauth_error=token_exchange_failed")
+            self.assertFalse(User.objects.exists())
+            self.assertFalse(SocialAccount.objects.exists())
+
+    def test_profile_limits_and_numeric_ids_are_accepted(self):
+        email = "a" * 64 + "@" + "b" * 63 + "." + "c" * 63 + "." + "d" * 61
+        profiles = (
+            {"sub": "u" * 500, "email": email, "given_name": "f" * 150, "family_name": "l" * 150},
+            {"id": 123, "email": "numeric@example.com", "given_name": None, "family_name": None},
+        )
+        for info in profiles:
+            self.start_state()
+            with self.subTest(profile=info), fake_provider_http({"access_token": "at"}, {**info, "email_verified": True}):
+                response = self.callback(code="c", state="state-token")
+            self.assertTrue(response.url.startswith(f"{FRONTEND}/oauth/callback?code="))
+            account = SocialAccount.objects.get(uid=str(info.get("sub") or info["id"]))
+            self.assertEqual(account.user.first_name, info["given_name"] or "")
+            self.assertEqual(account.user.last_name, info["family_name"] or "")
+
+    def test_non_object_token_and_userinfo_responses_are_controlled_errors(self):
+        for payloads in (([],), ({"access_token": "t"}, [])):
+            self.start_state()
+            with self.subTest(payloads=payloads), fake_provider_http(*payloads):
+                response = self.callback(code="c", state="state-token")
+            self.assertEqual(response.url, f"{FRONTEND}/login?oauth_error=token_exchange_failed")
+        self.assertFalse(SocialAccount.objects.exists())
+
     def test_provider_error_never_reaches_the_redirect_target(self):
         """CWE-601: the provider's error value is attacker-influenced, so a
         fixed slug is used instead of echoing it."""
@@ -178,7 +323,7 @@ class CallbackGuardTests(OAuthTestCase):
 
     def test_state_is_single_use(self):
         self.start_state("once")
-        with fake_provider_http({"access_token": "at"}, {"sub": "uid-1", "email": "a@example.com"}):
+        with fake_provider_http({"access_token": "at"}, {"sub": "uid-1", "email": "a@example.com", "email_verified": True}):
             first = self.callback(code="c", state="once")
         self.assertIn("/oauth/callback?code=", first.url)
 
@@ -189,11 +334,12 @@ class CallbackGuardTests(OAuthTestCase):
     def test_provider_http_failure_is_not_leaked_to_the_browser(self):
         self.start_state("boom")
 
-        def explode(request, timeout=None):
-            raise OSError("connection refused to https://idp.example/token")
-
-        with patch("urllib.request.urlopen", explode):
+        with (
+            patch("config.net.socket.getaddrinfo", return_value=PUBLIC_DNS),
+            patch("urllib.request.OpenerDirector.open", side_effect=OSError("connection refused to https://idp.example/token")) as transport,
+        ):
             resp = self.callback(code="c", state="boom")
+            transport.assert_called_once()
 
         self.assertEqual(resp.url, f"{FRONTEND}/login?oauth_error=token_exchange_failed")
 
@@ -218,7 +364,7 @@ class CallbackLoginTests(OAuthTestCase):
 
         with fake_provider_http(
             {"access_token": "at"},
-            {"sub": "uid-new", "email": "Fresh@Example.com", "given_name": "Fre", "family_name": "Sh"},
+            {"sub": "uid-new", "email": "Fresh@Example.com", "email_verified": True, "given_name": "Fre", "family_name": "Sh"},
         ):
             resp = self.callback(code="c", state="new")
 
@@ -239,6 +385,15 @@ class CallbackLoginTests(OAuthTestCase):
         self.assertEqual(OAuthExchangeCode.objects.get().user, existing)
         self.assertEqual(User.objects.filter(email="other@example.com").count(), 0,
                          "the uid match wins; no second account is created")
+
+    def test_a_known_identity_can_log_in_without_email(self):
+        user = make_user("known_no_email", UserRole.USER)
+        SocialAccount.objects.create(provider=self.provider, uid="uid-known", user=user)
+        self.start_state()
+        with fake_provider_http({"access_token": "at"}, {"sub": "uid-known"}):
+            response = self.callback(code="c", state="state-token")
+        self.assertTrue(response.url.startswith(f"{FRONTEND}/oauth/callback?code="))
+        self.assertEqual(OAuthExchangeCode.objects.get().user, user)
 
     def test_an_inactive_user_cannot_log_in(self):
         user = make_user("dormant", UserRole.USER)
@@ -318,16 +473,61 @@ class CallbackExistingAccountTests(OAuthTestCase):
         self.assertEqual(event.target_id, str(victim.pk))
         self.assertEqual(event.metadata_json["provider"], self.provider.name)
 
-    def test_provisioning_a_brand_new_account_still_needs_no_verified_claim(self):
-        """The guard covers inheriting an existing account. A new user grants
-        nothing that did not already exist, so signup is unaffected."""
+    def test_provisioning_a_brand_new_account_requires_verified_email(self):
         self.start_state("brandnew")
 
         with fake_provider_http({"access_token": "at"}, {"sub": "uid-brandnew", "email": "nobody@example.com"}):
             resp = self.callback(code="c", state="brandnew")
 
+        self.assertEqual(resp.url, f"{FRONTEND}/login?oauth_error=email_not_verified")
+        self.assertFalse(User.objects.filter(email="nobody@example.com").exists())
+        self.assertTrue(AuditEvent.objects.filter(action_type="oauth.provision_refused").exists())
+
+    def test_the_audited_claim_value_is_bounded(self):
+        self.start_state("bounded")
+        claim = {"x": "y" * 500}
+
+        with fake_provider_http({"access_token": "at"}, {"sub": "uid-b", "email": "b@example.com", "email_verified": claim}):
+            self.callback(code="c", state="bounded")
+
+        recorded = AuditEvent.objects.get(action_type="oauth.provision_refused").metadata_json["email_verified"]
+        self.assertIsInstance(recorded, str)
+        self.assertLessEqual(len(recorded), 32)
+
+    def test_provider_can_opt_in_to_missing_email_verified_claim(self):
+        self.provider.trust_missing_email_verified = True
+        self.provider.save(update_fields=["trust_missing_email_verified"])
+        self.start_state("trusted")
+
+        with fake_provider_http({"access_token": "at"}, {"sub": "uid-trusted", "email": "trusted@example.com"}):
+            resp = self.callback(code="c", state="trusted")
+
         self.assertTrue(resp.url.startswith(f"{FRONTEND}/oauth/callback?code="))
-        self.assertEqual(User.objects.get(email="nobody@example.com").role, UserRole.USER)
+        self.assertEqual(User.objects.get(email="trusted@example.com").role, UserRole.USER)
+
+    def test_provisioning_rejects_unverified_and_non_boolean_claims_even_when_trusted(self):
+        for trusted in (False, True):
+            self.provider.trust_missing_email_verified = trusted
+            self.provider.save(update_fields=["trust_missing_email_verified"])
+            for claim in (False, None, "true", 1):
+                with self.subTest(trusted=trusted, claim=claim):
+                    self.start_state("unverified")
+                    with fake_provider_http(
+                        {"access_token": "at"},
+                        {"sub": "uid-unverified", "email": "unverified@example.com", "email_verified": claim},
+                    ):
+                        resp = self.callback(code="c", state="unverified")
+                    self.assertEqual(resp.url, f"{FRONTEND}/login?oauth_error=email_not_verified")
+                    self.assertFalse(User.objects.filter(email="unverified@example.com").exists())
+                    self.assertFalse(SocialAccount.objects.filter(uid="uid-unverified").exists())
+
+    def test_trust_exception_cannot_inherit_an_existing_account(self):
+        self.provider.trust_missing_email_verified = True
+        self.provider.save(update_fields=["trust_missing_email_verified"])
+        victim = make_user("trusted_victim", UserRole.ADMIN)
+        resp = self._attempt("trusted-existing", victim)
+        self.assertEqual(resp.url, f"{FRONTEND}/login?oauth_error=email_not_verified")
+        self.assertFalse(SocialAccount.objects.filter(user=victim).exists())
 
     def test_a_previously_linked_identity_is_unaffected(self):
         """Once the link exists, the uid match short-circuits before any email
@@ -483,6 +683,21 @@ class ProviderConfigAuditTests(OAuthTestCase):
             {"before": "https://idp.example/token", "after": "https://attacker.example/token"},
         )
 
+    def test_trusted_missing_claim_policy_is_admin_only_and_audited(self):
+        url = f"{PROVIDERS_CONFIG}{self.provider.pk}/"
+        auth(self.client, make_user("trust_non_admin", UserRole.USER))
+        denied = self.client.patch(url, {"trust_missing_email_verified": True}, format="json")
+        self.assertEqual(denied.status_code, 403)
+        self.provider.refresh_from_db()
+        self.assertFalse(self.provider.trust_missing_email_verified)
+
+        auth(self.client, make_user("trust_admin", UserRole.ADMIN))
+        response = self.client.patch(url, {"trust_missing_email_verified": True}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["trust_missing_email_verified"])
+        event = AuditEvent.objects.get(action_type="oauth_provider.update")
+        self.assertEqual(event.changes_json["trust_missing_email_verified"], {"before": False, "after": True})
+
     def test_a_secret_rotation_is_recorded_as_a_flag_not_a_value(self):
         """The secret must not reach the audit trail, but rotating it is
         exactly the kind of change worth being able to see after the fact."""
@@ -539,7 +754,7 @@ class OAuthFlowAuditTests(OAuthTestCase):
         principal appears, not just a session."""
         self.start_state("s")
 
-        with fake_provider_http({"access_token": "at"}, {"sub": "uid-p", "email": "brand@example.com"}):
+        with fake_provider_http({"access_token": "at"}, {"sub": "uid-p", "email": "brand@example.com", "email_verified": True}):
             self.callback(code="c", state="s")
 
         provision = self._event("oauth.provision")
@@ -584,11 +799,12 @@ class OAuthFlowAuditTests(OAuthTestCase):
     def test_a_token_exchange_failure_is_audited(self):
         self.start_state("s")
 
-        def explode(request, timeout=None):
-            raise OSError("boom")
-
-        with patch("urllib.request.urlopen", explode):
+        with (
+            patch("config.net.socket.getaddrinfo", return_value=PUBLIC_DNS),
+            patch("urllib.request.OpenerDirector.open", side_effect=OSError("boom")) as transport,
+        ):
             self.callback(code="c", state="s")
+            transport.assert_called_once()
 
         self.assertEqual(self._event("oauth.login_failed").metadata_json["reason"],
                          "token_exchange_failed")
@@ -703,3 +919,20 @@ class OAuthMfaClaimTests(OAuthTestCase):
             resp = self.callback(code="c", state="s")
 
         self.assertTrue(resp.url.startswith(f"{FRONTEND}/oauth/callback?code="))
+
+
+class ProviderUrlSerializerTests(TestCase):
+    @override_settings(DEBUG=False)
+    def test_a_stored_plain_http_endpoint_can_be_resubmitted_but_not_newly_set(self):
+        from .serializers import OAuthProviderSerializer
+
+        provider = OAuthProvider.objects.create(
+            name="legacy", client_id="c", client_secret="s",
+            authorization_url="http://idp.example/auth", token_url="http://idp.example/token",
+            userinfo_url="http://idp.example/userinfo", redirect_url="https://app.example/cb",
+        )
+        unchanged = OAuthProviderSerializer(provider, data={"token_url": "http://idp.example/token", "enabled": False}, partial=True)
+        self.assertTrue(unchanged.is_valid(), unchanged.errors)
+        changed = OAuthProviderSerializer(provider, data={"token_url": "http://idp.example/other"}, partial=True)
+        self.assertFalse(changed.is_valid())
+        self.assertIn("token_url", changed.errors)

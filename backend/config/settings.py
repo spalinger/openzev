@@ -17,6 +17,8 @@ _INSECURE_SECRET_KEY = "change-me-in-production-use-a-long-random-string"
 
 SECRET_KEY = env("SECRET_KEY", default=_INSECURE_SECRET_KEY)
 DEBUG = env("DEBUG")
+# OAuth token/userinfo endpoints must resolve to public addresses unless an operator opts in (e.g. an in-cluster Keycloak).
+OAUTH_ALLOW_PRIVATE_HOSTS = env.bool("OAUTH_ALLOW_PRIVATE_HOSTS", default=DEBUG)
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
 
 

@@ -377,27 +377,36 @@ class OAuthProviderSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Provider slug cannot be empty.")
         return normalized
 
-    def _validate_endpoint_url(self, value: str) -> str:
+    def _validate_endpoint_url(self, value: str, *, field: str, secure_required: bool = False) -> str:
         url = (value or "").strip()
         if "://" not in url:
             url = f"https://{url}"
 
-        parsed = urlparse(url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        try:
+            parsed = urlparse(url)
+            host = parsed.hostname
+            _ = parsed.port
+        except ValueError as exc:
+            raise serializers.ValidationError("Enter a valid URL (http:// or https://).") from exc
+        if parsed.scheme not in {"http", "https"} or not host:
             raise serializers.ValidationError("Enter a valid URL (http:// or https://).")
+        # The edit form re-sends every field; a stored plain-HTTP endpoint must not block unrelated edits.
+        unchanged = self.instance is not None and url == getattr(self.instance, field)
+        if secure_required and parsed.scheme != "https" and not settings.DEBUG and not unchanged:
+            raise serializers.ValidationError("HTTPS is required for OAuth token and userinfo endpoints outside DEBUG.")
         return url
 
     def validate_authorization_url(self, value):
-        return self._validate_endpoint_url(value)
+        return self._validate_endpoint_url(value, field="authorization_url")
 
     def validate_token_url(self, value):
-        return self._validate_endpoint_url(value)
+        return self._validate_endpoint_url(value, field="token_url", secure_required=True)
 
     def validate_userinfo_url(self, value):
-        return self._validate_endpoint_url(value)
+        return self._validate_endpoint_url(value, field="userinfo_url", secure_required=True)
 
     def validate_redirect_url(self, value):
-        return self._validate_endpoint_url(value)
+        return self._validate_endpoint_url(value, field="redirect_url")
 
     def _build_default_redirect_url(self, provider_name: str) -> str:
         frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:5173").rstrip("/")
@@ -433,7 +442,7 @@ class OAuthProviderSerializer(serializers.ModelSerializer):
             "id", "name", "display_name", "client_id", "client_secret",
             "has_client_secret",
             "authorization_url", "token_url", "userinfo_url", "redirect_url", "scope",
-            "enabled", "require_mfa_claim", "created_at", "updated_at",
+            "enabled", "require_mfa_claim", "trust_missing_email_verified", "created_at", "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
 

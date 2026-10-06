@@ -1976,7 +1976,7 @@ interface ParticipantAccountCreateResult { participant: Participant; account: Us
 Line counts are not tracked here — they drift with every change. The inventory
 lists the test classes per module (test counts are the `test_*` methods).
 
-**`accounts/tests.py`** (17 test classes):
+**`accounts/tests.py`** (18 test classes):
 
 | Class | Tests | Description |
 |---|---|---|
@@ -1991,25 +1991,25 @@ lists the test classes per module (test counts are the `test_*` methods).
 | `MeEndpointParticipantContextTests` | 5 | `GET /auth/me/` lists a participant's community in `memberships` and carries no `zev_name` / `zev_count`; the membership carries the community's `zev_billing_interval`; an admin and an account without a community get `[]`; two memberships are both listed, by name |
 | `AppSettingsTests` | 5 | Authenticated user reads settings; non-admin read omits the MFA policy, admin read includes it; admin updates; non-admin cannot update |
 | `VatRateSettingsTests` | 4 | Admin CRUD; non-admin blocked; overlap rejection; valid_to validation |
-| `OAuthProviderConfigTests` | 5 | Admin creates provider (internal host URLs, scheme-less URLs, default redirect URL); non-admin blocked; login initiate uses provider redirect URL |
+| `OAuthProviderConfigTests` | 7 | Production token/userinfo HTTPS and malformed URL validation; admin creates provider (internal host URLs, scheme-less URLs, default redirect URL); non-admin blocked; login initiate uses provider redirect URL |
 | `OAuthProviderSecretWriteOnlyTests` | 5 | `client_secret` is write-only: create/list/detail responses never contain it and report `has_client_secret`; create without a secret is refused; blank secret on update keeps the stored value; new secret on update rotates it |
 | `UserListCreateAdminOnlyTests` | 6 | Owner/participant/anonymous cannot list or create users; admin can list all users and create |
 | `RbacEndpointMatrixTests` | 6 | Full list/create/update/action-delete/unauthenticated matrix across all endpoints |
 | `OAuthTokenCleanupTaskTests` | 1 | Token cleanup task keeps active and removes expired entries |
 | `PreferredZevApiTests` | 7 | Account-level default community (`preferred_zev`) on `/auth/me/`: none by default; an owner sets one of their own, cannot prefer another owner's or an unknown ZEV, and clears it back to first-by-name; a participant is refused; an admin may prefer any community |
 
-**Other `accounts/` test modules:**
+**Other `accounts/` test modules** (class counts exclude helpers and fixture-only bases):
 
 | Module | Classes | Tests | Coverage |
 |---|---|---|---|
 | `test_session_hardening.py` | 6 | 55 | Self-service profile lockdown (protected fields rejected, repeats accepted, names/preferred community still editable); session revocation (revoked/new/legacy tokens, dead access cookie leaves public endpoints working, refresh refusal, deactivation, stale-instance save cannot revive, API keys and impersonation); password change and revoke endpoints; verified email change (request/confirm, single-use, dies on password/address/deactivation/expiry, no enumeration, throttle, mail failure, API keys) |
-| `test_security_notifications.py` | 6 | 26 | Every event composes (subject, body, `{detail}` filled, admin vs. self advice, no-turn-off line); guards (no address, inactive, gone/deactivated by send time); hooked into passkey add/remove, TOTP enable/disable (not for an abandoned enrolment), recovery-code regeneration, password change (not on failure), admin MFA reset (not when nothing was removed) and admin session revocation (not for the self-service one); a broker or mail failure never fails the triggering request |
+| `test_security_notifications.py` | 5 | 26 | Every event composes (subject, body, `{detail}` filled, admin vs. self advice, no-turn-off line); guards (no address, inactive, gone/deactivated by send time); hooked into passkey add/remove, TOTP enable/disable (not for an abandoned enrolment), recovery-code regeneration, password change (not on failure), admin MFA reset (not when nothing was removed) and admin session revocation (not for the self-service one); a broker or mail failure never fails the triggering request |
 | `test_admin_users_list.py` | 2 | 13 | Admin user list: memberships per relationship (participant, owner-who-is-also-participant merged into one, owner of several communities sorted by name), confirmed-only `mfa_methods`, `last_login` exposed and `null` before the first sign-in, fixed query count, `/auth/me/` unaffected; `mfa_compliance` (`null` outside the policy, `"grace"` before the deadline, `"overdue"` after it, `"compliant"` once enrolled regardless of the deadline, no added query per account) |
 | `test_last_login.py` | 4 | 7 | `last_login` stamped by a plain password login (not by a failed one, not by the password step of a two-step login until `/token/mfa/` completes it) and by the auto-login after email verification; not restamped by a password change or by setting your initial password moments after verifying; untouched on either side of an impersonation session |
 | `test_admin_account_actions.py` | 2 | 12 | Account creation (generated password when omitted, returned once and never re-listed, two accounts get different passwords, a supplied password is still accepted, mismatched/weak supplied passwords rejected, generated password passes the validators anyway, response carries the new id, non-admin blocked); self-deactivation guard (blocked with a field error, deactivating someone else works and is audited, reactivating your own account is unaffected, deactivating someone else still revokes their sessions) |
 | `test_api_keys.py` | 10 | 81 | Generation, hashing, auth, read-only keys, scope deny-list, audit, throttling, CRUD, admin management |
-| `test_oauth.py` | 12 | 55 | Provider listing, initiate, callback guards/redirects, link flow, social accounts, audit, `require_mfa_claim` (`OAuthMfaClaimTests`) |
-| `test_passkeys.py` | 9 | 64 | Passkey registration and passwordless sign-in against a software authenticator, MFA policy and grace arithmetic, removal guard, admin reset, RP-ID/origin system checks |
+| `test_oauth.py` | 12 | 72 | Public endpoint validation, bounded JSON object responses, access-token/profile field types and model limits, numeric fallback IDs and linked login without email, redirect/credential containment, verified-email provisioning and linking, admin-only audited exception for trusted providers with an absent claim (new accounts only); provider listing, initiate, callback guards/redirects, link flow, social accounts, audit, `require_mfa_claim` (`OAuthMfaClaimTests`) |
+| `test_passkeys.py` | 8 | 64 | Passkey registration and passwordless sign-in against a software authenticator, MFA policy and grace arithmetic, removal guard, admin reset, RP-ID/origin system checks |
 | `test_mfa.py` | 4 | 28 | TOTP enrolment/removal/recovery codes, two-step login, MFA at the magic-link/onboarding/OAuth/impersonation/email-verification doors, per-account throttle (`SPEC-2026-09-two-factor-authentication`) |
 | `test_registration_concurrency.py` | — (3 functions) | 7 cases | PostgreSQL cancellation/verification/resend row-lock ordering; SMTP outside transactions; transitions during delivery; late cleanup preserves newer links |
 | `test_cookie_oauth.py` | — (7 module-level test functions) | 7 | Refresh/logout cookie handling; token exchange sets cookies, consumes codes, and stamps `last_login` |

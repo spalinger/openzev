@@ -99,7 +99,7 @@ export const it = {
                 title: 'Accesso non riuscito',
                 generic: 'Errore OAuth: {{code}}',
                 email_not_verified:
-                    "Il tuo provider di identità non ha verificato questo indirizzo e-mail, quindi non può essere usato per accedere a un account esistente. Accedi con la tua password e collega il provider dalla pagina del tuo account.",
+                    "Il tuo provider non ha verificato la tua e-mail. Registrati o accedi prima, poi collega il provider in Account.",
                 missingCode: 'Codice di autorizzazione mancante.',
                 exchangeFailed: 'Impossibile completare l\'accesso. Riprova.',
                 initFailed: 'Impossibile avviare l\'accesso OAuth. Riprova.',
@@ -3583,5 +3583,7 @@ export const it = {
         fieldEnabled: 'Abilitato',
         fieldRequireMfaClaim: 'Richiedi l\'attestazione MFA del provider',
         fieldRequireMfaClaimHint: 'Rifiuta l\'accesso se la risposta userinfo del provider non conferma un secondo fattore. Attivare solo dopo aver verificato che il provider lo invii.',
+        fieldTrustMissingEmailVerified: 'Consenti l’assenza dell’indicazione di verifica e-mail',
+        fieldTrustMissingEmailVerifiedHint: 'Solo nuovi account. Attiva solo se il provider verifica la titolarità dell’indirizzo e-mail, ma non invia email_verified.',
     },
 } as const

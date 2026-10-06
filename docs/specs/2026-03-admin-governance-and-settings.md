@@ -503,6 +503,30 @@ link the invoice breakdown to `/admin/invoices` and email statistics to
     - Uses `fetchOAuthProviderConfigs` with query key `['oauth-provider-configs']`.
     - Displays configured providers in a table with enabled badges and compact Edit/Delete actions.
     - Provider create/edit uses a shared modal form; delete uses `ConfirmDialog`.
+    - `require_mfa_claim` and `trust_missing_email_verified` are admin-editable,
+      audited switches. New accounts need `email_verified is True`, unless
+      `trust_missing_email_verified` is set and the claim is absent (false,
+      null and non-boolean values are always refused); matching an existing
+      account by email always needs `True`. Token and userinfo endpoints must
+      be HTTPS outside DEBUG (an unchanged stored URL may be re-saved), resolve
+      to public addresses unless `OAUTH_ALLOW_PRIVATE_HOSTS` is set (default
+      `DEBUG`, applies to every provider), and are final URLs: redirects are
+      refused. The public-address check is validation-time only (DNS
+      rebinding is not closed), and the client secret travels on this request.
+      Environment proxies may resolve the destination independently; deployments
+      must use trusted proxies/egress controls when this is a security boundary.
+      `_open_oauth_json` reads at most 1 MiB + 1 byte and rejects responses over
+      1 MiB or non-object JSON before callback processing.
+      The callback requires a nonblank string `access_token` before fetching
+      userinfo. `_parse_user_info` accepts a string `sub`, or a string/integer
+      `id` when `sub` is absent, null or empty (booleans are refused); identifiers
+      are limited to 500 characters and cannot be whitespace-only. Missing or
+      null email/names become empty strings; other values must be strings within
+      the model limits (`email`: 254, `given_name`/`family_name`: 150 each).
+      Nonempty email is trimmed, lowercased and syntax-validated. Malformed fields
+      redirect with `token_exchange_failed` before account/link writes; a missing
+      identifier redirects with `missing_uid`. Already-linked identities can
+      sign in without email.
     - `client_secret` is write-only: API responses never contain it (only
       `has_client_secret`), create without a secret is refused (400), and the
       edit form shows the secret field blank with a hint — a blank submit omits

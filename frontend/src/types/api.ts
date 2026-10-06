@@ -394,6 +394,8 @@ export interface OAuthProviderConfig extends OAuthProvider {
      * unless the provider's userinfo response names an MFA method in its
      * amr claim. Opt-in; the IdP already owns authentication otherwise. */
     require_mfa_claim: boolean
+    /** Permit new accounts through trusted providers that omit email_verified. */
+    trust_missing_email_verified: boolean
     created_at: string
     updated_at: string
 }
@@ -410,6 +412,7 @@ export interface OAuthProviderConfigInput {
     scope: string
     enabled: boolean
     require_mfa_claim: boolean
+    trust_missing_email_verified: boolean
 }
 
 export interface SocialAccount {

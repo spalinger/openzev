@@ -106,6 +106,11 @@ Fill in every value. The examples below assume the instance is reached at
 | `BACKUP_ENCRYPTION_KEYS` | *(generated, see below)* | Encrypts backup archives; without it backups are written unencrypted — see [Backups](18-backups.md) |
 | `INTEGRATION_ENCRYPTION_KEYS` | *(optional, a Fernet key as for `MFA_ENCRYPTION_KEYS`)* | Encrypts the API keys participants enter to connect Solar Manager; without it only push and file sources work — see [Your Own Energy Data](20-energy-data.md) |
 
+**OAuth upgrades:** new accounts need `email_verified: true` unless an admin
+enables **Allow missing email-verification claim** for a trusted provider that
+omits it. Review the [OAuth upgrade requirements](14-admin-console.md#oauth)
+before upgrading an existing deployment.
+
 Generate the three keys with Python (any machine with Python 3; the
 `cryptography` package is only needed for the second line):
 

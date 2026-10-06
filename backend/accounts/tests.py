@@ -1078,6 +1078,25 @@ class VatRateSettingsTests(TestCase):
 
 
 class OAuthProviderConfigTests(TestCase):
+	def test_malformed_provider_endpoints_are_refused(self):
+		from .serializers import OAuthProviderSerializer
+
+		for url in ("https://idp.example:bad/data", "https://idp.example:65536/data", "https://[broken/data", "https://@/data"):
+			with self.subTest(url=url):
+				serializer = OAuthProviderSerializer(data={"token_url": url}, partial=True)
+				self.assertFalse(serializer.is_valid())
+				self.assertIn("token_url", serializer.errors)
+
+	@override_settings(DEBUG=False)
+	def test_production_token_and_userinfo_urls_require_https(self):
+		from .serializers import OAuthProviderSerializer
+
+		for field in ("token_url", "userinfo_url"):
+			with self.subTest(field=field):
+				serializer = OAuthProviderSerializer(data={field: "http://idp.example/endpoint"}, partial=True)
+				self.assertFalse(serializer.is_valid())
+				self.assertIn(field, serializer.errors)
+
 	def _auth(self, client, user, password="pass1234"):
 		_cookie_auth(client, user.username, password)
 
@@ -1086,6 +1105,7 @@ class OAuthProviderConfigTests(TestCase):
 		self.admin = User.objects.create_user(username="admin_oauth", password="pass1234", role=UserRole.ADMIN)
 		self.owner = User.objects.create_user(username="owner_oauth", password="pass1234", role=UserRole.USER)
 
+	@override_settings(DEBUG=True)
 	def test_admin_can_create_provider_with_internal_host_urls(self):
 		self._auth(self.client, self.admin)
 
@@ -1109,6 +1129,7 @@ class OAuthProviderConfigTests(TestCase):
 		self.assertEqual(resp.status_code, 201)
 		self.assertEqual(resp.data["name"], "keycloak-internal")
 
+	@override_settings(DEBUG=True)
 	def test_admin_can_create_provider_without_scheme(self):
 		self._auth(self.client, self.admin)
 

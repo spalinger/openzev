@@ -48,6 +48,7 @@ const EMPTY_OAUTH_FORM: OAuthProviderConfigInput = {
     scope: 'openid email profile',
     enabled: true,
     require_mfa_claim: false,
+    trust_missing_email_verified: false,
 }
 
 const TAB_ORDER: SystemSettingsTab[] = ['regional', 'features', 'oauth', 'security', 'vat', 'backup']
@@ -177,6 +178,7 @@ export function AdminSystemSettingsPage() {
             scope: provider.scope,
             enabled: provider.enabled,
             require_mfa_claim: provider.require_mfa_claim,
+            trust_missing_email_verified: provider.trust_missing_email_verified,
         })
         setOauthFormError(null)
         setShowOAuthForm(true)
@@ -591,6 +593,17 @@ export function AdminSystemSettingsPage() {
                         label={t('adminOAuth.fieldRequireMfaClaim')}
                     />
                     <small className="muted">{t('adminOAuth.fieldRequireMfaClaimHint')}</small>
+
+                    <Switch
+                        name="trust_missing_email_verified"
+                        checked={oauthForm.trust_missing_email_verified}
+                        onChange={(event) => {
+                            const checked = event.currentTarget.checked
+                            setOauthForm((previous) => ({ ...previous, trust_missing_email_verified: checked }))
+                        }}
+                        label={t('adminOAuth.fieldTrustMissingEmailVerified')}
+                    />
+                    <small className="muted">{t('adminOAuth.fieldTrustMissingEmailVerifiedHint')}</small>
 
                     {oauthFormError && <div className="error-banner">{oauthFormError}</div>}
 
