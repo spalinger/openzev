@@ -71,6 +71,8 @@ describe('shared invoice presentation', () => {
     it('keeps participant rows without invoices and their metering/eligibility states', async () => {
         const base: InvoicePeriodParticipantRow = {
             participant_id: 'p1', participant_name: 'Anna', metering_data_complete: false,
+            participant_kind: 'person', participant_name_addition: '', participant_valid_from: '2026-01-01',
+            participant_valid_to: null, party_id: 'party-1', metering_point_labels: [],
             metering_points_total: 2, metering_points_with_data: 1, missing_meter_ids: ['CH-1'],
             missing_meter_details: [{ meter_id: 'CH-1', missing_days: 2 }],
             generation_eligibility: null, invoice: { ...invoice, last_email_status: 'failed', email_logs: [{ status: 'sent' } as never] },
@@ -79,15 +81,17 @@ describe('shared invoice presentation', () => {
             rows: [base, { ...base, participant_id: 'p2', invoice: null },
                 { ...base, participant_id: 'p3', invoice: null, generation_eligibility: { state: 'covered', invoice_id: 'old', invoice_number: 'OLD' } }],
             period: { period_start: invoice.period_start, period_end: invoice.period_end },
-            getPrimaryRowAction: () => null, getRowMenuItems: () => [], isPdfPending: () => false,
+            getPrimaryRowAction: () => null, getRowMenuItems: () => [], getRowWork: () => ({}),
+            repeatedPartyIds: new Set<string>(),
         }))
         expect(container.querySelectorAll('tbody tr')).toHaveLength(3)
-        expect(container.textContent).toContain('pages.invoices.metering.missing')
+        expect(container.textContent).toContain('pages.invoices.issues.metering')
         expect(container.textContent).toContain('pages.invoices.metering.missingDays')
         expect(container.textContent).toContain('pages.invoices.notCreated')
-        expect(container.textContent).toContain('pages.invoices.settledCovered')
-        expect(container.textContent).toContain('email.failed')
-        expect(container.textContent).not.toContain('email.sent')
+        expect(container.textContent).toContain('pages.invoices.covered.label')
+        // The delivery annotation wins over an older log entry.
+        expect(container.querySelector('tbody tr .invoice-row-issues')?.textContent).toContain('pages.invoices.issues.delivery')
+        expect(container.querySelector<HTMLElement>('tbody tr [data-step="sent"]')?.dataset.state).toBe('issue')
         expect(container.textContent).toContain('CHF −12.30')
         const link = container.querySelector('tbody a') as HTMLAnchorElement
         await act(async () => link.click())

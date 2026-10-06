@@ -5,6 +5,7 @@ import { useInvoiceActions } from '../src/features/invoices/useInvoiceActions'
 
 const pushToast = vi.fn()
 const invalidateQueries = vi.fn()
+const onPdfQueued = vi.fn()
 // Appends the interpolated count so tests can assert the scope a label claims,
 // not just which label was chosen.
 const t = (key: string, opts?: { count?: number }) =>
@@ -64,22 +65,29 @@ vi.mock('../src/lib/api/invoices', () => ({
   generateInvoicesForZev: vi.fn(),
   markInvoicePaid: vi.fn(),
   markInvoiceSent: vi.fn(),
+  openInvoicePdf: vi.fn(),
   retryFailedEmail: vi.fn(),
   sendAllInvoices: vi.fn(),
   sendInvoiceEmail: vi.fn(),
 }))
 
-function createHarness(rowsOverride?: unknown[], periodOverride?: { period_start: string; period_end: string }) {
+type HookOptions = Parameters<typeof useInvoiceActions>[0]
+
+function createHarness(
+  rowsOverride?: unknown[],
+  periodOverride?: { period_start: string; period_end: string },
+  extra: Partial<HookOptions> = {},
+) {
   const latestResult = { current: null as ReturnType<typeof useInvoiceActions> | null }
 
-  function Harness() {
+  function Harness({ rows, options }: { rows?: unknown[]; options?: Partial<HookOptions> }) {
     const hookResult = useInvoiceActions({
       selectedZevId: 'zev-1',
       period: periodOverride ?? {
         period_start: '2026-05-01',
         period_end: '2026-05-31',
       },
-      rows: rowsOverride ?? [
+      rows: (rows ?? rowsOverride) ?? [
         {
           participant_id: 'participant-1',
           invoice: null,
@@ -128,6 +136,9 @@ function createHarness(rowsOverride?: unknown[], periodOverride?: { period_start
       ] as any,
       userRole: 'participant',
       onDeleteClick: vi.fn(),
+      onPdfQueued,
+      ...extra,
+      ...options,
     })
 
     useEffect(() => {
@@ -147,6 +158,7 @@ describe('useInvoiceActions hook', () => {
   beforeEach(() => {
     mutationInstances.length = 0
     pushToast.mockClear()
+    onPdfQueued.mockClear()
     invalidateQueries.mockClear()
     container = document.createElement('div')
     document.body.appendChild(container)
@@ -201,10 +213,14 @@ describe('useInvoiceActions hook', () => {
     expect(result!.recommendedBatchAction?.label).toBe('pages.invoices.batch.generateAllCount:1')
     expect(result!.getRowMenuItems({ participant_id: 'participant-4', invoice: { id: 'invoice-sent', status: 'sent', pdf_url: '/pdf/invoice-sent.pdf', email_logs: [], invoice_number: 'INV-003' } as any } as any)).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({ key: 'open-pdf', label: 'common.openPdf' }),
         expect.objectContaining({ key: 'regenerate-pdf' }),
         expect.objectContaining({ key: 'resend-email' }),
       ]),
     )
+    // The row menu opens a stored document; without one there is nothing to open.
+    expect(result!.getRowMenuItems({ participant_id: 'participant-2', invoice: { id: 'invoice-draft', status: 'draft', pdf_url: null, email_logs: [] } as any } as any)
+      .map((item) => item.key)).not.toContain('open-pdf')
   })
 
 })
@@ -221,6 +237,9 @@ describe('recommendedBatchAction ordering', () => {
 
   beforeEach(() => {
     mutationInstances.length = 0
+    pushToast.mockClear()
+    onPdfQueued.mockClear()
+    invalidateQueries.mockClear()
     container = document.createElement('div')
     document.body.appendChild(container)
     root = createRoot(container)
@@ -261,6 +280,7 @@ describe('recommendedBatchAction ordering', () => {
 
   const withStatus = (id: string, status: string) => ({
     participant_id: id,
+    participant_email: `${id}@example.test`,
     invoice: { id: `invoice-${id}`, status, pdf_url: null, email_logs: [], invoice_number: id },
     generation_eligibility: status === 'cancelled' ? ELIGIBLE : null,
   })
@@ -293,16 +313,190 @@ describe('recommendedBatchAction ordering', () => {
     )
   })
 
+  it('offers cancelled generation once while preserving PDF and delete actions', () => {
+    const row = withStatus('p1', 'cancelled')
+    const result = mountRows([row])
+    expect(result.getPrimaryRowAction(row as any)?.key).toBe('generate')
+    expect(result.getRowMenuItems(row as any).map(item => item.key)).toEqual(['delete', 'generate-pdf'])
+  })
+
   it('no longer recommends a PDF pass — PDFs arrive with the invoice', () => {
     expect(recommend([withStatus('p1', 'sent'), withStatus('p2', 'sent')])).toBeNull()
   })
 
   it('excludes blocked and covered rows from generation candidates', () => {
     const result = mountRows([noInvoice('p1'), blocked('p2', 'inv-locked'), covered('p3', 'inv-cover')])
-    expect(result.stats.generationCandidateCount).toBe(1)
     expect(result.recommendedBatchAction?.label).toBe(
       'pages.invoices.batch.generateAllCount:1',
     )
+  })
+
+  it('keeps batch operations without eligible targets out of the menu', () => {
+    const result = mountRows([noInvoice('p1'), withStatus('p2', 'draft'), withStatus('p3', 'sent')])
+    expect(result.batchMenuItems.map(item => item.key)).toEqual(['generate-all', 'approve-all', 'generate-all-pdfs'])
+    expect(mountRows([covered('p1', 'old'), blocked('p2', 'locked')]).batchMenuItems).toEqual([])
+  })
+
+  type Instance = (typeof mutationInstances)[number]
+  const instanceOf = (mutation: { mutate: unknown }): Instance =>
+    mutationInstances.findLast(instance => instance.mutate === mutation.mutate)!
+  const submit = (instance: Instance, result: unknown, variables?: unknown) => {
+    const context = (instance.options.onMutate as (variables?: unknown) => unknown)(variables)
+    return { context, accept: () => act(() => (instance.options.onSuccess as (...args: unknown[]) => void)(result, variables, context)) }
+  }
+  const nextPeriod = { period_start: '2026-06-01', period_end: '2026-06-30' }
+  const overviewInvalidations = (period = '2026-05-01') => invalidateQueries.mock.calls
+    .filter(([{ queryKey }]) => queryKey[1] === 'period-overview' && queryKey.includes(period)).length
+
+  type MutationKey = 'generateMutation' | 'generateAllMutation' | 'generateAllPdfsMutation' | 'sendAllMutation' | 'emailMutation'
+  const base: Partial<HookOptions> = { accountId: 1, canWrite: true }
+
+  /** One mounted hook instance; `update` re-renders it with new props. */
+  function mountInstance(rows: unknown[]) {
+    const { Harness, getResult } = createHarness(rows, undefined, base)
+    const update = (options: Partial<HookOptions> = {}) => act(() => root.render(createElement(Harness, { options })))
+    update()
+    // TanStack Query calls the latest options' callbacks with the context
+    // onMutate returned when the request was made.
+    const latest = (key: MutationKey) => instanceOf(getResult()![key])
+    const submit = (key: MutationKey, result: unknown, variables?: unknown) => {
+      const context = (latest(key).options.onMutate as (variables?: unknown) => unknown)(variables)
+      return {
+        context,
+        accept: () => act(() => (latest(key).options.onSuccess as (...args: unknown[]) => void)(result, variables, context)),
+      }
+    }
+    return { update, submit, getResult }
+  }
+
+  it('snapshots generation targets and starts watching them on acceptance', () => {
+    const hook = mountInstance([noInvoice('p1'), blocked('p2', 'locked')])
+    const queued = hook.submit('generateAllMutation', { participant_count: 1 })
+    expect((queued.context as { participantIds: string[] }).participantIds).toEqual(['p1'])
+    queued.accept()
+    expect(onPdfQueued).toHaveBeenCalledWith(['p1'])
+    // The busy rows report a queued batch; no toast repeats it.
+    expect(pushToast).not.toHaveBeenCalled()
+  })
+
+  const transitions: Array<[string, Array<Partial<HookOptions>>]> = [
+    ['period A → B', [{ period: nextPeriod }]],
+    ['community A → B', [{ selectedZevId: 'zev-2' }]],
+    ['account change', [{ accountId: 2 }]],
+    ['write access revoked', [{ canWrite: false }]],
+    ['period A → B → A', [{ period: nextPeriod }, {}]],
+  ]
+  const mutations: Array<[MutationKey, unknown, unknown]> = [
+    ['generateAllMutation', { participant_count: 1 }, undefined],
+    ['generateMutation', {}, { participant_id: 'p1' }],
+    ['generateAllPdfsMutation', {}, undefined],
+    ['sendAllMutation', { queued: 1, skipped: 0 }, undefined],
+    ['emailMutation', {}, 'invoice-p3'],
+  ]
+
+  describe.each(transitions)('after %s in the same hook instance', (_name, steps) => {
+    beforeEach(() => vi.useFakeTimers())
+    afterEach(() => vi.useRealTimers())
+
+    it.each(mutations)('ignores a late %s acceptance and refreshes only its origin', (key, result, variables) => {
+      const rows = [noInvoice('p1'), withStatus('p2', 'draft'), { ...withStatus('p3', 'approved'), participant_email: 'p3@example.test' }]
+      const hook = mountInstance(rows)
+      const late = hook.submit(key, result, variables)
+      for (const step of steps) hook.update(step)
+      invalidateQueries.mockClear()
+      late.accept()
+      expect(onPdfQueued).not.toHaveBeenCalled()
+      expect(pushToast).not.toHaveBeenCalled()
+      expect(overviewInvalidations('2026-05-01')).toBeLessThanOrEqual(1)
+      if (steps.length === 1 && steps[0].period) expect(overviewInvalidations('2026-06-01')).toBe(0)
+      // No delivery tracking started: nothing polls, nothing is locked.
+      invalidateQueries.mockClear()
+      act(() => { vi.advanceTimersByTime(10_000) })
+      expect(invalidateQueries).not.toHaveBeenCalled()
+      expect(hook.getResult()!.getRowWork(rows[2] as any).sending).toBe(false)
+    })
+  })
+
+  it('ignores an acceptance that arrives after the page unmounted', () => {
+    const hook = mountInstance([noInvoice('p1')])
+    const late = hook.submit('generateAllMutation', { participant_count: 1 })
+    const onSuccess = instanceOf(hook.getResult()!.generateAllMutation).options.onSuccess as (...args: unknown[]) => void
+    act(() => root.render(null))
+    onSuccess({ participant_count: 1 }, undefined, late.context)
+    expect(onPdfQueued).not.toHaveBeenCalled()
+  })
+
+  it('keeps generation disabled for accepted targets until their invoices arrive', () => {
+    const { Harness, getResult } = createHarness(undefined, undefined, { generationParticipantIds: ['p1'] })
+    const rows = [noInvoice('p1'), noInvoice('p2')]
+    act(() => root.render(createElement(Harness, { rows })))
+    const queued = getResult()!
+    expect(queued.getRowWork(rows[0] as any).generating).toBe(true)
+    expect(queued.getRowWork(rows[1] as any).generating).toBe(false)
+    expect(queued.recommendedBatchAction?.disabled).toBe(true)
+    expect(queued.getPrimaryRowAction(rows[0] as any)?.disabled).toBe(true)
+    expect(queued.getPrimaryRowAction(rows[1] as any)?.disabled).toBe(false)
+
+    act(() => root.render(createElement(Harness, { rows: [withStatus('p1', 'draft'), noInvoice('p2')] })))
+    expect(getResult()!.batchMenuItems.find(item => item.key === 'generate-all')?.disabled).toBe(false)
+  })
+
+  it('promotes the first workflow action this range allows', () => {
+    const { Harness, getResult } = createHarness([noInvoice('p1'), withStatus('p2', 'draft')], undefined, { canGenerate: false })
+    act(() => root.render(createElement(Harness)))
+    expect(getResult()!.recommendedBatchAction?.key).toBe('approve-all')
+    expect(getResult()!.batchMenuItems.map(item => item.key)).not.toContain('generate-all')
+  })
+
+  describe('send all delivery tracking', () => {
+    const approved = (id: string, logs: unknown[] = []) => ({
+      ...withStatus(id, 'approved'), participant_email: `${id}@example.test`,
+      invoice: { ...withStatus(id, 'approved').invoice, email_logs: logs },
+    })
+    const delivered = (id: string, status: string) => ({
+      ...approved(id), invoice: { ...approved(id).invoice, status: status === 'sent' ? 'sent' : 'approved',
+        email_logs: [{ id: `log-${id}`, status, created_at: '2026-06-01T10:00:00Z' }] },
+    })
+
+    beforeEach(() => {
+      vi.useFakeTimers()
+      invalidateQueries.mockClear()
+      pushToast.mockClear()
+    })
+    afterEach(() => vi.useRealTimers())
+
+    it('polls the period until every target has a terminal attempt', () => {
+      const { Harness, getResult } = createHarness()
+      act(() => root.render(createElement(Harness, { rows: [approved('p1'), approved('p2')] })))
+      submit(instanceOf(getResult()!.sendAllMutation), { queued: 2, skipped: 0 }).accept()
+      expect(getResult()!.batchMenuItems.find(item => item.key === 'send-all')?.disabled).toBe(true)
+      invalidateQueries.mockClear()
+      act(() => { vi.advanceTimersByTime(2_500) })
+      expect(overviewInvalidations()).toBe(1)
+
+      // One delivery settles; the other is still outstanding.
+      act(() => root.render(createElement(Harness, { rows: [delivered('p1', 'sent'), approved('p2')] })))
+      act(() => { vi.advanceTimersByTime(2_500) })
+      expect(overviewInvalidations()).toBe(2)
+
+      act(() => root.render(createElement(Harness, { rows: [delivered('p1', 'sent'), delivered('p2', 'failed')] })))
+      invalidateQueries.mockClear()
+      act(() => { vi.advanceTimersByTime(30_000) })
+      expect(overviewInvalidations()).toBe(0)
+      expect(pushToast).not.toHaveBeenCalledWith('pages.invoices.messages.emailPollingTimeout', 'error')
+    })
+
+    it('stops at the deadline and says delivery is still unknown', () => {
+      const { Harness, getResult } = createHarness()
+      act(() => root.render(createElement(Harness, { rows: [approved('p1')] })))
+      submit(instanceOf(getResult()!.sendAllMutation), { queued: 1, skipped: 0 }).accept()
+      act(() => { vi.advanceTimersByTime(90_000) })
+      expect(pushToast).toHaveBeenCalledWith('pages.invoices.messages.emailPollingTimeout', 'error')
+      invalidateQueries.mockClear()
+      act(() => { vi.advanceTimersByTime(10_000) })
+      expect(overviewInvalidations()).toBe(0)
+    })
+
   })
 
   it('links a blocked row to its locked invoice instead of generating', () => {
@@ -316,14 +510,9 @@ describe('recommendedBatchAction ordering', () => {
     })
   })
 
-  it('links a covered row to its covering invoice instead of generating', () => {
+  it('offers no action on a covered row: its progress cell links the covering invoice', () => {
     const result = mountRows([covered('p1', 'inv-cover')])
-    const action = result.getPrimaryRowAction({ participant_id: 'p1', invoice: null, generation_eligibility: { state: 'covered', invoice_id: 'inv-cover', invoice_number: 'T-1' } } as any)
-    expect(action?.key).toBe('view-covering-invoice')
-    action?.onClick()
-    expect(mockNavigate).toHaveBeenCalledWith('/billing/invoices/inv-cover', {
-      state: { from: '/billing/invoices', period_start: '2026-05-01', period_end: '2026-05-31' },
-    })
+    expect(result.getPrimaryRowAction({ participant_id: 'p1', invoice: null, generation_eligibility: { state: 'covered', invoice_id: 'inv-cover', invoice_number: 'T-1' } } as any)).toBeNull()
   })
 
   it('keeps a historical viewed period on conflict navigation for the return link', () => {

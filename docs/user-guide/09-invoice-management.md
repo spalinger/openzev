@@ -109,10 +109,6 @@ billing hub. Its tabs are routes — each is directly linkable:
   failed-email banner, **View history** for the actual attempt log, and an
   inline **Retry** per failed latest attempt.
 
-Use the **Reports** link in the Billing header to open annual documents for
-the selected community, then choose the year. Viewers can download the available
-documents.
-
 The yearly whole-ZEV annual-statement ZIP is on **Reports** (see
 [Reports: Annual Report, Statements and Tax Overviews](#reports-annual-report-statements-and-tax-overviews)).
 The former `/billing/statements` address redirects there.
@@ -136,20 +132,35 @@ quality or tariffs. **Open invoices** opens that period's invoices.
 
 After a retry is accepted, the tab shows it as pending while the worker
 starts. It updates automatically when the next delivery attempt is recorded.
-Invoice rows themselves keep only the latest delivery-state badge; detailed
-attempts and errors are kept in the Emails tab's history panel.
+Invoice rows themselves show only the latest delivery state (the **Sent** step
+of their progress); detailed attempts and errors are kept in the Emails tab's
+history panel.
 
 ## Period-Based Invoice View
 
-The **Invoices** tab shows one billing period at a time. There are no status filters — you navigate between periods instead.
+The **Invoices** tab shows one billing period at a time. You move between
+periods, and within a period you can narrow the list to one workflow stage or
+to the rows that need attention.
 
 ### Period Navigation
 
-The toolbar at the top of the page displays:
+The command bar at the top of the tab shows:
 
-- The **ZEV name** and the **period date range** (e.g. `01.01.2026 → 31.01.2026`).
-- The ZEV's **billing interval** (`monthly`, `quarterly`, `semi_annual`, or `annual`).
-- **← Prev Period** and **Next Period →** buttons to step through periods.
+- The **period name** — `September 2026` for a monthly period,
+  `July – September 2026` for a quarter. Hover it to see the exact dates; click
+  it to pick one of the recent periods, each listed with its dates.
+- **‹** and **›** buttons on either side to step to the previous and next
+  period.
+- On the right, the period's **batch actions** (see
+  [Row and Batch Actions](#row-and-batch-actions)).
+
+A range that is not one whole billing period of the community (for example
+from an old bookmark, or an invoice's month after the community switched to
+quarterly billing) shows its dates with a warning badge, **Not a billing
+period**, and a notice above the table. Its invoices can still be approved,
+sent and paid, and their PDFs regenerated, but this page creates no invoices for such a range: the notice's button
+(for example **Show July – September 2026**) opens the whole billing period
+around it, and **‹** / **›** step to the nearest whole periods.
 
 The period is automatically set based on the selected ZEV's billing interval.
 
@@ -163,7 +174,8 @@ The period is automatically set based on the selected ZEV's billing interval.
   period_end=…` — from an Overview period card, an attention item, or your own
   bookmark) shows that **exact period**, including historical periods from an
   earlier billing interval after a switch. Ranges that would start before the
-  community existed are ignored and fall back to the default.
+  community existed are ignored: the page opens the default period and puts
+  it in the address bar.
 - **Boundary:** **Prev** stops at the community's earliest billable period;
   the preset menu offers nothing older. After switching billing intervals,
   already settled periods (fully paid under the previous interval) stay
@@ -171,9 +183,12 @@ The period is automatically set based on the selected ZEV's billing interval.
   offering Generate, while partly overlapping locked invoices surface as a
   generation conflict with a link to the blocking invoices.
 
-Choosing a period updates the URL without changing other filters. Reload and browser Back read the period from that URL. Switching
-community checks the same range against the new community's start date before
-loading its invoices. A failed refresh retains the loaded period rows with
+Choosing a period preserves unrelated URL parameters and clears the row filter. Reload and browser Back read the period from that URL. Switching
+community keeps the period you were looking at where it can: when the other
+community bills in a different interval, you land on its billing period that
+contains the end of the previous one (September in a monthly community becomes
+July – September in a quarterly one, and back), and a period before the
+community's start falls back to the default. A failed refresh retains the loaded period rows with
 **Retry**.
 
 ![Invoice period overview](screenshots/08-invoices.png)
@@ -184,13 +199,27 @@ Each row in the table represents one **participant** who had active metering-poi
 
 | Column | Description |
 |---|---|
-| **Participant** | Name and email address. |
-| **Metering Data** | Green "complete" badge if all assigned metering points have daily readings for the full period. Red "missing" badge otherwise, with a count of points with data vs. total and a list of missing meter IDs with the number of missing days each. |
-| **Invoice** | Linked invoice number and its status badge (`Draft`, `Approved`, `Sent`, `Paid`, `Cancelled`), or "Not created"/"Already billed" for a row without an invoice. Opening details retains the period for the return link. |
-| **Email** | Latest email delivery status badge (`pending`, `sent`, `failed`). Open **Billing → Emails** for attempt history, errors, and retry. |
-| **Total** | Invoice total in CHF. |
-| **PDF** | Preparing, failed, missing or ready state; **Open PDF** when ready. Generation/regeneration actions remain in the row actions. |
-| **Actions** | Per-invoice action buttons (see below). |
+| **Participant** | Current participant name, invoice link and relevant participation dates. Meter locations distinguish several participations held by the same party. Problems appear below the name. |
+| **Progress** | Metering data → Invoice → Approved → Sent → Paid. Checks show completed steps, spinners show pending work, and warning marks show problems. The legend explains the icons. |
+| **Amount (CHF)** | The invoice amount; *-* without a live invoice. |
+| **Actions** | The next step and **More**. Viewers and managers of disabled communities retain **Review conflict** and **Open PDF**. |
+
+- Organisations have a building icon; a household's second name line follows
+  the name. Names come from the current participant data; the invoice PDF keeps the
+  recipient as billed. **Joined**/**Left** dates explain participation inside the period.
+- The invoice number opens details and retains the period for return navigation.
+  Rows without an invoice show **Not created** or **Creating invoice…**;
+  cancelled invoices retain their link and show no billed amount.
+- Problems name missing meters and days, an overlapping locked invoice,
+  a failed PDF, a failed email, or an approved invoice whose participant has no
+  email address (deliver it yourself, then **Mark as Sent**). A settled invoice
+  whose meters were removed shows no missing-data warning.
+- **Already billed** means one or more sent/paid invoices cover the period,
+  for example monthly invoices collectively covering a quarter. No new invoice
+  is needed. The link opens one related invoice.
+
+On narrow screens each row becomes a card: name and amount (with *CHF*)
+first, then the progress and the actions.
 
 ### Empty State
 
@@ -202,32 +231,57 @@ If no participants with active assignments exist for the period, the page shows 
 
 ## Row and Batch Actions
 
-Each row shows its next step as a button — **Generate invoice**, **Approve**,
-**Send Email** or **Mark Paid**, depending on the status — and puts the rest
-under **More**:
+Each row shows its next step as an outlined button — **Generate invoice**,
+**Approve**, **Send Email** or **Mark Paid**, depending on the status — and puts
+the rest under **More**:
 
 | Status | Button | Under **More** |
 | --- | --- | --- |
-| *(none)* / Cancelled | **Generate invoice** / **Generate again** | Delete (cancelled) |
-| Draft | **Approve** | Regenerate invoice, Generate/Regenerate PDF, Delete |
-| Approved | **Send Email** | Mark as Sent, Generate/Regenerate PDF |
-| Sent | **Mark Paid** | Resend Email, Generate/Regenerate PDF |
-| Paid | — | Generate/Regenerate PDF |
+| *(none)* / Cancelled | **Generate invoice** / **Generate again** | Delete invoice (cancelled), Open PDF, Generate/Regenerate PDF |
+| Draft | **Approve** | Regenerate invoice, Delete invoice, Open PDF, Generate/Regenerate PDF |
+| Approved | **Send Email** | Mark as Sent, Open PDF, Generate/Regenerate PDF |
+| Sent | **Mark Paid** | Open PDF, Generate/Regenerate PDF, Resend Email |
+| Paid | — | Open PDF, Generate/Regenerate PDF |
 
-Admins also see **Delete** for approved, sent and paid invoices.
+**More** groups invoice actions first, then PDF and email actions. **Open PDF**
+appears once the invoice has a stored document.
 
-The **Batch actions** toolbar above the table acts on the whole period at once:
-**Generate all**, **Approve all**, **Send all**, **Regenerate all PDFs** and
-**Download all PDFs**. The recommended next batch step names how many
-invoices it touches (for example *Approve 4 invoices*).
+Admins also see **Delete invoice** for approved, sent and paid invoices.
+
+The filter above the table counts the period's rows: **All**, **Drafts**,
+**Approved**, **Sent** and **Issues** (rows with missing metering data, a
+generation conflict, a failed PDF, a failed email or no email address). Select one to show just
+those rows; select it again, **All** or **Show all rows** to clear it. A
+category with no rows cannot be selected. If the selected category empties,
+the page explains why and offers **Show all rows**. Paid invoices appear
+under **All** only. Changing period or community clears the filter.
+
+The **batch actions** in the command bar always act on the whole period,
+including rows hidden by a filter. The recommended next step is the page's one
+filled button and names how many invoices it touches (for example *Approve 4
+invoices*); **Download all PDFs** sits beside it, and **More batch actions**
+holds **Generate all**, **Approve all**, **Send all** and **Regenerate all
+PDFs**. Operations with no eligible invoices are omitted from the menu. While a
+batch request runs, its controls are disabled. Generation remains disabled
+for queued targets until their invoices arrive. **Send all** counts only
+approved invoices with an email address, and stays disabled while any email
+is being sent or its delivery checked; a row's **Send Email** is disabled
+while that invoice's delivery is checked.
 
 ## Generating Invoices
 
 1. Navigate to the desired billing period.
-2. Review the **Metering Data** column — ensure data is complete for the participants you want to invoice.
-3. Click **Generate invoice** on a participant's row, or **Generate all** in the
-   batch toolbar. Generating all runs in the background; the table fills in as
-   the invoices are created.
+2. Check the **Issues** filter — ensure metering data is complete for the participants you want to invoice.
+3. Click **Generate invoice** on a participant's row, or the recommended batch
+   action (*Generate n invoices*) in the command bar. Generating all runs in
+   the background: each row shows *Creating invoice…* until its invoice
+   arrives.
+
+The page watches for queued invoices and their PDFs for up to 90 seconds,
+including while the worker has not created any invoices yet. If processing
+takes longer, a warning says it has not finished: reload the page to check the
+result before generating again. Changing period or
+community stops watching the previous period.
 
 The system calculates energy allocation and applies tariffs, creating a **Draft** invoice.
 
@@ -242,7 +296,7 @@ regenerated.
 
 ## Reviewing Invoices
 
-Click **Open details** on a row to view a read-only invoice detail page.
+Click the invoice number in the **Participant** column to view the invoice detail page.
 
 ### Invoice Detail Page
 
@@ -288,9 +342,9 @@ PDF generation is a separate step from invoice creation.
 - **Regenerate** — replaces an existing PDF (e.g. after the HTML template was updated).
 - **Open PDF** — opens the generated PDF in a new browser tab.
 
-These actions appear in the **PDF** column and under **More** for any invoice
-that exists. **Download all PDFs** in the batch toolbar downloads the period's
-documents together.
+**More → Open PDF** opens the document. Generation and regeneration are also
+under **More** for any invoice that exists. **Download all
+PDFs** in the command bar downloads the period's documents together.
 
 For custom templates that omit the second address line, ask an admin to
 [update the PDF template](14-admin-console.md#invoice-pdf-templates), then regenerate the affected PDFs.
@@ -320,9 +374,11 @@ Revoking is recorded in the audit log, as is every first open of a link in a giv
 Once an invoice is approved, you can email it to the participant.
 
 1. Click **Send Email** on an approved invoice's row (or **Send all**).
-2. The system queues the email and watches for the delivery result.
+2. The system queues the email and watches for the delivery result. **Send all**
+   checks the period until deliveries succeed or fail, for up to 90 seconds.
 3. While it waits, the button shows **Sending…** and is disabled.
-4. The **Email** column updates automatically when the email is delivered or fails.
+4. The row's **Sent** step updates automatically when the email is delivered or
+   fails; a failure also appears in red under the participant.
 
 For a `Sent` invoice, **More → Resend Email** sends another copy.
 
@@ -332,7 +388,7 @@ without an email.
 
 ### Email History
 
-The **Email** column shows only the latest delivery status. Every attempt, with
+The **Sent** step shows only the latest delivery status. Every attempt, with
 recipient, status and error, is in **Billing → Emails** under **View
 history**, where a failed latest attempt also has a **Retry** button.
 
@@ -350,12 +406,12 @@ The status changes to `Paid`. There is no additional confirmation dialog or paym
 
 Invoices can be deleted to clean up incorrect or test data.
 
-1. Open **More** on the row and click **Delete**.
+1. Open **More** on the row and click **Delete invoice**.
 2. Confirm in the deletion dialog.
 
 **Delete visibility rules:**
 
-- **Draft** or **Cancelled** invoices — **More → Delete** is available to managers.
+- **Draft** or **Cancelled** invoices — **More → Delete invoice** is available to managers.
 - **Any status** — admins can always delete.
 
 Deletion is permanent; the invoice is removed from the database.
@@ -445,7 +501,7 @@ available after billing. The selected community appears above the page title.
 
 ## Best Practices
 
-- **Check metering completeness** before generating invoices — the Metering Data column shows exactly which meters are missing data and how many days are affected.
+- **Check metering completeness** before generating invoices — the **Issues** filter lists every participant with missing data, and each row names the affected meters and how many days are missing.
 - **Approve after review** — open the invoice detail page and check the embedded invoice document (line items and totals) before approving.
 - **Generate PDFs before sending** — while not strictly required, generating the PDF first lets you review the document before emailing.
 - **Approve only when final** — once approved, an invoice can no longer be

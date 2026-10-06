@@ -4,6 +4,8 @@ import {
     getCurrentBillingPeriod,
     getPreviousBillingPeriod,
     invoiceRangeFromParams,
+    isBillingAlignedPeriod,
+    alignedPeriodEndingWith,
     type BillingInterval,
 } from './billingPeriod'
 import { usePageNavigation } from './usePageNavigation'
@@ -21,9 +23,10 @@ type BillingPeriodParamsPolicy = {
     /** Only the default period is bounded by this aligned range. */
     minimumFallback?: BillingRange | null
     legacyParams?: boolean
-    /** Dashboard resets on community/interval changes; billing and chart re-read the URL.
+    /** Dashboard resets on community/interval changes; the chart re-reads the URL;
+     * billing aligns a carried-over range to the new community's periods.
      * With reset, the fallback must pass minimumRangeStart or URL reconciliation cannot settle. */
-    scopeChange: 'preserve-url' | 'reset'
+    scopeChange: 'preserve-url' | 'reset' | 'align'
 }
 
 export function readBillingPeriodParams(params: URLSearchParams, legacyParams = false): BillingRange | null {
@@ -35,6 +38,30 @@ export function readBillingPeriodParams(params: URLSearchParams, legacyParams = 
 
 const UNRESOLVED_RANGE: BillingRange = { from: '', to: '' }
 
+/** URL rewrite needed for a scope change or a rejected billing link. */
+export function resolveBillingPeriodTarget({
+    scopeChanged, scopeChange, interval, validRange, hasRangeParams,
+    fallbackRange, minimumRangeStart, minimumFallback,
+}: {
+    scopeChanged: boolean
+    scopeChange: BillingPeriodParamsPolicy['scopeChange']
+    interval: BillingInterval
+    validRange: BillingRange | null
+    hasRangeParams: boolean
+    fallbackRange: BillingRange
+    minimumRangeStart?: string | null
+    minimumFallback?: BillingRange | null
+}): BillingRange | null {
+    if (scopeChanged && scopeChange === 'reset') return fallbackRange
+    if (scopeChange !== 'align') return null
+    if (hasRangeParams && !validRange) return fallbackRange
+    if (!scopeChanged || !validRange || isBillingAlignedPeriod(validRange.from, validRange.to, interval)) return null
+    const aligned = alignedPeriodEndingWith(validRange, interval)
+    if (!invoiceRangeFromParams(aligned.from, aligned.to, minimumRangeStart)
+        || (minimumFallback && aligned.from < minimumFallback.from)) return fallbackRange
+    return aligned
+}
+
 /** The URL is authoritative; no effect copies an old period into a new scope's query. */
 export function useBillingPeriodParams({
     interval, ready, scopeId, fallback, minimumRangeStart, minimumFallback,
@@ -43,7 +70,7 @@ export function useBillingPeriodParams({
     const { searchParams, updateParams } = usePageNavigation()
     const context = `${scopeId}|${interval}`
     const [resolvedContext, setResolvedContext] = useState<string | null>(() => ready ? context : null)
-    const reset = ready && resolvedContext !== null && resolvedContext !== context && scopeChange === 'reset'
+    const scopeChanged = ready && resolvedContext !== null && resolvedContext !== context
 
     const defaultRange = fallback === 'previous-complete'
         ? getPreviousBillingPeriod(interval)
@@ -51,7 +78,16 @@ export function useBillingPeriodParams({
     const fallbackRange = minimumFallback && defaultRange.from < minimumFallback.from ? minimumFallback : defaultRange
     const requested = readBillingPeriodParams(searchParams, legacyParams)
     const validRange = invoiceRangeFromParams(requested?.from, requested?.to, minimumRangeStart)
-    const period = !ready ? UNRESOLVED_RANGE : reset ? fallbackRange : validRange ?? fallbackRange
+    const hasRangeParams = searchParams.has('period_start') || searchParams.has('period_end')
+        || (legacyParams && (searchParams.has('from') || searchParams.has('to')))
+    const rejected = ready && scopeChange === 'align' && hasRangeParams && !validRange
+    const target = ready ? resolveBillingPeriodTarget({
+        scopeChanged, scopeChange, interval, validRange, hasRangeParams,
+        fallbackRange, minimumRangeStart, minimumFallback,
+    }) : null
+    const period = !ready ? UNRESOLVED_RANGE : target ?? validRange ?? fallbackRange
+    const targetFrom = target?.from
+    const targetTo = target?.to
 
     const setPeriod = useCallback((next: BillingRange) => {
         if (!ready || !invoiceRangeFromParams(next.from, next.to, minimumRangeStart)) return
@@ -66,16 +102,16 @@ export function useBillingPeriodParams({
     }, [ready, minimumRangeStart, legacyParams, updateParams])
 
     useEffect(() => {
-        if (!ready || resolvedContext === context) return
+        if (!ready || (resolvedContext === context && !rejected)) return
         // Navigation can commit after a scope render. Keep returning the reset
         // period until its URL arrives, so queries never see the old URL range
         // paired with the new community between those two updates.
-        if (reset && (requested?.from !== fallbackRange.from || requested?.to !== fallbackRange.to)) {
-            setPeriod({ from: fallbackRange.from, to: fallbackRange.to })
+        if (targetFrom && targetTo && (requested?.from !== targetFrom || requested?.to !== targetTo)) {
+            setPeriod({ from: targetFrom, to: targetTo })
             return
         }
         setResolvedContext(context)
-    }, [ready, resolvedContext, context, reset, setPeriod, fallbackRange.from, fallbackRange.to, requested?.from, requested?.to])
+    }, [ready, resolvedContext, context, rejected, targetFrom, targetTo, setPeriod, requested?.from, requested?.to])
 
     return { period, setPeriod, isReady: ready }
 }

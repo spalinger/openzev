@@ -1474,7 +1474,7 @@ and `parties` use `AliasNavigate` to `/zev-settings/people`, retaining
 `focus`, other query parameters and the hash. Destination guards remain
 responsible for access.
 
-Same-hub workflow links, including Community Audit/Export, replace history and
+Same-hub workflow links replace history and
 retain query/hash/state. Cross-hub links open the destination's own context;
 Reports owns year selection, and source/audit links supply their documented
 filter parameters. Draft retention is described in

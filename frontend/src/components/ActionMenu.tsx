@@ -15,9 +15,10 @@ interface ActionMenuProps {
     label: string
     items: ActionMenuItem[]
     icon?: ReactNode
+    iconOnly?: boolean
 }
 
-export function ActionMenu({ label, items, icon }: ActionMenuProps) {
+export function ActionMenu({ label, items, icon, iconOnly = false }: ActionMenuProps) {
     const availableItems = useMemo(() => items.filter((item) => !item.disabled), [items])
     const renderedItems = useMemo(() => {
         return items.map((item, index) => {
@@ -45,9 +46,11 @@ export function ActionMenu({ label, items, icon }: ActionMenuProps) {
                     className="button button-secondary button-compact"
                     disabled={availableItems.length === 0}
                     aria-haspopup="menu"
+                    aria-label={iconOnly ? label : undefined}
+                    title={iconOnly ? label : undefined}
                 >
                     {icon ? <span className="menu-item-icon" aria-hidden="true">{icon}</span> : null}
-                    {label}
+                    {iconOnly ? null : label}
                 </button>
             </Menu.Target>
             <Menu.Dropdown>

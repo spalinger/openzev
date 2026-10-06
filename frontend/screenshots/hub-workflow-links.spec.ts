@@ -98,19 +98,6 @@ async function checkWidths(page: Page, name: string, outputPath: (name: string) 
 test.use({ storageState: { cookies: [], origins: [] }, locale: 'en-CH' })
 
 for (const role of ['admin', 'manager', 'viewer'] as const) {
-  test(`${role} reaches annual documents from Billing`, async ({ page }, testInfo) => {
-    const errors = await mockApi(page, { role })
-    await page.goto('/billing/invoices')
-    const reports = page.locator('main').getByRole('link', { name: 'Reports', exact: true })
-    await expect(reports).toBeVisible()
-    // Admin/viewer cover layout; every role still exercises navigation and permissions.
-    if (role !== 'manager') await checkWidths(page, `billing-${role}`, name => testInfo.outputPath(name))
-    await reports.click()
-    await expect(page).toHaveURL(/\/reports$/)
-    await expect(page.getByRole('button', { name: /Download.*PDF/ }).first()).toBeVisible()
-    expect(errors).toEqual([])
-  })
-
   test(`${role} sees shared-source facts and permitted controls`, async ({ page }, testInfo) => {
     const errors = await mockApi(page, { role, populated: true })
     await sourceApi(page)
@@ -315,7 +302,7 @@ test('source rows and totals survive a failed refetch', async ({ page }) => {
   expect(errors).toEqual([])
 })
 
-test('Audit and Export links preserve a dirty settings draft and its Save action', async ({ page }, testInfo) => {
+test('Audit and Export tabs preserve a dirty settings draft and its Save action', async ({ page }, testInfo) => {
   const errors = await mockApi(page, { role: 'manager' })
   await auditApi(page)
   await page.goto('/zev-settings/general?from=bookmark#community')
@@ -324,12 +311,12 @@ test('Audit and Export links preserve a dirty settings draft and its Save action
   await name.fill('Unsaved community')
   await expect(page.locator('.zev-settings-save-bar')).toBeVisible()
   await page.getByRole('tab', { name: 'Audit log', exact: true }).click()
-  await page.getByRole('link', { name: 'Export ZEV', exact: true }).click()
+  await page.getByRole('tab', { name: 'Export / transfer', exact: true }).click()
   await expect(page).toHaveURL(/\/zev-settings\/export\?from=bookmark#community$/)
   await expect(page.getByRole('button', { name: 'Export ZEV', exact: true })).toHaveClass(/button-secondary/)
   await expect(page.locator('.zev-settings-save-bar').getByRole('button', { name: 'Save changes', exact: true })).toBeVisible()
   await checkWidths(page, 'dirty-community-export', name => testInfo.outputPath(name))
-  await page.getByRole('link', { name: 'Audit log', exact: true }).click()
+  await page.getByRole('tab', { name: 'Audit log', exact: true }).click()
   await expect(page).toHaveURL(/\/zev-settings\/audit\?from=bookmark#community$/)
   await expect(page.locator('.zev-settings-save-bar')).toBeVisible()
   await page.getByRole('tab', { name: 'General', exact: true }).click()
@@ -337,7 +324,7 @@ test('Audit and Export links preserve a dirty settings draft and its Save action
   expect(errors).toEqual([])
 })
 
-test('a viewer exports a disabled community and follows its activity link', async ({ page }, testInfo) => {
+test('a viewer exports a disabled community and opens its audit tab', async ({ page }, testInfo) => {
   const errors = await mockApi(page, { role: 'viewer', zevs: [{ id: '42', name: 'Review ZEV', disabled_at: '2026-09-30T12:00:00Z' }] })
   await auditApi(page)
   const archive = Buffer.from('UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==', 'base64')
@@ -367,7 +354,7 @@ test('a viewer exports a disabled community and follows its activity link', asyn
   expect(download.suggestedFilename()).toBe('review-zev.zip')
   expect(await download.failure()).toBeNull()
   expect(await readFile((await download.path())!)).toEqual(archive)
-  await page.getByRole('link', { name: 'Audit log', exact: true }).click()
+  await page.getByRole('tab', { name: 'Audit log', exact: true }).click()
   await expect(page).toHaveURL(/\/zev-settings\/audit\?from=bookmark#community$/)
   await expect(page.locator('main')).toContainText('Activity for Review ZEV')
   expect(errors).toEqual([])

@@ -2,9 +2,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faBan, faClockRotateLeft, faDownload, faPlay, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
+import { faBan, faDownload, faPlay, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
 import { Tabs } from '@mantine/core'
-import { Link, useBlocker, useLocation, useParams } from 'react-router-dom'
+import { useBlocker, useParams } from 'react-router-dom'
 import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
 import { PageSkeleton } from '../components/PageSkeleton'
 import { ZevEmailTemplateFields } from '../components/ZevEmailTemplateFields'
@@ -85,7 +85,6 @@ export function ZevSettingsTabRoute() {
 export function ZevSettingsPage({ tab = 'general' }: { tab?: ZevSettingsTab }) {
     const { t } = useTranslation()
     const { navigateTab } = usePageNavigation()
-    const location = useLocation()
     const queryClient = useQueryClient()
     const { pushToast } = useToast()
     const { user } = useAuth()
@@ -478,15 +477,6 @@ export function ZevSettingsPage({ tab = 'general' }: { tab?: ZevSettingsTab }) {
                                 <FontAwesomeIcon icon={faDownload} fixedWidth />
                                 {t('zevTransfer.exportAction')}
                             </button>
-                            <Link
-                                className="button button-secondary"
-                                to={{ pathname: '/zev-settings/audit', search: location.search, hash: location.hash }}
-                                state={location.state}
-                                replace
-                            >
-                                <FontAwesomeIcon icon={faClockRotateLeft} fixedWidth />
-                                {t('pages.zevSettings.tabs.auditLog')}
-                            </Link>
                         </div>
                     </section>
 

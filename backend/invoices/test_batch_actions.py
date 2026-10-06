@@ -132,6 +132,8 @@ class TestInvoiceBatchActions:
         zev = ZevFactory(owner=owner)
         ParticipantFactory(zev=zev)
         ParticipantFactory(zev=zev)
+        # Left before the period: the task does not bill them, so they do not count.
+        ParticipantFactory(zev=zev, valid_from=date(2025, 1, 1), valid_to=date(2025, 12, 31))
         client = _owner_client(owner)
 
         with mock.patch("invoices.views.generate_zev_invoices_task.delay") as delay:

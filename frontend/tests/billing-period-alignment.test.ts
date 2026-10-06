@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+    adjacentBillingPeriod,
+    billingPeriodName,
+    billingPeriodsOfYear,
     billingRangeFromParams,
     firstAlignedBillingPeriod,
     getCurrentBillingPeriod,
@@ -140,4 +143,47 @@ describe('firstAlignedBillingPeriod (community-start floor)', () => {
     expect(firstAlignedBillingPeriod(null, 'monthly')).toBeNull()
     expect(firstAlignedBillingPeriod('2026-02-30', 'monthly')).toBeNull()
   })
+})
+
+describe('billingPeriodName (compact period trigger)', () => {
+  it('names a month, a run of months and a year the way people say them', () => {
+    expect(billingPeriodName('2026-09-01', '2026-09-30', 'en')).toBe('September 2026')
+    expect(billingPeriodName('2026-07-01', '2026-09-30', 'de')).toBe('Juli – September 2026')
+    expect(billingPeriodName('2026-01-01', '2026-12-31', 'it')).toBe('Gennaio – dicembre 2026')
+    expect(billingPeriodName('2026-11-01', '2027-01-31', 'en')).toBe('November 2026 – January 2027')
+  })
+
+  it('capitalises the leading month in languages that write months in lower case', () => {
+    expect(billingPeriodName('2026-09-01', '2026-09-30', 'fr')).toBe('Septembre 2026')
+    expect(billingPeriodName('2026-07-01', '2026-09-30', 'fr')).toBe('Juillet – septembre 2026')
+  })
+})
+
+describe('adjacentBillingPeriod (stepping from any range)', () => {
+    it('steps one whole period from an aligned range', () => {
+        expect(adjacentBillingPeriod('2026-07-01', 'quarterly', -1)).toEqual({ from: '2026-04-01', to: '2026-06-30' })
+        expect(adjacentBillingPeriod('2026-07-01', 'quarterly', 1)).toEqual({ from: '2026-10-01', to: '2026-12-31' })
+    })
+
+    it('steps from a month left behind by a monthly community to the nearest quarters', () => {
+        // September sits inside Q3: back is Q3 itself (it starts earlier), forward is Q4.
+        expect(adjacentBillingPeriod('2026-09-01', 'quarterly', -1)).toEqual({ from: '2026-07-01', to: '2026-09-30' })
+        expect(adjacentBillingPeriod('2026-09-01', 'quarterly', 1)).toEqual({ from: '2026-10-01', to: '2026-12-31' })
+        // A quarter's first month steps back past the quarter it opens.
+        expect(adjacentBillingPeriod('2026-07-01', 'annual', -1)).toEqual({ from: '2026-01-01', to: '2026-12-31' })
+        expect(adjacentBillingPeriod('2026-01-01', 'semi_annual', -1)).toEqual({ from: '2025-07-01', to: '2025-12-31' })
+    })
+})
+
+describe('billingPeriodsOfYear (sizing the compact trigger)', () => {
+    it('lists every whole period of the range\'s year', () => {
+        expect(billingPeriodsOfYear('2026-05-01', 'monthly')).toHaveLength(12)
+        expect(billingPeriodsOfYear('2026-07-01', 'quarterly')).toEqual([
+            { from: '2026-01-01', to: '2026-03-31' },
+            { from: '2026-04-01', to: '2026-06-30' },
+            { from: '2026-07-01', to: '2026-09-30' },
+            { from: '2026-10-01', to: '2026-12-31' },
+        ])
+        expect(billingPeriodsOfYear('2026-01-01', 'annual')).toEqual([{ from: '2026-01-01', to: '2026-12-31' }])
+    })
 })

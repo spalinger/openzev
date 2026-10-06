@@ -259,7 +259,7 @@ test.describe('User Guide Screenshots', () => {
   // 07 — Tariffs
   test('07-tariffs', async ({ page }) => {
     await navigateTo(page, '/tariffs')
-    await page.waitForSelector('table, .card', { timeout: 10_000 })
+    await page.waitForSelector('.tariff-card, .empty-state', { timeout: 10_000 })
     await screenshotFull(page, '07-tariffs')
   })
 
@@ -354,7 +354,7 @@ test.describe('User Guide Screenshots', () => {
 
   // 08c — Participant My Invoices (via impersonation)
   test('08c-my-invoices', async ({ page }) => {
-    const ok = await impersonateDemoParticipant(page)
+    const ok = await impersonateDemoParticipant(page, { requireSentInvoice: true })
     if (!ok) {
       test.skip()
       return

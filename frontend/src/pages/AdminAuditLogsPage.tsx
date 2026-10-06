@@ -13,9 +13,6 @@ import { PageHeader } from '../components/PageHeader'
 import { usePageNavigation } from '../lib/usePageNavigation'
 import { Notice } from '../components/Notice'
 import { PageSkeleton } from '../components/PageSkeleton'
-import { Link, useLocation } from 'react-router-dom'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faDownload } from '@fortawesome/free-solid-svg-icons'
 
 type AuditLogsScope = 'admin' | 'owner'
 
@@ -77,7 +74,6 @@ export function AuditLogsPage({ scope, embedded = false }: AuditLogsPageProps & 
     const { settings } = useAppSettings()
     const { user } = useAuth()
     const { searchParams, updateParams } = usePageNavigation()
-    const location = useLocation()
     const isAdminView = scope === 'admin'
     const canUseSearch = isAdminView && user?.role === 'admin'
     const { selectedZevId, selectedZev, isLoading: managedZevLoading } = useManagedZev()
@@ -228,19 +224,6 @@ export function AuditLogsPage({ scope, embedded = false }: AuditLogsPageProps & 
             )}
 
             {embedded && !isAdminView && scopeDescription && <p className="muted">{scopeDescription}</p>}
-            {!isAdminView && (
-                <div className="actions-row">
-                    <Link
-                        className="button button-secondary"
-                        to={{ pathname: '/zev-settings/export', search: location.search, hash: location.hash }}
-                        state={location.state}
-                        replace
-                    >
-                        <FontAwesomeIcon icon={faDownload} fixedWidth />
-                        {t('zevTransfer.exportAction')}
-                    </Link>
-                </div>
-            )}
 
             <section className="card page-stack">
                 <div className="form-grid">

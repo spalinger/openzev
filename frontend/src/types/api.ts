@@ -1041,9 +1041,21 @@ export interface GenerationEligibility {
     invoice_number: string | null
 }
 
-export interface InvoicePeriodParticipantRow {    participant_id: string
+export interface InvoicePeriodParticipantRow {
+    participant_id: string
     participant_name: string
     participant_email?: string
+    /** Whom the row bills (#761): an organisation or a person. */
+    participant_kind: PartyKind
+    /** Second name line, e.g. the other member of a joint household; '' when none. */
+    participant_name_addition: string
+    /** The participation's dates: a move in or out can fall inside the period. */
+    participant_valid_from: string
+    participant_valid_to: string | null
+    /** The party behind the participation; one party can have several rows. */
+    party_id: string
+    /** Locations (else IDs) of the meters assigned during the period. */
+    metering_point_labels: string[]
     invoice: Invoice | null
     /** Generation eligibility for rows without a live exact-period invoice
      * (null when the row's own invoice governs the actions). */

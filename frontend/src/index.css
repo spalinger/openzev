@@ -1922,56 +1922,171 @@ input.recurrence-chip-input {
   min-height: 100%;
 }
 
-.invoice-batch-toolbar {
+/* ── Billing period page: command bar and row filter ── */
+
+.invoice-period-view {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+}
+
+/* Period stepper on the left, the period's batch actions on the right. */
+.invoice-command-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-
-.invoice-batch-header {
-  display: grid;
-  gap: 0.65rem;
-}
-
-.invoice-batch-title {
-  font-weight: 700;
-  color: var(--ink);
-}
-
-.invoice-batch-summary {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.invoice-batch-stat {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.28rem 0.55rem;
-  border-radius: 999px;
-  background: var(--surface);
-  border: 1px solid var(--border-default);
-}
-
-.invoice-batch-stat-label {
-  font-size: 0.78rem;
-  color: var(--text-body);
-}
-
-.invoice-batch-stat-value {
-  font-size: 0.82rem;
-  font-weight: 700;
-  color: var(--ink);
+  gap: 0.75rem 1rem;
 }
 
 .invoice-batch-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
+  min-width: 0;
+}
+
+/* One control size across the bar, the overflow menu's compact button included. */
+.invoice-command-bar .button {
+  min-height: 2.5rem;
+  font-size: 0.9rem;
+}
+
+/* Compact stepper: chevrons around a one-line trigger naming the period. */
+.period-selector--compact {
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.period-selector-step {
+  flex: none;
+  width: 2.5rem;
+  padding-inline: 0;
+}
+
+.period-selector--compact .period-selector-trigger {
+  min-width: 0;
+  min-height: 2.5rem;
+  padding-block: 0.35rem;
+}
+
+.period-selector--compact .period-selector-text {
+  min-width: 0;
+}
+
+.period-selector--compact .period-selector-range {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.period-selector--compact .period-selector-range svg {
+  color: var(--interactive);
+}
+
+/* A range that is no billing period: the warning keeps its icon apart. */
+.period-selector .badge-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+/* The shown name and its invisible siblings share one cell: the widest name
+   of the year sets the width, so stepping never moves the chevrons. */
+.period-selector-name {
+  display: grid;
+  min-width: 0;
+  text-align: start;
+  font-variant-numeric: tabular-nums;
+}
+
+.period-selector-name > span {
+  grid-area: 1 / 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.period-selector-name-sizer {
+  visibility: hidden;
+}
+
+.invoice-filter-bar {
+  display: flex;
   flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+}
+
+.invoice-filter-bar > p {
+  margin: 0;
+}
+
+.invoice-row-filters {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  max-width: 100%;
+  padding: 0.25rem;
+  border: 1px solid var(--border-default);
+  border-radius: 0.8rem;
+  background: var(--surface-card);
+}
+
+.invoice-row-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.1rem;
+  padding: 0.35rem 0.75rem;
+  border: 0;
+  border-radius: 0.6rem;
+  background: transparent;
+  color: var(--text-body);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.invoice-row-filter:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+/* An empty segment has nothing to show: it stays readable but inert. */
+.invoice-row-filter:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.invoice-row-filter[aria-pressed='true'] {
+  background: var(--brand-pale);
+  color: var(--brand-deep);
+}
+
+.invoice-row-filter-count {
+  min-width: 1.4rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: var(--neutral-100);
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.invoice-row-filter[aria-pressed='true'] .invoice-row-filter-count {
+  background: var(--surface-card);
+}
+
+.invoice-row-filter--attention .invoice-row-filter-count {
+  background: var(--danger-100);
+  color: var(--danger-700);
 }
 
 .metering-toolbar {
@@ -2595,6 +2710,309 @@ input.recurrence-chip-input {
   align-content: start;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  border: 0;
+  white-space: nowrap;
+}
+
+/* ── Billing period rows: a table on wide containers, cards on narrow ones ── */
+
+.invoice-rows {
+  container-type: inline-size;
+}
+
+.invoice-rows th {
+  white-space: nowrap;
+}
+
+.invoice-rows th.numeric {
+  text-align: right;
+}
+
+.invoice-rows td {
+  vertical-align: middle;
+}
+
+/* Progress, amount and actions take their content's width; the participant the rest. */
+.invoice-row-progress,
+.invoice-row-total,
+.invoice-rows .invoice-actions-cell {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.invoice-rows .invoice-row-actions {
+  flex-wrap: nowrap;
+}
+
+/* The amount column's header names the currency; card mode shows it inline. */
+.invoice-row-currency {
+  display: none;
+}
+
+/* The name as billed, flowing as text: an organisation's icon leads it, a
+   household's second name line follows in muted text. */
+.invoice-row-name {
+  display: block;
+  color: var(--ink);
+}
+
+.invoice-row-name .muted {
+  margin-inline-start: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.invoice-row-kind {
+  margin-inline-end: 0.3rem;
+  color: var(--ink-soft);
+}
+
+.invoice-row-meta,
+.invoice-row-issues {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 0.75rem;
+  margin-top: 0.15rem;
+  font-size: 0.85rem;
+}
+
+.invoice-row-meta {
+  color: var(--muted);
+}
+
+.invoice-row-issues {
+  color: var(--danger-700);
+  font-weight: 600;
+}
+
+.invoice-row-meta a,
+.invoice-progress-covered a {
+  color: var(--interactive);
+  font-size: inherit;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.invoice-row-meta a:hover,
+.invoice-progress-covered a:hover {
+  text-decoration: underline;
+}
+
+.invoice-row-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--ink-soft);
+}
+
+.invoice-progress {
+  display: flex;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.invoice-progress-step {
+  display: inline-flex;
+}
+
+.invoice-progress-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  font-size: 1.05rem;
+}
+
+.invoice-progress-icon--done,
+.invoice-progress-icon--active {
+  color: var(--brand-mid);
+}
+
+.invoice-progress-icon--issue {
+  color: var(--danger-600);
+}
+
+.invoice-progress-icon--open {
+  color: var(--muted);
+  opacity: 0.5;
+}
+
+/* The state mark sits on the icon's corner inside a ring of card colour. */
+.invoice-progress-mark {
+  position: absolute;
+  right: -0.25rem;
+  bottom: -0.2rem;
+  display: inline-flex;
+  border-radius: 50%;
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1.5px var(--surface-card);
+  font-size: 0.65rem;
+  line-height: 1;
+}
+
+.invoice-progress-icon--done .invoice-progress-mark {
+  color: var(--success-600);
+}
+
+.invoice-progress-icon--active .invoice-progress-mark {
+  color: var(--interactive);
+}
+
+.invoice-progress-covered {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+}
+
+.invoice-progress-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem 1.5rem;
+  padding-top: 0.85rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.invoice-progress-legend ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.invoice-progress-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.invoice-progress-legend .invoice-progress-icon {
+  width: 1.2rem;
+  height: 1.2rem;
+  font-size: 0.85rem;
+}
+
+.invoice-progress-legend-mark {
+  display: inline-flex;
+  font-size: 0.8rem;
+}
+
+.invoice-progress-legend-mark--done {
+  color: var(--success-600);
+}
+
+.invoice-progress-legend-mark--active {
+  color: var(--interactive);
+}
+
+.invoice-progress-legend-mark--issue {
+  color: var(--danger-600);
+}
+
+/* Too narrow for four columns: each row becomes a card — who and how much,
+   then progress beside the actions (below them on phones). */
+@container (max-width: 46rem) {
+  .invoice-rows table,
+  .invoice-rows tbody,
+  .invoice-rows td {
+    display: block;
+  }
+
+  /* Out of sight, not out of the accessibility tree. */
+  .invoice-rows thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .invoice-rows tbody tr {
+    display: grid;
+    grid-template:
+      'who total' auto
+      'progress actions' auto / minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.6rem 1rem;
+    height: auto;
+    padding: 0.9rem 0;
+    border-bottom: 1px solid var(--border-default);
+  }
+
+  .invoice-rows tbody tr:first-child {
+    padding-top: 0.2rem;
+  }
+
+  .invoice-rows tbody td,
+  .invoice-rows tbody tr:hover > td {
+    width: auto;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .invoice-row-who {
+    grid-area: who;
+    align-self: start;
+  }
+
+  .invoice-row-total {
+    grid-area: total;
+    align-self: start;
+  }
+
+  /* The header that names the currency is out of sight here. */
+  .invoice-row-currency {
+    display: inline;
+  }
+
+  .invoice-row-progress {
+    grid-area: progress;
+  }
+
+  .invoice-rows .invoice-actions-cell {
+    grid-area: actions;
+    width: auto;
+  }
+}
+
+@container (max-width: 28rem) {
+  .invoice-rows tbody tr {
+    grid-template:
+      'who total' auto
+      'progress progress' auto
+      'actions actions' auto / minmax(0, 1fr) auto;
+  }
+
+  .page-stack .invoice-rows .invoice-actions-cell {
+    text-align: start;
+    white-space: normal;
+  }
+
+  .invoice-rows .invoice-actions-cell .invoice-row-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+}
+
 .invoice-row-actions {
   display: flex;
   gap: 0.4rem;
@@ -2602,8 +3020,8 @@ input.recurrence-chip-input {
   align-items: center;
 }
 
-.invoice-actions-cell {
-  text-align: right !important;
+.page-stack .invoice-actions-cell {
+  text-align: end;
 }
 
 .invoice-actions-cell .invoice-row-actions {

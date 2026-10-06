@@ -90,12 +90,12 @@ defined by shared frontend primitives and CSS contracts.
 
 | File | Export | Contract |
 |---|---|---|
-| `frontend/src/components/ActionMenu.tsx` | `ActionMenu` | Overflow action trigger for lower-priority row/card actions. Uses labelled menu items, optional icons, section headers, and danger styling. Default button class: `button button-secondary button-compact`. |
+| `frontend/src/components/ActionMenu.tsx` | `ActionMenu` | Overflow action trigger for lower-priority row/card actions. Uses labelled menu items, optional icons, section headers, and danger styling. Default button class: `button button-secondary button-compact`. Passing an icon retains visible text by default; `iconOnly` explicitly opts in to an accessible icon-only trigger. |
 | `frontend/src/components/ConfirmDialog.tsx` | `useConfirmDialog`, `ConfirmDialog` | Required wrapper for destructive or high-impact actions. Supports `title`, `message`, `isDangerous`, and async confirm handlers. `confirmText` and `cancelText` are optional and default to `common.confirm` / `common.cancel` i18n keys. Async errors surface via a toast (uses `useToast` internally). |
 | `frontend/src/components/FormModal.tsx` | `FormModal` | Generic modal shell for CRUD forms and small workflow dialogs. |
-| `frontend/src/components/PeriodSelector.tsx` | `PeriodSelector` | Billing-interval navigation and optional custom ranges. Callers own period URL state and the aligned navigation floor. |
+| `frontend/src/components/PeriodSelector.tsx` | `PeriodSelector` | Billing-interval navigation and optional custom ranges. Callers own period URL state and the aligned navigation floor. `compact` (whole periods) renders labelled chevron buttons around a one-line trigger naming the period via `billingPeriodName` (`lib/billingPeriod.ts`), with the exact dates in its tooltip and menu; the year's other names sit invisibly in the same cell so the trigger keeps a stable width. A whole-period selector (`allowCustomRange={false}`) steps from any range to the nearest whole periods (`adjacentBillingPeriod`); in `compact` mode a range that is not a whole period keeps its dates under a warning badge (`common.periodSelector.notBillingPeriod`), elsewhere under the **Custom** info badge. |
 | `frontend/src/components/YearPicker.tsx` | `YearPicker` | Native year control with `years`, `value`, `onChange`, optional `disabled`, required translated `label`, optional `id`, `visibleLabel` (default true), and `className`. It generates an associated id when omitted; hidden labels use `aria-label`. Range/default/rollover policy stays with the caller. |
-| `frontend/src/components/InvoicePresentation.tsx` | `InvoiceLink`, `InvoiceStatusBadge`, `InvoiceDeliveryStatus`, `InvoiceAmount`, `InvoicePdfCell`, `InvoiceActionButton`, `InvoiceRowActions` | Typed invoice cells/actions shared by period rows, own invoices, and the admin DataTable. Callers own row models, eligibility and permission checks; no shared pagination layer. |
+| `frontend/src/components/InvoicePresentation.tsx` | `InvoiceLink`, `InvoiceStatusBadge`, `InvoiceAmount`, `InvoicePdfCell`, `InvoiceActionButton`, `InvoiceRowActions` | Typed invoice cells/actions shared by period rows, own invoices, and the admin DataTable. `InvoiceActionButton`/`InvoiceRowActions` take `variant` (`primary` default, `secondary` outlined where a page-level primary action leads). `InvoiceAmount` takes `currency` (default true); `false` drops "CHF" for a column whose header names it. Callers own row models, eligibility and permission checks; no shared pagination layer. |
 | `frontend/src/components/PageHeader.tsx` | `PageHeader` | Page title (`h1`), optional `eyebrow`, `description`, and `actions`. Keep it outside data/scope state branches. Embedded pages use the host page title. |
 | `frontend/src/components/Notice.tsx` | `Notice` | Errors use `alert`, warnings use `status`; optional role override and retry with busy feedback. |
 | `frontend/src/components/PageState.tsx` | `PageState` | Blocking error → skeleton → content, with translated fallback error text and optional retry. |
@@ -147,9 +147,15 @@ present. Dates must be real ISO calendar days with `from <= to`.
 
 - `InvoicesContent`: `fallback: 'previous-complete'`, `minimumRangeStart`
   equals community start, `minimumFallback` is the first aligned period,
-  `scopeChange: 'preserve-url'`. Historical/custom URL ranges from community
+  `scopeChange: 'align'`. Historical/custom URL ranges from community
   start remain valid even before today's aligned floor. A scope/interval change
-  revalidates the URL before querying the new scope.
+  revalidates the URL before querying the new scope, and a range that is not a
+  whole period of the new community becomes the whole period holding its last
+  day (`alignedPeriodEndingWith`), or the default period when that predates the
+  community; the corrected range is returned until its URL commits, so no
+  query pairs the old range with the new community. Under `align`, a URL range the page
+  rejects (malformed, or before `minimumRangeStart`) is also replaced by the
+  fallback it shows.
 - `MeteringChartPage`: `fallback: 'current'`, no minimum URL range,
   legacy reads enabled, `scopeChange: 'preserve-url'`. Valid custom ranges
   survive scope and interval changes; absent/invalid dates use the new current
@@ -210,6 +216,7 @@ language and should be reused instead of ad hoc page-local CSS when possible:
 | `.skeleton-block` | Skeleton item radius/spacing bound to tokens; `prefers-reduced-motion: reduce` disables Mantine shimmer via `useReducedMotion() → animate={false}` + `.skeleton-block` CSS |
 | `.skeleton-table-rows` | Grid for `PageSkeleton` table rows (`display:grid; gap:0.6rem`); shared by `table` and `tableRows` variants |
 | `.checkbox-row` | Flex row for a checkbox and its label (`display:flex; align-items:center; gap:0.6rem`) |
+| `.visually-hidden` | Text for assistive technology only (clipped 1px box), e.g. per-step state text in icon rows |
 | `.participant-*`, `.metering-*`, `.tariff-*`, `.invoice-*` | Page-family-specific structural patterns that are already in active use |
 
 Form controls: native text-like inputs and single-value selects share one
@@ -265,6 +272,9 @@ scroll the table instead of squeezing its dates into tall rows.
 
 - Use `FontAwesomeIcon` from `@fortawesome/react-fontawesome`.
 - Action buttons that are visible in the main UI should use **icon + text**, not icon-only buttons.
+  Exceptions are stepping chevrons beside a labelled control and billing
+  overflow-menu triggers explicitly opting into `iconOnly`. Both retain
+  translated accessible names and tooltips. Other callers remain labelled.
 - Use `fixedWidth` on action icons to align labels vertically.
 - Do not embed symbols such as `+` in translated button labels when the button already renders an icon.
 - Destructive actions use the trash icon; edit uses pen; create/add uses plus; import/export use upload/download; cancel/close uses x-mark; approval/save uses check when a stronger visual cue is useful.
@@ -283,9 +293,10 @@ No Celery, integration, or backend workflow changes are introduced here.
 Frontend interaction rules relevant to async work:
 
 - `frontend/src/lib/useWriteScope.ts` owns the shared write lifetime for
-  Participants, Imports, tariff CRUD/versioning and metering-point actions.
-  `scope` identity changes with account ID, selected community or write
-  capability; layout-effect cleanup revokes it on replacement/unmount.
+  Participants, Imports, tariff CRUD/versioning, metering-point actions and
+  billing-period invoice actions. `scope` identity changes with account ID,
+  selected community, write capability or the optional `scopeKey` (billing
+  passes the period); layout-effect cleanup revokes it on replacement/unmount.
   `isCurrent(scope)` gates local completion effects and retained callbacks;
   `assertWritable(scope)` rejects obsolete, read-only or unresolved-community
   writes immediately before API dispatch, including queued mutations. Each
@@ -441,10 +452,12 @@ These pages define the current management-page reference set.
 - File: `frontend/src/pages/InvoicesPage.tsx`
 - Route: `/billing/invoices` (`/invoices` stays as alias)
 - Query key: `['invoices', 'period-overview', selectedZevId, period.period_start, period.period_end]`
-- Pattern: period navigation via `PeriodSelector` and `useBillingPeriodParams`, batch toolbar,
-  compact structured table rows, primary/secondary/overflow actions. The email
-  column carries only the latest delivery-state badge; delivery history is
-  owned by `BillingEmailsPage`.
+- Pattern: compact period navigation and whole-period batch actions, followed
+  by counted row filters and four-column workflow rows. Narrow containers use
+  cards. Row actions are outlined; billing overflow triggers opt into
+  icon-only presentation. Shared billing behavior, URL reconciliation, async
+  lifetime and read-only contracts are defined in
+  [Invoice lifecycle §Frontend](2026-03-invoice-lifecycle-and-communication.md#frontend).
 
 #### `OverviewPage`
 
@@ -524,8 +537,20 @@ These pages define the current management-page reference set.
 - Meter drafts: `frontend/tests/metering-draft-scope.test.ts` — dialog retention/reset, original-community cache invalidation after remount or navigation, and suppression after account/session cache resets.
 - Email history/retry: `frontend/tests/billing-email-history.test.ts` — request ordering, close/reopen, and obsolete read/write completions across account/community changes.
 - Write lifetime: `frontend/tests/write-scope.test.ts` covers stable identity, StrictMode replay, account/community/capability changes and return transitions, unmount and explicit all-community writes. Consumer tests retain coverage for dialog resets and delayed completions; `imports-wizard.test.ts` also rejects queued upload/single-delete/bulk-delete dispatch after scope replacement.
-- Shared behavior: `billing-period-params.test.ts` covers calendar validation, canonical/legacy precedence, page defaults/minima, readiness, scope/interval reconciliation, reload/back navigation, query/hash preservation and history policy. `invoice-presentation.test.ts` covers PDF states, missing-invoice rows, delivery annotation precedence, read-only rows, return context, cached failures and admin sorting/filtering/pagination. `screenshots/shared-page-behavior.spec.ts` checks period deep links, reload/back navigation, delayed interval data, routed tabs, Participants/Tariffs scope loading/failure/empty and cached-refresh states, console errors and desktop/400px layouts through the real app.
+- Shared behavior: `billing-period-params.test.ts` covers calendar validation, canonical/legacy precedence, page defaults/minima, readiness, scope/interval reconciliation (including `align`: a carried-over range becomes the new community's whole period, a deep link within one community stays, a rejected link is replaced by the period shown), reload/back navigation, query/hash preservation and history policy. `invoice-presentation.test.ts` covers PDF states, missing-invoice rows, delivery annotation precedence, read-only rows, return context, cached failures and admin sorting/filtering/pagination. `screenshots/shared-page-behavior.spec.ts` checks period deep links, reload/back navigation, delayed interval data, routed tabs, Participants/Tariffs scope loading/failure/empty and cached-refresh states, console errors and desktop/400px layouts through the real app.
 - Invoice states: `frontend/tests/invoices-page.test.ts` — standalone titles during scope loading/error/empty states, embedded heading ownership, and a skeleton before initial period/query resolution.
+- Invoice presentation coverage:
+
+  | Test | Contract |
+  |---|---|
+  | `invoice-row-filters.test.ts` | Shared issues, progress, local work and filter populations |
+  | `invoice-batch-bar.test.ts`, `invoices-page-filters.test.ts` | Filters, allowed recommendations and whole-period actions |
+  | `invoice-row-layout.test.ts`, `invoice-actions-hook.test.ts` | Billing identity, navigation, menu and workflow actions; stale acceptance after period, community, account, write-access and A→B→A changes in one hook instance; queued-generation locking and Send all delivery polling |
+  | `invoice-email-lock.test.ts` | Real mutations with held-open requests: row and batch sends lock each other; a row send is followed through the overview, announced once, and dropped on a period change |
+  | `billing-period-params.test.ts`, `billing-period-alignment.test.ts` | URL rejection, historical ranges and interval reconciliation |
+  | `period-selector-compact.test.ts` | Named periods, accessible chevrons and exact dates |
+  | `screenshots/billing-presentation.spec.ts` | Four-language desktop/400px geometry, permissions, Issues filtering during a PDF retry, long identities with every issue, queued lifetimes, polling and the unfinished-work deadline notice (test-driven fake timers); run locally via `test:browser` |
+
 - Retired CSS classes: `npx vitest run tests/retired-css-classes.test.ts` — classes with no rule must not survive in markup
 - Manual verification on the reference pages:
   - page header and description are present

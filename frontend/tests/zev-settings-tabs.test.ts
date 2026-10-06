@@ -642,9 +642,9 @@ describe('ZEV settings routed form', () => {
         expect(saveButton(container)).toBeDefined()
         const exportButton = Array.from(container.querySelectorAll('button')).find(button => button.textContent?.includes('zevTransfer.exportAction'))!
         expect(exportButton.classList.contains('button-secondary')).toBe(true)
-        const auditLink = container.querySelector<HTMLAnchorElement>('a[href="/zev-settings/audit?from=bookmark#draft"]')!
-        expect(auditLink).not.toBeNull()
-        await act(async () => { auditLink.click() })
+        // No in-panel detour link: the tab strip is the way to Audit.
+        expect(container.querySelector('a[href*="/zev-settings/audit"]')).toBeNull()
+        await clickTab(container, 'auditLog')
         expect(router.state.location.search).toBe('?from=bookmark')
         expect(router.state.location.hash).toBe('#draft')
         expect(container.textContent).toContain('audit')

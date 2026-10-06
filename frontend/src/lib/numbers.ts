@@ -36,12 +36,16 @@ export function formatPercent(
  * Values rounding to zero (|value| < 0.005) clamp to CHF 0.00 — never CHF −0.00.
  */
 export function formatChf(value: number): string {
-    if (!Number.isFinite(value)) return 'CHF 0.00'
-    if (Math.abs(value) < 0.005) return 'CHF 0.00'
+    return `CHF ${formatChfAmount(value)}`
+}
+
+/** A CHF amount without the currency, for a column whose header names it. */
+export function formatChfAmount(value: number): string {
+    if (!Number.isFinite(value) || Math.abs(value) < 0.005) return '0.00'
 
     const absFormatted = formatNumber(Math.abs(value), { minDecimals: 2, maxDecimals: 2 })
 
-    return value < 0 ? `CHF \u2212${absFormatted}` : `CHF ${absFormatted}`
+    return value < 0 ? `\u2212${absFormatted}` : absFormatted
 }
 
 /** Human-readable byte size for the admin system-health tab (phase 3):

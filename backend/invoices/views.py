@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from django.http import FileResponse, HttpResponse
 from accounts.permissions import HasZevAccess
 from allocation.errors import AllocationError
+from allocation.validity import active_during
 from zev.models import Zev, Participant
 from zev import access
 from zev.scoping import ZevScopedQuerySetMixin
@@ -405,7 +406,9 @@ class InvoiceViewSet(
         except DynamicTariffError as exc:
             return Response(exc.as_dict(), status=status.HTTP_409_CONFLICT)
 
-        participant_count = Participant.objects.filter(zev=zev).count()
+        # The task bills whoever takes part during the period, not everyone the
+        # community ever had: count the same set.
+        participant_count = active_during(zev.participants, period_start, period_end).count()
 
         generate_zev_invoices_task.delay(str(zev.id), str(period_start), str(period_end))
         _record_invoice_event(

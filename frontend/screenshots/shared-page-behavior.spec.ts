@@ -217,7 +217,7 @@ test('an invoice deletion dialog does not survive a community switch', async ({ 
   await page.goto('/billing/invoices?period_start=2026-09-01&period_end=2026-09-30')
   await expect(page.locator('tbody tr')).toHaveCount(1)
   await page.getByRole('button', { name: 'More', exact: true }).click()
-  await page.getByRole('menuitem', { name: 'Delete', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Delete invoice', exact: true }).click()
   await expect(page.getByText('Delete Invoice', { exact: true })).toBeVisible()
   // The modal overlay blocks the sidebar, so reconcile by removing the
   // selected community and refetching on focus — the dialog must not survive.

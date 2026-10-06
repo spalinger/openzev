@@ -571,10 +571,10 @@ Every validated control carries a `data-zev-field` anchor for focus jumps.
 - **Documents & emails** (`documents`): email template fields below, notes,
   local tariff notes and additional contract notes.
 - **Audit log** (`audit`): embedded `AuditLogsPage scope="owner"`, locked to
-  the selected ZEV with a community description and a link to Export;
+  the selected ZEV with a community description;
   no platform-wide log or free-text search.
 - **Export / transfer** (`export`): opens `ZevExportModal` for the selected
-  ZEV and links to Audit. Eligibility and draft retention are described in
+  ZEV. Eligibility and draft retention are described in
   `2026-08-zev-transfer-archive.md` §9. Import is on the platform ZEVs tab.
 
 **Cross-tab validation:** `attemptSave` runs `validateZevForm` over the whole
