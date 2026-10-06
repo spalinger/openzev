@@ -2,8 +2,9 @@
 
 Two communities owned by one demo owner (flagship STWEG + company ZEV),
 accounts (including a viewer and a property manager with per-ZEV access), meters, readings, tariffs, invoices in every status, and
-operational history (import/email logs, contracts, audit events). See the
-README for the full list and the demo login credentials.
+operational history (import/email logs, contracts, audit events), plus personas
+for the per-ZEV access and party model (#761). See the README for the full list
+and the demo login credentials.
 """
 
 from __future__ import annotations
@@ -54,7 +55,8 @@ from zev.models import (
     ZevType,
 )
 from zev.buildings import ensure_initial_building
-from zev.parties import assign_role, ensure_initial_roles, set_landowner_building
+from zev.parties import assign_role, ensure_initial_roles
+from zev.services import issue_invitation
 
 
 
@@ -446,6 +448,89 @@ class Command(BaseCommand):
         ZevAccessGrant.objects.filter(zev=zev, user=property_manager).delete()
         self._upsert_grant(zev=second_zev, user=property_manager, role=ZevAccessRole.MANAGER, granted_by=owner)
 
+        # Access and party personas (#761); the README lists what each shows.
+        former_user = self._upsert_user(
+            User,
+            username="demo_former",
+            email="former@openzev.local",
+            password="former1234",
+            role="user",
+            first_name="Maria Alexandra Elisabeth",
+            last_name="von Sonnenberg-Musterlingen",
+        )
+        household_user = self._upsert_user(
+            User,
+            username="demo_household",
+            email="household@openzev.local",
+            password="household1234",
+            role="user",
+            first_name="Robin",
+            last_name="Muster",
+        )
+        organisation_user = self._upsert_user(
+            User,
+            username="demo_organisation",
+            email="organisation@openzev.local",
+            password="organisation1234",
+            role="user",
+            first_name="Mira",
+            last_name="Keller",
+        )
+        mixed_user = self._upsert_user(
+            User,
+            username="demo_mixed",
+            email="mixed@openzev.local",
+            password="mixed1234",
+            role="user",
+            first_name="Sam",
+            last_name="Wechsel",
+        )
+        self._upsert_grant(zev=zev, user=mixed_user, role=ZevAccessRole.MANAGER, granted_by=owner)
+        auditor = self._upsert_user(
+            User,
+            username="demo_auditor",
+            email="treuhand@openzev.local",
+            password="treuhand1234",
+            role="user",
+            first_name="Tina",
+            last_name="Treuhand",
+        )
+        # Access is checked against the real date, so this end date follows
+        # today rather than --end-date: the login must still work.
+        self._upsert_grant(
+            zev=zev, user=auditor, role=ZevAccessRole.VIEWER, granted_by=owner,
+            valid_to=date(today.year + 1, 3, 31),
+        )
+        newcomer = self._upsert_user(
+            User,
+            username="demo_newcomer",
+            email="newcomer@openzev.local",
+            password="newcomer1234",
+            role="user",
+            first_name="Nora",
+            last_name="Neu",
+        )
+        if not newcomer.may_create_zev:
+            newcomer.may_create_zev = True
+            newcomer.save(update_fields=["may_create_zev"])
+        # Like an access-API invitation: inactive, no password, an unused
+        # link. Never emailed; a re-seed issues a fresh link.
+        invitee, _ = User.objects.update_or_create(
+            username="demo_invitee",
+            defaults={
+                "email": "invitee@openzev.local",
+                "role": "user",
+                "first_name": "Alex",
+                "last_name": "Eingeladen",
+                "is_active": False,
+            },
+        )
+        if invitee.has_usable_password():
+            invitee.set_unusable_password()
+            invitee.save(update_fields=["password"])
+        self._upsert_grant(zev=second_zev, user=invitee, role=ZevAccessRole.VIEWER, granted_by=owner)
+        issue_invitation(invitee)
+
         # Participants and their meter assignments are valid from the start of
         # the previous calendar year — not just from the seed window — so
         # annual statements and reports cover a full year. ``start_date``
@@ -463,7 +548,29 @@ class Command(BaseCommand):
             city="Bern",
             valid_from=main_valid_from,
         )
-        ensure_initial_roles(zev, owner_participant.party, main_valid_from)
+        # Dated issuer handover: the previous owner (no login) issued H1 of
+        # the settled year, Paula from mid-year. Rows are rebuilt every run.
+        ZevPartyRole.objects.filter(
+            zev=zev, role__in=[PartyRole.ISSUER, PartyRole.LANDOWNER]
+        ).delete()
+        handover_day = date(end_date.year - 1, 7, 1)
+        previous_issuer = self._upsert_party(
+            zev=zev,
+            kind=PartyKind.PERSON,
+            first_name="Otto",
+            last_name="Vorbesitzer",
+            email="",
+            phone="+41 31 555 05 05",
+            address_line1="Solarweg 1",
+            postal_code="3000",
+            city="Bern",
+        )
+        assign_role(
+            zev, previous_issuer, PartyRole.ISSUER,
+            main_valid_from, valid_to=handover_day - timedelta(days=1),
+        )
+        assign_role(zev, owner_participant.party, PartyRole.ISSUER, handover_day)
+        assign_role(zev, owner_participant.party, PartyRole.LANDOWNER, main_valid_from)
         # One property: its single building takes the issuer's address.
         main_building = ensure_initial_building(zev)
         self._drop_grant_covered_by_role(zev, owner)
@@ -493,6 +600,64 @@ class Command(BaseCommand):
             city="Bern",
             valid_from=main_valid_from,
         )
+        # Flat 3 changes tenants at the start of Q2 last year ("last year" is
+        # the year before --end-date). Maria keeps this address until her
+        # invoices are seeded, then moves away (below).
+        tenant_change = date(end_date.year - 1, 4, 1)
+        former_participant = self._upsert_participant(
+            zev=zev,
+            user=former_user,
+            title=Participant.Title.MS,
+            first_name="Maria Alexandra Elisabeth",
+            last_name="von Sonnenberg-Musterlingen",
+            email=former_user.email,
+            phone="+41 31 555 60 60",
+            address_line1="Aarestrasse 16",
+            postal_code="3000",
+            city="Bern",
+            valid_from=main_valid_from,
+            valid_to=tenant_change - timedelta(days=1),
+        )
+        household_participant = self._upsert_participant(
+            zev=zev,
+            user=household_user,
+            title=Participant.Title.MR,
+            first_name="Robin",
+            last_name="Muster",
+            name_addition="und Dominique Muster-Keller",
+            email=household_user.email,
+            phone="+41 31 555 61 61",
+            address_line1="Aarestrasse 16",
+            postal_code="3000",
+            city="Bern",
+            valid_from=tenant_change,
+        )
+        organisation_participant = self._upsert_participant(
+            zev=zev,
+            user=organisation_user,
+            title=Participant.Title.MS,
+            kind=PartyKind.ORGANISATION,
+            organisation_name="Atelier für nachhaltige Architektur und Gebäudetechnik Muster AG",
+            first_name="Mira",
+            last_name="Keller",
+            email=organisation_user.email,
+            phone="+41 31 555 62 62",
+            address_line1="Aarestrasse 10",
+            address_line2="Atelier im Erdgeschoss",
+            postal_code="3000",
+            city="Bern",
+            valid_from=main_valid_from,
+        )
+        # Ben's parking space is a second participation of his party, told
+        # apart from his flat by its note.
+        garage_note = "Einstellhalle, Platz 4 mit Ladestation"
+        garage_participant = Participant.objects.filter(
+            zev=zev, party=participant_two.party, notes=garage_note,
+        ).first() or Participant(zev=zev, party=participant_two.party, notes=garage_note)
+        garage_participant.user = participant_two_user
+        garage_participant.valid_from = main_valid_from
+        garage_participant.valid_to = None
+        garage_participant.save()
 
         # Parties that are not participants (#761): the Verwaltung represents
         # the community toward the grid operator, and its login manages the
@@ -568,6 +733,27 @@ class Command(BaseCommand):
             location_description="Common area: stairwell, lift, laundry",
             building=main_building,
         )
+        flat_three_cons = self._upsert_metering_point(
+            zev=zev,
+            meter_id="CH-DEMO-CONS-0004",
+            meter_type=MeteringPointType.CONSUMPTION,
+            location_description="Apartment 3 consumption meter",
+            building=main_building,
+        )
+        studio_cons = self._upsert_metering_point(
+            zev=zev,
+            meter_id="CH-DEMO-CONS-0005",
+            meter_type=MeteringPointType.CONSUMPTION,
+            location_description="Ground-floor studio consumption meter",
+            building=main_building,
+        )
+        charger_cons = self._upsert_metering_point(
+            zev=zev,
+            meter_id="CH-DEMO-EV-0001",
+            meter_type=MeteringPointType.CONSUMPTION,
+            location_description="Garage space 4: EV charger",
+            building=main_building,
+        )
 
         self._ensure_assignment(owner_prod, owner_participant, main_valid_from)
         self._ensure_assignment(participant_one_cons, participant_one, main_valid_from)
@@ -576,14 +762,24 @@ class Command(BaseCommand):
             common_area_cons, owner_participant, main_valid_from,
             allocation_mode=AllocationMode.COMMUNITY,
         )
+        self._ensure_assignment(studio_cons, organisation_participant, main_valid_from)
+        self._ensure_assignment(charger_cons, garage_participant, main_valid_from)
+        self._ensure_assignments(flat_three_cons, [
+            (former_participant, main_valid_from, former_participant.valid_to),
+            (household_participant, tenant_change, None),
+        ])
 
-        # Deliberately unequal so the demo shows a real weighted split rather
-        # than an equal one that looks the same either way: 1 / 1 / 2 -> 25 %,
-        # 25 %, 50 % of every common-area cost.
+        # Unequal so the demo shows a real weighted split rather than an equal
+        # one that looks the same either way; the parking space carries a
+        # small share.
         for participant, weight in (
             (owner_participant, Decimal("1")),
             (participant_one, Decimal("1")),
             (participant_two, Decimal("2")),
+            (former_participant, Decimal("2")),
+            (household_participant, Decimal("2")),
+            (organisation_participant, Decimal("2")),
+            (garage_participant, Decimal("0.25")),
         ):
             if participant.allocation_weight != weight:
                 participant.allocation_weight = weight
@@ -595,8 +791,20 @@ class Command(BaseCommand):
         # Rerun hygiene: drop every earlier reading on the main meters (both
         # last run's quarter window and its hourly history) so the shifting
         # seed windows below can never leave overlapping or stale rows behind.
+        # The roof is sized for the whole house, so the year's production
+        # still slightly exceeds its consumption.
+        main_meters = [
+            (owner_prod, ReadingDirection.OUT, self._scaled_kwh(self._producer_kwh, 2.0)),
+            (participant_one_cons, ReadingDirection.IN, self._consumer_one_kwh),
+            (participant_two_cons, ReadingDirection.IN, self._consumer_two_kwh),
+            (common_area_cons, ReadingDirection.IN, self._common_area_kwh),
+            (flat_three_cons, ReadingDirection.IN, self._scaled_kwh(self._consumer_two_kwh, 1.15)),
+            (studio_cons, ReadingDirection.IN, self._studio_kwh),
+            (charger_cons, ReadingDirection.IN, self._ev_charger_kwh),
+        ]
+        consumption_meters = [meter for meter, direction, _ in main_meters if direction == ReadingDirection.IN]
         deleted_readings = MeterReading.objects.filter(
-            metering_point__in=[owner_prod, participant_one_cons, participant_two_cons, common_area_cons],
+            metering_point__in=[meter for meter, _, _ in main_meters],
         ).delete()[0]
 
         # Reading volume dominates re-seed time, so 15-minute rows are kept
@@ -606,12 +814,6 @@ class Command(BaseCommand):
         # ``end_date`` once and shared by every meter. The full previous
         # calendar year stays hourly so the reports pages can render a
         # complete year at a fraction of the row count.
-        main_meters = [
-            (owner_prod, ReadingDirection.OUT, self._producer_kwh),
-            (participant_one_cons, ReadingDirection.IN, self._consumer_one_kwh),
-            (participant_two_cons, ReadingDirection.IN, self._consumer_two_kwh),
-            (common_area_cons, ReadingDirection.IN, self._common_area_kwh),
-        ]
         self._seed_history_readings(
             history_start=history_start,
             stop_date=start_date,
@@ -635,6 +837,12 @@ class Command(BaseCommand):
             skip_period=(invoice_period_start, invoice_period_end),
         )
         seeded_invoices = self._seed_invoices(zev, invoice_period_start, invoice_period_end)
+        # Maria has moved away; her issued invoices keep their address copy.
+        former_participant.address_line1 = "Alte Sonnenbergstrasse 123, Haus C, Appartement 42"
+        former_participant.address_line2 = "Eingang Nord, 3. Obergeschoss, Klingel Musterlingen"
+        former_participant.postal_code = "8001"
+        former_participant.city = "Zürich"
+        former_participant.save()
 
         # Second community: same shapes as the main one but smaller. Its
         # monthly cadence lets us seed a *closed* previous month (paid and
@@ -643,6 +851,7 @@ class Command(BaseCommand):
         second = self._seed_second_community(
             owner=owner,
             clara_user=second_participant_user,
+            mixed_user=mixed_user,
             zev=second_zev,
             start_date=start_date,
             end_date=end_date,
@@ -669,7 +878,7 @@ class Command(BaseCommand):
         )
         consumption_total = (
             MeterReading.objects.filter(
-                metering_point__in=[participant_one_cons, participant_two_cons, common_area_cons]
+                metering_point__in=consumption_meters
             ).aggregate(total=Sum("energy_kwh"))["total"]
             or Decimal("0")
         )
@@ -703,11 +912,19 @@ class Command(BaseCommand):
             "  Admin:         admin@openzev.local / admin1234",
             "  Issuer:        owner@openzev.local / owner1234                (ZEV 1 + ZEV 2)",
             "  Participant 1: anna@openzev.local / anna1234                  (ZEV 1)",
-            "  Participant 2: ben@openzev.local / ben1234                    (ZEV 1)",
+            "  Participant 2: ben@openzev.local / ben1234                    (ZEV 1, flat 2 + parking space with charger)",
             "  Participant 3: clara@openzev.local / clara1234                (ZEV 2)",
             "  Viewer:        viewer@openzev.local / viewer1234              (ZEV 1, read-only)",
             "  Manager:       manager@openzev.local / manager1234            (ZEV 1 as representative + ZEV 2)",
-            "  Contact:       Hans Hauswart, no login                         (ZEV 1)",
+            "  Former:        former@openzev.local / former1234              (ZEV 1, moved out)",
+            "  Household:     household@openzev.local / household1234        (ZEV 1, joint household)",
+            "  Organisation:  organisation@openzev.local / organisation1234  (ZEV 1, organisation)",
+            "  Mixed:         mixed@openzev.local / mixed1234                (ZEV 1 manager by grant + ZEV 2 participant)",
+            "  Treuhand:      treuhand@openzev.local / treuhand1234          (ZEV 1 viewer until 31 March next year)",
+            "  Newcomer:      newcomer@openzev.local / newcomer1234          (no ZEV yet, may set one up)",
+            "  Invited:       invitee@openzev.local, no password             (ZEV 2 viewer, invitation pending)",
+            "  No login:      Otto Vorbesitzer (ZEV 1 issuer until mid last year), Hans Hauswart (ZEV 1 contact),",
+            "                 Lukas (ZEV 2 participant and landowner)",
             "",
             f"ZEV 1: {zev.name} (full dataset, {zev.billing_interval} "
             f"{zev.invoice_language.upper()} invoices, VAT folded into prices)",
@@ -722,7 +939,7 @@ class Command(BaseCommand):
             f"  Deleted existing demo readings: {deleted_readings}",
             f"  Production total ({history_start} -> {end_date}): {production_total} kWh",
             f"  Consumption total ({history_start} -> {end_date}): {consumption_total} kWh",
-            f"    of which common area (split 25/25/50 by weight): {common_area_total} kWh",
+            f"    of which common area (split by weight): {common_area_total} kWh",
             f"  Production minus consumption: {(production_total - consumption_total).quantize(Decimal('0.0001'))} kWh",
         ]
         if gap_start is not None:
@@ -827,7 +1044,7 @@ class Command(BaseCommand):
             # The invoice counter is part of the canonical config too: the
             # seed deletes the demo invoices before regenerating them, so
             # without the reset the numbers would keep climbing across
-            # re-seeds (the settled year alone consumes twelve). The
+            # re-seeds. The
             # contract counter is deliberately left alone — issued
             # contract snapshots are not deleted, so resetting it could
             # mint duplicate CTR-YYYY-NNNN document numbers.
@@ -908,6 +1125,7 @@ class Command(BaseCommand):
         *,
         owner,
         clara_user,
+        mixed_user=None,
         zev: Zev,
         start_date: date,
         end_date: date,
@@ -919,7 +1137,7 @@ class Command(BaseCommand):
         refresh semantics: assignments re-applied, tariffs rebuilt, and
         readings and invoices replaced on every run. Clara has a login so the
         participant side can be demoed on this ZEV too; Lukas is billed by
-        mail without an account.
+        mail without an account. Sam has just moved in, without a meter yet.
 
         Two months of invoices are seeded: the last complete month in the
         normal draft/approved/sent progression, and the month before it as a
@@ -948,8 +1166,8 @@ class Command(BaseCommand):
         )
         ensure_initial_roles(zev, owner_participant.party, start_date)
         self._drop_grant_covered_by_role(zev, owner)
-        # A vZEV of three houses, one building each (#890); the owner's
-        # landowner role names the house it owns.
+        # A vZEV of three houses, one building each (#890); the landowner
+        # roles are assigned below, once all three participants exist.
         owner_house = self._upsert_building(
             zev=zev, address_line1="Solarweg 1", name="Solarweg 1", postal_code="3000", city="Bern",
         )
@@ -961,9 +1179,6 @@ class Command(BaseCommand):
             zev=zev, address_line1="Monbijoustrasse 88", name="Monbijoustrasse 88",
             postal_code="3007", city="Bern",
         )
-        landowner = ZevPartyRole.objects.filter(zev=zev, role=PartyRole.LANDOWNER, party=owner_participant.party).first()
-        if landowner is not None and landowner.building_id is None:
-            set_landowner_building(landowner, owner_house)
         participant_one = self._upsert_participant(
             zev=zev,
             user=clara_user,
@@ -989,6 +1204,37 @@ class Command(BaseCommand):
             postal_code="3007",
             city="Bern",
             valid_from=start_date,
+        )
+        # Sam has just moved in: his meter is not assigned yet, so he has no
+        # seeded invoices.
+        if mixed_user is not None:
+            self._upsert_participant(
+                zev=zev,
+                user=mixed_user,
+                title=Participant.Title.MR,
+                first_name="Sam",
+                last_name="Wechsel",
+                email=mixed_user.email,
+                phone="+41 31 555 63 63",
+                address_line1="Monbijoustrasse 90",
+                postal_code="3007",
+                city="Bern",
+                valid_from=end_date,
+            )
+
+        # One landowner per house, rebuilt every run; Lukas has no login.
+        ZevPartyRole.objects.filter(zev=zev, role=PartyRole.LANDOWNER).delete()
+        assign_role(
+            zev, owner_participant.party, PartyRole.LANDOWNER,
+            start_date, building=owner_house,
+        )
+        assign_role(
+            zev, participant_one.party, PartyRole.LANDOWNER,
+            start_date, building=clara_house,
+        )
+        assign_role(
+            zev, participant_two.party, PartyRole.LANDOWNER,
+            start_date, building=lukas_house,
         )
 
         owner_prod = self._upsert_metering_point(
@@ -1029,8 +1275,7 @@ class Command(BaseCommand):
         )
 
         # Equal weights here — each participant pays one third of the common
-        # area — which reads differently from the main ZEV's deliberate
-        # 1 / 1 / 2 split.
+        # area — which reads differently from the main ZEV's unequal weights.
         for participant in (owner_participant, participant_one, participant_two):
             if participant.allocation_weight != Decimal("1"):
                 participant.allocation_weight = Decimal("1")
@@ -1226,8 +1471,8 @@ class Command(BaseCommand):
         # Two representative contracts — Anna on the flagship (German) and
         # Clara on the second community (English) — issued through the real
         # issuance path; unchanged re-seeds reuse the stored snapshot.
-        # Issuing all six would triple the PDF-render cost for no new demo
-        # value. One failing participant must not roll back the whole seed
+        # Issuing one for every participation would multiply the PDF-render
+        # cost for no new demo value. One failing participant must not roll back the whole seed
         # (``handle`` is atomic), so it is warned and skipped.
         for participant in Participant.objects.filter(
             zev__in=[zev, second_zev],
@@ -1457,16 +1702,27 @@ class Command(BaseCommand):
         user.save()
         return user
 
-    def _upsert_grant(self, *, zev: Zev, user, role: str, granted_by) -> ZevAccessGrant:
-        """An open grant of ``role`` for ``user`` on ``zev``, valid since the
-        community started (or today, for a community that starts later)."""
+    def _upsert_grant(
+        self, *, zev: Zev, user, role: str, granted_by, valid_to: date | None = None,
+    ) -> ZevAccessGrant:
+        """A grant of ``role`` for ``user`` on ``zev``, valid since the
+        community started (or today, for a community that starts later).
+        Open-ended unless ``valid_to`` is given; a dated grant replaces the
+        user's earlier grants on the ZEV."""
+        valid_from = min(zev.start_date, date.today())
+        if valid_to is not None:
+            ZevAccessGrant.objects.filter(zev=zev, user=user).delete()
+            return ZevAccessGrant.objects.create(
+                zev=zev, user=user, role=role, valid_from=valid_from, valid_to=valid_to,
+                granted_by=granted_by,
+            )
         grant = ZevAccessGrant.objects.filter(zev=zev, user=user, valid_to__isnull=True).first()
         if grant is None:
             grant = ZevAccessGrant.objects.create(
                 zev=zev,
                 user=user,
                 role=role,
-                valid_from=min(zev.start_date, date.today()),
+                valid_from=valid_from,
                 granted_by=granted_by,
             )
         elif grant.role != role:
@@ -1488,23 +1744,32 @@ class Command(BaseCommand):
         postal_code: str,
         city: str,
         valid_from: date,
+        valid_to: date | None = None,
+        kind: str = PartyKind.PERSON,
+        organisation_name: str = "",
+        name_addition: str = "",
+        address_line2: str = "",
     ) -> Participant:
+        # Oldest first: Ben's party also holds his parking space.
         participant = Participant.objects.filter(
             zev=zev, party__first_name=first_name, party__last_name=last_name,
-        ).first() or Participant(zev=zev)
+        ).order_by("created_at").first() or Participant(zev=zev)
+        participant.kind = kind
+        participant.organisation_name = organisation_name
         participant.first_name = first_name
         participant.last_name = last_name
+        participant.name_addition = name_addition
         participant.user = user
         participant.title = title
         participant.email = email
         participant.phone = phone
         participant.address_line1 = address_line1
+        participant.address_line2 = address_line2
         participant.postal_code = postal_code
         participant.city = city
         participant.valid_from = valid_from
-        # A re-seed is the refresh: any manually-ended window is reopened so
-        # the seed's assignments stay open-ended.
-        participant.valid_to = None
+        # A re-seed resets the window.
+        participant.valid_to = valid_to
         participant.save()
         return participant
 
@@ -1559,17 +1824,27 @@ class Command(BaseCommand):
         valid_from: date,
         allocation_mode: str = AllocationMode.PERSONAL,
     ) -> None:
-        # The seed window moves every quarter. Drop the prior open-ended window
-        # first so the new one cannot trip the model's non-overlap guard on save.
+        self._ensure_assignments(meter, [(participant, valid_from, None)], allocation_mode=allocation_mode)
+
+    def _ensure_assignments(
+        self,
+        meter: MeteringPoint,
+        windows: list[tuple[Participant, date, date | None]],
+        allocation_mode: str = AllocationMode.PERSONAL,
+    ) -> None:
+        """Replace ``meter``'s assignments with ``windows``, in order."""
+        # The seed window moves every quarter. Drop the prior windows first so
+        # the new ones cannot trip the model's non-overlap guard on save.
         with transaction.atomic():
             MeteringPointAssignment.objects.filter(metering_point=meter).delete()
-            MeteringPointAssignment.objects.create(
-                metering_point=meter,
-                participant=participant,
-                valid_from=valid_from,
-                valid_to=None,
-                allocation_mode=allocation_mode,
-            )
+            for participant, valid_from, valid_to in windows:
+                MeteringPointAssignment.objects.create(
+                    metering_point=meter,
+                    participant=participant,
+                    valid_from=valid_from,
+                    valid_to=valid_to,
+                    allocation_mode=allocation_mode,
+                )
 
     def _seed_tariffs(
         self, zev: Zev, valid_from: date, specs: list | None = None,
@@ -2058,6 +2333,22 @@ class Command(BaseCommand):
         variation = ((day_index % 11) - 5) * 0.0020
         value = (base + morning + midday + evening + variation) * (1.04 if weekday >= 5 else 0.99)
         return Decimal(str(round(max(value, 0.005), 4)))
+
+    def _studio_kwh(self, timestamp: datetime, day_index: int) -> Decimal:
+        """An office: busy on weekday working hours, a standby base otherwise."""
+        hour = timestamp.hour + timestamp.minute / 60.0
+        base = 0.018
+        office = (0.210 if timestamp.weekday() < 5 else 0.0) * self._gaussian(hour, 12.5, 3.0)
+        variation = ((day_index % 5) - 2) * 0.0020
+        return Decimal(str(round(max(base + office + variation, 0.005), 4)))
+
+    def _ev_charger_kwh(self, timestamp: datetime, day_index: int) -> Decimal:
+        """A car charged on some evenings; the charger idles in between."""
+        hour = timestamp.hour + timestamp.minute / 60.0
+        if day_index % 3 != 0:
+            return Decimal("0.002")
+        charging = 1.6 * self._gaussian(hour, 20.5, 1.4)
+        return Decimal(str(round(max(charging, 0.002), 4)))
 
     def _producer_kwh(self, timestamp: datetime, day_index: int) -> Decimal:
         hour = timestamp.hour + timestamp.minute / 60.0

@@ -41,7 +41,7 @@ location, and a vZEV with several landowners cannot say who owns which building.
 | Transfer / backups | Archive format 6 (`buildings.json` in the `metering_points` section); backups registry |
 | Frontend | Buildings managed on the metering points page (list grouped by building, building form); building select in the metering-point form; building filter; building on landowner rows; "copy address from building" in the participant form; "copy address from participant" in the building form |
 | Map | The participants map draws buildings (geocoded from the building address) instead of participants' billing addresses; participant addresses are no longer geocoded (§7.7) |
-| Demo | `seed_demo`: the vZEV demo gets more than one building (three houses, the owner's landowner role names its house) |
+| Demo | `seed_demo`: the vZEV demo gets more than one building (three houses, each with its own landowner role naming it) |
 | Docs | User guide (ZEV setup, metering points, participants, transfer), baseline specs |
 
 ### Out of scope

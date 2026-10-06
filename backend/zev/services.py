@@ -6,9 +6,10 @@ from typing import TYPE_CHECKING
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.utils import timezone
 from django.utils.text import slugify
 
-from accounts.models import UserRole
+from accounts.models import EmailVerificationToken, UserRole
 
 if TYPE_CHECKING:
     from .models import ParticipantOnboardingToken
@@ -310,3 +311,13 @@ def create_zev_for_existing_owner(*, owner_user, zev_data: dict, participant_dat
         'zev': {'id': str(zev.id), 'name': zev.name},
         'owner_participant_id': str(owner_participant.id),
     }
+
+
+def issue_invitation(user) -> EmailVerificationToken:
+    """A fresh invitation link; earlier unused ones stop working."""
+    user.email_verification_tokens.filter(
+        purpose=EmailVerificationToken.Purpose.INVITATION, consumed_at__isnull=True
+    ).update(consumed_at=timezone.now())
+    return EmailVerificationToken.objects.create(
+        user=user, token=secrets.token_urlsafe(48), purpose=EmailVerificationToken.Purpose.INVITATION
+    )

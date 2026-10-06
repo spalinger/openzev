@@ -2609,7 +2609,11 @@ class SeedDemoEndToEndTests(TestCase):
 	tests cover: every wipe/replace step and the operational-history seeding
 	working together."""
 
-	WINDOW = ["--start-date=2025-11-01", "--end-date=2026-01-15"]
+	# Pinned, so the seed's dates relative to --end-date ("last year") are
+	# fixed: the expectations below derive from END, not from today.
+	END = date(2026, 1, 15)
+	LAST_YEAR = END.year - 1
+	WINDOW = ["--start-date=2025-11-01", f"--end-date={END.isoformat()}"]
 
 	def _run(self):
 		buf = StringIO()
@@ -2697,3 +2701,107 @@ class SeedDemoEndToEndTests(TestCase):
 		contact = Party.objects.get(zev=flagship, last_name="Hauswart")
 		self.assertFalse(contact.roles.exists())
 		self.assertFalse(contact.participations.exists())
+
+	def test_the_access_personas_survive_a_reseed(self):
+		"""Re-seeding keeps the #761 personas as the README describes them."""
+		from accounts.models import User
+		from zev import access
+		from zev.models import MeteringPointAssignment, Participant, PartyKind, ZevPartyRole
+		from zev.views_access import is_pending_invitation
+
+		self._run()
+		self._run()
+		flagship = Zev.objects.get(name=DEMO_ZEV_NAME)
+		second_zev = Zev.objects.get(name=SECOND_DEMO_ZEV_NAME)
+		year = self.LAST_YEAR
+
+		with self.subTest("invoices name the issuer of their period end"):
+			invoices = Invoice.objects.filter(zev=flagship, period_end__year=year)
+			self.assertEqual(len({invoice.period_end for invoice in invoices}), 4)
+			for invoice in invoices:
+				expected = "Otto Vorbesitzer" if invoice.period_end < date(year, 7, 1) else "Paula Producer"
+				self.assertIn(expected, invoice.issuer["name"], invoice.period_end)
+			self.assertEqual(ZevPartyRole.objects.filter(zev=flagship, role="issuer").count(), 2)
+
+		maria = User.objects.get(email="former@openzev.local")
+		maria_participation = Participant.objects.get(user=maria)
+		maria_invoice = Invoice.objects.get(participant=maria_participation)
+		with self.subTest("flat 3 changes tenants on one meter"):
+			robin = Participant.objects.get(user__email="household@openzev.local")
+			self.assertEqual(maria_participation.valid_to, date(year, 3, 31))
+			self.assertEqual(robin.valid_from, date(year, 4, 1))
+			self.assertEqual(robin.name_addition, "und Dominique Muster-Keller")
+			windows = list(
+				MeteringPointAssignment.objects.filter(metering_point__meter_id="CH-DEMO-CONS-0004")
+				.order_by("valid_from")
+				.values_list("participant", "valid_to")
+			)
+			self.assertEqual(windows, [(maria_participation.pk, date(year, 3, 31)), (robin.pk, None)])
+
+		with self.subTest("Maria sees her own invoice and nothing else"):
+			client = APIClient()
+			client.force_authenticate(maria)
+			listing = client.get("/api/v1/invoices/invoices/").json()
+			self.assertEqual([row["id"] for row in listing["results"]], [str(maria_invoice.pk)])
+			self.assertEqual(client.get(f"/api/v1/invoices/invoices/{maria_invoice.pk}/").status_code, 200)
+			other = Invoice.objects.filter(zev=flagship).exclude(participant=maria_participation).first()
+			self.assertEqual(client.get(f"/api/v1/invoices/invoices/{other.pk}/").status_code, 404)
+			access.invalidate(maria)
+			self.assertFalse(access.can_view(maria, flagship))
+
+		with self.subTest("her invoice keeps the address it was issued to"):
+			self.assertEqual(maria_invoice.recipient["address_line1"], "Aarestrasse 16")
+			self.assertEqual(maria_invoice.recipient["city"], "Bern")
+			self.assertEqual(maria_participation.address_line1, "Alte Sonnenbergstrasse 123, Haus C, Appartement 42")
+			self.assertEqual(maria_participation.city, "Zürich")
+
+		with self.subTest("Ben's flat and parking space share one party"):
+			ben_rows = Participant.objects.filter(user__email="ben@openzev.local")
+			self.assertEqual(ben_rows.count(), 2)
+			self.assertEqual(len({row.party_id for row in ben_rows}), 1)
+			self.assertTrue(all(row.last_name == "Consumer" for row in ben_rows))
+			meters = set(
+				MeteringPointAssignment.objects.filter(participant__in=ben_rows)
+				.values_list("metering_point__meter_id", flat=True)
+			)
+			self.assertEqual(meters, {"CH-DEMO-CONS-0002", "CH-DEMO-EV-0001"})
+
+		with self.subTest("the studio is billed to an organisation"):
+			studio = Participant.objects.get(user__email="organisation@openzev.local")
+			self.assertEqual(studio.kind, PartyKind.ORGANISATION)
+			self.assertTrue(studio.organisation_name.startswith("Atelier"))
+			self.assertEqual(studio.address_line2, "Atelier im Erdgeschoss")
+
+		with self.subTest("Sam manages ZEV 1 by grant and participates in ZEV 2"):
+			sam = User.objects.get(email="mixed@openzev.local")
+			access.invalidate(sam)
+			self.assertTrue(access.can_manage(sam, flagship))
+			self.assertFalse(access.can_manage(sam, second_zev))
+			self.assertTrue(Participant.objects.filter(user=sam, zev=second_zev).exists())
+
+		with self.subTest("each house of ZEV 2 has its landowner"):
+			pairs = set(
+				ZevPartyRole.objects.filter(zev=second_zev, role="landowner")
+				.values_list("party__last_name", "building__name")
+			)
+			self.assertEqual(pairs, {
+				("Producer", "Solarweg 1"),
+				("Müller", "Kirchenfeldstrasse 42"),
+				("Schneider", "Monbijoustrasse 88"),
+			})
+
+		with self.subTest("dated grant, self-setup and pending invitation"):
+			auditor_grant = ZevAccessGrant.objects.get(user__email="treuhand@openzev.local")
+			self.assertEqual(auditor_grant.role, "viewer")
+			# Grants follow the real date, not the pinned window.
+			self.assertEqual(auditor_grant.valid_to, date(date.today().year + 1, 3, 31))
+			newcomer = User.objects.get(email="newcomer@openzev.local")
+			self.assertTrue(newcomer.may_create_zev)
+			access.invalidate(newcomer)
+			self.assertFalse(any(access.can_view(newcomer, zev) for zev in Zev.objects.all()))
+			invitee = User.objects.get(email="invitee@openzev.local")
+			self.assertTrue(is_pending_invitation(invitee))
+			self.assertFalse(invitee.is_active)
+			self.assertFalse(invitee.has_usable_password())
+			self.assertEqual(invitee.email_verification_tokens.filter(consumed_at__isnull=True).count(), 1)
+			self.assertEqual(len(mail.outbox), 0)

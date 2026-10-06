@@ -27,9 +27,11 @@ Self-hosted, AGPL-3.0.
 
 ### Communities, roles and metering points
 
-Four roles (`admin`, `zev_owner`, `participant`, `guest`), each with its own view of
-the same data: owners and admins get the operational screens, participants get
-self-service access to their own consumption and invoices.
+Access is per ZEV. Managers run a ZEV: whoever holds its issuer or representative
+role, plus anyone granted manager access. Viewers see the same screens read-only,
+and participants get self-service access to their own consumption and invoices.
+Admins see every ZEV. One account can relate to several ZEVs in different ways and
+switch between them.
 
 Assignments between participants and metering points carry validity dates, so
 someone who moves out on 15 March is billed to 15 March and the next tenant picks up
@@ -404,10 +406,29 @@ Seeded demo users:
 - Admin: `admin@openzev.local` / `admin1234`
 - Issuer and manager: `owner@openzev.local` / `owner1234`
 - Participant (ZEV 1): `anna@openzev.local` / `anna1234`
-- Participant (ZEV 1): `ben@openzev.local` / `ben1234`
+- Participant (ZEV 1, flat 2 + parking space with charger): `ben@openzev.local` / `ben1234`
 - Participant (ZEV 2): `clara@openzev.local` / `clara1234`
 - Viewer (ZEV 1, read-only): `viewer@openzev.local` / `viewer1234`
 - Property manager (both ZEVs): `manager@openzev.local` / `manager1234`
+- Former participant (ZEV 1, moved out): `former@openzev.local` / `former1234`
+- Joint household (ZEV 1): `household@openzev.local` / `household1234`
+- Organisation participant (ZEV 1): `organisation@openzev.local` / `organisation1234`
+- Manager of ZEV 1 by grant + participant of ZEV 2: `mixed@openzev.local` / `mixed1234`
+- Viewer of ZEV 1 until 31 March next year (Treuhand): `treuhand@openzev.local` / `treuhand1234`
+- No ZEV yet, may set one up: `newcomer@openzev.local` / `newcomer1234`
+- Pending invitation (ZEV 2 viewer, no password yet): `invitee@openzev.local`
+
+"Last year" below means the year before `--end-date`.
+
+- **Dated issuer:** Otto Vorbesitzer (no login) issued the flagship's invoices until
+  30 June last year, Paula Producer from 1 July.
+- **Tenant change:** Maria left flat 3 after Q1 last year and the Musters took over the
+  same meter. Maria's login shows only her one invoice; she has moved away since, and
+  that invoice keeps her old address.
+- **Parties that are not participants:** the Verwaltung Muster AG represents the
+  flagship and manages it through that role; Hans Hauswart is a contact without access.
+- **Landowners:** each house of the second ZEV has its own (Paula, Clara, Lukas). The
+  role grants no access.
 
 The seed command creates two communities owned by the same demo owner, so the community switcher can be exercised:
 

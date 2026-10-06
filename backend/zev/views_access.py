@@ -17,7 +17,6 @@ read-only, and change only with the role.
 from __future__ import annotations
 
 import logging
-import secrets
 
 from django.conf import settings
 from django.core.mail import EmailMessage
@@ -36,7 +35,7 @@ from audit.services import record_audit_event
 
 from . import access
 from .models import Participant, Party, Zev, ZevAccessGrant, ZevAccessRole
-from .services import build_unique_username
+from .services import build_unique_username, issue_invitation
 
 logger = logging.getLogger(__name__)
 
@@ -177,16 +176,6 @@ def _send_access_email(
         from_email=settings.DEFAULT_FROM_EMAIL,
         to=[to],
     ).send(fail_silently=False)
-
-
-def _issue_invitation(user) -> EmailVerificationToken:
-    """A fresh invitation link; earlier unused ones stop working."""
-    user.email_verification_tokens.filter(
-        purpose=EmailVerificationToken.Purpose.INVITATION, consumed_at__isnull=True
-    ).update(consumed_at=timezone.now())
-    return EmailVerificationToken.objects.create(
-        user=user, token=secrets.token_urlsafe(48), purpose=EmailVerificationToken.Purpose.INVITATION
-    )
 
 
 def send_invitation(zev, grant, token) -> None:
@@ -339,7 +328,7 @@ class ZevAccessListView(_ZevAccessBase):
             if party is not None and not access.party_accounts(party):
                 party.user = account
                 party.save(update_fields=["user", "updated_at"])
-            token = _issue_invitation(account) if invited else None
+            token = issue_invitation(account) if invited else None
         access.invalidate(account)
 
         email_sent = True
@@ -458,7 +447,7 @@ class ZevAccessResendInvitationView(_ZevAccessBase):
         if grant.user.is_active:
             return Response({"detail": "This account has already accepted its invitation."},
                             status=status.HTTP_400_BAD_REQUEST)
-        token = _issue_invitation(grant.user)
+        token = issue_invitation(grant.user)
         email_sent = True
         try:
             send_invitation(zev, grant, token)
