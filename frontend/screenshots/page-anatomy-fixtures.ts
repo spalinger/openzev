@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test'
+import type { InvoicePeriodParticipantRow } from '../src/types/api'
 
 export const apiErrors = new WeakMap<Page, string[]>()
 
@@ -21,6 +22,7 @@ export type ApiState = {
   interval?: 'monthly' | 'quarterly' | 'semi_annual' | 'annual'
   communityStart?: string
   populated?: boolean
+  periodRows?: InvoicePeriodParticipantRow[]
   invoices?: Array<{
     id: string; invoice_number: string; zev: string; zev_name: string;
     participant: string; participant_name: string; status: string;
@@ -32,6 +34,8 @@ export type ApiState = {
   pendingScope?: string
   onPending?: () => void
   year?: number
+  /** Fake timers too, so a test can step polling intervals itself. */
+  fakeTimers?: boolean
 }
 
 export async function mockApi(page: Page, state: ApiState = {}) {
@@ -45,7 +49,8 @@ export async function mockApi(page: Page, state: ApiState = {}) {
       errors.push(message.text())
     }
   })
-  await page.clock.setFixedTime(new Date('2026-10-02T12:00:00Z'))
+  if (state.fakeTimers) await page.clock.install({ time: new Date('2026-10-02T12:00:00Z') })
+  else await page.clock.setFixedTime(new Date('2026-10-02T12:00:00Z'))
   await page.addInitScript(() => {
     // Only the app needs this preference; Chromium's PDF frames may lack storage.
     if (window === window.top && location.protocol.startsWith('http')) {
@@ -193,10 +198,10 @@ export async function mockApi(page: Page, state: ApiState = {}) {
     }
     if (path.endsWith('/invoices/invoices/1/')) return route.fulfill({ json: invoice })
     if (path.endsWith('/invoices/invoices/period-overview/')) return route.fulfill({ json: {
-      rows: state.populated ? [{ participant_id: invoice.participant, participant_name: invoice.participant_name,
+      rows: state.periodRows ?? (state.populated ? [{ participant_id: invoice.participant, participant_name: invoice.participant_name,
         invoice, generation_eligibility: null, metering_data_complete: true,
         metering_points_total: 1, metering_points_with_data: 1, missing_meter_ids: [],
-      }] : [],
+      }] : []),
     } })
     if (path.endsWith('/tariffs/tariffs/series/')) {
       const id = scope ?? '42'
@@ -217,6 +222,8 @@ export async function mockApi(page: Page, state: ApiState = {}) {
         meter_type: 'consumption', is_active: true, has_behind_meter_generation: false,
         reading_count: 0, assignment_count: 0, first_reading_at: null, last_reading_at: null })),
       '/zev/metering-point-assignments/': [],
+      '/zev/buildings/': [],
+      '/zev/party-roles/': [],
       '/invoices/invoices/': (state.invoices ?? [invoice]).map(entry => ({
         period_start: invoiceFrom, period_end: invoiceTo, ...entry,
       })),

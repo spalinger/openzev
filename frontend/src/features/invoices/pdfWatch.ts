@@ -2,66 +2,65 @@ import { useCallback, useState } from 'react'
 
 import type { InvoicePeriodParticipantRow } from '../../types/api'
 
-/**
- * Watching for invoice PDFs that are being rendered off the request.
- *
- * Creating an invoice queues its PDF (`generate_invoice_pdf_task`), and
- * "Regenerate all PDFs" queues a whole period, so the invoice row appears
- * before its document does. `Invoice.pdf_status` records that, so the poll is
- * a status read: after an action that queues work, re-read the period overview
- * while any invoice in it is still `pending`.
- *
- * `pdf_status` gives the watch a terminal state to stop on: a failed render
- * settles to `failed` and stops being counted, so the common failure ends the
- * watch immediately instead of running it to the deadline. The deadline
- * remains as the backstop for the case no status can cover — a worker killed
- * mid-render leaves the row `pending` with nothing left to settle it.
- */
+/** Track accepted generation until invoices exist, then follow PDF status.
+ * Failed PDFs are terminal; the deadline bounds jobs that never settle. */
 
-/** How long to keep watching after an action queued PDF work. */
 export const PDF_WATCH_MS = 90_000
 
-/**
- * How often to re-read the period overview while waiting. One render is well
- * under a second; this is paced for a worker chewing through a whole period.
- */
 export const PDF_POLL_MS = 2_500
 
-export type PdfWatch = { startedAt: number; until: number } | null
+export type PdfWatch = { startedAt: number; until: number; generationParticipantIds?: string[] } | null
 
-/**
- * Invoices in this period whose document is still being rendered.
- *
- * Reads `pdf_status` rather than inferring from a missing `pdf_url`: a failed
- * render also leaves `pdf_url` null, and counting those would hold the watch
- * open until its deadline on every poll for the rest of the period's life.
- */
+/** Failed/missing PDFs are not pending renders. */
 export function countPendingPdfs(rows: InvoicePeriodParticipantRow[]): number {
     return rows.filter((row) => row.invoice?.pdf_status === 'pending').length
 }
 
-export function usePdfWatch() {
-    const [pdfWatch, setPdfWatch] = useState<PdfWatch>(null)
-
-    const startPdfWatch = useCallback(() => {
-        const now = Date.now()
-        setPdfWatch({ startedAt: now, until: now + PDF_WATCH_MS })
-    }, [])
-
-    const stopPdfWatch = useCallback(() => setPdfWatch(null), [])
-
-    return { pdfWatch, startPdfWatch, stopPdfWatch }
+/** Batch generation can be queued before any invoice exists to report PDF status. */
+export function countPendingInvoiceWork(rows: InvoicePeriodParticipantRow[], watch: PdfWatch): number {
+    const awaitingGeneration = new Set(watch?.generationParticipantIds ?? [])
+    for (const row of rows) {
+        if (row.invoice && row.invoice.status !== 'cancelled') awaitingGeneration.delete(row.participant_id)
+    }
+    return awaitingGeneration.size + countPendingPdfs(rows)
 }
 
-/**
- * Whether a settled watch should end.
- *
- * The `startedAt` grace is what makes this safe to call on every render: right
- * after the click the overview has not refetched yet, so a count of zero means
- * "nothing loaded" rather than "all done", and ending on it would stop the
- * watch before it ever polled.
- */
+export function usePdfWatch() {
+    const [pdfWatch, setPdfWatch] = useState<PdfWatch>(null)
+    // Set when the deadline ended a watch with work still outstanding.
+    const [pdfWatchExpired, setPdfWatchExpired] = useState(false)
+
+    const startPdfWatch = useCallback((generationParticipantIds: string[] = []) => {
+        const now = Date.now()
+        setPdfWatchExpired(false)
+        setPdfWatch(current => ({
+            startedAt: now, until: now + PDF_WATCH_MS,
+            generationParticipantIds: [...new Set([...(current?.generationParticipantIds ?? []), ...generationParticipantIds])],
+        }))
+    }, [])
+
+    /** Completion or a scope change: nothing left to report. */
+    const stopPdfWatch = useCallback(() => {
+        setPdfWatch(null)
+        setPdfWatchExpired(false)
+    }, [])
+
+    /** The deadline passed before the work was seen to finish. */
+    const expirePdfWatch = useCallback(() => {
+        setPdfWatch(null)
+        setPdfWatchExpired(true)
+    }, [])
+
+    return { pdfWatch, pdfWatchExpired, startPdfWatch, stopPdfWatch, expirePdfWatch }
+}
+
+/** Allow an initial refresh before treating a zero pending count as settled. */
 export function pdfWatchIsFinished(watch: NonNullable<PdfWatch>, pendingCount: number, now: number): boolean {
     if (now >= watch.until) return true
     return pendingCount === 0 && now - watch.startedAt > PDF_POLL_MS
+}
+
+/** Overview refetch interval for the watch, read from the query's latest rows. */
+export function pdfWatchRefetchInterval(watch: PdfWatch, rows: InvoicePeriodParticipantRow[]): number | false {
+    return watch && !pdfWatchIsFinished(watch, countPendingInvoiceWork(rows, watch), Date.now()) ? PDF_POLL_MS : false
 }

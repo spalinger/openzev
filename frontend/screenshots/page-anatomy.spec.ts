@@ -251,7 +251,7 @@ test('metering refresh failure preserves an open draft and retry recovers', asyn
   const state: ApiState = { endpoint: '/zev/metering-points/', qualityPeriod: healthPeriod }
   await mockApi(page, state)
   await page.goto('/metering/points')
-  await page.locator('main .metering-toolbar .toolbar-actions button').click()
+  await page.getByRole('button', { name: 'New Metering Point', exact: true }).click()
   const dialog = page.getByRole('dialog')
   const meterId = dialog.getByRole('textbox', { name: 'Meter ID *', exact: true })
   await meterId.fill('Unsaved meter')
@@ -381,11 +381,18 @@ async function switchToOtherZev(page: Page) {
   await page.locator('.zev-dropdown-item').filter({ hasText: 'Other ZEV' }).click()
 }
 
+/**
+ * The invoice table's identity cell: the participant's name first, then the
+ * invoice number (or the row's billing state) — so match the name's prefix
+ * rather than the whole cell.
+ */
+const participantCell = (page: Page, name: string) => page.getByRole('cell', { name: new RegExp(`^${name}\\b`) })
+
 test('switching communities ignores a late response from the previous selection', async ({ page }) => {
   const state: ApiState = { zevs: twoZevs, populated: true, endpoint: overviewEndpoint }
   await mockApi(page, state)
   await page.goto('/billing/invoices')
-  await expect(page.getByRole('cell', { name: 'Participant A', exact: true })).toBeVisible()
+  await expect(participantCell(page, 'Participant A')).toBeVisible()
   let release!: () => void
   state.pendingScope = '42'
   state.pending = new Promise<void>(resolve => { release = resolve })
@@ -397,13 +404,13 @@ test('switching communities ignores a late response from the previous selection'
   state.expectedScope = '43'
   await switchToOtherZev(page)
   await newResponse
-  await expect(page.getByRole('cell', { name: 'Participant B', exact: true })).toBeVisible()
+  await expect(participantCell(page, 'Participant B')).toBeVisible()
   const oldResponse = successfulResponse(page, overviewEndpoint, '42')
   state.pending = undefined
   release()
   await oldResponse
-  await expect(page.getByRole('cell', { name: 'Participant B', exact: true })).toBeVisible()
-  await expect(page.getByRole('cell', { name: 'Participant A', exact: true })).toHaveCount(0)
+  await expect(participantCell(page, 'Participant B')).toBeVisible()
+  await expect(participantCell(page, 'Participant A')).toHaveCount(0)
   await expect(page.locator('main .eyebrow').first()).toHaveText('Other ZEV')
 
 })
@@ -412,15 +419,15 @@ test('removing the selected community reconciles to the remaining community', as
   const state: ApiState = { zevs: twoZevs, populated: true, preferred: '42' }
   await mockApi(page, state)
   await page.goto('/billing/invoices')
-  await expect(page.getByRole('cell', { name: 'Participant A', exact: true })).toBeVisible()
+  await expect(participantCell(page, 'Participant A')).toBeVisible()
   state.transitionScope = '42'
   state.zevs = [twoZevs[1]]
   const loaded = successfulResponse(page, overviewEndpoint, '43')
   await refetchOnFocus(page)
   await loaded
-  await expect(page.getByRole('cell', { name: 'Participant B', exact: true })).toBeVisible()
+  await expect(participantCell(page, 'Participant B')).toBeVisible()
   await expect(page.locator('main .eyebrow').first()).toHaveText('Other ZEV')
-  await expect(page.getByRole('cell', { name: 'Participant A', exact: true })).toHaveCount(0)
+  await expect(participantCell(page, 'Participant A')).toHaveCount(0)
   state.transitionScope = undefined
   const refresh = successfulResponse(page, overviewEndpoint, '43')
   await refetchOnFocus(page)
@@ -436,7 +443,8 @@ for (const role of ['manager', 'viewer'] as const) {
     await expect(page.locator('main').getByText('MP-42', { exact: true }).first()).toBeVisible()
     await expect(page.locator('main').getByText('MP-43', { exact: true })).toHaveCount(0)
     await expect(page.locator('.sidebar-zev-menu')).toHaveCount(0)
-    await expect(page.locator('main .metering-toolbar .toolbar-actions button')).toHaveCount(role === 'manager' ? 1 : 0)
+    await expect(page.getByRole('button', { name: 'New Metering Point', exact: true })).toHaveCount(role === 'manager' ? 1 : 0)
+    await expect(page.getByRole('button', { name: 'Add building', exact: true })).toHaveCount(role === 'manager' ? 1 : 0)
 
   })
 }
@@ -478,7 +486,7 @@ test('scope refresh failures retain email editor local state and its DOM node', 
 })
 
 async function openMeterDraft(page: Page, mode: 'create' | 'edit') {
-  if (mode === 'create') await page.locator('main .metering-toolbar .toolbar-actions button').click()
+  if (mode === 'create') await page.getByRole('button', { name: 'New Metering Point', exact: true }).click()
   else {
     await page.locator('main').getByRole('button', { name: 'More', exact: true }).first().click()
     await page.getByRole('menuitem', { name: 'Edit', exact: true }).click()

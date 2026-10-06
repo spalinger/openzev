@@ -1,23 +1,29 @@
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { InvoicePeriodRowsTable } from '../features/invoices/InvoicePeriodRowsTable'
-import { InvoiceBatchToolbar } from '../features/invoices/InvoiceBatchToolbar'
+import { repeatedParties } from '../features/invoices/invoiceRowState'
+import { InvoiceBatchActions } from '../features/invoices/InvoiceBatchActions'
+import { InvoiceRowFilterTabs } from '../features/invoices/InvoiceRowFilterTabs'
 import { InvoiceDeleteModal } from '../features/invoices/InvoiceDeleteModal'
 import { InvoicesEmptyState } from '../features/invoices/InvoicesEmptyState'
 import { useInvoiceActions } from '../features/invoices/useInvoiceActions'
 import {
-    PDF_POLL_MS,
-    countPendingPdfs,
+    countPendingInvoiceWork,
     pdfWatchIsFinished,
+    pdfWatchRefetchInterval,
     usePdfWatch,
 } from '../features/invoices/pdfWatch'
 import { PeriodSelector } from '../components/PeriodSelector'
 import {
+    billingPeriodName,
+    alignedPeriodEndingWith,
     firstAlignedBillingPeriod,
+    isBillingAlignedPeriod,
     type BillingInterval,
 } from '../lib/billingPeriod'
 import { useBillingPeriodParams } from '../lib/useBillingPeriodParams'
+import { filterInvoiceRows, type InvoiceRowFilter } from '../features/invoices/invoiceRowFilters'
 import { fetchInvoicePeriodOverview } from '../lib/api/invoices'
 import { queryKeys } from '../lib/api/queryKeys'
 import { useAuth } from '../lib/auth'
@@ -27,6 +33,10 @@ import { PageHeader } from '../components/PageHeader'
 import { Notice } from '../components/Notice'
 import { PageSkeleton } from '../components/PageSkeleton'
 import { ScopeGuard } from '../components/ScopeGuard'
+
+const READ_ONLY_ROW_ITEMS = new Set(['review-conflict', 'open-pdf'])
+/** Actions that create invoices: offered for whole billing periods only. */
+const GENERATING_ITEMS = new Set(['generate', 'generate-again', 'generate-all'])
 
 export function InvoicesPage() {
     const { t } = useTranslation()
@@ -45,7 +55,7 @@ export function InvoicesPage() {
 
 /** Period-scoped billing body; its standalone page or hub owns the header. */
 export function InvoicesContent() {
-    const { t } = useTranslation()
+    const { t, i18n } = useTranslation()
     const { selectedZevId, selectedZev } = useManagedZev()
     const { user } = useAuth()
 
@@ -63,15 +73,23 @@ export function InvoicesContent() {
         fallback: 'previous-complete',
         minimumRangeStart: communityStart,
         minimumFallback: minPeriod,
-        scopeChange: 'preserve-url',
+        scopeChange: 'align',
     })
     const period = { period_start: range.from, period_end: range.to }
+    // Historical links keep their exact range; this page generates whole periods.
+    const wholePeriod = !range.from || isBillingAlignedPeriod(range.from, range.to, interval)
+    const enclosingPeriod = wholePeriod ? null : alignedPeriodEndingWith(range, interval)
 
-    // Declared above the query because it paces it; the query's own rows are
-    // what tell it when to stop, so the interval reads them from the query.
-    const { pdfWatch, startPdfWatch, stopPdfWatch } = usePdfWatch()
+    // The watch controls the overview refetch interval.
+    const { pdfWatch, pdfWatchExpired, startPdfWatch, stopPdfWatch, expirePdfWatch } = usePdfWatch()
+    useEffect(() => {
+        stopPdfWatch()
+    }, [user?.id, selectedZevId, period.period_start, period.period_end, stopPdfWatch])
 
     const [deleteModalInvoiceId, setDeleteModalInvoiceId] = useState<string | null>(null)
+    // Row filters narrow one period of one community: never let a filter leak
+    // into another period, community or account.
+    const [rowFilter, setRowFilter] = useState<InvoiceRowFilter>(null)
 
     // A deletion dialog targets one community's invoice: never let it survive
     // an account, community, write-access, or period change.
@@ -79,6 +97,10 @@ export function InvoicesContent() {
     useEffect(() => {
         setDeleteModalInvoiceId(null)
     }, [user?.id, selectedZevId, canWriteSelectedCommunity, period.period_start, period.period_end])
+
+    useEffect(() => {
+        setRowFilter(null)
+    }, [user?.id, selectedZevId, period.period_start, period.period_end])
 
     const periodOverviewQuery = useQuery({
         queryKey: queryKeys.invoices.periodOverview(selectedZevId, period.period_start, period.period_end),
@@ -89,92 +111,113 @@ export function InvoicesContent() {
                 period_end: period.period_end,
             }),
         enabled: periodReady && !!selectedZevId,
-        // Poll only while an action's queued PDFs are still outstanding, and
-        // read that from the query's own latest rows rather than from state
-        // derived below — otherwise the interval would lag a render behind.
-        refetchInterval: (query) =>
-            pdfWatch && countPendingPdfs(query.state.data?.rows ?? []) > 0 ? PDF_POLL_MS : false,
+        // Read the query's own rows; derived state would lag a render behind.
+        refetchInterval: (query) => pdfWatchRefetchInterval(pdfWatch, query.state.data?.rows ?? []),
         refetchIntervalInBackground: true,
     })
 
     const rows = periodOverviewQuery.data?.rows ?? []
-    const pendingPdfCount = countPendingPdfs(rows)
-    const isWaitingForPdfs = pdfWatch !== null && pendingPdfCount > 0
+    const pendingWorkCount = countPendingInvoiceWork(rows, pdfWatch)
+    const isWaitingForPdfs = pdfWatch !== null && pendingWorkCount > 0
 
-    // Generation eligibility rides on the rows themselves, so no second
-    // request gates the actions: while the overview loads the table shows
-    // its skeleton, and on failure the error banner — never a Generate
-    // button that a missing readiness payload cannot qualify.
+    const pendingWorkRef = useRef(pendingWorkCount)
+    useEffect(() => {
+        pendingWorkRef.current = pendingWorkCount
+    }, [pendingWorkCount])
 
-    // End the watch when every invoice has its document, or the deadline passes.
+    // End the watch when every invoice has its document. A deadline that
+    // passes first is reported: the work may still finish, or never will.
     useEffect(() => {
         if (!pdfWatch) return
-        if (pdfWatchIsFinished(pdfWatch, pendingPdfCount, Date.now())) {
-            stopPdfWatch()
+        if (pdfWatchIsFinished(pdfWatch, pendingWorkCount, Date.now())) {
+            if (pendingWorkCount > 0) expirePdfWatch()
+            else stopPdfWatch()
             return
         }
-        const timer = window.setTimeout(stopPdfWatch, pdfWatch.until - Date.now())
+        const timer = window.setTimeout(() => (pendingWorkRef.current > 0 ? expirePdfWatch() : stopPdfWatch()), pdfWatch.until - Date.now())
         return () => window.clearTimeout(timer)
-    }, [pdfWatch, pendingPdfCount, stopPdfWatch])
+    }, [pdfWatch, pendingWorkCount, stopPdfWatch, expirePdfWatch])
 
     const {
         deleteMutation,
         downloadAllPdfsMutation,
         anyBatchPending,
-        stats,
+        rowCounts,
         recommendedBatchAction,
         batchMenuItems,
         getPrimaryRowAction,
         getRowMenuItems,
-        pdfGeneratingInvoiceId,
+        getRowWork,
     } = useInvoiceActions({
         selectedZevId,
         period,
         rows,
         userRole: user?.role,
+        accountId: user?.id,
+        canWrite: canWriteSelectedCommunity,
+        canGenerate: wholePeriod,
+        generationParticipantIds: pdfWatch?.generationParticipantIds,
         onDeleteClick: (invoiceId) => setDeleteModalInvoiceId(invoiceId),
         onPdfQueued: startPdfWatch,
     })
 
-    /** Whether this row's document is being produced right now.
-     *
-     * The local mutation matters as well as the stored status: the per-invoice
-     * regenerate renders inline, so the row is busy before any write lands. */
-    const isPdfPending = (row: typeof rows[number]) => {
-        if (!row.invoice) return false
-        if (pdfGeneratingInvoiceId === row.invoice.id) return true
-        return row.invoice.pdf_status === 'pending'
+    // Read-only accounts keep conflict review and the PDF.
+    const offered = (item: { key: string }) =>
+        (canWriteSelectedCommunity || READ_ONLY_ROW_ITEMS.has(item.key)) && (wholePeriod || !GENERATING_ITEMS.has(item.key))
+    const primaryRowAction = (row: typeof rows[number]) => {
+        const action = getPrimaryRowAction(row)
+        return action && offered(action) ? action : null
     }
+    const rowMenuItems = (row: Parameters<typeof getRowMenuItems>[0]) => getRowMenuItems(row).filter(offered)
+    const batchAction = recommendedBatchAction && offered(recommendedBatchAction) ? recommendedBatchAction : null
+    const batchItems = batchMenuItems.filter(offered)
 
-    // A viewer sees the period and may download the PDFs, but generates,
-    // approves, sends and deletes nothing (#761): only navigation stays.
-    // Managers of a disabled ZEV keep read access only.
-    const READ_ONLY_ROW_ITEMS = new Set(['review-conflict'])
-    const primaryRowAction = canWriteSelectedCommunity ? getPrimaryRowAction : () => null
-    const rowMenuItems = canWriteSelectedCommunity
-        ? getRowMenuItems
-        : (row: Parameters<typeof getRowMenuItems>[0]) => getRowMenuItems(row).filter((item) => READ_ONLY_ROW_ITEMS.has(item.key))
-
-    const batchStats = [
-        { key: 'invoices', label: t('pages.invoices.batch.summaryInvoices'), value: stats.invoiceCount },
-        { key: 'drafts', label: t('pages.invoices.batch.summaryDrafts'), value: stats.draftCount },
-        { key: 'approved', label: t('pages.invoices.batch.summaryApproved'), value: stats.approvedCount },
-        { key: 'pdfs', label: t('pages.invoices.batch.summaryPdfs'), value: stats.pdfCount },
-    ]
+    // The filter narrows what the table shows. Batch actions keep reading the
+    // whole period (`rows`), so narrowing the view never narrows an operation.
+    const visibleRows = filterInvoiceRows(rows, rowFilter, getRowWork)
 
     const content = (
-        <>
-            <section className="card">
+        <div className="invoice-period-view">
+            <div className="invoice-command-bar">
                 <PeriodSelector
                     interval={interval}
                     from={period.period_start}
                     to={period.period_end}
-                    title={selectedZev?.name}
                     allowCustomRange={false}
                     minFrom={minPeriod?.from}
                     onChange={setPeriod}
+                    compact
                 />
-            </section>
+
+                {isManagedScope && rows.length > 0 && (
+                    <InvoiceBatchActions
+                        recommendedAction={batchAction}
+                        menuItems={batchItems}
+                        pdfCount={rowCounts.pdfs}
+                        anyBatchPending={anyBatchPending}
+                        onDownloadAll={() => downloadAllPdfsMutation.mutate()}
+                    />
+                )}
+            </div>
+
+            {enclosingPeriod && (
+                <Notice tone="warning">
+                    <p>{t('pages.invoices.unalignedPeriod.notice')}</p>
+                    <div className="actions-row">
+                        <button
+                            type="button"
+                            className="button button-secondary button-compact"
+                            onClick={() => setPeriod(enclosingPeriod)}
+                        >
+                            {t('pages.invoices.unalignedPeriod.show', {
+                                period: billingPeriodName(enclosingPeriod.from, enclosingPeriod.to, i18n.resolvedLanguage || i18n.language),
+                            })}
+                        </button>
+                    </div>
+                </Notice>
+            )}
+
+            {pdfWatchExpired && <Notice tone="warning">{t('pages.invoices.workUnresolved')}</Notice>}
 
             {periodOverviewQuery.isError && periodOverviewQuery.data && (
                 <Notice tone="warning" onRetry={() => void periodOverviewQuery.refetch()} isRetrying={periodOverviewQuery.isFetching}>{t('pages.invoices.failed')}</Notice>
@@ -187,31 +230,40 @@ export function InvoicesContent() {
                 <InvoicesEmptyState />
             ) : (
                 <>
-                    {/* Batch actions stay hidden from read-only roles even if routing changes. */}
-                    {isManagedScope && (
-                        <InvoiceBatchToolbar
-                            stats={batchStats}
-                            recommendedAction={canWriteSelectedCommunity ? recommendedBatchAction : null}
-                            menuItems={canWriteSelectedCommunity ? batchMenuItems : []}
-                            anyBatchPending={anyBatchPending}
-                            pdfCount={stats.pdfCount}
-                            onDownloadAll={() => downloadAllPdfsMutation.mutate()}
+                    <div className="invoice-filter-bar">
+                        <InvoiceRowFilterTabs counts={rowCounts} activeFilter={rowFilter} onFilterChange={setRowFilter} />
+                        {rowFilter !== null && visibleRows.length > 0 && (
+                            <p className="muted" role="status">
+                                {t('pages.invoices.filters.showing', { shown: visibleRows.length, total: rows.length })}{' '}
+                                <button type="button" className="table-inline-link" onClick={() => setRowFilter(null)}>
+                                    {t('pages.invoices.filters.clear')}
+                                </button>
+                            </p>
+                        )}
+                    </div>
+
+                    {/* One announcement for all pending rows. */}
+                    <p className="visually-hidden" role="status">
+                        {isWaitingForPdfs ? t('pages.invoices.workPending', { count: pendingWorkCount }) : ''}
+                    </p>
+
+                    {visibleRows.length === 0 ? (
+                        <p className="muted" role="status">
+                            {t('pages.invoices.filters.noMatches')}{' '}
+                            <button type="button" className="table-inline-link" onClick={() => setRowFilter(null)}>
+                                {t('pages.invoices.filters.clear')}
+                            </button>
+                        </p>
+                    ) : (
+                        <InvoicePeriodRowsTable
+                            rows={visibleRows}
+                            period={period}
+                            getPrimaryRowAction={primaryRowAction}
+                            getRowMenuItems={rowMenuItems}
+                            getRowWork={getRowWork}
+                            repeatedPartyIds={repeatedParties(rows)}
                         />
                     )}
-
-                    {isWaitingForPdfs && (
-                        <p className="muted" role="status" aria-live="polite">
-                            {t('pages.invoices.pdfsGenerating', { n: pendingPdfCount })}
-                        </p>
-                    )}
-
-                    <InvoicePeriodRowsTable
-                        rows={rows}
-                        period={period}
-                        getPrimaryRowAction={primaryRowAction}
-                        getRowMenuItems={rowMenuItems}
-                        isPdfPending={isPdfPending}
-                    />
                 </>
             )}
 
@@ -226,8 +278,7 @@ export function InvoicesContent() {
                     })
                 }}
             />
-
-        </>
+        </div>
     )
 
     return <ScopeGuard skeleton="tableRows">{content}</ScopeGuard>

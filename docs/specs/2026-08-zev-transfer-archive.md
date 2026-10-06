@@ -383,12 +383,12 @@ way readings require.
 
 ## 9. Frontend
 
-The Export panel names the selected community and links to Audit, which links
-back to Export. Action emphasis follows the workflow-link guidance in
+The Export panel names the selected community. Audit and Export are sibling
+tabs; tab switches retain the shared draft and Save bar.
+Action emphasis follows the workflow-link guidance in
 `2026-04-frontend-management-page-design.md`.
 Admins, managers and viewers can read/export, including disabled communities.
-Audit/Export tab changes retain the shared draft and Save bar. The route/history
-policy is described in `2026-03-community-and-access.md` §9.2.
+The route/history policy is described in `2026-03-community-and-access.md` §9.2.
 
 ### `frontend/src/features/zev/ZevExportModal.tsx`
 

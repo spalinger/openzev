@@ -187,6 +187,21 @@ def compute_period_overview(*, zev, period_start: date_type, period_end: date_ty
                 "participant_id": str(participant.id),
                 "participant_name": participant.full_name,
                 "participant_email": participant.email,
+                # Who the row bills (#761): an organisation or a person, a
+                # second name line for a joint household, and the
+                # participation's dates for a move in or out mid-period.
+                "participant_kind": participant.kind,
+                "participant_name_addition": participant.name_addition.strip(),
+                "participant_valid_from": participant.valid_from.isoformat(),
+                "participant_valid_to": participant.valid_to.isoformat() if participant.valid_to else None,
+                # One party can hold several participations (a flat and a
+                # parking space); their meters' locations tell the rows apart.
+                "party_id": str(participant.party_id),
+                "metering_point_labels": sorted({
+                    assignment.metering_point.location_description.strip()
+                    or assignment.metering_point.meter_id
+                    for assignment in assignments
+                }),
                 "invoice": InvoiceSerializer(invoice, context={"request": request}).data if invoice else None,
                 "generation_eligibility": eligibility,
                 "metering_data_complete": metering_data_complete,

@@ -34,10 +34,9 @@ added later, but today an import is a copy.
    file and can take a while to stream.
 4. Click **Download archive**.
 
-The Export panel names the selected community and links to its **Audit log**.
-The log also links back to Export. These links keep any unsaved settings draft;
-Save remains available across the tabs. Viewers can export, including a disabled
-community.
+The Export panel names the selected community. Tab switches keep any unsaved
+settings draft; Save remains available across the tabs. Viewers can export,
+including a disabled community.
 
 You get a file named `openzev-export-<community>-<date>.zip`.
 

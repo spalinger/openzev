@@ -263,7 +263,7 @@ All invoice endpoints are routed under `/api/v1/invoices/invoices/` via a DRF `G
 | Method | URL | Permission | Payload | Response |
 |---|---|---|---|---|
 | `POST` | `/invoices/generate/` | `HasZevAccess` | `{participant_id, period_start, period_end}` | `201` with invoice JSON; `400` with the underlying error if allocation fails (`AllocationError`, e.g. overlapping assignment windows), or if the participant's ZEV is disabled — non-admin only, ZEV lifecycle phase 2 (§4.5 of `2026-03-community-and-access.md`; this view resolves the participant directly rather than through `ZevScopedQuerySetMixin`, so it carries its own copy of that rule); `409` if locked, or a structured `{code: "dynamic_price_gap", tariff_id, tariff_name, source_id, missing_at, error}` when a fetched series does not cover a reading; invalid source configurations return `409` with `code: "invalid_dynamic_tariff"`, tariff/source ids, tariff name and error |
-| `POST` | `/invoices/generate-all/` | `HasZevAccess` | `{zev_id, period_start, period_end}` | Same disabled-ZEV `400` as `generate/` above, non-admin only; `409` with the same structured dynamic gap/configuration error as single generation when the synchronous coverage/configuration preflight fails; otherwise `202` with `{detail, queued: true, participant_count}` — generation runs asynchronously via Celery (`generate_zev_invoices_task`); per-participant failures (e.g. locked invoices) are isolated — the batch continues, and the audit event (`source = celery`) reports generated/failed counts plus per-participant errors |
+| `POST` | `/invoices/generate-all/` | `HasZevAccess` | `{zev_id, period_start, period_end}` | Same disabled-ZEV `400` as `generate/` above, non-admin only; `409` with the same structured dynamic gap/configuration error as single generation when the synchronous coverage/configuration preflight fails; otherwise `202` with `{detail, queued: true, participant_count}`, where `participant_count` counts the participants active during the period (`active_during`, the set the task bills) — generation runs asynchronously via Celery (`generate_zev_invoices_task`); per-participant failures (e.g. locked invoices) are isolated — the batch continues, and the audit event (`source = celery`) reports generated/failed counts plus per-participant errors |
 | `POST` | `/invoices/generate-pdfs-all/` | `HasZevAccess` | `{zev_id, period_start, period_end}` | Same disabled-ZEV `400` as the others (via `_get_period_invoices(require_active=True)`, non-admin only); `202` with `{detail, queued: true, invoice_count}` — PDF rendering runs asynchronously via Celery (`generate_zev_pdfs_task`) |
 
 **Disabled-ZEV coverage on the remaining actions** (ZEV lifecycle phase 2
@@ -356,9 +356,6 @@ export job, polls its status, and downloads the artifact when it completes
 (§8.1, ADR 0017). The owner/admin branch also shows the annual ZEV report
 (`docs/specs/2026-09-annual-zev-report.md`).
 
-The Billing header opens `/reports` for annual documents; year selection is
-described in `2026-09-annual-zev-report.md`.
-
 | Method | URL | Permission | Frontend usage |
 |---|---|---|---|
 | `GET` | `/invoices/invoices/annual-statement/` | Authenticated (participant sees own, admin/owner ZEV-scoped) | `downloadAnnualStatement({year}, signal?)` (no `zev_id`, backend scopes by participant) behind the participant Annual Statement tab; owners/admins supply `participant_id` + `zev_id`, which this page does not do. The participant's own download calls `generate_annual_statement_pdf(..., sent_only=True)`, so its invoice table and totals count only invoices already sent to them (§6.1); an owner/admin-requested statement and the whole-ZEV export keep every non-cancelled invoice |
@@ -409,7 +406,14 @@ always agree, including for multi-membership users.
       "participant_id": "...",
       "participant_name": "Alice Muster",
       "participant_email": "alice@example.com",
+      "participant_kind": "person",
+      "participant_name_addition": "und Bruno Muster",
+      "participant_valid_from": "2025-01-01",
+      "participant_valid_to": null,
+      "party_id": "...",
+      "metering_point_labels": ["Flat 2"],
       "invoice": { ... } | null,
+      "generation_eligibility": { "state": "eligible", "invoice_id": null, "invoice_number": null } | null,
       "metering_data_complete": true,
       "metering_points_total": 2,
       "metering_points_with_data": 2,
@@ -419,6 +423,18 @@ always agree, including for multi-membership users.
   ]
 }
 ```
+
+**Who a row bills (#761):** `participant_kind` (`person` | `organisation`)
+and `participant_name_addition` (the party's second name line, trimmed; `""`
+when none) come from the participant's party; `participant_name` is its
+display name. `participant_valid_from` / `participant_valid_to` (ISO dates,
+`valid_to` null when open) are the participation's dates, so a move in or out
+inside the period is visible. `party_id` identifies the party, which can hold
+several participations (a flat and a parking space); `metering_point_labels`
+lists, sorted and de-duplicated, the location description (else the meter ID)
+of each meter assigned to the participant during the period. The participant manager
+loads the related party. These are the participant's current data, not the
+recipient copy frozen on an issued invoice; the PDF keeps the billed copy.
 
 **Metering completeness logic:**
 
@@ -1127,7 +1143,7 @@ the cockpit readiness and attention caches.
 | `test_disabled_zev_invoice_generation.py` | `GenerateSingleInvoiceTests`, `GenerateAllInvoicesTests` | §5.2: ZEV lifecycle phase 2 — `generate`/`generate-all` refuse a disabled ZEV for its owner (400, no invoice created / no task queued) but not for an admin |
 | `test_workflow.py` | `StaleInstanceConcurrencyTests` | §5.3 concurrency (#572): a stale-in-memory `cancel_invoice`/`approve_invoice`/`mark_invoice_sent` cannot undo a transition another already-loaded instance committed first (a `paid` invoice survives a stale cancel, a `cancelled` one survives a stale mark-sent/approve); a stale `record_email_delivery` never raises and never resurrects a status past cancellation, but still records `sent_at` and reports the row's real prior status; a second stale cancel is reported as "already cancelled", not the original status |
 | `test_workflow.py` | `test_concurrent_cancel_and_mark_paid_serialize_on_the_row_lock` (PostgreSQL only — CI's "Verify PostgreSQL retention and concurrency" step) | §5.3 concurrency (#572): two genuinely overlapping transactions — one holding the invoice row lock, the other running real `mark_invoice_paid` — serialize on that lock (verified via `pg_blocking_pids`) rather than racing; the second sees the first's committed `cancelled` status and correctly refuses |
-| `test_period_overview.py` | `InvoicePeriodOverviewTests` | §5.5: metering completeness, missing-day detection, partial-assignment windows, no-assignment exclusion, cross-ZEV permission denial |
+| `test_period_overview.py` | `InvoicePeriodOverviewTests` | §5.5: metering completeness, missing-day detection, partial-assignment windows, no-assignment exclusion, cross-ZEV permission denial, whom a row bills (`test_row_names_who_it_bills`: kind, name addition, participation dates and party; `test_meter_labels_use_location_or_meter_id`: location/ID fallback) |
 | `test_period_overview_unit.py` | `ComputePeriodOverviewTests` (10 tests) | §5.5 unit level: complete/incomplete participants, single missing day, exclusion without assignment, partial-assignment required-day windows and gaps, invoice period matching, row ordering, multiple-metering-point counts |
 | `test_readiness.py` | 22 test classes (104 tests) | §5.6a: cockpit period resolution, bulk parity and stable query count, exact historical periods, running-versus-ended lifecycle metadata, first-run/awaiting/caught-up states, structured step details, attention and RBAC |
 | `test_engine_edge_cases.py` | `InvoiceMathEdgeCaseTests` | Edge cases: monthly fee month-boundary counting, tariff validity windows, zero/negative fees, rounding |
@@ -1162,28 +1178,82 @@ the cockpit readiness and attention caches.
 ### Frontend
 
 - Invoice action button visibility by role and status
-- Invoice rows show only the latest email state; Billing Emails loads attempt
-  history on demand and protects retries while queued/pending
-- Role-aware home routing, invoices-first Billing tab order, and the
-  `/billing/periods` compatibility redirect
-- Cockpit compaction (open steps visible, completed steps collapsed, caught-up
-  one-line state) and label-before-primary-CTA order
-- Running periods display **Collecting data** while only ended periods are
-  classified as actionable or complete
-- Period overview metering completeness indicators
-- Batch toolbar (`InvoiceBatchToolbar`): "Alle PDFs herunterladen" renders only
-  when the period has at least one PDF (`pdfCount > 0`); "Weitere Sammelaktionen"
-  renders only when at least one non-recommended batch item is enabled. In
-  periods with nothing to act on (e.g. future periods) both are hidden, not
-  disabled; disabled state is reserved for transient `anyBatchPending`.
-- Generation eligibility follows the readiness conflict contract and is
-  authoritative per period-overview row (`generation_eligibility`:
-  `eligible` | `covered` | `blocked` with the first covering/locking
-  invoice id+number): participants blocked by locked overlapping invoices
-  are not generation candidates (batch counts exclude them) and their row
-  action links to the locked invoice (`pages.invoices.reviewConflict`)
-  instead of offering Generate; fully settled rows link to the covering
-  invoice (`pages.invoices.viewCoveringInvoice`).
+- `InvoicePeriodRowsTable` has participant, progress, amount and actions columns.
+  The participant cell shows current participant identity, invoice-number link, dates inside
+  the period and meter locations when a party has several participations.
+  Repeated parties are determined before filtering. The invoice number is the
+  identity cell's only link; stored PDFs open from the row menu. Cancelled
+  invoices retain their link but have no billed amount.
+- `invoiceRowState.ts` derives five steps (metering, invoice, approved, sent,
+  paid), each done, open, active or in trouble. Reasons identify invoice/PDF
+  generation, email delivery, metering gaps, locked overlaps and failures.
+  Missing assignments do not raise a metering issue on a sent/paid historical
+  invoice (its metering step is done with reason `noMeters`, not "complete");
+  an unsettled zero-meter row reports that no meters are assigned. The metering
+  issue names how many of the assigned points lack data. An approved invoice
+  without a participant email raises `noEmail`. The issue line, progress and
+  Issues filtering use the same local work state (`generating`, `pdfPending`,
+  `sending`), which suppresses an old PDF or delivery failure while it is retried.
+- Full coverage can come from one or more sent/paid invoices in other periods.
+  Such a row shows **Already billed** and a representative invoice link in
+  Progress, retaining the viewed period for return navigation.
+- The progress legend explains the icons and completion marks. Steps have
+  textual accessible labels and tooltips. Delivery shows the latest attempt
+  only; Billing Emails owns attempt history and retries.
+- The compact period selector and batch actions share the command bar.
+  Period names have a stable width, with exact dates in the tooltip/menu;
+  longer translated controls wrap below the selector. The first allowed
+  workflow action (generate, approve, send) is promoted; the remaining actions
+  and PDF regeneration are in overflow. Download is visible when documents
+  exist. Controls with no targets are omitted; in-flight operations disable
+  their controls. Row actions are outlined; billing overflow triggers are
+  explicitly icon-only with translated accessible names.
+- Filters are **All**, **Drafts**, **Approved**, **Sent** and **Issues** with
+  counts. Sent means the exact sent status, excluding paid. Pressing All or
+  the active segment clears filtering. A zero-count segment is disabled unless
+  active, so an emptied selection can still be released. Empty filtered results
+  have an explanation and clear action. Filtering changes visible rows only;
+  batch counts and payloads always use the full period. Filters reset on
+  account, community or period changes and remain available read-only.
+- Accepted generation keeps the original participant IDs until live invoices
+  arrive, then follows PDF status. A 90-second watch polls the overview every
+  2.5 seconds; ready/failed PDF states stop counting as pending. New watches
+  retain outstanding generation targets. Generation stays disabled while its
+  targets are outstanding, including individual generation for those targets.
+  Single generation and PDF-batch acceptance check the originating account,
+  community, period and write-access lifetime before starting local feedback.
+  Scope changes stop watching; errors still toast. One hidden status region
+  announces invoice/PDF preparation. If the deadline passes with work still
+  outstanding, a warning says processing has not finished and to reload before
+  retrying; completion and scope changes clear it.
+- `useEmailDelivery` tracks queued email for row sends and Send all alike.
+  Each target is an invoice and its prior latest-email-log ID (Send all counts
+  and snapshots approved invoices with a recipient). The overview polls every
+  2.5 seconds until each target has a new sent/failed attempt or becomes
+  paid/cancelled, bounded at 90 seconds with the delivery-timeout message; a
+  delivered row send is announced. Scope changes clear tracking, and an
+  acceptance from the old scope is ignored. Row and batch sending share one lock: while either request runs, or
+  any tracked delivery is open, Send all is disabled; row sends are disabled
+  while any send request runs and for invoices whose delivery is tracked.
+  Tracked rows show the Sent step as sending.
+- Historical deep links keep their exact ranges. On community/interval changes,
+  carried ranges align to the new interval around their last day, or default
+  when before community start. Malformed, incomplete, reversed and pre-start
+  billing URLs are replaced with the displayed fallback, preserving other
+  query parameters and hash. `resolveBillingPeriodTarget` holds rewrite policy;
+  `alignedPeriodEndingWith` is a pure calendar helper in `billingPeriod.ts`.
+- An unaligned range is flagged and offers navigation to a whole period.
+  This page hides invoice generation (generate, regenerate invoice, generate all)
+  for that range; PDF rendering of existing invoices stays available. It continues
+  managing existing invoices. The backend API still accepts custom ranges;
+  the presentation restriction is not an API alignment guarantee.
+- Viewers and managers of disabled communities retain filtering, conflict and
+  related-invoice navigation, stored PDFs and batch download, with no writes.
+- Containers up to 46rem render card rows, keeping table headers accessible;
+  up to 28rem, progress and actions stack. The amount column header names CHF;
+  cards show the currency next to the amount.
+- Role-aware home routing, invoices-first Billing tabs, compatibility redirects,
+  cockpit compaction and running-period **Collecting data** behavior remain.
 - Template field definitions come from the backend catalogs. `frontend/src/lib/emailTemplateFields.ts` owns only `EMAIL_TEMPLATE_KEYS`/`EmailTemplateKey`, the four-key frontend route contract. `frontend/src/components/FieldReference.tsx` is shared by `ZevEmailTemplateFields`, `AdminEmailTemplatesPage`, and `AdminPdfTemplatesPage`; it renders API-provided groups (without the backend-only `sample_path`), examples, search, usage badges, and click-to-insert behavior. Insertion calculates state changes and restores the caret after controlled React updates rather than writing `element.value` directly. `frontend/tests/templates-hub.test.ts` covers the seven-tab hub and cross-category routing; `field-reference.test.ts`, `email-template-parity.test.ts`, and `dead-i18n-keys.test.ts` pin token helpers, syntax-aware counting, key/tab parity, backend description-key translations, and catalog-key reachability.
 - Annual-statement export card (admin/owner): prepare → poll → download with partial, failed and expired states. Polling stops on ZEV/year switch, and a create response that resolves after the user switched ZEV/year is discarded (the old selection's job is never shown under the new one); a failed job shows the backend's safe `error_message` when there is one; a single transient poll error is tolerated (only consecutive errors or a long wall-clock backstop end the poll); a failed download surfaces an error instead of crashing; an in-flight or completed export is restored after a reload (`AnnualStatementsExportCard`)
 - PDF tests: `use-pdf-object-url.test.ts` covers replacement, abort, failure, and cleanup; `participant-documents.test.ts` covers tabs, year and user changes, retries, and blob reuse. `pdf-preview.test.ts`, `api-reports.test.ts`, and `invoice-pdf-preview.test.ts` cover the shared viewer and API calls. Manager and export flows remain in `reports-page.test.ts` and `annual-statements-export.test.ts`.

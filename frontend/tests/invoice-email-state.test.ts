@@ -4,6 +4,10 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
+vi.mock('../src/lib/appSettings', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../src/lib/appSettings')>()),
+    useAppSettings: () => ({ settings: {} }),
+}))
 vi.mock('../src/lib/api/invoices', () => ({ openInvoicePdf: vi.fn() }))
 
 import { InvoicePeriodRowsTable } from '../src/features/invoices/InvoicePeriodRowsTable'
@@ -12,7 +16,7 @@ const cleanups: Array<() => void> = []
 afterEach(() => cleanups.splice(0).forEach((cleanup) => cleanup()))
 
 describe('invoice list email summary', () => {
-    it('shows only the latest state and leaves delivery history to the Emails tab', () => {
+    it('shows only the latest delivery state and leaves delivery history to the Emails tab', () => {
         const container = document.createElement('div')
         document.body.appendChild(container)
         const root = createRoot(container)
@@ -44,7 +48,8 @@ describe('invoice list email summary', () => {
                 period: { period_start: '2026-01-01', period_end: '2026-01-31' },
                 getPrimaryRowAction: () => null,
                 getRowMenuItems: () => [],
-                isPdfPending: () => false,
+                getRowWork: () => ({}),
+                repeatedPartyIds: new Set<string>(),
             }),
         )))
         cleanups.push(() => {
@@ -52,9 +57,12 @@ describe('invoice list email summary', () => {
             container.remove()
         })
 
-        const emailCell = container.querySelector('tbody tr')?.children.item(3)
-        expect(emailCell?.textContent).toBe('email.sent')
-        expect(emailCell?.querySelector('button, a')).toBeNull()
+        // The progress cell carries the latest delivery only: the older
+        // failure is history, not a problem on the row.
+        const progress = container.querySelector('tbody tr')?.children.item(1)
+        expect(progress?.querySelector<HTMLElement>('[data-step="sent"]')?.dataset.state).toBe('done')
+        expect(progress?.querySelector('button, a')).toBeNull()
+        expect(container.querySelector('.invoice-row-issues')).toBeNull()
         expect(container.textContent).not.toContain('pages.invoices.viewLogs')
     })
 })

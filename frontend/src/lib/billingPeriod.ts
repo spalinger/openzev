@@ -77,12 +77,30 @@ export function recentBillingPeriods(
     return periods.filter((range) => !minFrom || range.from >= minFrom)
 }
 
-/**
- * True when {from, to} exactly spans one whole billing period.
- *
- * Prev/next navigation only makes sense on an aligned period, so the selector
- * disables the arrows when a custom range is active.
- */
+const periodFormatters = new Map<string, { month: Intl.DateTimeFormat; monthYear: Intl.DateTimeFormat }>()
+
+/** Localized labels for whole-month ranges, including ranges across years. */
+export function billingPeriodName(fromIso: string, toIso: string, locale: string): string {
+    let formatters = periodFormatters.get(locale)
+    if (!formatters) {
+        formatters = {
+            month: new Intl.DateTimeFormat(locale, { month: 'long', timeZone: 'UTC' }),
+            monthYear: new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric', timeZone: 'UTC' }),
+        }
+        periodFormatters.set(locale, formatters)
+    }
+    const { month, monthYear } = formatters
+    const from = new Date(`${fromIso}T00:00:00Z`)
+    const to = new Date(`${toIso}T00:00:00Z`)
+    const name = fromIso.slice(0, 7) === toIso.slice(0, 7)
+        ? monthYear.format(from)
+        : fromIso.slice(0, 4) === toIso.slice(0, 4)
+            ? `${month.format(from)} – ${monthYear.format(to)}`
+            : `${monthYear.format(from)} – ${monthYear.format(to)}`
+    return name.charAt(0).toLocaleUpperCase(locale) + name.slice(1)
+}
+
+/** True when {from, to} spans one whole billing period. */
 export function isBillingAlignedPeriod(from: string, to: string, interval: BillingInterval): boolean {
     if (!from || !to) {
         return false
@@ -103,6 +121,34 @@ export function shiftBillingPeriod(
         from: formatIsoDate(shiftedStart),
         to: formatIsoDate(endOfBillingPeriod(shiftedStart, interval)),
     }
+}
+
+/** Steps to the nearest whole period starting before or after fromIso. */
+export function adjacentBillingPeriod(
+    fromIso: string,
+    interval: BillingInterval,
+    direction: -1 | 1,
+): { from: string; to: string } {
+    const containing = formatIsoDate(startOfBillingPeriod(new Date(`${fromIso}T00:00:00`), interval))
+    if (direction === -1 && containing < fromIso) {
+        return { from: containing, to: formatIsoDate(endOfBillingPeriod(new Date(`${containing}T00:00:00`), interval)) }
+    }
+    return shiftBillingPeriod(containing, interval, direction)
+}
+
+/**
+ * Every whole billing period of `fromIso`'s calendar year, in order — the
+ * names a period selector can show in that year.
+ */
+export function billingPeriodsOfYear(fromIso: string, interval: BillingInterval): Array<{ from: string; to: string }> {
+    const periods = []
+    let start = `${fromIso.slice(0, 4)}-01-01`
+    while (start.slice(0, 4) === fromIso.slice(0, 4)) {
+        const period = { from: start, to: formatIsoDate(endOfBillingPeriod(new Date(`${start}T00:00:00`), interval)) }
+        periods.push(period)
+        start = shiftBillingPeriod(start, interval, 1).from
+    }
+    return periods
 }
 
 /**
@@ -135,4 +181,10 @@ export function firstAlignedBillingPeriod(
 export function getPreviousBillingPeriod(interval: BillingInterval): { from: string; to: string } {
     const currentStart = startOfBillingPeriod(new Date(), interval)
     return shiftBillingPeriod(formatIsoDate(currentStart), interval, -1)
+}
+
+/** Whole billing period containing the range's last day. */
+export function alignedPeriodEndingWith(range: { from: string; to: string }, interval: BillingInterval): { from: string; to: string } {
+    const start = startOfBillingPeriod(new Date(`${range.to}T00:00:00`), interval)
+    return { from: formatIsoDate(start), to: formatIsoDate(endOfBillingPeriod(start, interval)) }
 }

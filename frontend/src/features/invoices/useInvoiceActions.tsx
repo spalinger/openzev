@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
@@ -20,13 +20,13 @@ import {
     approveInvoice,
     deleteInvoice,
     downloadAllPdfs,
-    fetchInvoice,
     generateAllPdfs,
     generateInvoice,
     generateInvoicePdf,
     generateInvoicesForZev,
     markInvoicePaid,
     markInvoiceSent,
+    openInvoicePdf,
     sendAllInvoices,
     sendInvoiceEmail,
 } from '../../lib/api/invoices'
@@ -35,18 +35,17 @@ import { queryKeys } from '../../lib/api/queryKeys'
 import { downloadBlob } from '../../lib/downloadBlob'
 import { formatDateTime, useAppSettings } from '../../lib/appSettings'
 import { useToast } from '../../lib/toast'
+import { useWriteScope } from '../../lib/useWriteScope'
+import { liveInvoice, type InvoiceRowWork } from './invoiceRowState'
 import { getLatestEmailLog } from './emailLogs'
+import { useEmailDelivery } from './useEmailDelivery'
+import { invoiceRowCounts } from './invoiceRowFilters'
 import type { ActionMenuItem } from '../../components/ActionMenu'
 import type { Invoice, InvoicePeriodParticipantRow } from '../../types/api'
 
-const EMAIL_STATUS_POLL_TIMEOUT_MS = 90_000
-
-interface InvoiceActionStats {
-    invoiceCount: number
-    draftCount: number
-    approvedCount: number
-    pdfCount: number
-    generationCandidateCount: number
+/** Send all queues approved invoices that have a recipient. */
+function isSendable(row: InvoicePeriodParticipantRow): boolean {
+    return row.invoice?.status === 'approved' && !!row.participant_email
 }
 
 export function hasDeletePermission(invoice: Invoice, role: string | undefined): boolean {
@@ -60,14 +59,22 @@ export function useInvoiceActions({
     userRole,
     onDeleteClick,
     onPdfQueued,
+    generationParticipantIds = [],
+    canGenerate = true,
+    canWrite = true,
+    accountId,
 }: {
     selectedZevId: string
     period: { period_start: string; period_end: string }
     rows: InvoicePeriodParticipantRow[]
     userRole: string | undefined
+    generationParticipantIds?: string[]
+    canGenerate?: boolean
+    canWrite?: boolean
+    accountId?: number
     onDeleteClick: (invoiceId: string) => void
     /** Called when an action queued PDF work the operator should see arrive. */
-    onPdfQueued: () => void
+    onPdfQueued: (generationParticipantIds?: string[]) => void
 }) {
     const { t } = useTranslation()
     const navigate = useNavigate()
@@ -75,9 +82,12 @@ export function useInvoiceActions({
     const { pushToast } = useToast()
     const { settings } = useAppSettings()
 
-    // ── Email polling state ──────────────────────────────────────────────
-    const [pollingInvoiceId, setPollingInvoiceId] = useState<string | null>(null)
-    const [emailPollingStartedAt, setEmailPollingStartedAt] = useState<number | null>(null)
+    const { scope, isCurrent } = useWriteScope({
+        selectedZevId,
+        scopeKey: `${period.period_start}|${period.period_end}`,
+        accountId,
+        canWrite,
+    }, t('common.scopeGuard.loadFailed'))
 
     const periodOverviewInvalidationKey = useMemo(
         () => (
@@ -88,12 +98,10 @@ export function useInvoiceActions({
         [selectedZevId, period.period_start, period.period_end],
     )
 
-    // Invalidates the period overview after any mutation that could change it.
     const invalidatePeriodOverview = useCallback(() => {
         void queryClient.invalidateQueries({ queryKey: periodOverviewInvalidationKey })
     }, [periodOverviewInvalidationKey, queryClient])
 
-    // Invalidate the ['invoices','list'] prefix so all invoice lists refresh.
     const invalidateInvoicesList = useCallback(() => {
         void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.lists() })
     }, [queryClient])
@@ -105,6 +113,12 @@ export function useInvoiceActions({
         void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.readinessList(selectedZevId) })
         void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.attention(selectedZevId) })
     }, [queryClient, selectedZevId])
+
+    const refreshRelated = useCallback(() => {
+        invalidateInvoicesList()
+        invalidateCockpit()
+    }, [invalidateInvoicesList, invalidateCockpit])
+    const delivery = useEmailDelivery({ rows, scope, refreshOverview: invalidatePeriodOverview, refreshRelated })
 
     const showGenerationError = (error: unknown, fallback: string) => {
         const gap = dynamicPriceGapPayload(error)
@@ -125,12 +139,14 @@ export function useInvoiceActions({
 
     const generateMutation = useMutation({
         mutationFn: generateInvoice,
-        onSuccess: () => {
+        onMutate: () => ({ scope, queryKey: periodOverviewInvalidationKey }),
+        onSuccess: (_result, variables, submitted) => {
+            void queryClient.invalidateQueries({ queryKey: submitted?.queryKey ?? periodOverviewInvalidationKey })
+            if (submitted && !isCurrent(submitted.scope)) return
             pushToast(t('pages.invoices.messages.generated'), 'success')
-            invalidatePeriodOverview()
             invalidateInvoicesList()
             // The invoice is saved; its PDF is queued and arrives later.
-            onPdfQueued()
+            onPdfQueued([variables.participant_id])
             invalidateCockpit()
         },
         onError: (error) => showGenerationError(error, t('pages.invoices.messages.generateFailed')),
@@ -169,11 +185,16 @@ export function useInvoiceActions({
 
     const emailMutation = useMutation({
         mutationFn: (invoiceId: string) => sendInvoiceEmail(invoiceId),
-        onSuccess: (_result, invoiceId) => {
+        onMutate: (invoiceId) => ({
+            scope,
+            queryKey: periodOverviewInvalidationKey,
+            previousLogId: getLatestEmailLog(rows.find(row => row.invoice?.id === invoiceId)?.invoice ?? null)?.id ?? null,
+        }),
+        onSuccess: (_result, invoiceId, submitted) => {
+            void queryClient.invalidateQueries({ queryKey: submitted?.queryKey ?? periodOverviewInvalidationKey })
+            if (submitted && !isCurrent(submitted.scope)) return
             pushToast(t('pages.invoices.messages.emailQueued'), 'success')
-            setPollingInvoiceId(invoiceId)
-            setEmailPollingStartedAt(Date.now())
-            invalidatePeriodOverview()
+            delivery.track([{ invoiceId, previousLogId: submitted?.previousLogId ?? null, announce: true }])
             invalidateInvoicesList()
             invalidateCockpit()
         },
@@ -206,14 +227,18 @@ export function useInvoiceActions({
 
     const batchPayload = { zev_id: selectedZevId, period_start: period.period_start, period_end: period.period_end }
 
-
     const generateAllMutation = useMutation({
         mutationFn: () => generateInvoicesForZev(batchPayload),
-        onSuccess: (result) => {
-            pushToast(t('pages.invoices.batch.generateAllQueued', { n: result.participant_count }), 'success')
-            invalidatePeriodOverview()
+        onMutate: () => ({
+            scope,
+            queryKey: periodOverviewInvalidationKey,
+            participantIds: rows.filter(row => row.generation_eligibility?.state === 'eligible').map(row => row.participant_id),
+        }),
+        onSuccess: (_result, _variables, queuedWork) => {
+            void queryClient.invalidateQueries({ queryKey: queuedWork?.queryKey ?? periodOverviewInvalidationKey })
             invalidateInvoicesList()
-            onPdfQueued()
+            if (queuedWork && !isCurrent(queuedWork.scope)) return
+            onPdfQueued(queuedWork?.participantIds)
             invalidateCockpit()
         },
         onError: (error) => showGenerationError(error, t('pages.invoices.batch.generateAllFailed')),
@@ -232,12 +257,20 @@ export function useInvoiceActions({
 
     const sendAllMutation = useMutation({
         mutationFn: () => sendAllInvoices(batchPayload),
-        onSuccess: (result) => {
+        onMutate: () => ({
+            scope,
+            queryKey: periodOverviewInvalidationKey,
+            targets: rows.filter(isSendable)
+                .map(row => ({ invoiceId: row.invoice!.id, previousLogId: getLatestEmailLog(row.invoice)?.id ?? null })),
+        }),
+        onSuccess: (result, _variables, submitted) => {
+            void queryClient.invalidateQueries({ queryKey: submitted?.queryKey ?? periodOverviewInvalidationKey })
+            if (submitted && !isCurrent(submitted.scope)) return
+            if (result.queued > 0 && submitted?.targets.length) delivery.track(submitted.targets)
             const msg = result.skipped > 0
                 ? t('pages.invoices.batch.sentAllWithSkipped', { queued: result.queued, skipped: result.skipped })
                 : t('pages.invoices.batch.sentAll', { n: result.queued })
             pushToast(msg, 'success')
-            invalidatePeriodOverview()
             invalidateInvoicesList()
             invalidateCockpit()
         },
@@ -246,9 +279,10 @@ export function useInvoiceActions({
 
     const generateAllPdfsMutation = useMutation({
         mutationFn: () => generateAllPdfs(batchPayload),
-        onSuccess: (result) => {
-            pushToast(t('pages.invoices.batch.generateAllPdfsQueued', { n: result.invoice_count }), 'success')
-            invalidatePeriodOverview()
+        onMutate: () => ({ scope, queryKey: periodOverviewInvalidationKey }),
+        onSuccess: (_result, _variables, submitted) => {
+            void queryClient.invalidateQueries({ queryKey: submitted?.queryKey ?? periodOverviewInvalidationKey })
+            if (submitted && !isCurrent(submitted.scope)) return
             onPdfQueued()
         },
         onError: (error) => pushToast(formatApiError(error, t('pages.invoices.batch.generateAllPdfsFailed')), 'error'),
@@ -264,167 +298,63 @@ export function useInvoiceActions({
 
     const anyBatchPending = generateAllMutation.isPending || approveAllMutation.isPending || sendAllMutation.isPending || generateAllPdfsMutation.isPending || downloadAllPdfsMutation.isPending
 
-    // ── Polling effect for email status ──────────────────────────────────────────────
+    // Row and batch sends share one lock: either path would queue the same
+    // approved invoice again while the other's request or delivery is open.
+    const isSending = (invoiceId: string) => delivery.isTracking(invoiceId)
+        || (emailMutation.isPending && emailMutation.variables === invoiceId)
+        || (sendAllMutation.isPending && rows.some(row => row.invoice?.id === invoiceId && isSendable(row)))
+    const rowSendLocked = (invoiceId: string) => emailMutation.isPending || sendAllMutation.isPending || isSending(invoiceId)
 
-    useEffect(() => {
-        if (!pollingInvoiceId || !emailPollingStartedAt) return
+    const getRowWork = (row: InvoicePeriodParticipantRow): InvoiceRowWork => ({
+        generating: (generateMutation.isPending && generateMutation.variables?.participant_id === row.participant_id)
+            || (generationParticipantIds.includes(row.participant_id) && !liveInvoice(row)),
+        pdfPending: !!row.invoice && pdfMutation.isPending && pdfMutation.variables === row.invoice.id,
+        sending: !!row.invoice && isSending(row.invoice.id),
+    })
+    const rowCounts = invoiceRowCounts(rows, getRowWork)
+    const { invoices: invoiceCount, drafts: draftCount } = rowCounts
+    const sendableCount = rows.filter(isSendable).length
+    const generationCandidateCount = rows.filter(row => row.generation_eligibility?.state === 'eligible').length
+    const generationPending = generateMutation.isPending || generationParticipantIds.some(id =>
+        !rows.some(row => row.participant_id === id && liveInvoice(row)))
 
-        let pollCount = 0
-        const maxPolls = 15 // 15 * 2 seconds = 30 seconds max
-
-        const pollInterval = setInterval(async () => {
-            pollCount++
-
-            try {
-                const invoice = await fetchInvoice(pollingInvoiceId)
-                const lastEmailLog = getLatestEmailLog(invoice)
-                const logTime = lastEmailLog?.created_at ? new Date(lastEmailLog.created_at).getTime() : 0
-                const relatesToCurrentAttempt = !!lastEmailLog && logTime >= emailPollingStartedAt - 1000
-
-                // Stop polling if this attempt has a final email status
-                if (relatesToCurrentAttempt && (lastEmailLog.status === 'sent' || lastEmailLog.status === 'failed')) {
-                    setPollingInvoiceId(null)
-                    setEmailPollingStartedAt(null)
-                    invalidatePeriodOverview()
-                    invalidateInvoicesList()
-                    invalidateCockpit()
-                    if (lastEmailLog.status === 'sent') {
-                        pushToast(t('pages.invoices.messages.emailSentSuccess'), 'success')
-                    }
-                    clearInterval(pollInterval)
-                    return
-                }
-
-                // Stop if max polls reached
-                if (pollCount >= maxPolls) {
-                    setPollingInvoiceId(null)
-                    setEmailPollingStartedAt(null)
-                    pushToast(t('pages.invoices.messages.emailPollingTimeout'), 'error')
-                    clearInterval(pollInterval)
-                    return
-                }
-
-                // Update the query cache with the latest invoice data
-                invalidatePeriodOverview()
-                invalidateInvoicesList()
-                invalidateCockpit()
-            } catch (error) {
-                console.error('Error polling invoice status:', error)
-            }
-        }, 2000) // Poll every 2 seconds
-
-        return () => clearInterval(pollInterval)
-    }, [pollingInvoiceId, emailPollingStartedAt, periodOverviewInvalidationKey, invalidatePeriodOverview, invalidateInvoicesList, invalidateCockpit, pushToast, t])
-
-    useEffect(() => {
-        if (!pollingInvoiceId || !emailPollingStartedAt) return
-        const timeoutId = window.setTimeout(() => {
-            setPollingInvoiceId(null)
-            setEmailPollingStartedAt(null)
-            pushToast(t('pages.invoices.messages.emailPollingTimeout'), 'error')
-        }, EMAIL_STATUS_POLL_TIMEOUT_MS)
-
-        return () => {
-            window.clearTimeout(timeoutId)
-        }
-    }, [pollingInvoiceId, emailPollingStartedAt, pushToast, t])
-
-    // ── Stats computation ──────────────────────────────────────────────
-
-    const draftCount = useMemo(() => rows.filter((r) => r.invoice?.status === 'draft').length, [rows])
-    const approvedCount = useMemo(() => rows.filter((r) => r.invoice?.status === 'approved').length, [rows])
-    const invoiceCount = useMemo(() => rows.filter((r) => r.invoice).length, [rows])
-    const pdfCount = useMemo(() => rows.filter((r) => r.invoice?.pdf_url).length, [rows])
-    const generationCandidateCount = useMemo(
-        () => rows.filter((row) => row.generation_eligibility?.state === 'eligible').length,
-        [rows],
-    )
-    const stats: InvoiceActionStats = {
-        invoiceCount,
-        draftCount,
-        approvedCount,
-        pdfCount,
-        generationCandidateCount,
-    }
-
-    // ── Recommended batch action ──────────────────────────────────────────────
-
-    // Ordered by the workflow itself — generate, then approve, then send.
-    // Recommending approval first would skip participants who have no invoice
-    // yet (a late joiner, or a generation that failed), because approve-all only
-    // touches drafts: the button would report success and silently leave them
-    // unbilled. PDFs are not a rung — they are produced with the invoice.
-    const recommendedBatchAction: ActionMenuItem | null = useMemo(() => {
-        if (generationCandidateCount > 0) {
-            return {
-                key: 'generate-all',
-                label: t('pages.invoices.batch.generateAllCount', { count: generationCandidateCount }),
-                icon: <FontAwesomeIcon icon={faFileInvoice} fixedWidth />,
-                onClick: () => generateAllMutation.mutate(),
-                disabled: anyBatchPending,
-            }
-        }
-        if (draftCount > 0) {
-            return {
-                key: 'approve-all',
-                label: t('pages.invoices.batch.approveAllCount', { count: draftCount }),
-                icon: <FontAwesomeIcon icon={faCheckDouble} fixedWidth />,
-                onClick: () => approveAllMutation.mutate(),
-                disabled: anyBatchPending,
-            }
-        }
-        if (approvedCount > 0) {
-            return {
-                key: 'send-all',
-                label: t('pages.invoices.batch.sendAllCount', { count: approvedCount }),
-                icon: <FontAwesomeIcon icon={faPaperPlane} fixedWidth />,
-                onClick: () => sendAllMutation.mutate(),
-                disabled: anyBatchPending,
-            }
-        }
-        return null
-    }, [
-        anyBatchPending,
-        approveAllMutation,
-        approvedCount,
-        draftCount,
-        generateAllMutation,
-        generationCandidateCount,
-        sendAllMutation,
-        t,
-    ])
-
-    // ── Batch menu items ──────────────────────────────────────────────
-
-    const batchMenuItems: ActionMenuItem[] = [
-        {
+    const workflowActions: Array<ActionMenuItem & { recommendedLabel: string }> = [
+        ...(canGenerate && generationCandidateCount > 0 ? [{
             key: 'generate-all',
-            label: `${t('pages.invoices.batch.generateAll')}${generationCandidateCount > 0 ? ` (${generationCandidateCount})` : ''}`,
+            label: `${t('pages.invoices.batch.generateAll')} (${generationCandidateCount})`,
+            recommendedLabel: t('pages.invoices.batch.generateAllCount', { count: generationCandidateCount }),
             icon: <FontAwesomeIcon icon={faFileInvoice} fixedWidth />,
             onClick: () => generateAllMutation.mutate(),
-            disabled: anyBatchPending || generationCandidateCount === 0,
-        },
-        {
+            disabled: anyBatchPending || generationPending,
+        }] : []),
+        ...(draftCount > 0 ? [{
             key: 'approve-all',
-            label: `${t('pages.invoices.batch.approveAll')}${draftCount > 0 ? ` (${draftCount})` : ''}`,
+            label: `${t('pages.invoices.batch.approveAll')} (${draftCount})`,
+            recommendedLabel: t('pages.invoices.batch.approveAllCount', { count: draftCount }),
             icon: <FontAwesomeIcon icon={faCheckDouble} fixedWidth />,
             onClick: () => approveAllMutation.mutate(),
-            disabled: anyBatchPending || draftCount === 0,
-        },
-        {
+            disabled: anyBatchPending,
+        }] : []),
+        ...(sendableCount > 0 ? [{
             key: 'send-all',
-            label: `${t('pages.invoices.batch.sendAll')}${approvedCount > 0 ? ` (${approvedCount})` : ''}`,
+            label: `${t('pages.invoices.batch.sendAll')} (${sendableCount})`,
+            recommendedLabel: t('pages.invoices.batch.sendAllCount', { count: sendableCount }),
             icon: <FontAwesomeIcon icon={faPaperPlane} fixedWidth />,
             onClick: () => sendAllMutation.mutate(),
-            disabled: anyBatchPending || approvedCount === 0,
-        },
-        {
+            disabled: anyBatchPending || emailMutation.isPending || delivery.anyTracking,
+        }] : []),
+    ]
+    const nextAction = workflowActions[0]
+    const recommendedBatchAction = nextAction ? { ...nextAction, label: nextAction.recommendedLabel } : null
+    const batchMenuItems: ActionMenuItem[] = [
+        ...workflowActions,
+        ...(invoiceCount > 0 ? [{
             key: 'generate-all-pdfs',
-            label: `${t('pages.invoices.batch.generateAllPdfs')}${invoiceCount > 0 ? ` (${invoiceCount})` : ''}`,
+            label: `${t('pages.invoices.batch.generateAllPdfs')} (${invoiceCount})`,
             icon: <FontAwesomeIcon icon={faFilePdf} fixedWidth />,
             onClick: () => generateAllPdfsMutation.mutate(),
-            disabled: anyBatchPending || invoiceCount === 0,
-        },
+            disabled: anyBatchPending,
+        }] : []),
     ]
 
     // ── Row action helpers ──────────────────────────────────────────────
@@ -456,15 +386,7 @@ export function useInvoiceActions({
                     onClick: () => navigate(destination.pathname, { state: destination.state }),
                 }
             }
-            if (eligibility?.state === 'covered' && eligibility.invoice_id) {
-                const destination = detailDestination(eligibility.invoice_id)
-                return {
-                    key: 'view-covering-invoice',
-                    label: t('pages.invoices.viewCoveringInvoice'),
-                    icon: <FontAwesomeIcon icon={faFileInvoice} fixedWidth />,
-                    onClick: () => navigate(destination.pathname, { state: destination.state }),
-                }
-            }
+            // A covered row names its invoice as a link in the progress column.
             if (eligibility && eligibility.state !== 'eligible') {
                 return null
             }
@@ -478,7 +400,7 @@ export function useInvoiceActions({
                         period_start: period.period_start,
                         period_end: period.period_end,
                     }),
-                disabled: generateMutation.isPending,
+                disabled: generateMutation.isPending || generateAllMutation.isPending || !!getRowWork(row).generating,
             }
         }
 
@@ -495,10 +417,10 @@ export function useInvoiceActions({
         if (invoice.status === 'approved') {
             return {
                 key: 'send-email',
-                label: pollingInvoiceId === invoice.id ? t('pages.invoices.sending') : t('pages.invoices.sendEmail'),
+                label: isSending(invoice.id) ? t('pages.invoices.sending') : t('pages.invoices.sendEmail'),
                 icon: <FontAwesomeIcon icon={faEnvelope} fixedWidth />,
                 onClick: () => emailMutation.mutate(invoice.id),
-                disabled: emailMutation.isPending || pollingInvoiceId === invoice.id,
+                disabled: rowSendLocked(invoice.id),
             }
         }
 
@@ -523,7 +445,8 @@ export function useInvoiceActions({
 
         const items: ActionMenuItem[] = []
 
-        if (invoice.status === 'draft' || invoice.status === 'cancelled') {
+        // Cancelled rows already offer generation or conflict review as primary.
+        if (invoice.status === 'draft') {
             const eligibility = row.generation_eligibility
             const destination =
                 eligibility && eligibility.state !== 'eligible' ? eligibility.invoice_id : null
@@ -552,19 +475,10 @@ export function useInvoiceActions({
                             period_start: period.period_start,
                             period_end: period.period_end,
                         }),
-                    disabled: generateMutation.isPending,
+                    disabled: generateMutation.isPending || generateAllMutation.isPending || !!getRowWork(row).generating,
                 })
             }
         }
-
-        items.push({
-            key: invoice.pdf_url ? 'regenerate-pdf' : 'generate-pdf',
-            label: invoice.pdf_url ? t('pages.invoices.regeneratePdf') : t('pages.invoices.generatePdf'),
-            icon: <FontAwesomeIcon icon={faFilePdf} fixedWidth />,
-            section: t('pages.invoices.menuSections.pdf'),
-            onClick: () => pdfMutation.mutate(invoice.id),
-            disabled: pdfMutation.isPending,
-        })
 
         if (invoice.status === 'approved') {
             items.push({
@@ -577,6 +491,37 @@ export function useInvoiceActions({
             })
         }
 
+        if (hasDeletePermission(invoice, userRole)) {
+            items.push({
+                key: 'delete',
+                label: t('pages.invoices.deleteInvoice'),
+                icon: <FontAwesomeIcon icon={faTrash} fixedWidth />,
+                section: t('pages.invoices.menuSections.invoice'),
+                onClick: () => onDeleteClick(invoice.id),
+                disabled: deleteMutation.isPending,
+                danger: true,
+            })
+        }
+
+        if (invoice.pdf_url) {
+            items.push({
+                key: 'open-pdf',
+                label: t('common.openPdf'),
+                icon: <FontAwesomeIcon icon={faFilePdf} fixedWidth />,
+                section: t('pages.invoices.menuSections.pdf'),
+                onClick: () => void openInvoicePdf(invoice.id),
+            })
+        }
+
+        items.push({
+            key: invoice.pdf_url ? 'regenerate-pdf' : 'generate-pdf',
+            label: invoice.pdf_url ? t('pages.invoices.regeneratePdf') : t('pages.invoices.generatePdf'),
+            icon: <FontAwesomeIcon icon={faFilePdf} fixedWidth />,
+            section: t('pages.invoices.menuSections.pdf'),
+            onClick: () => pdfMutation.mutate(invoice.id),
+            disabled: pdfMutation.isPending,
+        })
+
         if (invoice.status === 'sent') {
             items.push({
                 key: 'resend-email',
@@ -584,19 +529,7 @@ export function useInvoiceActions({
                 icon: <FontAwesomeIcon icon={faEnvelope} fixedWidth />,
                 section: t('pages.invoices.menuSections.email'),
                 onClick: () => emailMutation.mutate(invoice.id),
-                disabled: emailMutation.isPending || pollingInvoiceId === invoice.id,
-            })
-        }
-
-        if (hasDeletePermission(invoice, userRole)) {
-            items.push({
-                key: 'delete',
-                label: t('pages.invoices.delete'),
-                icon: <FontAwesomeIcon icon={faTrash} fixedWidth />,
-                section: t('pages.invoices.menuSections.danger'),
-                onClick: () => onDeleteClick(invoice.id),
-                disabled: deleteMutation.isPending,
-                danger: true,
+                disabled: rowSendLocked(invoice.id),
             })
         }
 
@@ -604,7 +537,6 @@ export function useInvoiceActions({
     }
 
     return {
-        // Mutations
         generateMutation,
         pdfMutation,
         approveMutation,
@@ -612,25 +544,16 @@ export function useInvoiceActions({
         emailMutation,
         markSentMutation,
         markPaidMutation,
-        // Batch mutations
         generateAllMutation,
         approveAllMutation,
         sendAllMutation,
         generateAllPdfsMutation,
         downloadAllPdfsMutation,
         anyBatchPending,
-        // Polling state
-        pollingInvoiceId,
-        setPollingInvoiceId,
-        emailPollingStartedAt,
-        setEmailPollingStartedAt,
-        // The invoice whose PDF is being rendered inline right now, if any.
-        pdfGeneratingInvoiceId: pdfMutation.isPending ? pdfMutation.variables ?? null : null,
-        // Stats & computed
-        stats,
+        rowCounts,
         recommendedBatchAction,
         batchMenuItems,
-        // Callbacks
+        getRowWork,
         getPrimaryRowAction,
         getRowMenuItems,
     }

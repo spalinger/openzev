@@ -1,12 +1,23 @@
 import { useMemo, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faArrowLeft, faArrowRight, faChevronDown } from '@fortawesome/free-solid-svg-icons'
+import {
+    faArrowLeft,
+    faArrowRight,
+    faCalendarDays,
+    faChevronDown,
+    faChevronLeft,
+    faChevronRight,
+    faTriangleExclamation,
+} from '@fortawesome/free-solid-svg-icons'
 import { Popover } from '@mantine/core'
 import { DatePicker } from '@mantine/dates'
 import { useTranslation } from 'react-i18next'
 import { formatShortDate, useAppSettings } from '../lib/appSettings'
 import {
     type BillingInterval,
+    adjacentBillingPeriod,
+    billingPeriodName,
+    billingPeriodsOfYear,
     getCurrentBillingPeriod,
     isBillingAlignedPeriod,
     recentBillingPeriods,
@@ -27,6 +38,8 @@ type PeriodSelectorProps = {
     allowCustomRange?: boolean
     /** Community start (aligned floor): the previous button stops here. */
     minFrom?: string
+    /** Named period with accessible stepping chevrons. */
+    compact?: boolean
 }
 
 const QUICK_PRESETS: Array<{ preset: Exclude<QuickRangePreset, 'custom'>; labelKey: string }> = [
@@ -49,21 +62,29 @@ export function PeriodSelector({
     title,
     allowCustomRange = true,
     minFrom,
+    compact = false,
 }: PeriodSelectorProps) {
-    const { t } = useTranslation()
+    const { t, i18n } = useTranslation()
     const { settings } = useAppSettings()
 
     const [opened, setOpened] = useState(false)
     const [draft, setDraft] = useState<[string | null, string | null]>([from || null, to || null])
 
     const formatDate = (iso: string) => formatShortDate(iso, settings)
+    const formatRange = (range: PeriodRange) => `${formatDate(range.from)} → ${formatDate(range.to)}`
+    const locale = i18n.resolvedLanguage || i18n.language
 
     // Prev stops at the community's earliest billable period — never a pre-start range.
+    // A custom range cannot step; a whole-period selector steps from any
+    // range to the nearest whole period, so a range carried over from another
+    // community's interval never strands the chevrons.
     const aligned = isBillingAlignedPeriod(from, to, interval)
-    const previous = from ? shiftBillingPeriod(from, interval, -1) : null
-    const canGoPrevious = !!previous && aligned && (!minFrom || previous.from >= minFrom)
-    const canGoNext = !!from && aligned
-    const canNavigate = canGoNext
+    const canStep = !!from && (aligned || !allowCustomRange)
+    const step = (direction: -1 | 1) => allowCustomRange
+        ? shiftBillingPeriod(from, interval, direction)
+        : adjacentBillingPeriod(from, interval, direction)
+    const previous = canStep ? step(-1) : null
+    const canGoPrevious = !!previous && (!minFrom || previous.from >= minFrom)
 
     const presets = useMemo<Array<{ id: string; label: string; hint?: string; range: PeriodRange }>>(() => {
         const current = getCurrentBillingPeriod(interval)
@@ -71,12 +92,16 @@ export function PeriodSelector({
         if (!allowCustomRange) {
             // Invoices bill whole periods, so offer recent ones instead of a
             // calendar — none predating the community's first period.
-            return recentBillingPeriods(interval, PAST_BILLING_PERIODS, minFrom).map((range, index) => ({
-                id: range.from,
-                label: `${formatShortDate(range.from, settings)} → ${formatShortDate(range.to, settings)}`,
-                hint: index === 0 ? t('common.periodSelector.currentPeriod') : undefined,
-                range,
-            }))
+            return recentBillingPeriods(interval, PAST_BILLING_PERIODS, minFrom).map((range, index) => {
+                const dates = `${formatShortDate(range.from, settings)} → ${formatShortDate(range.to, settings)}`
+                const currentHint = index === 0 ? t('common.periodSelector.currentPeriod') : undefined
+                return {
+                    id: range.from,
+                    label: compact ? billingPeriodName(range.from, range.to, locale) : dates,
+                    hint: compact ? [dates, currentHint].filter(Boolean).join(' · ') : currentHint,
+                    range,
+                }
+            })
         }
 
         return [
@@ -87,7 +112,53 @@ export function PeriodSelector({
                 range: quickRangeToDates(preset),
             })),
         ]
-    }, [interval, allowCustomRange, minFrom, t, settings])
+    }, [interval, allowCustomRange, minFrom, t, settings, compact, locale])
+
+    // A compact trigger names whole periods; anything else keeps its dates.
+    const named = compact && aligned
+    const year = from.slice(0, 4)
+    const sizingNames = useMemo(() => named
+        ? billingPeriodsOfYear(`${year}-01-01`, interval).map(period => billingPeriodName(period.from, period.to, locale))
+        : [], [named, year, interval, locale])
+    const triggerText = named ? (
+        <span className="period-selector-text">
+            <span className="period-selector-range">
+                <FontAwesomeIcon icon={faCalendarDays} fixedWidth aria-hidden="true" />
+                {/* Every name of the year shares one grid cell, so the trigger
+                    keeps the widest one's width and the chevrons stay put. */}
+                <span className="period-selector-name">
+                    <span>{billingPeriodName(from, to, locale)}</span>
+                    {sizingNames.map((name) => (
+                        <span key={name} className="period-selector-name-sizer" aria-hidden="true">
+                            {name}
+                        </span>
+                    ))}
+                </span>
+            </span>
+        </span>
+    ) : (
+        <span className="period-selector-text">
+            {title && <span className="period-selector-title">{title}</span>}
+            <span className="period-selector-range">
+                {from && to ? formatRange({ from, to }) : '—'}
+            </span>
+            {aligned ? (
+                <span className="muted period-selector-interval">
+                    {t('pages.invoices.billingInterval')}{' '}
+                    {t(`pages.zevs.billingIntervals.${interval}`)}
+                </span>
+            ) : compact ? (
+                // Whole periods are all this selector offers: anything else
+                // came from a link and is not one of the community's periods.
+                <span className="badge badge-warning">
+                    <FontAwesomeIcon icon={faTriangleExclamation} fixedWidth aria-hidden="true" />
+                    {t('common.periodSelector.notBillingPeriod')}
+                </span>
+            ) : (
+                <span className="badge badge-info">{t('common.periodSelector.custom')}</span>
+            )}
+        </span>
+    )
 
     function apply(next: PeriodRange) {
         onChange(next)
@@ -96,19 +167,20 @@ export function PeriodSelector({
 
     function openPopover() {
         setDraft([from || null, to || null])
-        setOpened((previous) => !previous)
+        setOpened((wasOpen) => !wasOpen)
     }
 
     return (
-        <div className="period-selector">
+        <div className={compact ? 'period-selector period-selector--compact' : 'period-selector'}>
             <button
-                className="button button-secondary"
+                className={compact ? 'button button-secondary period-selector-step' : 'button button-secondary'}
                 type="button"
                 onClick={() => previous && onChange(previous)}
                 disabled={!canGoPrevious}
+                {...(compact ? { 'aria-label': t('pages.invoices.prevPeriod'), title: t('pages.invoices.prevPeriod') } : {})}
             >
-                <FontAwesomeIcon icon={faArrowLeft} fixedWidth />
-                {t('pages.invoices.prevPeriod')}
+                <FontAwesomeIcon icon={compact ? faChevronLeft : faArrowLeft} fixedWidth />
+                {!compact && t('pages.invoices.prevPeriod')}
             </button>
 
             <Popover
@@ -126,21 +198,9 @@ export function PeriodSelector({
                         type="button"
                         onClick={openPopover}
                         disabled={!from}
+                        title={named ? formatRange({ from, to }) : undefined}
                     >
-                        <span className="period-selector-text">
-                            {title && <span className="period-selector-title">{title}</span>}
-                            <span className="period-selector-range">
-                                {from && to ? `${formatDate(from)} → ${formatDate(to)}` : '—'}
-                            </span>
-                            {aligned ? (
-                                <span className="muted period-selector-interval">
-                                    {t('pages.invoices.billingInterval')}{' '}
-                                    {t(`pages.zevs.billingIntervals.${interval}`)}
-                                </span>
-                            ) : (
-                                <span className="badge badge-info">{t('common.periodSelector.custom')}</span>
-                            )}
-                        </span>
+                        {triggerText}
                         <FontAwesomeIcon
                             icon={faChevronDown}
                             className="period-selector-caret"
@@ -184,13 +244,14 @@ export function PeriodSelector({
             </Popover>
 
             <button
-                className="button button-secondary"
+                className={compact ? 'button button-secondary period-selector-step' : 'button button-secondary'}
                 type="button"
-                onClick={() => onChange(shiftBillingPeriod(from, interval, 1))}
-                disabled={!canNavigate}
+                onClick={() => onChange(step(1))}
+                disabled={!canStep}
+                {...(compact ? { 'aria-label': t('pages.invoices.nextPeriod'), title: t('pages.invoices.nextPeriod') } : {})}
             >
-                {t('pages.invoices.nextPeriod')}
-                <FontAwesomeIcon icon={faArrowRight} fixedWidth />
+                {!compact && t('pages.invoices.nextPeriod')}
+                <FontAwesomeIcon icon={compact ? faChevronRight : faArrowRight} fixedWidth />
             </button>
         </div>
     )

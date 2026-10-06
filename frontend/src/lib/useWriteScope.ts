@@ -4,11 +4,13 @@ type WriteScope<ZevId> = {
     selectedZevId: ZevId
     canWrite: boolean
     accountId: number | undefined
+    /** Narrows the lifetime further, e.g. to one billing period. */
+    scopeKey?: string
 }
 
 /** Identity represents one uninterrupted account/community/capability lifetime. */
-export function useWriteScope<ZevId extends string | null | undefined>({ selectedZevId, canWrite, accountId }: WriteScope<ZevId>, errorMessage: string) {
-    const scope = useMemo(() => ({ selectedZevId, canWrite, accountId }), [selectedZevId, canWrite, accountId])
+export function useWriteScope<ZevId extends string | null | undefined>({ selectedZevId, canWrite, accountId, scopeKey }: WriteScope<ZevId>, errorMessage: string) {
+    const scope = useMemo(() => ({ selectedZevId, canWrite, accountId, scopeKey }), [selectedZevId, canWrite, accountId, scopeKey])
     const currentScope = useRef<typeof scope | null>(scope)
     useLayoutEffect(() => {
         currentScope.current = scope

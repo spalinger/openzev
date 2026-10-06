@@ -11,7 +11,7 @@ from invoices.models import InvoiceStatus
 from invoices.test_helpers import make_invoice, make_participant, make_user, make_zev
 from metering.models import MeterReading, ReadingDirection, ReadingResolution
 from testing.helpers import authenticate as auth
-from zev.models import MeteringPoint, MeteringPointAssignment, MeteringPointType
+from zev.models import MeteringPoint, MeteringPointAssignment, MeteringPointType, PartyKind
 
 
 class InvoicePeriodOverviewTests(TestCase):
@@ -178,6 +178,51 @@ class InvoicePeriodOverviewTests(TestCase):
         )
         participant_names = [row["participant_name"] for row in resp.data["rows"]]
         self.assertNotIn(self.p_with_data.full_name, participant_names)
+
+    def test_row_names_who_it_bills(self):
+        """An organisation, a household's second name line and a move-out
+        reach the row, so the billing table can say whom it bills (#761)."""
+        self.p_missing_data.kind = PartyKind.ORGANISATION
+        self.p_missing_data.organisation_name = "Missing Data AG"
+        self.p_missing_data.name_addition = "c/o Buchhaltung"
+        self.p_missing_data.valid_to = date(2026, 1, 20)
+        self.p_missing_data.save()
+        auth(self.client, self.owner)
+        resp = self.client.get(
+            "/api/v1/invoices/invoices/period-overview/",
+            {"zev_id": str(self.zev.id), "period_start": "2026-01-01", "period_end": "2026-01-31"},
+        )
+        rows = {row["participant_id"]: row for row in resp.data["rows"]}
+        organisation = rows[str(self.p_missing_data.id)]
+        self.assertEqual(organisation["participant_name"], "Missing Data AG")
+        self.assertEqual(organisation["participant_kind"], "organisation")
+        self.assertEqual(organisation["participant_name_addition"], "c/o Buchhaltung")
+        self.assertEqual(organisation["participant_valid_from"], "2026-01-01")
+        self.assertEqual(organisation["participant_valid_to"], "2026-01-20")
+        person = rows[str(self.p_with_data.id)]
+        self.assertEqual(person["participant_kind"], "person")
+        self.assertEqual(person["participant_name_addition"], "")
+        self.assertIsNone(person["participant_valid_to"])
+        self.assertEqual(person["party_id"], str(self.p_with_data.party_id))
+
+    def test_meter_labels_use_location_or_meter_id(self):
+        auth(self.client, self.owner)
+        resp = self.client.get(
+            "/api/v1/invoices/invoices/period-overview/",
+            {"zev_id": str(self.zev.id), "period_start": "2026-01-01", "period_end": "2026-01-31"},
+        )
+        rows = {row["participant_id"]: row for row in resp.data["rows"]}
+        person = rows[str(self.p_with_data.id)]
+        # A meter's location names it; one without falls back to its ID.
+        self.assertEqual(person["metering_point_labels"], ["CH-OVERVIEW-1"])
+        self.mp_with_data.location_description = "Flat 2"
+        self.mp_with_data.save()
+        resp = self.client.get(
+            "/api/v1/invoices/invoices/period-overview/",
+            {"zev_id": str(self.zev.id), "period_start": "2026-01-01", "period_end": "2026-01-31"},
+        )
+        rows = {row["participant_id"]: row for row in resp.data["rows"]}
+        self.assertEqual(rows[str(self.p_with_data.id)]["metering_point_labels"], ["Flat 2"])
 
 
 class GenerationEligibilityTests(TestCase):

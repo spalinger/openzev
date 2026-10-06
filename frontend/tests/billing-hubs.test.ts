@@ -34,7 +34,7 @@ vi.mock('../src/lib/api/invoices', () => ({
 }))
 vi.mock('../src/lib/api/readiness', () => ({ fetchReadinessList: api.readiness }))
 vi.mock('../src/components/PageSkeleton', () => ({ PageSkeleton: () => null }))
-vi.mock('../src/features/invoices/useInvoiceActions', () => ({ useInvoiceActions: () => ({ stats: {}, deleteMutation: {} }) }))
+vi.mock('../src/features/invoices/useInvoiceActions', () => ({ useInvoiceActions: () => ({ rowCounts: { all: 0, invoices: 0, drafts: 0, approved: 0, sent: 0, issues: 0, pdfs: 0 }, getRowWork: () => ({}), deleteMutation: {}, batchMenuItems: [], recommendedBatchAction: null }) }))
 vi.mock('../src/features/invoices/InvoiceDeleteModal', () => ({ InvoiceDeleteModal: () => null }))
 vi.mock('../src/features/invoices/InvoicesEmptyState', () => ({ InvoicesEmptyState: () => null }))
 vi.mock('../src/components/PeriodSelector', () => ({ PeriodSelector: (props: { from: string; to: string; minFrom: string }) =>

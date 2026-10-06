@@ -4,6 +4,7 @@ import {
     PDF_POLL_MS,
     PDF_WATCH_MS,
     countPendingPdfs,
+    countPendingInvoiceWork,
     pdfWatchIsFinished,
 } from '../src/features/invoices/pdfWatch'
 import type { InvoicePdfStatus, InvoicePeriodParticipantRow } from '../src/types/api'
@@ -77,5 +78,37 @@ describe('pdfWatchIsFinished', () => {
         // A failed render leaves pdf_url null forever; without this the page
         // would poll for the rest of the session.
         expect(pdfWatchIsFinished(watch, 3, started + PDF_WATCH_MS)).toBe(true)
+    })
+})
+
+describe('queued invoice work', () => {
+    const watch = { startedAt: 0, until: PDF_WATCH_MS, generationParticipantIds: ['p1'] }
+
+    it('waits for queued generation before there is an invoice or PDF status', () => {
+        expect(countPendingInvoiceWork([{ ...row(null), participant_id: 'p1' }], watch)).toBe(1)
+        expect(countPendingInvoiceWork([], watch)).toBe(1)
+    })
+
+    it('does not mistake a cancelled invoice for the queued replacement', () => {
+        const cancelled = { ...row('ready', '/old.pdf'), participant_id: 'p1' }
+        cancelled.invoice!.status = 'cancelled'
+        expect(countPendingInvoiceWork([cancelled], watch)).toBe(1)
+    })
+
+    it('moves from awaited generation to pending PDF, then stops on ready or failed', () => {
+        const generated = { ...row('pending'), participant_id: 'p1' }
+        generated.invoice!.status = 'draft'
+        expect(countPendingInvoiceWork([generated], watch)).toBe(1)
+        generated.invoice!.pdf_status = 'ready'
+        expect(countPendingInvoiceWork([generated], watch)).toBe(0)
+        generated.invoice!.pdf_status = 'failed'
+        expect(countPendingInvoiceWork([generated], watch)).toBe(0)
+    })
+
+    it('watches only the generation targets, with the existing timeout for failed jobs', () => {
+        const unrelated = { ...row(null), participant_id: 'p2' }
+        expect(countPendingInvoiceWork([unrelated], watch)).toBe(1)
+        expect(pdfWatchIsFinished(watch, 1, PDF_WATCH_MS)).toBe(true)
+        expect(countPendingInvoiceWork([unrelated], null)).toBe(0)
     })
 })

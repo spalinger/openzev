@@ -90,6 +90,25 @@ describe('shared period URL policies', () => {
             : getCurrentBillingPeriod('monthly'))
     })
 
+    it.each([
+        'period_start=2026-02-30&period_end=2026-03-31',
+        'period_start=2026-09-01',
+        'period_end=2026-09-30',
+        'period_start=2026-09-30&period_end=2026-09-01',
+        'from=invalid&to=2026-09-30',
+    ])('rewrites rejected billing parameters to the displayed fallback: %s', async query => {
+        const page = await mount(`/billing/invoices?${query}&tab=history#details`, {
+            scopeChange: 'align', legacyParams: true, fallback: 'previous-complete',
+        })
+        const params = new URL(page.url, 'https://example.test').searchParams
+        expect(params.get('period_start')).toBe(page.period.from)
+        expect(params.get('period_end')).toBe(page.period.to)
+        expect(params.has('from')).toBe(false)
+        expect(params.has('to')).toBe(false)
+        expect(params.get('tab')).toBe('history')
+        expect(page.url).toContain('#details')
+    })
+
     it('only reads legacy pairs for the chart and never mixes partial canonical pairs', async () => {
         const url = '/metering/chart?from=2025-02-03&to=2025-03-14'
         const chart = await mount(url, { legacyParams: true })
@@ -134,6 +153,45 @@ describe('shared period URL policies', () => {
         })
         await page.reconcile({ scopeId: 'b', minimumRangeStart: '2026-01-01' })
         expect(page.period).toEqual(getPreviousBillingPeriod('monthly'))
+    })
+
+    it('aligns a carried-over billing range to the new community\'s periods on a switch', async () => {
+        const page = await mount('/billing/invoices?period_start=2026-09-01&period_end=2026-09-30', {
+            fallback: 'previous-complete', minimumRangeStart: '2025-01-01', scopeChange: 'align',
+        })
+        // A monthly community's September is the quarterly community's Q3 …
+        await page.reconcile({ scopeId: 'b', interval: 'quarterly' })
+        expect(page.period).toEqual({ from: '2026-07-01', to: '2026-09-30' })
+        expect(page.url).toContain('period_start=2026-07-01&period_end=2026-09-30')
+        // … every read meanwhile was a whole period of the community it was paired with.
+        expect(page.reads.filter(read => read.scopeId === 'b').map(read => read.period))
+            .not.toContainEqual({ from: '2026-09-01', to: '2026-09-30' })
+        // … and Q3 is September again on the way back.
+        await page.reconcile({ scopeId: 'a', interval: 'monthly' })
+        expect(page.period).toEqual({ from: '2026-09-01', to: '2026-09-30' })
+    })
+
+    it('keeps a deep-linked range within one community and falls back before its first period', async () => {
+        const page = await mount('/billing/invoices?period_start=2026-09-01&period_end=2026-09-30', {
+            interval: 'quarterly', fallback: 'previous-complete', minimumRangeStart: '2025-01-01', scopeChange: 'align',
+        })
+        // An old monthly invoice's period, opened in a now-quarterly community, stays as linked.
+        expect(page.period).toEqual({ from: '2026-09-01', to: '2026-09-30' })
+        const first = { from: '2026-10-01', to: '2026-12-31' }
+        await page.reconcile({ scopeId: 'b', minimumRangeStart: '2026-10-01', minimumFallback: first })
+        expect(page.period).toEqual(first)
+    })
+
+    it('replaces a billing link it cannot show with the period it shows', async () => {
+        // The community starts in July 2026: a range from 2025 is not one of its periods.
+        const first = { from: '2026-07-01', to: '2026-07-31' }
+        const page = await mount('/billing/invoices?period_start=2025-09-01&period_end=2026-09-30&tab=x', {
+            fallback: 'previous-complete', minimumRangeStart: '2026-07-01', minimumFallback: first, scopeChange: 'align',
+        })
+        const shown = page.period
+        expect(shown).not.toEqual({ from: '2025-09-01', to: '2026-09-30' })
+        expect(page.url).toContain(`period_start=${shown.from}&period_end=${shown.to}`)
+        expect(page.url).toContain('tab=x')
     })
 
     it('dashboard deep links reset to the current period on community and interval changes', async () => {

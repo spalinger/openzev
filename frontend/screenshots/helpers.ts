@@ -118,7 +118,7 @@ export async function pinDemoZev(page: Page): Promise<boolean> {
  * participant overall would land on whichever empty tenant sorts first and the
  * participant dashboard would render without any readings.
  */
-export async function impersonateDemoParticipant(page: Page): Promise<boolean> {
+export async function impersonateDemoParticipant(page: Page, { requireSentInvoice = false } = {}): Promise<boolean> {
   const adminToken = await getAdminToken(page)
   const headers = { Authorization: `Bearer ${adminToken}` }
 
@@ -128,8 +128,18 @@ export async function impersonateDemoParticipant(page: Page): Promise<boolean> {
   // User ids linked to participants of the demo ZEV.
   const partsResp = await page.request.get(`${API_BASE}/zev/participants/?zev_id=${zevId}`, { headers })
   expect(partsResp.ok(), `Fetching participants failed (${partsResp.status()})`).toBeTruthy()
-  const partsBody = await partsResp.json() as { results?: Array<{ user: number | null }> }
-  const demoUserIds = new Set((partsBody.results ?? []).map(p => p.user).filter((u): u is number => u != null))
+  const partsBody = await partsResp.json() as { results?: Array<{ id: string; user: number | null }> }
+  let participants = partsBody.results ?? []
+  if (requireSentInvoice) {
+    // Personal invoice captures need a billed participant, not a new account
+    // whose drafts are correctly hidden from the participant list.
+    const response = await page.request.get(`${API_BASE}/invoices/invoices/?zev_id=${zevId}&status=sent,paid`, { headers })
+    expect(response.ok(), `Fetching sent invoices failed (${response.status()})`).toBeTruthy()
+    const body = await response.json() as { results: Array<{ participant: string }> }
+    const billedIds = new Set(body.results.map(invoice => invoice.participant))
+    participants = participants.filter(participant => billedIds.has(participant.id))
+  }
+  const demoUserIds = new Set(participants.map(p => p.user).filter((u): u is number => u != null))
   if (demoUserIds.size === 0) return false
 
   const usersResp = await page.request.get(`${API_BASE}/auth/users/`, { headers })
