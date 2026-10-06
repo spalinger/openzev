@@ -350,6 +350,12 @@ billing inputs is required; an operator may no longer publish that history.
 > [ZEV settings](02-zev-setup.md#vat-configuration) rather than adjusting
 > tariff prices by hand; a re-import would undo that.
 
+### Outbound URL checks
+
+Tariff downloads must resolve to public addresses. The check cannot rule out
+DNS rebinding, so also restrict outbound traffic at the network level (see the
+[VSE import spec](../specs/2026-09-vse-tariff-import.md)).
+
 ## Energy Tariff Types
 
 ### Local Energy Tariff

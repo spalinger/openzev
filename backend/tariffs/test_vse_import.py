@@ -8,6 +8,7 @@ synthetic ones for the shapes that document happens not to contain, and the
 mapping is asserted through to what the billing engine actually reads back.
 """
 import json
+import socket
 import urllib.error
 from datetime import date, datetime, time, timezone, timedelta
 from decimal import Decimal
@@ -1299,6 +1300,25 @@ def fake_private_dns(*args, **kwargs):
 class RemoteFetchTests(SimpleTestCase):
     """The URL comes from the user — there is no registry of these documents —
     so this is a server-side request to an address a user chose."""
+
+    def test_shared_address_space_is_refused_before_downloading(self):
+        dns_answer = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("100.64.0.1", 443))]
+        with mock.patch("tariffs.importers.remote.socket.getaddrinfo", return_value=dns_answer), \
+                mock.patch("urllib.request.OpenerDirector.open") as transport:
+            with self.assertRaises(TariffFetchError):
+                fetch_tariff_document("https://operator.example/tariffs.json")
+            transport.assert_not_called()
+
+    def test_overlong_dns_label_is_a_user_correctable_fetch_error(self):
+        with self.assertRaises(TariffFetchError):
+            fetch_tariff_document("https://" + "x" * 64 + ".example/tariffs.json")
+
+    def test_malformed_urls_are_user_correctable_fetch_errors(self):
+        for url in ("https://operator.example:65536/data", "https://operator.example:bad/data", "https://[broken/data"):
+            with self.subTest(url=url), mock.patch("urllib.request.OpenerDirector.open") as transport:
+                with self.assertRaises(TariffFetchError):
+                    fetch_tariff_document(url)
+                transport.assert_not_called()
 
     def test_a_url_resolving_into_private_space_is_refused(self):
         """Otherwise an authenticated user could aim the import at an internal
