@@ -176,6 +176,13 @@ that is not a public HTTPS origin only warns (`accounts.W002`).
 Changing `rpId` later orphans every passkey registered under the old one.
 Passkeys need no encryption key — only TOTP does.
 
+## Django admin
+
+Django admin defaults to `DEBUG` (`DJANGO_ADMIN_ENABLED`); its separate session
+login bypasses the JWT MFA flow, so any production use needs a private backend
+hostname and an ingress allowlist. Keep public `/admin/...` routes pointed at
+the frontend for the platform pages.
+
 ## OAuth upgrades
 
 After upgrading, new OAuth accounts require `email_verified: true`. For a trusted
@@ -224,7 +231,7 @@ media:
 Default ingress routes:
 
 - `/` to frontend
-- `/api` and `/admin` to backend
+- `/api` to backend
 
 Configure hosts/paths in `values.yaml` under `ingress.hosts`.
 
@@ -384,7 +391,6 @@ ingress:
         - /
       backendPaths:
         - /api
-        - /admin
 ```
 
 Apply a values file with:

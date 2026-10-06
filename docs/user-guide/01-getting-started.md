@@ -95,6 +95,7 @@ Fill in every value. The examples below assume the instance is reached at
 | Setting | Example | Notes |
 |---|---|---|
 | `SECRET_KEY` | *(generated, see below)* | The backend refuses to start without it |
+| `DJANGO_ADMIN_ENABLED` | `False` | Keeps Django's separate `/admin/` login disabled. Use the platform pages for normal administration; enable Django admin only behind a private network or ingress/nginx allowlist. |
 | `ALLOWED_HOSTS` | `zev.example.ch` | Bare hostname(s), comma-separated, no scheme or port |
 | `CSRF_TRUSTED_ORIGINS` | `https://zev.example.ch` | Full public origin — set it even though CORS stays empty |
 | `CORS_ALLOWED_ORIGINS` | *(empty)* | Leave empty: nginx serves the UI and the API from the same origin |
