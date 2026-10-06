@@ -235,7 +235,7 @@ address, after which the new login belongs to that party.
 
 | Setting | Purpose | Required |
 | --- | --- | --- |
-| **Invoice prefix** | Prefix for invoice numbers (default: `INV`) | No |
+| **Invoice prefix** | Prefix for invoice numbers (default: `INV`); 1–10 uppercase letters, digits or hyphens | No |
 | **Bank name** | Internal reference for the payment account | No |
 | **Bank IBAN** | Account participants pay into; without it invoices carry no payment details or QR payment slip | No |
 | **VAT treatment** | How VAT is applied when billing participants (see [below](#vat-configuration)) | No |

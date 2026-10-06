@@ -133,7 +133,7 @@ The two-factor policy fields `mfa_required`, `mfa_grace_period_days` and `mfa_po
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `billing_interval` | CharField(20) | `monthly` | Choices: `monthly`, `quarterly`, `semi_annual`, `annual` (from `BillingInterval` TextChoices) |
-| `invoice_prefix` | CharField(10) | `INV` | Used in `next_invoice_number()` |
+| `invoice_prefix` | CharField(10) | `INV` | Prefix of `next_invoice_number()`. API writes must match `\A[A-Z0-9-]{1,10}\Z`; updates preserve unchanged raw legacy values (including blanks/whitespace), and a blank wizard value means the default. Newly assigned whitespace is refused on updates. Migration `0043` only reports invalid legacy values. |
 | `invoice_counter` | PositiveIntegerField | `1` | Auto-incremented atomically via `F()` expression |
 | `invoice_language` | CharField(2) | `de` | Choices: `de`, `fr`, `it`, `en` (from `InvoiceLanguage` TextChoices). Used for PDF + contract translation lookups. |
 | `payment_term_days` | PositiveIntegerField | `30` | Days after invoice generation (issue date) until payment is due. Validators: min 1, max 365. The engine uses it to set `Invoice.due_date` at generation. |

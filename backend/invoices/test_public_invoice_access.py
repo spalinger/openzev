@@ -14,7 +14,7 @@ from rest_framework.test import APIClient
 
 from accounts.models import UserRole
 from audit.models import AuditEvent, AuditEventSource
-from testing.helpers import make_user
+from testing.helpers import authenticate, make_user
 
 from . import access_tokens
 from .models import InvoiceItem, InvoiceStatus
@@ -209,6 +209,24 @@ class PublicInvoicePdfTests(PublicInvoiceTestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp["Content-Type"], "application/pdf")
+
+    def test_pdf_downloads_sanitize_legacy_invoice_numbers(self):
+        from django.core.files.base import ContentFile
+
+        self.invoice.invoice_number = 'INV"\\old\r\n'
+        self.invoice.pdf_file.save("legacy.pdf", ContentFile(b"%PDF-1.7\n"), save=True)
+        owner_client = APIClient()
+        authenticate(owner_client, self.owner)
+        for client, url, params in (
+            (self.client, PUBLIC_PDF_URL.format(prefix=self.token.prefix), {"s": self.secret}),
+            (owner_client, f"/api/v1/invoices/invoices/{self.invoice.pk}/pdf/", {}),
+        ):
+            with self.subTest(url=url):
+                response = client.get(url, params)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response["Content-Type"], "application/pdf")
+                self.assertEqual(response["Content-Disposition"], 'inline; filename="INV\\"_old.pdf"')
+                self.assertEqual(b"".join(response.streaming_content), b"%PDF-1.7\n")
 
     def test_wrong_secret_is_404(self):
         self.assertEqual(self._get(secret="wrong", url=PUBLIC_PDF_URL).status_code, 404)

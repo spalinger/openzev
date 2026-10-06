@@ -11,6 +11,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.http import FileResponse, HttpResponse
 from accounts.permissions import HasZevAccess
+from config.http import content_disposition, sanitize_filename
 from allocation.errors import AllocationError
 from allocation.validity import active_during
 from zev.models import Zev, Participant
@@ -493,7 +494,8 @@ class InvoiceViewSet(
                 status=status.HTTP_404_NOT_FOUND,
             )
         return FileResponse(
-            invoice.pdf_file.open("rb"), content_type="application/pdf"
+            invoice.pdf_file.open("rb"), content_type="application/pdf",
+            filename=sanitize_filename(f"{invoice.invoice_number}.pdf"),
         )
 
     @action(detail=True, methods=["post"], url_path="generate-pdf",
@@ -882,7 +884,7 @@ class InvoiceViewSet(
             for invoice in invoices_with_pdf:
                 try:
                     pdf_content = invoice.pdf_file.read()
-                    filename = f"{invoice.invoice_number}.pdf"
+                    filename = sanitize_filename(f"{invoice.invoice_number}.pdf")
                     zf.writestr(filename, pdf_content)
                 except Exception:
                     continue
@@ -890,5 +892,5 @@ class InvoiceViewSet(
 
         response = HttpResponse(buf.getvalue(), content_type="application/zip")
         period = invoices_with_pdf[0].period_start.isoformat()
-        response["Content-Disposition"] = f'attachment; filename="invoices-{period}.zip"'
+        response["Content-Disposition"] = content_disposition("attachment", f"invoices-{period}.zip")
         return response

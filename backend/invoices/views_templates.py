@@ -10,6 +10,7 @@ import re
 
 from django.conf import settings
 from django.http import HttpResponse
+from config.http import content_disposition
 from django.template import Context, Template
 from django.template import engines
 from rest_framework import exceptions, status
@@ -302,7 +303,7 @@ class PdfTemplatePreviewView(_AdminTemplateView):
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
             response = HttpResponse(pdf_bytes, content_type="application/pdf")
-            response["Content-Disposition"] = f'inline; filename="preview-{template_type}.pdf"'
+            response["Content-Disposition"] = content_disposition("inline", f"preview-{template_type}.pdf")
             return response
 
         return Response({"html": rendered})

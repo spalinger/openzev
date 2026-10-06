@@ -234,8 +234,8 @@ bytes needed its own section rather than letting the next render stand in.
 **PDF member names**: `invoices/pdf/<sanitised>-<digest>.pdf`, built by
 `pdf_member_name()` with the exact same construction as reading member names
 below (`invoice_number` in place of `meter_id`) and for the same reason —
-`invoice_prefix` is free text, so two distinct numbers can sanitise to the
-same string, and a binary PDF (unlike a reading CSV's self-describing rows)
+legacy invoice prefixes can contain arbitrary characters, so two distinct
+numbers can sanitise to the same string, and a binary PDF (unlike a reading CSV's self-describing rows)
 has no internal field the importer could use to notice a collision. The
 importer recomputes the member name from each imported invoice's own
 `invoice_number` rather than reading a mapping from the manifest —

@@ -20,6 +20,7 @@ from datetime import MAXYEAR, MINYEAR, date
 
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse
+from config.http import content_disposition
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -140,7 +141,7 @@ def _self_service(request) -> tuple[bool, Participant | None]:
 
 def _pdf_response(pdf_bytes: bytes, filename: str, *, disposition: str) -> HttpResponse:
     response = HttpResponse(pdf_bytes, content_type="application/pdf")
-    response["Content-Disposition"] = f'{disposition}; filename="{filename}"'
+    response["Content-Disposition"] = content_disposition(disposition, filename)
     return response
 
 
