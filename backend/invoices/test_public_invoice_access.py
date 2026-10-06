@@ -617,6 +617,14 @@ class MagicLinkTemplateTests(PublicInvoiceTestCase):
         self.assertNotIn("{link_url}", body)
         self.assertIn("/signin/", body)
 
+    def test_attribute_traversal_falls_back_rather_than_rendering(self):
+        self._customise(body="Hello {zev_name.__class__}")
+
+        self._request()
+
+        self.assertNotIn("<class", self._sent().body)
+        self.assertIn("/signin/", self._sent().body)
+
     def test_malformed_braces_fall_back_rather_than_raising(self):
         """`str.format` raises ValueError here, not KeyError."""
         self._customise(body="Sign in at {link_url} {")

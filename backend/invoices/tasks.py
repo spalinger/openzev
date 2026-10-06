@@ -4,6 +4,7 @@ from billiard.exceptions import SoftTimeLimitExceeded
 from celery import shared_task
 from django.core.mail import EmailMessage
 from django.utils import timezone as djtimezone
+from config.safe_format import render_with_fallback
 from audit.models import AuditActionCategory, AuditEventSource, AuditEventStatus
 from audit.services import record_audit_event
 
@@ -82,16 +83,14 @@ def send_invoice_email_task(self, invoice_id: str, recipient_email: str = None):
     subject_tpl = invoice.zev.email_subject_template or global_subject
     body_tpl = invoice.zev.email_body_template or global_body
 
-    try:
-        subject = subject_tpl.format_map(template_ctx)
-        body = body_tpl.format_map(template_ctx)
-    except (KeyError, ValueError) as exc:
+    def _log_fallback(exc):
         logger.warning(
             "Email template rendering failed for ZEV %s (%s); falling back to defaults: %s",
             invoice.zev.name, invoice.zev_id, exc,
         )
-        subject = DEFAULT_EMAIL_SUBJECT_TEMPLATE.format_map(template_ctx)
-        body = DEFAULT_EMAIL_BODY_TEMPLATE.format_map(template_ctx)
+
+    subject = render_with_fallback(subject_tpl, DEFAULT_EMAIL_SUBJECT_TEMPLATE, template_ctx, on_error=_log_fallback)
+    body = render_with_fallback(body_tpl, DEFAULT_EMAIL_BODY_TEMPLATE, template_ctx, on_error=_log_fallback)
 
     log = EmailLog.objects.create(
         invoice=invoice,

@@ -121,6 +121,12 @@ Kind regards,
 
 If a template contains an invalid placeholder (typo or unsupported variable), the system logs a warning and falls back to the default template above.
 
+Use plain named placeholders; attribute/item expressions are refused. Templates
+may contain up to 20,000 characters. Format widths and precision may contain at
+most four digits and have a value no greater than 1,000; larger values also fall
+back to the default. Subject and body fall back independently. These limits do
+not cap total rendered output; repeating a variable can amplify it.
+
 ## Sending Invoices
 
 When you [send approved invoices](09-invoice-management.md#sending-invoices-by-email):

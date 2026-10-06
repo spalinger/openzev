@@ -142,8 +142,8 @@ The two-factor policy fields `mfa_required`, `mfa_grace_period_days` and `mfa_po
 | `vat_mode` | CharField(20) | `not_registered` | Choices `not_registered`, `registered`, `inclusive` (from `VatMode` TextChoices). Drives VAT handling in the billing engine — see `2026-03-tariffs-and-billing-engine.md` §4.8. |
 | `vat_number` | CharField(50) | blank | Swiss UID. `Zev.clean()` requires it when `vat_mode = registered` and forbids it otherwise. Shown on invoice/contract PDFs only when set. |
 | `itemize_tariff_bands` | BooleanField | `False` | Bill each price band of a multi-band tariff as its own invoice line at its own rate, instead of one line at the blended average — see `2026-03-tariffs-and-billing-engine.md` §4.7a. Applies to invoices generated after the change. |
-| `email_subject_template` | CharField(500) | `""` (blank) | Per-ZEV `.format_map()` template. Resolution is ZEV value → global `EmailTemplate(template_key="invoice_email")` override → `DEFAULT_EMAIL_SUBJECT_TEMPLATE`. |
-| `email_body_template` | TextField | `""` (blank) | Per-ZEV `.format_map()` template. Resolution is ZEV value → global `EmailTemplate(template_key="invoice_email")` override → `DEFAULT_EMAIL_BODY_TEMPLATE`. |
+| `email_subject_template` | CharField(500) | `""` (blank) | Per-ZEV bare-placeholder template, rendered with `config.safe_format.safe_format`. Resolution is ZEV value → global `EmailTemplate(template_key="invoice_email")` override → `DEFAULT_EMAIL_SUBJECT_TEMPLATE`. |
+| `email_body_template` | TextField | `""` (blank) | Per-ZEV bare-placeholder template, rendered with `config.safe_format.safe_format`. Resolution is ZEV value → global `EmailTemplate(template_key="invoice_email")` override → `DEFAULT_EMAIL_BODY_TEMPLATE`. |
 | `local_tariff_notes` | TextField | blank | Free-text shown on contract PDF |
 | `additional_contract_notes` | TextField | blank | Additional agreements on contract PDF |
 | `notes` | TextField | blank | General notes |
@@ -320,7 +320,15 @@ Template variable resolution:
 | `{total_chf}` | `invoice.total_chf` |
 
 4. Resolves subject and body independently: nonblank per-ZEV template → global `invoice_email` override → hardcoded default.
-5. Calls `.format_map(template_ctx)`. On `KeyError`/`ValueError`, the task falls back to the shipped defaults and logs a warning.
+5. Calls `config.safe_format.safe_format(template, template_ctx)`. Only bare
+   named fields resolve; attribute (`.`) and item (`[`) traversal raise
+   `KeyError`. On `KeyError`/`IndexError`/`ValueError`, the task falls back to the
+   shipped defaults and logs a warning. Templates are limited to 20,000 characters;
+   numeric format width/precision components must have at most four digits and
+   a value no greater than 1,000, checked before formatting. Total rendered output
+   is not capped; repeated fields can amplify it. Magic-link, onboarding, verification
+   and ZEV-access invitation/notification mails use the same formatter and
+   fallback policy.
 6. Attaches the invoice PDF, sends via `EmailMessage`, and logs to `EmailLog`.
 
 ---

@@ -658,7 +658,16 @@ Email subjects and bodies resolve through a three-tier fallback chain:
 | `{due_date}` | Payment due date, formatted per `AppSettings.date_format_short`; empty string if the invoice has no `due_date` |
 | `{total_chf}` | Invoice total amount |
 
-If custom template rendering fails (e.g. `KeyError` or `ValueError` from `format_map`), the system falls back to the **hardcoded** defaults (tier 3) and logs a warning.
+Templates are rendered with `config.safe_format.safe_format`, which resolves
+bare named placeholders and rejects attribute/item traversal. If rendering
+raises `KeyError`, `IndexError`, or `ValueError`, the system falls back to the
+**hardcoded** defaults (tier 3) and logs a warning. The shipped default itself
+is never sent raw: a broken default raises instead (`render_with_fallback`).
+Normal format specifications and conversions are retained. Templates are limited
+to 20,000 characters; numeric width/precision components, including expanded
+nested specifications, are limited to four digits and a value of 1,000 before
+formatting allocates output. Exceeding either limit triggers the same fallback.
+Total rendered output is not capped; repeated fields can amplify it.
 
 ### 7.2 Celery task: `send_invoice_email_task`
 

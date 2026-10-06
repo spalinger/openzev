@@ -206,6 +206,15 @@ class PasswordLoginAuditTests(TestCase):
 
 
 class RegistrationTests(TestCase):
+	def test_register_unsafe_template_uses_the_default_verification_link(self):
+		EmailTemplate.objects.create(
+			template_key="email_verification", subject="Verify", body="{verify_url.__class__}",
+		)
+		response = APIClient().post("/api/v1/auth/register/", {"email": "safe@example.com"}, format="json")
+		self.assertEqual(response.status_code, 201)
+		self.assertIn("/verify-email?token=", mail.outbox[-1].body)
+		self.assertNotIn("<class", mail.outbox[-1].body)
+
 	def test_register_accepts_email_only_and_generates_username(self):
 		client = APIClient()
 

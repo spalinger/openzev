@@ -32,6 +32,7 @@ from rest_framework.views import APIView
 from accounts.models import EmailVerificationToken, User, UserRole
 from audit.models import AuditActionCategory, AuditEventStatus
 from audit.services import record_audit_event
+from config.safe_format import render_with_fallback
 
 from . import access
 from .models import Participant, Party, Zev, ZevAccessGrant, ZevAccessRole
@@ -144,9 +145,8 @@ def _send_access_email(
 ) -> None:
     """Render and send one of the two access emails; raises on a send failure.
 
-    Same policy as the magic-link mail (``invoices.emails``): the ZEV's invoice
-    language unless an operator saved a custom template, and the shipped default
-    when a custom template has an unusable placeholder.
+    Shipped defaults follow the ZEV's invoice language. A global override
+    replaces them; invalid overrides fall back to that language's default.
     """
     from invoices.email_context import build_zev_access_email_context
     from invoices.models import ZEV_ACCESS_ROLE_NAMES_BY_LANGUAGE, EmailTemplate
@@ -164,11 +164,14 @@ def _send_access_email(
     )
 
     def render(template: str, fallback: str) -> str:
-        try:
-            return template.format(**context)
-        except (KeyError, IndexError, ValueError):
-            logger.warning("%s template has an unusable placeholder; sending the default instead.", template_key)
-            return fallback.format(**context)
+        return render_with_fallback(
+            template,
+            fallback,
+            context,
+            on_error=lambda _exc: logger.warning(
+                "Invalid %s template; using default.", template_key
+            ),
+        )
 
     EmailMessage(
         subject=render(override.subject if override else defaults["subject"], defaults["subject"]),

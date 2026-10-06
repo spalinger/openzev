@@ -598,6 +598,8 @@ responses, and the detail view do not carry it.
    `purpose="invitation"`, valid 7 days — SPEC-2026-10-zev-access-grants §8).
    `POST /auth/verify-email/` answers with the token's `purpose`.
 5. Send verification email with link `{FRONTEND_URL}/verify-email?token={token}`.
+   Operator templates use `config.safe_format.safe_format`; unusable fields
+   fall back to the shipped verification template.
 6. Return `201` with "Verification email sent.".
 
 ### 5.3 Email verification
@@ -1942,7 +1944,7 @@ lists the test classes per module (test counts are the `test_*` methods).
 | `PasswordChangeFlagTests` | 1 | `must_change_password` cleared on password change |
 | `TokenLoginCredentialTests` | 1 | Email login issues httpOnly cookie JWTs instead of a response body token |
 | `PasswordLoginAuditTests` | 5 | Successful login records `auth.login` with the user as actor and target; wrong password, unknown username, and inactive account each record `auth.login_failed` (status `failed`, no actor) with the attempted identifier in `target_display`; a request with no identifier is still audited |
-| `RegistrationTests` | 5 | Self-registration accepts email only and generates a username; the verification template uses the send-time context; a duplicate email is rejected case-insensitively; login still accepts a username; disabled registration is refused |
+| `RegistrationTests` | 6 | Self-registration accepts email only and generates a username; the verification template uses the send-time context; a duplicate email is rejected case-insensitively; an unsafe template falls back to the shipped link; login still accepts a username; disabled registration is refused |
 | `FeatureFlagsApiTests` | 5 | Anonymous 401 and non-admin 403 on list; admin can list and toggle; defaults sync on read |
 | `ImpersonationTests` | 4 | Admin can impersonate participant/owner; non-admin blocked; admin cannot impersonate admin |
 | `LinkedAccountSafetyTests` | 8 | Admin can edit linked account; cannot delete linked; can delete unlinked; cannot delete last admin (with audit-denied assertion); can delete self when other admin exists (with audit actor SET_NULL assertion); can delete other admin when multiple exist; cannot change own role (via both detail and me endpoints) |

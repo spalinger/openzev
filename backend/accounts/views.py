@@ -21,6 +21,7 @@ from rest_framework_simplejwt.settings import api_settings as jwt_settings
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 from . import mfa, mfa_crypto, notifications
+from config.safe_format import render_default, safe_format
 from .api_keys import default_api_key_expiry, generate_key
 from .models import (
     ApiKey,
@@ -781,11 +782,11 @@ def register(request):
     template_ctx = build_verification_email_context(verify_url=verify_url)
 
     try:
-        subject = subject_tpl.format_map(template_ctx)
-        body = body_tpl.format_map(template_ctx)
-    except (KeyError, ValueError):
-        subject = defaults["subject"].format_map(template_ctx)
-        body = defaults["body"].format_map(template_ctx)
+        subject = safe_format(subject_tpl, template_ctx)
+        body = safe_format(body_tpl, template_ctx)
+    except (KeyError, IndexError, ValueError):
+        subject = render_default(defaults["subject"], template_ctx)
+        body = render_default(defaults["body"], template_ctx)
 
     EmailMessage(
         subject=subject,

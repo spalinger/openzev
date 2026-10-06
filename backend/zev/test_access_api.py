@@ -228,6 +228,14 @@ class ZevAccessInvitationTests(AccessApiTestCase):
         self.invite("broken@example.com")
         self.assertIn("/verify-email?token=", mail.outbox[-1].body)
 
+    def test_attribute_traversal_in_an_invitation_uses_the_default_template(self):
+        EmailTemplate.objects.create(
+            template_key="zev_access_invitation", subject="Join {zev_name}", body="{zev_name.__class__}",
+        )
+        self.invite("safe-template@example.com")
+        self.assertIn("/verify-email?token=", mail.outbox[-1].body)
+        self.assertNotIn("<class", mail.outbox[-1].body)
+
 
 class AccountsAroundGrantsTests(AccessApiTestCase):
     def test_me_lists_every_zev_the_account_relates_to(self):
