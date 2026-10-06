@@ -112,8 +112,8 @@ export const it = {
             modalTitle: 'Crea il tuo account',
             email: 'Indirizzo e-mail',
             emailPlaceholder: 'tu@esempio.ch',
-            submitModal: 'Invia e-mail di verifica',
-            success: 'Controlla la tua casella di posta! Abbiamo inviato un link di verifica a {{email}}.',
+            submitModal: 'Richiedi il link di verifica',
+            success: 'Se questo indirizzo può essere utilizzato, controlla la tua casella di posta.',
         },
         emailChange: {
             confirming: 'Conferma del nuovo indirizzo e-mail…',

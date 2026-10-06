@@ -172,7 +172,8 @@ class ZevAccessInvitationTests(AccessApiTestCase):
         self.assertTrue(account.is_active)
         self.assertTrue(access.can_manage(account, self.zev))
         # A signup token still says so.
-        signup = EmailVerificationToken.objects.create(user=make_user("api_signup", UserRole.USER), token="s" * 40)
+        signup_user = User.objects.create_user(username="api_signup", email="signup@example.com", is_active=False)
+        signup = EmailVerificationToken.objects.create(user=signup_user, token="s" * 40)
         self.assertEqual(
             APIClient().post("/api/v1/auth/verify-email/", {"token": signup.token}, format="json").json()["purpose"],
             "signup",

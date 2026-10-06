@@ -112,8 +112,8 @@ export const fr = {
             modalTitle: 'Créer votre compte',
             email: 'Adresse e-mail',
             emailPlaceholder: 'vous@exemple.ch',
-            submitModal: 'Envoyer le lien de vérification',
-            success: 'Vérifiez votre boîte de réception! Nous avons envoyé un lien à {{email}}.',
+            submitModal: 'Demander le lien de vérification',
+            success: 'Si cette adresse peut être utilisée, consultez votre boîte de réception.',
         },
         emailChange: {
             confirming: 'Confirmation de votre nouvelle adresse e-mail…',

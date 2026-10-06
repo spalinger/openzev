@@ -1,15 +1,18 @@
-from rest_framework import generics, status
+from rest_framework import generics, serializers, status
 from rest_framework.decorators import api_view, authentication_classes, permission_classes, throttle_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.exceptions import AuthenticationFailed, PermissionDenied, ValidationError
 from rest_framework.views import APIView
+import hashlib
 import logging
 import secrets
 import pyotp
 from django.conf import settings
-from django.db import transaction
-from django.db.models import Prefetch
+from django.core.cache import cache
+from django.db import IntegrityError, transaction
+from redis.exceptions import RedisError
+from django.db.models import Prefetch, Q
 from django.utils.text import slugify
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -21,7 +24,8 @@ from rest_framework_simplejwt.settings import api_settings as jwt_settings
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 from . import mfa, mfa_crypto, notifications
-from config.safe_format import render_default, safe_format
+from config.safe_format import render_with_fallback
+from config.cache import delete_if_value
 from .api_keys import default_api_key_expiry, generate_key
 from .models import (
     ApiKey,
@@ -56,7 +60,7 @@ from .cookies import (
     set_auth_cookies,
 )
 from .permissions import IsAdmin
-from .throttling import AuthLoginThrottle, AuthMfaThrottle, AuthRefreshThrottle, AuthRegisterThrottle, AuthVerifyThrottle
+from .throttling import AuthLoginThrottle, AuthMfaThrottle, AuthRefreshThrottle, AuthRegisterThrottle, AuthVerifyThrottle, RegistrationUnavailable
 from audit.models import AuditActionCategory, AuditEventStatus
 from audit.mixins import AuditedUpdateMixin
 from audit.services import build_diff, record_audit_event
@@ -389,6 +393,16 @@ class UserDetailView(AuditedUpdateMixin, generics.RetrieveUpdateDestroyAPIView):
     def get_audit_target_display(self, instance):
         return instance.email or instance.username
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if self.request.method in ("PUT", "PATCH"):
+            return queryset.select_for_update()
+        return queryset
+
+    def update(self, request, *args, **kwargs):
+        with transaction.atomic():
+            return super().update(request, *args, **kwargs)
+
     def perform_update(self, serializer):
         was_active = serializer.instance.is_active
         super().perform_update(serializer)
@@ -396,6 +410,9 @@ class UserDetailView(AuditedUpdateMixin, generics.RetrieveUpdateDestroyAPIView):
         # later would bring back whatever tokens were still unexpired.
         if was_active and not serializer.instance.is_active:
             revoke_sessions(serializer.instance)
+        # An explicit cancellation also invalidates a still-inactive signup.
+        if serializer.validated_data.get("is_active") is False:
+            serializer.instance.email_verification_tokens.filter(consumed_at__isnull=True).delete()
 
     def perform_destroy(self, instance):
         user_display = instance.email or instance.username
@@ -723,79 +740,166 @@ def feature_flag_update(request, pk: int):
     return Response(serializer.data)
 
 
+REGISTER_RESPONSE_DETAIL = "If that address can be used, check your inbox."
+# Per-address mail cooldown, independent of caller IP.
+REGISTER_MAIL_INTERVAL_SECONDS = 15 * 60
+
+
+def _reserve_mail_slot(key: str) -> str | None:
+    """Return a reservation nonce, or None if reserved."""
+    nonce = secrets.token_hex(8)
+    return nonce if cache.add(key, nonce, REGISTER_MAIL_INTERVAL_SECONDS) else None
+
+
+def _release_mail_slot(key: str, nonce: str) -> None:
+    """Release only the matching reservation."""
+    try:
+        delete_if_value(key, nonce)
+    except (RedisError, OSError):
+        logger.exception("Could not release a registration mail reservation")
+
+
+def _send_verification_email(user, token) -> None:
+    from invoices.models import EmailTemplate, EMAIL_TEMPLATE_DEFAULTS
+
+    defaults = EMAIL_TEMPLATE_DEFAULTS["email_verification"]
+    override = EmailTemplate.objects.filter(template_key="email_verification").first()
+    verify_url = f"{settings.FRONTEND_URL.rstrip('/')}/verify-email?token={token.token}"
+    context = build_verification_email_context(verify_url=verify_url)
+
+    def render(field):
+        return render_with_fallback(
+            getattr(override, field) if override else defaults[field],
+            defaults[field],
+            context,
+            on_error=lambda exc: logger.warning("Invalid email template; using default: %s", exc),
+        )
+
+    EmailMessage(
+        subject=render("subject"),
+        body=render("body"),
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        to=[user.email],
+    ).send(fail_silently=False)
+
+
+def _is_pending_self_registration(user) -> bool:
+    """Pending signup: inactive, no password, signup history only. Call under the user lock."""
+    tokens = user.email_verification_tokens
+    Purpose = EmailVerificationToken.Purpose
+    return (
+        not user.is_active
+        and not user.has_usable_password()
+        and tokens.filter(purpose=Purpose.SIGNUP).exists()
+        and not tokens.filter(Q(purpose=Purpose.INVITATION) | Q(consumed_at__isnull=False)).exists()
+    )
+
+
+def _create_pending_user(email: str):
+    """Create the inactive account; retries a username taken by a concurrent registration."""
+    local = slugify(email.split("@", 1)[0]).replace("-", ".") if "@" in email else ""
+    base = local or "owner"
+    for _ in range(3):
+        username, suffix = base, 1
+        while User.objects.filter(username=username).exists():
+            suffix += 1
+            username = f"{base}{suffix}"
+        try:
+            with transaction.atomic():
+                return User.objects.create_user(
+                    username=username,
+                    email=email,
+                    role=UserRole.USER,
+                    may_create_zev=True,
+                    is_active=False,
+                    must_change_password=True,
+                )
+        except IntegrityError:
+            if not User.objects.filter(username=username).exists():
+                raise
+    raise IntegrityError(f"Could not find a free username for a new registration ({base!r})")
+
+
+def _prepare_signup_link(email: str):
+    """Create a signup credential atomically, serialized with verification and cancellation."""
+    with transaction.atomic():
+        user = User.objects.select_for_update().filter(email__iexact=email).first()
+        if user is None:
+            user = _create_pending_user(email)
+        elif not _is_pending_self_registration(user):
+            return None
+        previous_ids = list(user.email_verification_tokens.filter(
+            purpose=EmailVerificationToken.Purpose.SIGNUP, consumed_at__isnull=True,
+        ).values_list("pk", flat=True))
+        token = EmailVerificationToken.objects.create(user=user, token=secrets.token_urlsafe(48))
+    return user, token, previous_ids
+
+
+def _retire_previous_signup_links(user, token, previous_ids) -> None:
+    """Retire earlier links after delivery; preserve later issuances and completed transitions."""
+    if not previous_ids:
+        return
+    with transaction.atomic():
+        locked = User.objects.select_for_update().filter(pk=user.pk).first()
+        if locked is None or locked.is_active:
+            return
+        if locked.email_verification_tokens.filter(pk=token.pk, consumed_at__isnull=True).exists():
+            locked.email_verification_tokens.filter(pk__in=previous_ids, consumed_at__isnull=True).delete()
+
+
 @api_view(["POST"])
 @permission_classes([AllowAny])
 @throttle_classes([AuthRegisterThrottle])
 def register(request):
-    """Self-registration: create a pending account that may set up a ZEV, and send a verification email."""
+    """Create a pending account, or resend a pending signup link, with a uniform status and body."""
     if not FeatureFlag.is_enabled(FeatureFlag.ZEV_SELF_REGISTRATION_ENABLED):
         return Response(
             {"detail": "Self-registration is currently disabled."},
             status=status.HTTP_403_FORBIDDEN,
         )
 
-    email = request.data.get("email", "").strip()
+    if not isinstance(request.data, dict):
+        return Response({"detail": "Expected an object."}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        email = serializers.EmailField(
+            max_length=User._meta.get_field("email").max_length,
+        ).run_validation(request.data.get("email", ""))
+    except serializers.ValidationError as exc:
+        return Response({"email": exc.detail}, status=status.HTTP_400_BAD_REQUEST)
 
-    errors = {}
-    if not email:
-        errors["email"] = "Email is required."
-    if errors:
-        return Response(errors, status=status.HTTP_400_BAD_REQUEST)
-
-    if User.objects.filter(email__iexact=email).exists():
-        return Response({"email": "An account with this email already exists."}, status=status.HTTP_400_BAD_REQUEST)
-
-    email_local = slugify(email.split("@", 1)[0]).replace("-", ".") if "@" in email else ""
-    base_username = email_local or "owner"
-    username = base_username
-    suffix = 1
-    while User.objects.filter(username=username).exists():
-        suffix += 1
-        username = f"{base_username}{suffix}"
-
-    user = User.objects.create_user(
-        username=username,
-        email=email,
-        role=UserRole.USER,
-        may_create_zev=True,
-        is_active=False,
-        must_change_password=True,
-    )
-    user.set_unusable_password()
-    user.save(update_fields=["password"])
-
-    token = EmailVerificationToken.objects.create(
-        user=user,
-        token=secrets.token_urlsafe(48),
-    )
-
-    frontend_url = settings.FRONTEND_URL.rstrip("/")
-    verify_url = f"{frontend_url}/verify-email?token={token.token}"
-
-    from invoices.models import EmailTemplate, EMAIL_TEMPLATE_DEFAULTS
-
-    defaults = EMAIL_TEMPLATE_DEFAULTS["email_verification"]
-    override = EmailTemplate.objects.filter(template_key="email_verification").first()
-    subject_tpl = override.subject if override else defaults["subject"]
-    body_tpl = override.body if override else defaults["body"]
-
-    template_ctx = build_verification_email_context(verify_url=verify_url)
+    response = Response({"detail": REGISTER_RESPONSE_DETAIL}, status=status.HTTP_201_CREATED)
+    key = "register-mail:" + hashlib.sha256(email.lower().encode()).hexdigest()
+    try:
+        nonce = _reserve_mail_slot(key)
+    except (RedisError, OSError):
+        logger.exception("Could not reserve a registration mail slot")
+        raise RegistrationUnavailable from None
+    if nonce is None:
+        return response
 
     try:
-        subject = safe_format(subject_tpl, template_ctx)
-        body = safe_format(body_tpl, template_ctx)
-    except (KeyError, IndexError, ValueError):
-        subject = render_default(defaults["subject"], template_ctx)
-        body = render_default(defaults["body"], template_ctx)
+        prepared = _prepare_signup_link(email)
+    except Exception:
+        logger.exception("Could not issue a registration link")
+        _release_mail_slot(key, nonce)
+        return response
+    if prepared is None:
+        return response
 
-    EmailMessage(
-        subject=subject,
-        body=body,
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        to=[email],
-    ).send(fail_silently=False)
-
-    return Response({"detail": "Verification email sent. Please check your inbox."}, status=status.HTTP_201_CREATED)
+    user, token, previous_ids = prepared
+    try:
+        # The token remains on failure so the signup can be retried immediately.
+        _send_verification_email(user, token)
+    except Exception:
+        logger.exception("Could not send a registration link")
+        _release_mail_slot(key, nonce)
+        return response
+    try:
+        _retire_previous_signup_links(user, token, previous_ids)
+    except Exception:
+        # Delivery already happened: retain its cooldown even if cleanup fails.
+        logger.exception("Registration link sent, but earlier links could not be retired")
+    return response
 
 
 @api_view(["POST"])
@@ -808,39 +912,47 @@ def verify_email(request):
     response's ``purpose`` tells the frontend which, so an invitee is not
     walked into setting up a ZEV of their own.
     """
-    token_value = request.data.get("token", "").strip()
+    if not isinstance(request.data, dict):
+        return Response({"detail": "Expected an object."}, status=status.HTTP_400_BAD_REQUEST)
+    token_value = request.data.get("token", "")
+    if not isinstance(token_value, str):
+        return Response({"detail": "Token must be a string."}, status=status.HTTP_400_BAD_REQUEST)
+    token_value = token_value.strip()
     if not token_value:
         return Response({"detail": "Token is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        token = EmailVerificationToken.objects.select_related("user").get(token=token_value)
-    except EmailVerificationToken.DoesNotExist:
+    if len(token_value) > EmailVerificationToken._meta.get_field("token").max_length:
         return Response({"detail": "Invalid or expired verification link."}, status=status.HTTP_400_BAD_REQUEST)
 
-    if not token.is_valid():
-        return Response(
-            {"detail": "This verification link has expired or already been used."},
-            status=status.HTTP_400_BAD_REQUEST,
+    user_id = EmailVerificationToken.objects.filter(token=token_value).values_list("user_id", flat=True).first()
+    if user_id is None:
+        return Response({"detail": "Invalid or expired verification link."}, status=status.HTTP_400_BAD_REQUEST)
+
+    with transaction.atomic():
+        # Use the same user-first lock order as signup and cancellation.
+        user = User.objects.select_for_update().filter(pk=user_id).first()
+        token = EmailVerificationToken.objects.filter(token=token_value, user_id=user_id).first()
+        if user is None or user.is_active or token is None or not token.is_valid():
+            return Response(
+                {"detail": "This verification link has expired or already been used."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        token.consumed_at = timezone.now()
+        token.save(update_fields=["consumed_at"])
+        user.email_verification_tokens.filter(consumed_at__isnull=True).delete()
+        user.is_active = True
+        user.save(update_fields=["is_active"])
+
+        record_audit_event(
+            action_category=AuditActionCategory.AUTH,
+            action_type="email.verify",
+            target_type="accounts.User",
+            target=user,
+            target_id=str(user.pk),
+            target_display=user.email or user.username,
+            summary=f"Verified email for {user.email or user.username}.",
+            user=user,
+            changes=build_diff({"is_active": False}, {"is_active": user.is_active}, ["is_active"]),
         )
-
-    token.consumed_at = timezone.now()
-    token.save(update_fields=["consumed_at"])
-
-    user = token.user
-    user.is_active = True
-    user.save(update_fields=["is_active"])
-
-    record_audit_event(
-        action_category=AuditActionCategory.AUTH,
-        action_type="email.verify",
-        target_type="accounts.User",
-        target=user,
-        target_id=str(user.pk),
-        target_display=user.email or user.username,
-        summary=f"Verified email for {user.email or user.username}.",
-        user=user,
-        changes=build_diff({"is_active": False}, {"is_active": user.is_active}, ["is_active"]),
-    )
 
     # Verification itself is final regardless of what happens next — only
     # whether it also delivers a session depends on the account's MFA state.

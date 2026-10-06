@@ -1,14 +1,17 @@
 from django.test import SimpleTestCase, TestCase
 from django.core import mail
+from django.core.cache import cache
 from django.test.utils import override_settings
 from rest_framework.test import APIClient
 from urllib.parse import parse_qs, urlparse
+import hashlib
 import os
 from unittest import mock
 
 from .models import (
 	AppSettings,
 	FeatureFlag,
+	EmailVerificationToken,
 	OAuthExchangeCode,
 	OAuthProvider,
 	OAuthState,
@@ -206,6 +209,66 @@ class PasswordLoginAuditTests(TestCase):
 
 
 class RegistrationTests(TestCase):
+	def setUp(self):
+		cache.clear()
+
+	def post_register(self, email):
+		return APIClient().post("/api/v1/auth/register/", {"email": email}, format="json")
+
+	def make_pending(self, email="pend@example.com", purpose="signup", **fields):
+		user = User.objects.create_user(username=email.split("@")[0], email=email, is_active=False, **fields)
+		user.set_unusable_password()
+		user.save()
+		EmailVerificationToken.objects.create(user=user, token=f"old-{email}", purpose=purpose)
+		return user
+
+	def test_mail_failure_keeps_the_pending_account_and_lets_the_user_retry(self):
+		User.objects.create_user(username="registered", email="registered@example.com")
+		with mock.patch("accounts.views.EmailMessage.send", side_effect=OSError("smtp down")):
+			existing = self.post_register("registered@example.com")
+			new = self.post_register("new@example.com")
+		self.assertEqual((new.status_code, new.data), (existing.status_code, existing.data))
+		self.assertEqual(existing.status_code, 201)
+		pending = User.objects.get(email="new@example.com")
+		self.assertFalse(pending.is_active)
+		self.post_register("new@example.com")
+		self.assertEqual(len(mail.outbox), 1)
+		self.assertEqual(pending.email_verification_tokens.count(), 1)
+
+	def test_register_validates_email_before_creating_an_account(self):
+		client = APIClient()
+		for invalid in ("invalid", "a@", "", None, [], {}):
+			with self.subTest(email=invalid):
+				response = client.post("/api/v1/auth/register/", {"email": invalid}, format="json")
+				self.assertEqual(response.status_code, 400)
+		self.assertFalse(User.objects.exists())
+		self.assertFalse(EmailVerificationToken.objects.exists())
+
+	def test_register_rejects_email_over_model_limit_before_issuance(self):
+		email = "a@" + ".".join(("b" * 63, "c" * 63, "d" * 63, "e" * 57, "com"))
+		self.assertEqual(len(email), User._meta.get_field("email").max_length + 1)
+		with mock.patch("accounts.views._reserve_mail_slot") as reserve, mock.patch(
+			"accounts.views._prepare_signup_link", return_value=None
+		) as prepare, mock.patch("accounts.views.logger.exception") as log_error:
+			response = self.post_register(email)
+		self.assertEqual(response.status_code, 400)
+		self.assertIn("email", response.data)
+		reserve.assert_not_called()
+		prepare.assert_not_called()
+		log_error.assert_not_called()
+		self.assertFalse(User.objects.exists())
+		self.assertFalse(EmailVerificationToken.objects.exists())
+		self.assertEqual(len(mail.outbox), 0)
+
+	def test_register_accepts_email_at_model_limit(self):
+		email = "a@" + ".".join(("b" * 63, "c" * 63, "d" * 63, "e" * 56, "com"))
+		self.assertEqual(len(email), User._meta.get_field("email").max_length)
+		response = self.post_register(email)
+		self.assertEqual(response.status_code, 201)
+		user = User.objects.get(email=email)
+		self.assertEqual(user.email_verification_tokens.count(), 1)
+		self.assertEqual(len(mail.outbox), 1)
+
 	def test_register_unsafe_template_uses_the_default_verification_link(self):
 		EmailTemplate.objects.create(
 			template_key="email_verification", subject="Verify", body="{verify_url.__class__}",
@@ -253,7 +316,7 @@ class RegistrationTests(TestCase):
 		self.assertTrue(message.body.startswith("Verify http"))
 		self.assertIn("/verify-email?token=", message.body)
 
-	def test_register_rejects_duplicate_email_case_insensitive(self):
+	def test_register_duplicate_email_is_indistinguishable_and_does_not_create_token(self):
 		User.objects.create_user(
 			username="existing.owner",
 			email="existing.owner@example.com",
@@ -268,8 +331,237 @@ class RegistrationTests(TestCase):
 			format="json",
 		)
 
+		self.assertEqual(resp.status_code, 201)
+		self.assertEqual(resp.data["detail"], "If that address can be used, check your inbox.")
+		self.assertFalse(EmailVerificationToken.objects.exists())
+		self.assertEqual(len(mail.outbox), 0)
+
+	def test_repeated_probes_of_an_existing_address_send_no_mail(self):
+		User.objects.create_user(username="known", email="known@example.com", password="pass1234")
+		client = APIClient()
+		for _ in range(3):
+			self.assertEqual(client.post("/api/v1/auth/register/", {"email": "known@example.com"}, format="json").status_code, 201)
+		self.assertEqual(len(mail.outbox), 0)
+
+	def test_registering_again_resends_the_link_and_retires_the_old_one(self):
+		self.post_register("pending@example.com")
+		cache.clear()
+		self.assertEqual(self.post_register("pending@example.com").status_code, 201)
+		user = User.objects.get(email="pending@example.com")
+		self.assertEqual(User.objects.filter(email="pending@example.com").count(), 1)
+		self.assertEqual(user.email_verification_tokens.count(), 1)
+		self.assertEqual(len(mail.outbox), 2)
+		self.assertIn(user.email_verification_tokens.get().token, mail.outbox[-1].body)
+
+	def test_an_expired_signup_can_be_restarted(self):
+		user = self.make_pending()
+		EmailVerificationToken.objects.filter(user=user).update(created_at=timezone.now() - timedelta(days=30))
+		self.post_register(user.email)
+		self.assertEqual(len(mail.outbox), 1)
+
+	def test_a_failed_resend_keeps_the_old_link_and_can_be_retried_at_once(self):
+		user = self.make_pending()
+		with mock.patch("accounts.views.EmailMessage.send", side_effect=OSError("smtp down")):
+			self.assertEqual(self.post_register(user.email).status_code, 201)
+		self.assertTrue(user.email_verification_tokens.filter(token=f"old-{user.email}").exists())
+		self.post_register(user.email)
+		self.assertEqual(len(mail.outbox), 1)
+		self.assertEqual(user.email_verification_tokens.count(), 1)
+
+	def test_only_one_request_per_address_sends_within_the_window(self):
+		user = self.make_pending()
+		cache.add("register-mail:" + hashlib.sha256(user.email.encode()).hexdigest(), "other-request", 60)
+		self.assertEqual(self.post_register(user.email).status_code, 201)
+		self.assertEqual(len(mail.outbox), 0)
+
+	def test_a_stale_request_does_not_free_a_newer_requests_reservation(self):
+		from accounts.views import _release_mail_slot, _reserve_mail_slot
+		cache.clear()
+		mine = _reserve_mail_slot("k")
+		cache.set("k", "newer")
+		_release_mail_slot("k", mine)
+		self.assertEqual(cache.get("k"), "newer")
+
+	def test_established_and_disabled_accounts_get_no_mail_or_token(self):
+		User.objects.create_user(username="known", email="known@example.com", password="pass1234")
+		User.objects.create_user(username="off", email="off@example.com", password="pass1234", is_active=False)
+		for email in ("known@example.com", "off@example.com"):
+			self.assertEqual(self.post_register(email).status_code, 201)
+		self.assertEqual(len(mail.outbox), 0)
+		self.assertFalse(EmailVerificationToken.objects.exists())
+
+	def test_an_invitation_account_does_not_get_a_signup_link(self):
+		user = self.make_pending("invited@example.com", purpose="invitation", may_create_zev=False)
+		self.post_register(user.email)
+		self.assertEqual(len(mail.outbox), 0)
+		self.assertEqual(user.email_verification_tokens.count(), 1)
+
+	def test_a_verified_then_disabled_account_does_not_get_a_signup_link(self):
+		user = self.make_pending("gone@example.com")
+		EmailVerificationToken.objects.filter(user=user).update(consumed_at=timezone.now())
+		self.post_register(user.email)
+		self.assertEqual(len(mail.outbox), 0)
+		self.assertEqual(user.email_verification_tokens.count(), 1)
+
+	def test_a_taken_username_is_retried_during_account_creation(self):
+		User.objects.create_user(username="race", email="another@example.com")
+		real_filter = User.objects.filter
+		checked = False
+
+		def miss_concurrent_username(*args, **kwargs):
+			nonlocal checked
+			if kwargs == {"username": "race"} and not checked:
+				checked = True
+				query = mock.Mock()
+				query.exists.return_value = False
+				return query
+			return real_filter(*args, **kwargs)
+
+		with mock.patch.object(User.objects, "filter", side_effect=miss_concurrent_username):
+			self.assertEqual(self.post_register("race@example.com").status_code, 201)
+		self.assertEqual(User.objects.get(email="race@example.com").username, "race2")
+		self.assertEqual(len(mail.outbox), 1)
+
+	def test_unrelated_integrity_failures_are_not_retried(self):
+		from django.db import IntegrityError
+
+		with mock.patch.object(User.objects, "create_user", side_effect=IntegrityError("other constraint")) as create:
+			self.assertEqual(self.post_register("error@example.com").status_code, 201)
+		create.assert_called_once()
+		self.assertFalse(User.objects.exists())
+		self.assertFalse(EmailVerificationToken.objects.exists())
+
+	def test_initial_token_failure_rolls_back_the_account_and_allows_retry(self):
+		with mock.patch.object(EmailVerificationToken.objects, "create", side_effect=RuntimeError("token write failed")):
+			self.assertEqual(self.post_register("retry@example.com").status_code, 201)
+		self.assertFalse(User.objects.exists())
+		self.assertFalse(EmailVerificationToken.objects.exists())
+		self.assertEqual(self.post_register("retry@example.com").status_code, 201)
+		self.assertEqual(User.objects.count(), 1)
+		self.assertEqual(EmailVerificationToken.objects.count(), 1)
+		self.assertEqual(len(mail.outbox), 1)
+
+	def test_pending_signup_cancellation_invalidates_its_link(self):
+		from testing.helpers import authenticate, make_user
+
+		user = self.make_pending()
+		token = user.email_verification_tokens.get()
+		client = APIClient()
+		authenticate(client, make_user("cancel_admin", UserRole.ADMIN))
+		response = client.patch(
+			f"/api/v1/auth/users/{user.pk}/", {"first_name": "Corrected", "is_active": False}, format="json",
+		)
+		self.assertEqual(response.status_code, 200)
+		response = APIClient().post("/api/v1/auth/verify-email/", {"token": token.token}, format="json")
+		self.assertEqual(response.status_code, 400)
+		self.post_register(user.email)
+		user.refresh_from_db()
+		self.assertFalse(user.is_active)
+		self.assertEqual(user.session_version, 0)
+		self.assertFalse(user.email_verification_tokens.exists())
+		self.assertEqual(len(mail.outbox), 0)
+
+	def test_unrelated_pending_account_edit_preserves_its_link(self):
+		from testing.helpers import authenticate, make_user
+
+		user = self.make_pending()
+		token = user.email_verification_tokens.get()
+		client = APIClient()
+		authenticate(client, make_user("edit_admin", UserRole.ADMIN))
+		# The admin edit form resubmits these fields and omits is_active.
+		payload = {field: getattr(user, field) for field in (
+			"username", "email", "first_name", "last_name", "role", "must_change_password",
+		)}
+		payload["first_name"] = "Pending"
+		response = client.patch(f"/api/v1/auth/users/{user.pk}/", payload, format="json")
+		self.assertEqual(response.status_code, 200)
+		response = APIClient().post("/api/v1/auth/verify-email/", {"token": token.token}, format="json")
+		self.assertEqual(response.status_code, 200)
+
+	def test_non_object_registration_payload_is_refused(self):
+		response = APIClient().post("/api/v1/auth/register/", [], format="json")
+		self.assertEqual(response.status_code, 400)
+		self.assertFalse(User.objects.exists())
+
+	def test_cache_outages_return_a_controlled_error_before_issuance(self):
+		from redis.exceptions import ConnectionError
+		from .throttling import AuthRegisterThrottle
+
+		for operation in ("get", "set", "add"):
+			cache.clear()
+			with (
+				self.subTest(operation=operation),
+				mock.patch.object(AuthRegisterThrottle, "THROTTLE_RATES", {"auth_register": "100/hour"}),
+				mock.patch.object(cache, operation, side_effect=ConnectionError("cache down")),
+			):
+				response = self.post_register("outage@example.com")
+				self.assertEqual(response.status_code, 503)
+		self.assertFalse(User.objects.exists())
+		self.assertFalse(EmailVerificationToken.objects.exists())
+
+	def test_active_accounts_cannot_use_an_unused_activation_link(self):
+		user = self.make_pending()
+		token = user.email_verification_tokens.get()
+		user.is_active = True
+		user.save(update_fields=["is_active"])
+		response = APIClient().post("/api/v1/auth/verify-email/", {"token": token.token}, format="json")
+		self.assertEqual(response.status_code, 400)
+		self.assertNotIn("openzev_access", response.cookies)
+
+	def test_invalid_verification_payloads_are_refused_before_lookup(self):
+		invalid = ([], "token", None, {}, *({"token": value} for value in (None, 123, True, [], {}, "", "x" * 65)))
+		for payload in invalid:
+			with (
+				self.subTest(payload=payload),
+				mock.patch.object(EmailVerificationToken.objects, "filter", side_effect=AssertionError("Invalid token queried")),
+			):
+				response = APIClient().post("/api/v1/auth/verify-email/", payload, format="json")
+			self.assertEqual(response.status_code, 400)
+
+	def test_verification_accepts_a_maximum_length_token(self):
+		user = self.make_pending()
+		token = user.email_verification_tokens.get()
+		token.token = "v" * 64
+		token.save(update_fields=["token"])
+		response = APIClient().post("/api/v1/auth/verify-email/", {"token": f" {token.token} "}, format="json")
+		self.assertEqual(response.status_code, 200)
+		user.refresh_from_db()
+		self.assertTrue(user.is_active)
+
+	def test_failed_reservation_release_does_not_change_the_public_response(self):
+		from redis.exceptions import ConnectionError
+
+		with (
+			mock.patch("accounts.views.EmailMessage.send", side_effect=OSError("smtp down")),
+			mock.patch("accounts.views.delete_if_value", side_effect=ConnectionError("cache down")),
+		):
+			response = self.post_register("failed@example.com")
+		self.assertEqual(response.status_code, 201)
+		self.assertEqual(EmailVerificationToken.objects.count(), 1)
+
+	def test_post_delivery_cleanup_failure_keeps_the_cooldown(self):
+		with mock.patch("accounts.views._retire_previous_signup_links", side_effect=RuntimeError("cleanup failed")):
+			self.assertEqual(self.post_register("sent@example.com").status_code, 201)
+		self.assertEqual(self.post_register("sent@example.com").status_code, 201)
+		self.assertEqual(len(mail.outbox), 1)
+
+	def test_admin_deactivation_kills_outstanding_activation_links(self):
+		from testing.helpers import authenticate, make_user
+		user = self.make_pending()
+		admin_client = APIClient()
+		authenticate(admin_client, make_user("reg_admin", UserRole.ADMIN))
+		admin_client.patch(f"/api/v1/auth/users/{user.pk}/", {"is_active": True}, format="json")
+		EmailVerificationToken.objects.create(user=user, token="late")
+		admin_client.patch(f"/api/v1/auth/users/{user.pk}/", {"is_active": False}, format="json")
+		resp = APIClient().post("/api/v1/auth/verify-email/", {"token": "late"}, format="json")
 		self.assertEqual(resp.status_code, 400)
-		self.assertIn("email", resp.data)
+
+	def test_verifying_retires_every_other_unused_link(self):
+		user = self.make_pending()
+		EmailVerificationToken.objects.create(user=user, token="second")
+		resp = APIClient().post("/api/v1/auth/verify-email/", {"token": "second"}, format="json")
+		self.assertEqual(resp.status_code, 200)
+		self.assertEqual(list(user.email_verification_tokens.values_list("token", flat=True)), ["second"])
 
 	def test_login_still_accepts_username(self):
 		client = APIClient()

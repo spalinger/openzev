@@ -160,7 +160,7 @@ export function LoginPage() {
         setRegError(null)
         try {
             await apiRegister({ email: regEmail })
-            setRegSuccess(t('auth.register.success', { email: regEmail }))
+            setRegSuccess(t('auth.register.success'))
         } catch (err) {
             setRegError(formatApiError(err))
         } finally {

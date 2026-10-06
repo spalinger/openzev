@@ -121,8 +121,8 @@ export const en = {
             modalTitle: 'Create your account',
             email: 'Email address',
             emailPlaceholder: 'you@example.com',
-            submitModal: 'Send verification email',
-            success: 'Check your inbox! We sent a verification link to {{email}}.',
+            submitModal: 'Request verification link',
+            success: 'If this address can be used, check your inbox.',
         },
         emailChange: {
             confirming: 'Confirming your new email address…',

@@ -588,19 +588,52 @@ responses, and the detail view do not carry it.
 **Payload:** `{ email }`
 
 **Flow:**
-1. Validate uniqueness of `email` (case-insensitive).
-2. Generate an internal unique `username` from the email local-part (suffix when needed).
-3. Create `User` with `role=user`, `may_create_zev=True` (#761: the
-   right to self-setup, not a role), `is_active=False`,
-   `must_change_password=True`, unusable password.
-4. Generate `EmailVerificationToken` (48-byte `token_urlsafe`, `purpose="signup"`,
-   valid 24 hours; ZEV-access invitations use the same model with
-   `purpose="invitation"`, valid 7 days — SPEC-2026-10-zev-access-grants §8).
-   `POST /auth/verify-email/` answers with the token's `purpose`.
-5. Send verification email with link `{FRONTEND_URL}/verify-email?token={token}`.
-   Operator templates use `config.safe_format.safe_format`; unusable fields
-   fall back to the shipped verification template.
-6. Return `201` with "Verification email sent.".
+1. Apply the per-IP throttle (`429` when exceeded), then require an object payload
+   and validate the email, including the `User.email` model length limit
+   (254 characters; `400` otherwise). Over-length addresses are refused before
+   reserving a mail slot or issuing an account/token.
+2. Reserve `register-mail:<sha256(lowercase email)>` for 15 minutes with an ownership
+   nonce. An existing reservation does no work.
+   A cache connection failure in either operation returns `503` before issuance;
+   the throttle is never bypassed.
+3. In a short transaction, lock an existing user row before checking eligibility.
+   A pending signup is inactive, has an unusable password and at least one `signup`
+   token, with no invitation or consumed-token history. Other existing accounts
+   get no mail or token. Otherwise create the inactive user (`role=user`,
+   `may_create_zev=True`, `must_change_password=True`, unusable password), retrying
+   only a confirmed username collision (up to 3 attempts).
+4. Create the new `signup` token in the same transaction and capture the IDs of
+   earlier unused signup links. An initial token failure rolls back the new user
+   as well; an issuance failure releases the owned reservation and returns the
+   uniform response, allowing retry.
+5. Commit before rendering and sending `{FRONTEND_URL}/verify-email?token={token}`.
+   No database transaction remains open during SMTP. Editable templates use
+   `config.safe_format.render_with_fallback`. A failed send retains the pending
+   credential and atomically releases only its own reservation; a cache failure
+   during release is logged and leaves the cooldown to expire.
+6. After delivery, take the user lock again. Retire only the captured older links,
+   and only if the issued token is still unused and the account inactive. Never
+   delete a later issuance, recreate a cancelled token, or undo verification.
+   Cleanup failures are logged separately and retain the delivered mail's cooldown.
+7. Normal attempts return `201` with
+   `{"detail": "If that address can be used, check your inbox."}`, including
+   unavailable addresses and issuance/delivery failures. The guarantee is
+   status/body normalization, not timing resistance.
+
+**Lifecycle:** pending signup → verification activates it; explicit admin
+`is_active: false` → cancelled signup with no unused activation credentials.
+Cancellation applies even when already inactive, including edits that also
+change other fields. The admin edit form omits `is_active`, preserving its
+links. Session revocation remains an active → inactive transition. Verified
+accounts and invitation accounts are excluded from signup resends. Initial
+user/token creation is atomic, so a failed first issuance cannot leave a new
+account without the token history that identifies a pending signup.
+
+Registration, verification and admin updates serialize on the user row, always
+locking it before reading/updating its credentials. Email is not unique at the
+database level: creation of the same address is protected only by the cache
+reservation, not a database invariant. A case-insensitive uniqueness migration
+would need a duplicate-data and blank-address policy across all provisioning paths.
 
 ### 5.3 Email verification
 
@@ -609,11 +642,18 @@ responses, and the detail view do not carry it.
 **Payload:** `{ token }`
 
 **Flow:**
-1. Look up `EmailVerificationToken` by token value.
-2. Validate not consumed and within 24h expiry.
-3. Mark token as consumed (`consumed_at = now`).
-4. Activate user (`is_active = True`).
-5. Issue JWT via `accounts.views._make_jwt_for_user(user)` set as httpOnly cookies `openzev_access` / `openzev_refresh` (+ `csrftoken` via `get_token`) for auto-login.
+1. Require an object payload and a string token. Trim surrounding whitespace;
+   empty or over-64-character tokens return `400` before lookup.
+2. Resolve the token's user ID, then acquire that user row's lock in a transaction.
+3. Reload the token under the lock; require an inactive user and a valid, unused
+   token within its purpose-specific lifetime (signup: 24 hours; invitation: 7 days).
+   Missing, cancelled, consumed, expired and already-active cases return `400`.
+4. Mark it consumed, delete other unused verification tokens, activate the user,
+   and record `email.verify` in the same transaction.
+5. After commit, return an MFA challenge when required; otherwise use
+   `accounts.jwt_utils.make_jwt_for_user` and set the httpOnly `openzev_access` /
+   `openzev_refresh` cookies (+ `csrftoken`) to sign in. A later admin cancellation
+   revokes sessions using the version counter (§5.6b).
 
 ### 5.4 Initial password set
 
@@ -684,7 +724,7 @@ a session holder).
 | Account has no usable password (participants — whose address the community owner maintains on the participant record — and OAuth-only accounts) | `403` `{code: "no_password"}` |
 | Malformed address / same as current / missing or wrong password | `400` (wrong password audited `auth.email_change.failed`, reason `bad_password`) |
 | Address held by another account (case-insensitive) | `202`, **same body as success**, no mail sent — cannot be used to find which addresses have accounts; audited `auth.email_change.failed` (`DENIED`, reason `address_in_use`) |
-| Otherwise | `202`; a confirmation link is emailed to the **new** address; audited `auth.email_change.requested`. A mail failure is `503` and is not recorded as requested. |
+| Otherwise | `202`; a confirmation link is emailed to the **new** address; audited `auth.email_change.requested`. A mail failure returns the same `202` body, is logged and audited as `auth.email_change.failed` (`FAILED`, reason `mail_failed`), and is not recorded as requested. |
 
 **Token:** `accounts/email_change.py` — a `django.core.signing` token (salt
 `accounts.email-change`, 24 h) carrying `{u: user id, n: new address, f: fingerprint}`,
@@ -1944,7 +1984,7 @@ lists the test classes per module (test counts are the `test_*` methods).
 | `PasswordChangeFlagTests` | 1 | `must_change_password` cleared on password change |
 | `TokenLoginCredentialTests` | 1 | Email login issues httpOnly cookie JWTs instead of a response body token |
 | `PasswordLoginAuditTests` | 5 | Successful login records `auth.login` with the user as actor and target; wrong password, unknown username, and inactive account each record `auth.login_failed` (status `failed`, no actor) with the attempted identifier in `target_display`; a request with no identifier is still audited |
-| `RegistrationTests` | 6 | Self-registration accepts email only and generates a username; the verification template uses the send-time context; a duplicate email is rejected case-insensitively; an unsafe template falls back to the shipped link; login still accepts a username; disabled registration is refused |
+| `RegistrationTests` | 33 | Email-only signup and validation, including rejection above the model email length limit before issuance and acceptance at the limit; uniform response; pending-registration resend rules (invitation, verified/disabled and active accounts excluded); per-address reservation and release; retry after a mail failure; username-collision retry; explicit inactive-signup cancellation and full admin-form edit preservation; atomic initial issuance, delivery/cleanup failure handling and cache outages; verification payload types/length and active-account refusal; template fallback; disabled registration |
 | `FeatureFlagsApiTests` | 5 | Anonymous 401 and non-admin 403 on list; admin can list and toggle; defaults sync on read |
 | `ImpersonationTests` | 4 | Admin can impersonate participant/owner; non-admin blocked; admin cannot impersonate admin |
 | `LinkedAccountSafetyTests` | 8 | Admin can edit linked account; cannot delete linked; can delete unlinked; cannot delete last admin (with audit-denied assertion); can delete self when other admin exists (with audit actor SET_NULL assertion); can delete other admin when multiple exist; cannot change own role (via both detail and me endpoints) |
@@ -1963,7 +2003,7 @@ lists the test classes per module (test counts are the `test_*` methods).
 | Module | Classes | Tests | Coverage |
 |---|---|---|---|
 | `test_session_hardening.py` | 6 | 55 | Self-service profile lockdown (protected fields rejected, repeats accepted, names/preferred community still editable); session revocation (revoked/new/legacy tokens, dead access cookie leaves public endpoints working, refresh refusal, deactivation, stale-instance save cannot revive, API keys and impersonation); password change and revoke endpoints; verified email change (request/confirm, single-use, dies on password/address/deactivation/expiry, no enumeration, throttle, mail failure, API keys) |
-| `test_security_notifications.py` | 5 | 26 | Every event composes (subject, body, `{detail}` filled, admin vs. self advice, no-turn-off line); guards (no address, inactive, gone/deactivated by send time); hooked into passkey add/remove, TOTP enable/disable (not for an abandoned enrolment), recovery-code regeneration, password change (not on failure), admin MFA reset (not when nothing was removed) and admin session revocation (not for the self-service one); a broker or mail failure never fails the triggering request |
+| `test_security_notifications.py` | 6 | 26 | Every event composes (subject, body, `{detail}` filled, admin vs. self advice, no-turn-off line); guards (no address, inactive, gone/deactivated by send time); hooked into passkey add/remove, TOTP enable/disable (not for an abandoned enrolment), recovery-code regeneration, password change (not on failure), admin MFA reset (not when nothing was removed) and admin session revocation (not for the self-service one); a broker or mail failure never fails the triggering request |
 | `test_admin_users_list.py` | 2 | 13 | Admin user list: memberships per relationship (participant, owner-who-is-also-participant merged into one, owner of several communities sorted by name), confirmed-only `mfa_methods`, `last_login` exposed and `null` before the first sign-in, fixed query count, `/auth/me/` unaffected; `mfa_compliance` (`null` outside the policy, `"grace"` before the deadline, `"overdue"` after it, `"compliant"` once enrolled regardless of the deadline, no added query per account) |
 | `test_last_login.py` | 4 | 7 | `last_login` stamped by a plain password login (not by a failed one, not by the password step of a two-step login until `/token/mfa/` completes it) and by the auto-login after email verification; not restamped by a password change or by setting your initial password moments after verifying; untouched on either side of an impersonation session |
 | `test_admin_account_actions.py` | 2 | 12 | Account creation (generated password when omitted, returned once and never re-listed, two accounts get different passwords, a supplied password is still accepted, mismatched/weak supplied passwords rejected, generated password passes the validators anyway, response carries the new id, non-admin blocked); self-deactivation guard (blocked with a field error, deactivating someone else works and is audited, reactivating your own account is unaffected, deactivating someone else still revokes their sessions) |
@@ -1971,6 +2011,7 @@ lists the test classes per module (test counts are the `test_*` methods).
 | `test_oauth.py` | 12 | 55 | Provider listing, initiate, callback guards/redirects, link flow, social accounts, audit, `require_mfa_claim` (`OAuthMfaClaimTests`) |
 | `test_passkeys.py` | 9 | 64 | Passkey registration and passwordless sign-in against a software authenticator, MFA policy and grace arithmetic, removal guard, admin reset, RP-ID/origin system checks |
 | `test_mfa.py` | 4 | 28 | TOTP enrolment/removal/recovery codes, two-step login, MFA at the magic-link/onboarding/OAuth/impersonation/email-verification doors, per-account throttle (`SPEC-2026-09-two-factor-authentication`) |
+| `test_registration_concurrency.py` | — (3 functions) | 7 cases | PostgreSQL cancellation/verification/resend row-lock ordering; SMTP outside transactions; transitions during delivery; late cleanup preserves newer links |
 | `test_cookie_oauth.py` | — (7 module-level test functions) | 7 | Refresh/logout cookie handling; token exchange sets cookies, consumes codes, and stamps `last_login` |
 | `test_impersonation.py` | 5 | 22 | Permissions, audit, cookie round-trip, stop-impersonation |
 | `test_throttling.py` | 4 | 15 | Per-IP 429 boundaries for all six public auth write endpoints; budgets are independent; production settings wiring and spoofed `X-Forwarded-For` regression coverage; headers neither evade the login bucket without a trusted proxy nor escape the right-most-entry bucket with one trusted hop |

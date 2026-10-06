@@ -210,6 +210,12 @@ The quickest way in is from the account itself: **View activity** on a row
 under **Platform → Accounts → Users** opens the audit log already filtered to
 what that account has done.
 
+For email-change delivery failures, filter action type `auth.email_change.failed`
+and status **Failed**; the event metadata identifies `mail_failed`. Operators
+should monitor these events and the registration issuance/send/cleanup error
+logs, since public confirmation responses deliberately do not report mail failure.
+Alert on registration cache-unavailable `503` responses as well.
+
 The API is `GET /api/v1/audit/events/` (list) and
 `GET /api/v1/audit/events/{id}/` (detail). See the access spec
 [2026-05-audit-log-and-operational-traceability.md](../specs/2026-05-audit-log-and-operational-traceability.md)

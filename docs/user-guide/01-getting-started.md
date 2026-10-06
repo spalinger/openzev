@@ -71,6 +71,9 @@ gunicorn), a Celery worker, one Celery Beat scheduler, PostgreSQL and Redis on
 one host. Only the frontend port `8080` is published; nginx proxies `/api/` to
 the backend, and PostgreSQL and Redis are reachable only on the compose
 network. The images are built from your checkout of the repository.
+Keep the shared Redis cache supplied by Compose: registration reservations and
+throttles must be shared across backend workers; an in-memory cache is local to
+each process.
 
 ### 1. Get the code
 

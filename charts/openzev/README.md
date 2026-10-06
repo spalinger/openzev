@@ -305,6 +305,9 @@ redis:
   cacheUrl: redis://redis.example.svc.cluster.local:6379/1
 ```
 
+All backend replicas must share this cache for registration reservations and
+throttles; a process-local cache does not coordinate workers.
+
 ## Example values
 
 A complete production-oriented example covering the required Django host,

@@ -112,8 +112,8 @@ export const de = {
             modalTitle: 'Konto erstellen',
             email: 'E-Mail-Adresse',
             emailPlaceholder: 'sie@beispiel.ch',
-            submitModal: 'Bestätigungs-E-Mail senden',
-            success: 'Bitte prüfen Sie Ihren Posteingang! Wir haben einen Bestätigungslink an {{email}} gesendet.',
+            submitModal: 'Bestätigungslink anfordern',
+            success: 'Wenn diese Adresse verwendet werden kann, prüfen Sie bitte Ihren Posteingang.',
         },
         emailChange: {
             confirming: 'Ihre neue E-Mail-Adresse wird bestätigt…',
