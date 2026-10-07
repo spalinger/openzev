@@ -153,7 +153,7 @@ class PasskeyDetailView(APIView):
 
         if mfa.removal_blocked(user, leaving=mfa.factor_count(user) - 1):
             return Response(
-                {"detail": "Two-factor authentication is required for your role; add another factor before removing this one."},
+                {"detail": "Two-factor authentication is required; add another factor before removing this one."},
                 status=status.HTTP_409_CONFLICT,
             )
 

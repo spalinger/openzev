@@ -1010,7 +1010,7 @@ class TotpDeviceView(APIView):
         # is the last one — a passkey elsewhere on the account still counts.
         if mfa.removal_blocked(request.user, leaving=mfa.factor_count(request.user) - int(device.is_active)):
             return Response(
-                {"detail": "Two-factor authentication is required for your role; add a passkey before removing this one."},
+                {"detail": "Two-factor authentication is required; add a passkey before removing this one."},
                 status=status.HTTP_409_CONFLICT,
             )
 
