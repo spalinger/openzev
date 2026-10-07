@@ -437,6 +437,13 @@ The seed command creates two communities owned by the same demo owner, so the co
 
 The standard Swiss VAT ranges (7.7 % from 2018 and 8.1 % from 2024) are added only when no existing rate overlaps each range; existing VAT timelines are preserved. The operational/log pages are seeded too — metering import logs (CSV + SDAT-CH, with CSV provenance on a real meter month), invoice email logs, two issued contract snapshots (Anna and Clara), and audit events (including one denied) — and one meter on the flagship carries an intentional ~12-day reading gap in the current quarter so the data-quality page has a real issue to show.
 
+The flagship also carries **Netznutzung dynamisch**, linked to a synthetic price
+source with quarter-hourly prices from the start of the quarter containing
+`--end-date` through the following day. The tariff starts after all seeded
+invoice periods, so their totals are unchanged. Fetching is disabled and the
+source URL is a reserved `.invalid` host, so seeding never calls a tariff API.
+Re-seeding keeps the stored prices.
+
 Re-running `seed_demo` refreshes the demo readings, invoices, import/email logs and audit events, while retaining contract snapshots. Screenshot captures explicitly select ZEV STWEG Sonnenhof so they consistently show the same community.
 
 ## API & Developer Docs

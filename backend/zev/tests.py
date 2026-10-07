@@ -16,6 +16,7 @@ from audit.models import AuditActionCategory, AuditEvent
 from audit.services import record_audit_event
 from zev.management.commands.seed_demo import (
 	Command as SeedDemoCommand,
+	DEMO_DYNAMIC_TARIFF_NAME,
 	DEMO_ZEV_LEGACY_NAME,
 	DEMO_ZEV_NAME,
 	SECOND_DEMO_ZEV_NAME,
@@ -26,6 +27,7 @@ from zev.management.commands.seed_demo import (
 )
 from invoices.models import ContractIssue, EmailLog, Invoice, InvoiceStatus
 from metering.models import ImportLog, MeterReading, ReadingDirection, ReadingResolution
+from tariffs.dynamic.models import DynamicPricePoint, DynamicTariffSource
 from tariffs.models import BillingMode, PeriodType, Tariff
 from tariffs.series import active_version, find_gaps
 from zev.models import (
@@ -2615,19 +2617,22 @@ class SeedDemoEndToEndTests(TestCase):
 	LAST_YEAR = END.year - 1
 	WINDOW = ["--start-date=2025-11-01", f"--end-date={END.isoformat()}"]
 
-	def _run(self):
+	def _run(self, window=None):
 		buf = StringIO()
 		with mock.patch(
 			"zev.management.commands.seed_demo.issue_contract_pdf",
 			return_value=(None, False),
 		):
-			call_command("seed_demo", *self.WINDOW, stdout=buf, stderr=buf)
+			call_command("seed_demo", *(window or self.WINDOW), stdout=buf, stderr=buf)
 
 	def _snapshot(self):
 		return {
 			"readings": MeterReading.objects.count(),
 			"invoices": Invoice.objects.count(),
 			"invoice_numbers": set(Invoice.objects.values_list("invoice_number", flat=True)),
+			"invoice_totals": set(Invoice.objects.values_list("invoice_number", "total_chf")),
+			"dynamic_sources": DynamicTariffSource.objects.count(),
+			"dynamic_points": DynamicPricePoint.objects.count(),
 			"email_logs": EmailLog.objects.count(),
 			"import_logs": ImportLog.objects.count(),
 			"audit_events": AuditEvent.objects.count(),
@@ -2651,6 +2656,11 @@ class SeedDemoEndToEndTests(TestCase):
 		)
 
 		first = self._snapshot()
+		dynamic_tariff = flagship.tariffs.get(name=DEMO_DYNAMIC_TARIFF_NAME)
+		self.assertFalse(Invoice.objects.filter(zev=flagship, period_end__gte=dynamic_tariff.valid_from).exists())
+		self.assertFalse(dynamic_tariff.dynamic_source.enabled)
+		self.assertEqual(first["dynamic_sources"], 1)
+		self.assertGreater(first["dynamic_points"], 0)
 		self.assertEqual(first["zevs"], 2)
 		self.assertGreater(first["readings"], 0)
 		self.assertGreater(first["invoices"], 0)
@@ -2669,11 +2679,29 @@ class SeedDemoEndToEndTests(TestCase):
 		self.assertEqual(second["readings"], first["readings"])
 		self.assertEqual(second["invoices"], first["invoices"])
 		self.assertEqual(second["invoice_numbers"], first["invoice_numbers"])
+		self.assertEqual(second["invoice_totals"], first["invoice_totals"])
+		self.assertEqual(second["dynamic_sources"], first["dynamic_sources"])
+		self.assertEqual(second["dynamic_points"], first["dynamic_points"])
 		self.assertEqual(second["email_logs"], first["email_logs"])
 		self.assertEqual(second["import_logs"], first["import_logs"])
 		self.assertEqual(second["audit_events"], first["audit_events"])
 		self.assertEqual(second["contracts"], first["contracts"])
 		self.assertEqual(second["zevs"], 2)
+
+	def test_a_next_quarter_re_seed_bills_none_of_the_dynamic_tariff(self):
+		"""The dynamic tariff is replaced before invoices are rebuilt. Otherwise
+		the previous run's tariff would still cover the new invoice quarter."""
+		self._run()
+		points = set(DynamicPricePoint.objects.values_list("pk", "price_chf_per_kwh"))
+		self._run(["--start-date=2026-02-01", "--end-date=2026-04-15"])
+
+		flagship = Zev.objects.get(name=DEMO_ZEV_NAME)
+		dynamic_tariff = flagship.tariffs.get(name=DEMO_DYNAMIC_TARIFF_NAME)
+		self.assertEqual((dynamic_tariff.valid_from, dynamic_tariff.valid_to), (date(2026, 4, 1), None))
+		self.assertTrue(Invoice.objects.filter(zev=flagship, period_end=date(2026, 3, 31)).exists())
+		self.assertFalse(Invoice.objects.filter(zev=flagship, period_end__gte=dynamic_tariff.valid_from).exists())
+		self.assertFalse(Invoice.objects.filter(dynamic_evidence__isnull=False).exists())
+		self.assertLessEqual(points, set(DynamicPricePoint.objects.values_list("pk", "price_chf_per_kwh")))
 
 	def test_the_flagship_has_a_representative_and_a_contact(self):
 		"""The Verwaltung represents the flagship and manages it through that
