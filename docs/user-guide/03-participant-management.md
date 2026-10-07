@@ -132,7 +132,9 @@ To mark a participant as active/inactive:
 - **Ongoing membership:** Leave **Valid To** blank
 - **End membership:** Set **Valid To** to the last day of their invoice period
 
-> **Important:** Changing validity dates affects future invoices only—past invoices remain unchanged.
+> **Important:** Changing validity dates does not change existing invoices on its
+> own. Regenerating a **draft** invoice recalculates it with the new dates;
+> invoices that have been approved, sent or paid stay as they are.
 
 ## Allocation Weight
 
