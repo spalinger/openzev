@@ -388,7 +388,7 @@ export function EnergyFlowChart({ totals, participantStats, highlightParticipant
     return (
         <svg
             viewBox={`0 0 ${VIEW_W} ${viewH}`}
-            style={{ width: '100%', height: 'auto', display: 'block' }}
+            className="energy-flow-svg"
             onMouseLeave={() => { setHoverNode(null); setHoverLink(null) }}
         >
             {/* Flow ribbons */}
@@ -408,7 +408,7 @@ export function EnergyFlowChart({ totals, participantStats, highlightParticipant
                             stroke={lk.color}
                             strokeOpacity={dim ? 0.08 : hit ? 0.55 : 0.25}
                             strokeWidth={0.5}
-                            style={{ transition: 'fill-opacity 200ms, stroke-opacity 200ms', cursor: 'pointer' }}
+                            className="energy-flow-link"
                             onMouseEnter={() => setHoverLink(lk.id)}
                             onMouseLeave={() => setHoverLink(null)}
                         >
@@ -423,7 +423,7 @@ export function EnergyFlowChart({ totals, participantStats, highlightParticipant
                                 fontSize={9}
                                 fill={CHART_INK}
                                 fillOpacity={0.85}
-                                style={{ pointerEvents: 'none' }}
+                                pointerEvents="none"
                             >
                                 {formatKwh(lk.value)} kWh
                             </text>
@@ -448,7 +448,7 @@ export function EnergyFlowChart({ totals, participantStats, highlightParticipant
                 return (
                     <g
                         key={n.id}
-                        style={{ cursor: 'pointer', opacity: active ? 1 : 0.3, transition: 'opacity 200ms' }}
+                        className={`energy-flow-node${active ? '' : ' energy-flow-node--dimmed'}`}
                         onMouseEnter={() => setHoverNode(n.id)}
                         onMouseLeave={() => setHoverNode(null)}
                     >

@@ -14,7 +14,7 @@ export function EnergyFlowCard({ totals, participantStats, highlightParticipantI
     if (participantStats.length === 0) return null
     return (
         <section className="card">
-            <h3 style={{ marginTop: 0 }}>
+            <h3>
                 {t('pages.dashboard.energyFlow.title')}
                 {zevName ? ` — ${zevName}` : ''}
             </h3>

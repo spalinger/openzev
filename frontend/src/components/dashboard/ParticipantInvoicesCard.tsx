@@ -18,7 +18,7 @@ export function ParticipantInvoicesCard({ invoices, isLoading, isError, allCommu
 
     return (
         <section className="card">
-            <h3 style={{ marginTop: 0 }}>{t(allCommunities ? 'pages.dashboard.invoicesAllCommunitiesSection' : 'pages.dashboard.invoicesSection')}</h3>
+            <h3>{t(allCommunities ? 'pages.dashboard.invoicesAllCommunitiesSection' : 'pages.dashboard.invoicesSection')}</h3>
             {isLoading ? (
                 <PageSkeleton variant="tableRows" />
             ) : isError ? (
@@ -26,31 +26,30 @@ export function ParticipantInvoicesCard({ invoices, isLoading, isError, allCommu
             ) : invoices.length === 0 ? (
                 <p className="muted">{t('pages.dashboard.noInvoices')}</p>
             ) : (
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <table className="participant-invoices-table">
                     <thead>
                         <tr>
-                            <th style={{ textAlign: 'left', padding: '0.5rem 0.6rem' }}>{t('pages.dashboard.invoiceCol.invoice')}</th>
-                            <th style={{ textAlign: 'left', padding: '0.5rem 0.6rem' }}>{t('pages.dashboard.invoiceCol.period')}</th>
-                            <th style={{ textAlign: 'right', padding: '0.5rem 0.6rem' }}>{t('pages.dashboard.invoiceCol.total')}</th>
-                            <th style={{ textAlign: 'left', padding: '0.5rem 0.6rem' }}>{t('pages.dashboard.invoiceCol.actions')}</th>
+                            <th>{t('pages.dashboard.invoiceCol.invoice')}</th>
+                            <th>{t('pages.dashboard.invoiceCol.period')}</th>
+                            <th className="participant-invoices-total">{t('pages.dashboard.invoiceCol.total')}</th>
+                            <th>{t('pages.dashboard.invoiceCol.actions')}</th>
                         </tr>
                     </thead>
                     <tbody>
                         {invoices.map((invoice) => (
-                            <tr key={invoice.id} style={{ borderTop: '1px solid var(--border-default)' }}>
-                                <td style={{ padding: '0.5rem 0.6rem' }}>{invoice.invoice_number}</td>
-                                <td style={{ padding: '0.5rem 0.6rem' }}>{formatShortDate(invoice.period_start, settings)} → {formatShortDate(invoice.period_end, settings)}</td>
-                                <td style={{ textAlign: 'right', padding: '0.5rem 0.6rem' }}>CHF {invoice.total_chf}</td>
-                                <td style={{ padding: '0.5rem 0.6rem' }}>
-                                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                        <Link className="button button-primary" style={{ textDecoration: 'none' }} to={`/billing/invoices/${invoice.id}`} state={{ from: '/' }}>
+                            <tr key={invoice.id}>
+                                <td>{invoice.invoice_number}</td>
+                                <td>{formatShortDate(invoice.period_start, settings)} → {formatShortDate(invoice.period_end, settings)}</td>
+                                <td className="participant-invoices-total">CHF {invoice.total_chf}</td>
+                                <td>
+                                    <div className="participant-invoice-actions">
+                                        <Link className="button button-primary" to={`/billing/invoices/${invoice.id}`} state={{ from: '/' }}>
                                             {t('pages.dashboard.viewDetails')}
                                         </Link>
                                         <button
                                             type="button"
                                             onClick={() => openInvoicePdf(invoice.id)}
-                                            className="button button-primary"
-                                            style={{ textDecoration: 'none', padding: '0.3rem 0.5rem', lineHeight: 1 }}
+                                            className="button button-primary participant-invoice-pdf"
                                             aria-label={t('pages.dashboard.openInvoicePdf', { number: invoice.invoice_number })}
                                             title={t('common.openPdf')}
                                         >

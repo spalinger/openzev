@@ -282,6 +282,20 @@ label > small.muted {
   cursor: pointer;
 }
 
+.data-table-footer {
+  font-size: 0.82rem;
+}
+
+.data-table-page-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.data-table-page-size select {
+  width: auto;
+}
+
 .shell {
   display: grid;
   grid-template-columns: 280px 1fr;
@@ -1545,6 +1559,8 @@ h3 {
 }
 
 .skeleton-block {
+  /* Keep fixed-width placeholders within their container. */
+  max-width: 100%;
   border-radius: 0.75rem;
 }
 
@@ -1675,6 +1691,66 @@ h3 {
   color: var(--success-700);
 }
 
+.chart-card {
+  min-height: 360px;
+}
+
+.chart-card-description {
+  margin-top: 0;
+  font-size: 0.875rem;
+}
+
+.form-grid.balance-chart-grid {
+  gap: 2rem;
+}
+
+.balance-chart-label {
+  margin: 0 0 0.5rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.energy-flow-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.energy-flow-link {
+  transition: fill-opacity 200ms, stroke-opacity 200ms;
+  cursor: pointer;
+}
+
+.energy-flow-node {
+  cursor: pointer;
+  transition: opacity 200ms;
+}
+
+.energy-flow-node--dimmed {
+  opacity: 0.3;
+}
+
+/* Denser cells than the .page-stack table it sits in. */
+.participant-invoices-table th,
+.participant-invoices-table td {
+  padding: 0.5rem 0.6rem;
+}
+
+.participant-invoices-table .participant-invoices-total {
+  text-align: right;
+}
+
+.participant-invoice-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.button.participant-invoice-pdf {
+  padding: 0.3rem 0.5rem;
+  line-height: 1;
+}
+
 /* Admin dashboard invoice-status tiles */
 .status-tile {
   padding: 1rem;
@@ -1787,6 +1863,10 @@ h3 {
   align-items: start;
 }
 
+.inline-form--narrow {
+  max-width: 320px;
+}
+
 .field-error {
   color: var(--danger-600);
   font-size: 0.85rem;
@@ -1867,12 +1947,35 @@ input.recurrence-chip-input {
   width: 0;
 }
 
+/* Single-property utilities; the suffix is the size in rem (`05` = 0.5rem,
+   `15` = 1.5rem). Plain class specificity: a contextual rule that sets the same
+   property (`.page-stack th`) still wins, so use the context's own class there. */
+.m-0 {
+  margin: 0;
+}
+
+.mt-0 {
+  margin-top: 0;
+}
+
+.mt-05 {
+  margin-top: 0.5rem;
+}
+
 .mb-1 {
   margin-bottom: 1rem;
 }
 
+.mb-15 {
+  margin-bottom: 1.5rem;
+}
+
 .mt-1 {
   margin-top: 1rem;
+}
+
+.flex-1 {
+  flex: 1;
 }
 
 .template-editor {
@@ -3063,6 +3166,16 @@ input.recurrence-chip-input {
   gap: 0.6rem;
 }
 
+/* Label with a hint underneath: keep the box on the first line. */
+.checkbox-row.align-start {
+  align-items: flex-start;
+}
+
+.checkbox-row-text {
+  display: grid;
+  gap: 0.15rem;
+}
+
 .toast-stack {
   position: fixed;
   top: 1rem;
@@ -3723,6 +3836,151 @@ input.recurrence-chip-input {
   justify-content: flex-end;
   gap: 0.75rem;
   margin-top: 0.5rem;
+}
+
+/* z-index is set inline from lib/zLayers.ts, which owns the stacking order. */
+.dialog-scrim {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dialog-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: flex-end;
+}
+
+.form-modal {
+  background-color: var(--surface-card);
+  border-radius: 0.5rem;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+  width: 90%;
+  max-height: 90vh;
+  overflow: auto;
+  padding: 2rem;
+  outline: none;
+}
+
+.form-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.form-modal-close {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0;
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Out-rank .card's padding in the narrow-viewport media query. */
+.card.confirm-dialog {
+  max-width: 400px;
+  padding: 2rem;
+  outline: none;
+}
+
+.confirm-dialog-message {
+  margin-bottom: 1.5rem;
+  color: var(--text-body);
+  line-height: 1.5;
+}
+
+.card.email-logs-dialog {
+  max-width: 600px;
+  max-height: 80vh;
+  overflow: auto;
+  padding: 2rem;
+}
+
+.email-logs-empty {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 2rem 0;
+}
+
+.email-logs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.email-log {
+  border: 1px solid var(--border-default);
+  border-radius: 0.4rem;
+  padding: 1rem;
+  background-color: var(--surface);
+}
+
+.email-log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 0.5rem;
+}
+
+.email-log-subject {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
+.email-log-status {
+  display: inline-block;
+  padding: 0.35rem 0.8rem;
+  border-radius: 0.3rem;
+  background-color: var(--text-muted);
+  color: var(--white);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: center;
+  min-width: 80px;
+}
+
+.email-log-status--pending {
+  background-color: var(--warning-800);
+}
+
+.email-log-status--sent {
+  background-color: var(--success-600);
+}
+
+.email-log-status--failed {
+  background-color: var(--danger-600);
+}
+
+.email-log-meta {
+  font-size: 0.85rem;
+  color: var(--text-body);
+  margin-bottom: 0.5rem;
+}
+
+.email-log-error {
+  background-color: var(--danger-100);
+  border: 1px solid var(--danger-300);
+  border-radius: 0.3rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--danger-700);
+  margin-bottom: 0.5rem;
+  font-family: monospace;
+}
+
+.email-logs-footer {
+  margin-top: 2rem;
 }
 
 /* Verify email page card */
@@ -4592,6 +4850,22 @@ input.recurrence-chip-input {
 
 .pdf-preview-actions {
   padding: 0.75rem;
+}
+
+.pdf-preview-frame {
+  width: 100%;
+  border: 0;
+  display: block;
+}
+
+.pdf-preview-link {
+  padding: 0.5rem 0.75rem;
+  margin: 0;
+}
+
+.pdf-preview-empty {
+  padding: 2rem;
+  text-align: center;
 }
 
 /* Hold the viewer height while generating. */

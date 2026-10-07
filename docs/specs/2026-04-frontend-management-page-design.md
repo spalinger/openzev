@@ -213,11 +213,28 @@ language and should be reused instead of ad hoc page-local CSS when possible:
 | `.actions-row`, `.actions-row-wrap`, `.actions-row-end` | Inline action layouts |
 | `.app-tabs`, `.app-tabs-list`, `.app-tabs-tab` | Token styling for Mantine `Tabs`: root grid rhythm (1.5rem gap), 1rem tab gap, muted labels with a 2px `--interactive` underline when active; applied via the `classNames` prop. |
 | `.empty-state` | Empty-state layout (`display:grid; gap:0.75rem` inside `.card`); retired inline-style version from `InvoicesEmptyState` |
-| `.skeleton-block` | Skeleton item radius/spacing bound to tokens; `prefers-reduced-motion: reduce` disables Mantine shimmer via `useReducedMotion() → animate={false}` + `.skeleton-block` CSS |
+| `.skeleton-block` | Skeleton item radius/spacing bound to tokens, capped at `max-width: 100%` so fixed-width placeholders shrink with the page; `prefers-reduced-motion: reduce` disables Mantine shimmer via `useReducedMotion() → animate={false}` + `.skeleton-block` CSS |
 | `.skeleton-table-rows` | Grid for `PageSkeleton` table rows (`display:grid; gap:0.6rem`); shared by `table` and `tableRows` variants |
 | `.checkbox-row` | Flex row for a checkbox and its label (`display:flex; align-items:center; gap:0.6rem`) |
+| `.checkbox-row.align-start`, `.checkbox-row-text` | Checkbox with its label and hint stacked |
+| `.inline-form--narrow` | Caps an `.inline-form` holding one short control at 320px |
+| `.grid-span-full` | Full-width row inside `.form-grid` and other grids |
+| `.m-0`, `.mt-0`, `.mt-05`, `.mt-1`, `.mb-1`, `.mb-15` | Margin utilities; suffix is rem (`05` = 0.5, `15` = 1.5) |
+| `.flex-1` | Flexible spacer in a flex row |
+| `.dialog-scrim`, `.dialog-actions` | Shared modal backdrop and right-aligned dialog button row; the scrim's `z-index` stays inline (`lib/zLayers.ts`) |
+| `.data-table-footer`, `.data-table-page-size` | Pagination footer and rows-per-page control of `DataTable` / `RawMeteringTable` |
 | `.visually-hidden` | Text for assistive technology only (clipped 1px box), e.g. per-step state text in icon rows |
 | `.participant-*`, `.metering-*`, `.tariff-*`, `.invoice-*` | Page-family-specific structural patterns that are already in active use |
+
+**Inline styles.** Put static presentation in `index.css`, reusing existing
+classes where practical. Keep `style` props for runtime values,
+component-provided dimensions, and tokens owned by TypeScript constants
+(`lib/zLayers.ts`, `lib/chartTokens.ts`). Use modifier classes for fixed visual
+states. When extracting a style, preserve its effective value: an inline style
+out-ranks normal declarations, so the replacement rule must match or out-rank
+any contextual rule that sets the same property, including in media queries.
+Shared components and the dashboard follow this; other pages and feature
+modals are migrated separately.
 
 Form controls: native text-like inputs and single-value selects share one
 default presentation with Mantine field controls (`TextInput`,

@@ -404,7 +404,7 @@ export function RawMeteringTable({
     return (
         <div className="table-card raw-metering">
             <h3>{t('pages.meteringData.rawTable.title')}</h3>
-            <p className="muted" style={{ marginTop: 0 }}>
+            <p className="muted mt-0">
                 {t('pages.meteringData.rawTable.description')}
             </p>
 
@@ -495,7 +495,7 @@ export function RawMeteringTable({
             )}
 
             {days.length > DAYS_PER_PAGE && (
-                <div className="data-table-footer actions-row actions-row-end muted" style={{ fontSize: '0.82rem', alignItems: 'center' }}>
+                <div className="data-table-footer actions-row actions-row-end muted">
                     <span>
                         {t('common.pagination.range', {
                             from: page * DAYS_PER_PAGE + 1,
@@ -503,7 +503,7 @@ export function RawMeteringTable({
                             total: days.length,
                         })}
                     </span>
-                    <span style={{ flex: 1 }} />
+                    <span className="flex-1" />
                     <button
                         className="button button-secondary button-compact"
                         type="button"

@@ -1,8 +1,5 @@
 [
   "index.css@alpha",
-  "components/FormModal.tsx@alpha",
-  "components/ConfirmDialog.tsx@alpha",
-  "components/EmailLogsModal.tsx@alpha",
   "features/invoices/InvoiceDeleteModal.tsx@alpha",
   "features/audit/AuditEventDrawer.tsx@alpha",
   "features/tariffs/TariffDetailDrawer.tsx@alpha",

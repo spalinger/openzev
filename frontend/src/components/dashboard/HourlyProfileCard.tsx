@@ -20,12 +20,12 @@ export function HourlyProfileCard({ data, hourlyKwhTick, hourlyKwhTooltipValue, 
     const { t } = useTranslation()
     if (data.length === 0) return null
     return (
-        <section className="card" style={{ minHeight: 360 }}>
-            <h3 style={{ marginTop: 0 }}>
+        <section className="card chart-card">
+            <h3>
                 {t('pages.dashboard.hourlyProfile.title')}
                 {participantName ? ` — ${participantName}` : ''}
             </h3>
-            <p className="muted" style={{ marginTop: 0, fontSize: '0.875rem' }}>{t('pages.dashboard.hourlyProfile.description')}</p>
+            <p className="muted chart-card-description">{t('pages.dashboard.hourlyProfile.description')}</p>
             <ResponsiveContainer width="100%" height={320}>
                 <BarChart data={data} margin={{ top: 4, right: 4, bottom: 4, left: 0 }}>
                     <CartesianGrid stroke={CHART_GRIDLINE} strokeDasharray="3 3" vertical={false} />
