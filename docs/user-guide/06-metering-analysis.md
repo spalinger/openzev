@@ -93,7 +93,8 @@ Two flags can appear next to a day's date:
 
 - **Zero consumption** — the day has an assignment holder but recorded no
   energy at all, which usually means a meter or import problem rather than
-  genuinely nothing used.
+  genuinely nothing used. Only admins, managers and viewers see this flag:
+  assignment holders are not shown to participants.
 - **Negative total** — the day's consumption or feed-in total is below zero,
   which should not happen for a normal reading.
 

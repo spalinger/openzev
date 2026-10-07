@@ -582,6 +582,7 @@ These pages define the current management-page reference set.
 
 - Route accessibility: `npx vitest run tests/route-accessibility.test.ts` — skip link first and focusing `main` without a location change, one `main` without the top bar, no focus move on first render, query edits or a loading redirect, focus to the new `h1` after sidebar/in-page navigation, a first navigation that replaces history, Back and alias redirects, and retained focus on routed hub tabs, page-placed focus and open dialogs.
 - Document titles: `npx vitest run tests/document-title.test.ts` — page and scope format from the English templates, the scope note kept out of the title, no reset between pages. `tests/page-anatomy.test.ts` requires every routed page outside the embedded bodies and the `HomePage` dispatcher to render `PageHeader` or call `useDocumentTitle`.
+- Raw readings access: `npx vitest run tests/raw-metering-table-access.test.ts` — without assignment access the table neither requests nor uses (cached) assignments, so no holder-dependent zero-consumption flag appears.
 - Retired CSS classes: `npx vitest run tests/retired-css-classes.test.ts` — classes with no rule must not survive in markup
 - Manual verification on the reference pages:
   - page header and description are present
