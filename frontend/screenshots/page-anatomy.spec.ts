@@ -439,7 +439,8 @@ for (const role of ['manager', 'viewer'] as const) {
   test(`${role} provider limits selection to granted communities and respects write access`, async ({ page }) => {
     await mockApi(page, { role, zevs: twoZevs, membershipIds: ['42'], populated: true, qualityPeriod: healthPeriod })
     await page.goto('/metering/points')
-    await expect(page.locator('main .eyebrow').first()).toHaveText('Review ZEV')
+    // A viewer's header also notes the read-only access.
+    await expect(page.locator('main .eyebrow').first()).toHaveText(role === 'viewer' ? 'Review ZEV · Viewer (read only)' : 'Review ZEV')
     await expect(page.locator('main').getByText('MP-42', { exact: true }).first()).toBeVisible()
     await expect(page.locator('main').getByText('MP-43', { exact: true })).toHaveCount(0)
     await expect(page.locator('.sidebar-zev-menu')).toHaveCount(0)

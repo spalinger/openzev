@@ -35,14 +35,13 @@ export function MyInvoicesPage() {
     // The unscoped list is the union of management/viewer access and the
     // caller's participant invoices: keep only the caller's own, previously sent rows here.
     const invoices = (invoicesQuery.data ?? []).filter(isPersonalInvoice)
-    // A multi-membership participant needs to know which community issued each
-    // invoice; with a single membership the page header already names it.
+    // Several memberships: a community column, and the header names all of them.
     const showCommunity = (user?.memberships?.length ?? 0) > 1
 
     return (
         <div className="page-stack">
             <PageHeader
-                eyebrow={soleCommunityName(user)}
+                eyebrow={showCommunity ? t('pages.myInvoices.allCommunities') : soleCommunityName(user)}
                 title={t('pages.myInvoices.title')}
                 description={t('pages.myInvoices.description')}
             />

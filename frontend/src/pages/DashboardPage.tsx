@@ -8,9 +8,9 @@ import { formatKwh, formatPercent } from '../lib/numbers'
 import { dashboardKwhStat, hourlyKwhTick, hourlyKwhTooltipValue, fromZevRate, kwhTick } from '../lib/dashboardFormatting'
 import { formatMeteringBucketLabel } from '../lib/meteringLabels'
 import { useAppSettings } from '../lib/appSettings'
-import { useCommunityAccess } from '../lib/communityAccess'
+import { useCommunityAccess, useScopeNote } from '../lib/communityAccess'
 import { useAuth } from '../lib/auth'
-import { ownParticipantIds } from '../lib/membership'
+import { ownParticipantIds, selectedCommunityName } from '../lib/membership'
 import { useManagedZev } from '../lib/managedZev'
 import { PageSkeleton } from '../components/PageSkeleton'
 import { ScopeGuard } from '../components/ScopeGuard'
@@ -29,6 +29,7 @@ import { useBillingPeriodParams } from '../lib/useBillingPeriodParams'
 
 export function DashboardPage() {
     const { t } = useTranslation()
+    const scopeNote = useScopeNote()
     const { user } = useAuth()
     const { settings } = useAppSettings()
     const { entries, selectedZevId, selectedZev } = useManagedZev()
@@ -95,7 +96,7 @@ export function DashboardPage() {
 
     const summary = summaryQuery.data
     const selectedZevName = selectedZev?.name
-    const participantScopeName = isParticipantScope ? entries?.find((entry) => entry.id === selectedZevId)?.name : undefined
+    const scopeName = selectedCommunityName({ selectedZev, entries, selectedZevId })
     const selectedParticipantName = summary?.summary_kind === 'zev' ? summary.selected_participant_name : undefined
     const ownerTimeline = useMemo(() => (summary?.summary_kind === 'zev' ? summary.timeline : []), [summary])
     // The selected participant personally holds a metering point with
@@ -166,7 +167,8 @@ export function DashboardPage() {
     return (
         <div className="page-stack">
             <PageHeader
-                eyebrow={selectedZevName ?? participantScopeName}
+                eyebrow={scopeName}
+                scopeNote={scopeNote}
                 title={t(isZevScopedRole ? 'pages.energyBalancePage.title' : 'dashboard.title')}
                 description={t(isZevScopedRole ? 'pages.energyBalancePage.description' : 'dashboard.description')}
             />
@@ -309,7 +311,7 @@ export function DashboardPage() {
                                 totals={summary.zev_totals}
                                 participantStats={summary.zev_participant_stats}
                                 highlightParticipantId={summary.current_participant_id}
-                                zevName={selectedZevName ?? participantScopeName}
+                                zevName={scopeName}
                             />
                         )}
                         <ConsumptionSplitCard

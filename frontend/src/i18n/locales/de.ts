@@ -12,6 +12,8 @@ export const de = {
     },
     app: {
         title: 'OpenZEV',
+        documentTitle: '{{page}} – {{app}}',
+        documentTitleScoped: '{{page}} · {{scope}} – {{app}}',
     },
     nav: {
         dashboard: 'Dashboard',
@@ -36,6 +38,7 @@ export const de = {
         collapseSidebar: 'Seitenleiste einklappen',
         expandSidebar: 'Seitenleiste ausklappen',
         menu: 'Menü',
+        skipToContent: 'Zum Hauptinhalt springen',
         zevs: 'ZEVs',
         participants: 'Teilnehmer',
         meteringPoints: 'Messstellen',
@@ -62,6 +65,7 @@ export const de = {
         logout: 'Abmelden',
     },
     auth: {
+        pageTitle: 'Anmelden',
         welcome: 'Willkommen',
         signIn: 'Melden Sie sich bei OpenZEV an',
         email: 'E-Mail-Adresse',
@@ -631,6 +635,7 @@ export const de = {
     pages: {
         myInvoices: {
             title: 'Meine Rechnungen',
+            allCommunities: 'Alle Ihre Gemeinschaften',
             description: 'Rechnungen, die für Sie ausgestellt wurden. Klicken Sie auf eine Rechnung, um Details zu sehen oder das PDF zu öffnen.',
             failed: 'Rechnungen konnten nicht geladen werden.',
             empty: {
@@ -2297,6 +2302,10 @@ export const de = {
             wholeZevTotal: 'Gesamte (v)ZEV (alle Messstellen)',
             noPointSelectedTitle: 'Keine Messstelle ausgewählt',
             noPointSelected: 'Wählen Sie oben eine Messstelle aus, um ihre Energieablesungen zu sehen.',
+            noMetersTitle: 'Noch keine Messstellen',
+            noMeters: 'Für diese Gemeinschaft sind noch keine Messstellen eingerichtet.',
+            noOwnMetersTitle: 'Keine Messstellen zugewiesen',
+            noOwnMeters: 'Ihnen sind in dieser Gemeinschaft keine Messstellen zugewiesen. Wenden Sie sich an die Verwaltung.',
             allMeteringPoints: 'Alle Messstellen…',
             meterIdOptional: 'Zähler-ID (optional)',
             resolution: 'Auflösung',
@@ -2672,6 +2681,8 @@ export const de = {
                 firstRunTitle: 'Richten Sie Ihren ZEV ein',
                 firstRunDescription: 'Erfüllen Sie diese Schritte vor der ersten Abrechnung.',
                 awaitingFirstPeriod: 'Alles ist eingerichtet — die erste Abrechnungsperiode ist noch nicht abgelaufen.',
+                setupDone: 'Erledigt:',
+                setupTodo: 'Offen:',
                 setupParticipants: 'Teilnehmende hinzufügen',
                 setupMeteringPoints: 'Messpunkte hinzufügen',
                 setupTariffs: 'Energietarif definieren',

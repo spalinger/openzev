@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   ALL_METERING_POINTS_VALUE,
+  defaultMeterSelection,
   filterAndRankQualityRows,
   meteringPointDataRange,
   peakChartPoint,
@@ -231,5 +232,30 @@ describe('resolveMeterSelection', () => {
       isManagedScope: true,
       selectedZevId: '',
     })).toMatchObject({ valid: false, selectedMpId: '', isResolving: false })
+  })
+})
+
+describe('defaultMeterSelection', () => {
+  const list = (ids: string[]) => ({ meterListResolved: true, meteringPointIds: ids })
+
+  it('defaults management readers to the whole-community total without waiting for the list', () => {
+    expect(defaultMeterSelection({ isManagedScope: true, selectedZevId: '42', meterListResolved: false, meteringPointIds: [] }))
+      .toEqual({ selectedMpId: ALL_METERING_POINTS_VALUE, isResolving: false })
+  })
+
+  it('has no management default before a community is selected', () => {
+    expect(defaultMeterSelection({ isManagedScope: true, selectedZevId: '', ...list(['mp1']) }))
+      .toEqual({ selectedMpId: '', isResolving: false })
+  })
+
+  it('waits for a participant\'s meter list', () => {
+    expect(defaultMeterSelection({ isManagedScope: false, selectedZevId: '42', meterListResolved: false, meteringPointIds: [] }))
+      .toEqual({ selectedMpId: '', isResolving: true })
+  })
+
+  it('selects a participant\'s only meter and leaves zero or several unselected', () => {
+    expect(defaultMeterSelection({ isManagedScope: false, selectedZevId: '42', ...list(['mp1']) }).selectedMpId).toBe('mp1')
+    expect(defaultMeterSelection({ isManagedScope: false, selectedZevId: '42', ...list([]) }).selectedMpId).toBe('')
+    expect(defaultMeterSelection({ isManagedScope: false, selectedZevId: '42', ...list(['mp1', 'mp2']) }).selectedMpId).toBe('')
   })
 })

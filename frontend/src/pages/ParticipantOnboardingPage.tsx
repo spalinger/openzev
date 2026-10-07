@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { useDocumentTitle } from '../lib/useDocumentTitle'
 
 import { useAuth } from '../lib/auth'
 import { consumeOnboardingLink } from '../lib/api/public'
@@ -79,6 +80,14 @@ export function ParticipantOnboardingPage() {
 
     // A passkey-only account can only answer with a recovery code.
     const recoveryOnly = challengeInput(mfaMethods, false).recovery
+
+    useDocumentTitle(step === 'welcome'
+        ? t('pages.onboarding.welcomeTitle', { zevName })
+        : t({
+            'signing-in': 'pages.onboarding.signingIn',
+            'mfa-required': 'auth.mfa.title',
+            error: 'pages.onboarding.errorTitle',
+        }[step]))
 
     if (step === 'error') {
         return (

@@ -16,7 +16,7 @@ import { queryKeys } from '../lib/api/queryKeys'
 import { formatShortDate, useAppSettings } from '../lib/appSettings'
 import { useAuth } from '../lib/auth'
 import { useManagedZev } from '../lib/managedZev'
-import { useCommunityAccess } from '../lib/communityAccess'
+import { useCommunityAccess, useScopeNote } from '../lib/communityAccess'
 import { ZevPeopleSection } from '../features/zev/ZevPeopleSection'
 import {
     ZEV_FIELD_TABS,
@@ -84,6 +84,7 @@ export function ZevSettingsTabRoute() {
 
 export function ZevSettingsPage({ tab = 'general' }: { tab?: ZevSettingsTab }) {
     const { t } = useTranslation()
+    const scopeNote = useScopeNote()
     const { navigateTab } = usePageNavigation()
     const queryClient = useQueryClient()
     const { pushToast } = useToast()
@@ -572,6 +573,7 @@ export function ZevSettingsPage({ tab = 'general' }: { tab?: ZevSettingsTab }) {
         <div className="page-stack">
             <PageHeader
                 eyebrow={selectedZev?.name}
+                scopeNote={scopeNote}
                 title={t('pages.zevSettings.title')}
                 description={t('pages.zevSettings.description')}
             />

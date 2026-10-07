@@ -96,7 +96,7 @@ defined by shared frontend primitives and CSS contracts.
 | `frontend/src/components/PeriodSelector.tsx` | `PeriodSelector` | Billing-interval navigation and optional custom ranges. Callers own period URL state and the aligned navigation floor. `compact` (whole periods) renders labelled chevron buttons around a one-line trigger naming the period via `billingPeriodName` (`lib/billingPeriod.ts`), with the exact dates in its tooltip and menu; the year's other names sit invisibly in the same cell so the trigger keeps a stable width. A whole-period selector (`allowCustomRange={false}`) steps from any range to the nearest whole periods (`adjacentBillingPeriod`); in `compact` mode a range that is not a whole period keeps its dates under a warning badge (`common.periodSelector.notBillingPeriod`), elsewhere under the **Custom** info badge. |
 | `frontend/src/components/YearPicker.tsx` | `YearPicker` | Native year control with `years`, `value`, `onChange`, optional `disabled`, required translated `label`, optional `id`, `visibleLabel` (default true), and `className`. It generates an associated id when omitted; hidden labels use `aria-label`. Range/default/rollover policy stays with the caller. |
 | `frontend/src/components/InvoicePresentation.tsx` | `InvoiceLink`, `InvoiceStatusBadge`, `InvoiceAmount`, `InvoicePdfCell`, `InvoiceActionButton`, `InvoiceRowActions` | Typed invoice cells/actions shared by period rows, own invoices, and the admin DataTable. `InvoiceActionButton`/`InvoiceRowActions` take `variant` (`primary` default, `secondary` outlined where a page-level primary action leads). `InvoiceAmount` takes `currency` (default true); `false` drops "CHF" for a column whose header names it. Callers own row models, eligibility and permission checks; no shared pagination layer. |
-| `frontend/src/components/PageHeader.tsx` | `PageHeader` | Page title (`h1`), optional `eyebrow`, `description`, and `actions`. Keep it outside data/scope state branches. Embedded pages use the host page title. |
+| `frontend/src/components/PageHeader.tsx` | `PageHeader` | Page title (`h1`, `tabIndex={-1}`: the focus target after navigation, not a tab stop), a plain-text `title`, optional `eyebrow`, `scopeNote` (access label after the eyebrow, e.g. a viewer's read-only access; not in the tab title), `description` and `actions`. Sets `document.title` through `useDocumentTitle` (`frontend/src/lib/useDocumentTitle.ts`): `app.documentTitleScoped` ("Billing · Muster ZEV – OpenZEV") when the eyebrow is text, else `app.documentTitle`. Keep it outside data/scope state branches. Embedded pages use the host page title. |
 | `frontend/src/components/Notice.tsx` | `Notice` | Errors use `alert`, warnings use `status`; optional role override and retry with busy feedback. |
 | `frontend/src/components/PageState.tsx` | `PageState` | Blocking error → skeleton → content, with translated fallback error text and optional retry. |
 | `frontend/src/components/ScopeGuard.tsx` | `ScopeGuard` | Community state handling for management views; see the scope rules below. |
@@ -334,6 +334,35 @@ Management pages should follow this high-level order:
 4. Main content using either a structured table (shared `frontend/src/components/DataTable.tsx`) or a card list, depending on record complexity.
 5. Modals and confirm dialogs rendered at the end of the component tree.
 
+The app shell (`Layout`) supplies what surrounds every page: a skip link
+(`nav.skipToContent`) as the first tab stop, the top bar as its own `header`
+banner, and `<main id="main-content" tabIndex={-1}>` holding only the routed
+page. The skip link focuses `main` directly (`preventDefault`, no hash change:
+URL edits preserve the hash). After a pathname change, `useRouteFocus`
+(`frontend/src/lib/useRouteFocus.ts`) moves focus to the new page's `h1` —
+`main` when there is none — except when:
+
+- focus is still on a connected element inside `main` (a routed hub tab, which
+  persists across its sibling tab routes, or focus the page set itself);
+- focus is inside an open dialog (`dialog`, `role="dialog"`/`"alertdialog"`, `aria-modal`);
+- only the search or hash changed (filters, query tabs), or this is the first
+  render;
+- it is a `REPLACE` before any user input or other navigation — a redirect while
+  loading, such as a former participant's `/` → `/me/invoices`.
+
+It runs in the shell after the page's own effects. Navigations run as
+transitions, so a lazy page's `h1` is present in the same commit. The `h1` is
+described by the eyebrow (`aria-describedby`), so focus also announces the
+community and any scope note. The skip link also closes an open mobile drawer.
+`main` and the page `h1` show no outline when focused programmatically.
+
+Every routed page names the browser tab: shell pages through `PageHeader`,
+`GuestHomePage` and the public/authentication pages (sign-in, email
+verification and change, OAuth callback, magic-link and onboarding sign-in,
+public invoice, not found) by calling `useDocumentTitle` with the heading of
+their current state. The title is not reset on unmount; `index.html` keeps
+`OpenZEV` as the initial value.
+
 ### 7.2 Information architecture rules
 
 #### A. When to use tables (DataTable)
@@ -551,6 +580,10 @@ These pages define the current management-page reference set.
   | `period-selector-compact.test.ts` | Named periods, accessible chevrons and exact dates |
   | `screenshots/billing-presentation.spec.ts` | Four-language desktop/400px geometry, permissions, Issues filtering during a PDF retry, long identities with every issue, queued lifetimes, polling and the unfinished-work deadline notice (test-driven fake timers); run locally via `test:browser` |
 
+- Route accessibility: `npx vitest run tests/route-accessibility.test.ts` — skip link first and focusing `main` without a location change, one `main` without the top bar, no focus move on first render, query edits or a loading redirect, focus to the new `h1` after sidebar/in-page navigation, a first navigation that replaces history, Back and alias redirects, and retained focus on routed hub tabs, page-placed focus and open dialogs.
+- Document titles: `npx vitest run tests/document-title.test.ts` — page and scope format from the English templates, the scope note kept out of the title, no reset between pages. `tests/page-anatomy.test.ts` requires every routed page outside the embedded bodies and the `HomePage` dispatcher to render `PageHeader` or call `useDocumentTitle`.
+- Defaults and navigation accessibility in the browser: `frontend/screenshots/defaults-accessibility.spec.ts`, via `npm run test:browser` — skip link as the first tab stop (also from an open 400px drawer), focus and browser title after sidebar, lazy-page and Back navigation, routed Billing tabs keeping focus, 400px drawer navigation, the metering default (viewer total; participant with one, several or no meters) and the selected-community eyebrow for a multi-membership participant; the lazy-page case holds the page module until released. The shared fixture's `meterCount` sets metering points per community.
+- Raw readings access: `npx vitest run tests/raw-metering-table-access.test.ts` — without assignment access the table neither requests nor uses (cached) assignments, so no holder-dependent zero-consumption flag appears.
 - Retired CSS classes: `npx vitest run tests/retired-css-classes.test.ts` — classes with no rule must not survive in markup
 - Manual verification on the reference pages:
   - page header and description are present

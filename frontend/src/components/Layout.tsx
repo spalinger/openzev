@@ -12,6 +12,7 @@ import { LanguageSelector } from './LanguageSelector'
 import { ConfirmDialog, useConfirmDialog } from './ConfirmDialog'
 import { hasUnsavedZevSettingsDraft } from '../lib/zevUnsavedGuard'
 import { useToast } from '../lib/toast'
+import { useRouteFocus } from '../lib/useRouteFocus'
 import pkg from '../../package.json'
 
 // Keep in sync with the mobile shell breakpoint in index.css.
@@ -90,6 +91,9 @@ export function Layout() {
     const sidebarCollapseButtonRef = useRef<HTMLButtonElement | null>(null)
     const previousIsMobileRef = useRef(isMobile)
     const lastNavigationFocusRef = useRef<HTMLElement | null>(null)
+    const mainRef = useRef<HTMLElement | null>(null)
+
+    useRouteFocus(mainRef)
 
     useEffect(() => {
         window.localStorage.setItem('openzev.sidebarCollapsed', String(isSidebarCollapsed))
@@ -241,6 +245,18 @@ export function Layout() {
                 }
             }}
         >
+            {/* Focus main without changing the URL hash; close an open drawer. */}
+            <a
+                className="skip-link"
+                href="#main-content"
+                onClick={(event) => {
+                    event.preventDefault()
+                    setIsMobileMenuOpen(false)
+                    mainRef.current?.focus()
+                }}
+            >
+                {t('nav.skipToContent')}
+            </a>
             <div
                 className={`sidebar-overlay${isMobileMenuOpen ? ' visible' : ''}`}
                 onClick={() => setIsMobileMenuOpen(false)}
@@ -444,7 +460,7 @@ export function Layout() {
                 </div>
             </aside>
 
-            <main className="content">
+            <div className="content">
                 <header className="top-nav">
                     <button
                         ref={mobileMenuButtonRef}
@@ -537,8 +553,10 @@ export function Layout() {
                         )}
                     </div>
                 </header>
-                <Outlet />
-            </main>
+                <main id="main-content" ref={mainRef} className="content-main" tabIndex={-1}>
+                    <Outlet />
+                </main>
+            </div>
             {zevSwitchDialog && (
                 <ConfirmDialog
                     {...zevSwitchDialog}

@@ -7,10 +7,12 @@ import { queryKeys } from '../lib/api/queryKeys'
 import { useManagedZev } from '../lib/managedZev'
 import { BillingPeriodsPage } from './BillingPeriodsPage'
 import { PageHeader } from '../components/PageHeader'
+import { useScopeNote } from '../lib/communityAccess'
 
 /** Manager start page: everything that asks for operational attention. */
 export function OverviewPage() {
     const { t } = useTranslation()
+    const scopeNote = useScopeNote()
     const { selectedZevId, selectedZev } = useManagedZev()
 
     const readinessQuery = useQuery({
@@ -28,6 +30,7 @@ export function OverviewPage() {
         <div className="page-stack">
             <PageHeader
                 eyebrow={selectedZev?.name}
+                scopeNote={scopeNote}
                 title={t('pages.overview.title')}
                 description={t('pages.overview.description')}
             />

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { accessFor, canWriteInSelectedCommunity, relationToZev, shellRoleFor, shellRoleForZev } from '../src/lib/communityAccess'
+import { accessFor, canWriteInSelectedCommunity, relationToZev, scopeNoteKey, shellRoleFor, shellRoleForZev } from '../src/lib/communityAccess'
 import { communityEntries, resolveCommunitySelection } from '../src/lib/managedZev'
-import { relationOf, ownParticipantIds } from '../src/lib/membership'
+import { relationOf, ownParticipantIds, selectedCommunityName } from '../src/lib/membership'
 import type { Membership, User, Zev } from '../src/types/api'
 
 // What the shell shows for the selected community (#761, SPEC-2026-10-zev-access-grants §9).
@@ -158,5 +158,31 @@ describe('resolveCommunitySelection', () => {
         const selection = resolveCommunitySelection({ isAdmin: false, entryIds: ['a', 'b'], currentId: '' })
         expect(selection.isAllowedId('b')).toBe(true)
         expect(selection.isAllowedId('x')).toBe(false)
+    })
+})
+
+describe('selectedCommunityName', () => {
+    const entries = [{ id: 'a', name: 'Alpha' }, { id: 'b', name: 'Beta' }]
+
+    it('prefers the readable ZEV record', () => {
+        expect(selectedCommunityName({ selectedZev: { name: 'Alpha record' }, entries, selectedZevId: 'a' })).toBe('Alpha record')
+    })
+
+    it('names a participant selection from its switcher entry, whatever the membership count', () => {
+        expect(selectedCommunityName({ selectedZev: null, entries, selectedZevId: 'b' })).toBe('Beta')
+    })
+
+    it('is empty without a selection', () => {
+        expect(selectedCommunityName({ selectedZev: null, entries, selectedZevId: '' })).toBeUndefined()
+        expect(selectedCommunityName({})).toBeUndefined()
+    })
+})
+
+describe('scopeNoteKey', () => {
+    it('notes read-only access for a viewer only', () => {
+        expect(scopeNoteKey('viewer')).toBe('nav.relation.viewer')
+        for (const role of ['admin', 'manager', 'participant', 'former', 'none'] as const) {
+            expect(scopeNoteKey(role)).toBeUndefined()
+        }
     })
 })

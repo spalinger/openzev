@@ -359,12 +359,15 @@ export function RawMeteringTable({
     dateTo,
     hasOut,
     meterType,
+    canReadAssignments,
 }: {
     meteringPointId: string
     dateFrom: string
     dateTo: string
     hasOut: boolean
     meterType?: MeteringPoint['meter_type']
+    /** Assignments are management data; participants cannot read them. */
+    canReadAssignments: boolean
 }) {
     const { t } = useTranslation()
     const { settings } = useAppSettings()
@@ -379,11 +382,13 @@ export function RawMeteringTable({
 
     // Only needed to scope the zero-consumption anomaly flag to days with an
     // actual holder (#652) — not shown anywhere else in this table.
+    // Holder-dependent flags require assignment access, cached data included.
     const assignmentsQuery = useQuery({
         queryKey: queryKeys.metering.pointAssignments(meteringPointId),
         queryFn: () => fetchMeteringPointAssignments(meteringPointId),
-        enabled: !!meteringPointId,
+        enabled: !!meteringPointId && canReadAssignments,
     })
+    const assignments = canReadAssignments ? assignmentsQuery.data ?? [] : []
 
     // Back to page 1 whenever the meter or period changes, rather than
     // stranding the viewer on e.g. page 4 of a now much-shorter list (#641).
@@ -427,7 +432,7 @@ export function RawMeteringTable({
                     <tbody>
                         {visibleDays.map((day) => {
                             const isOpen = expanded === day.date
-                            const flags = dayAnomalyFlags(day, assignmentsQuery.data ?? [])
+                            const flags = dayAnomalyFlags(day, assignments)
                             const inBarPct = dataBarPercent(day.in_kwh, maxIn)
                             const outBarPct = dataBarPercent(day.out_kwh, maxOut)
                             return (

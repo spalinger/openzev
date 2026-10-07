@@ -30,7 +30,7 @@ import { useAppSettings } from '../lib/appSettings'
 import { useAuth } from '../lib/auth'
 import { useWriteScope } from '../lib/useWriteScope'
 import { useManagedZev } from '../lib/managedZev'
-import { useCommunityAccess } from '../lib/communityAccess'
+import { useCommunityAccess, useScopeNote } from '../lib/communityAccess'
 import { queryKeys } from '../lib/api/queryKeys'
 import { PageSkeleton } from '../components/PageSkeleton'
 import { useTranslation } from 'react-i18next'
@@ -57,6 +57,7 @@ export function ParticipantsPage() {
     const { settings } = useAppSettings()
     const { selectedZevId, selectedZev, isLoading: scopeLoading } = useManagedZev()
     const { t } = useTranslation()
+    const scopeNote = useScopeNote()
     const [searchParams, setSearchParams] = useSearchParams()
     const focusId = searchParams.get('focus')
     const focusField = searchParams.get('field')
@@ -328,6 +329,7 @@ export function ParticipantsPage() {
     const header = (
         <PageHeader
             eyebrow={selectedZev?.name}
+            scopeNote={scopeNote}
             title={t('pages.participants.title')}
             description={t('pages.participants.description')}
         />

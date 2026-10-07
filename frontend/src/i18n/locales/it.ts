@@ -12,6 +12,8 @@ export const it = {
     },
     app: {
         title: 'OpenZEV',
+        documentTitle: '{{page}} – {{app}}',
+        documentTitleScoped: '{{page}} · {{scope}} – {{app}}',
     },
     nav: {
         dashboard: 'Pannello di controllo',
@@ -36,6 +38,7 @@ export const it = {
         collapseSidebar: 'Riduci barra laterale',
         expandSidebar: 'Espandi barra laterale',
         menu: 'Menu',
+        skipToContent: 'Vai al contenuto principale',
         zevs: 'RCP',
         participants: 'Partecipanti',
         meteringPoints: 'Punti di misurazione',
@@ -62,6 +65,7 @@ export const it = {
         logout: 'Esci',
     },
     auth: {
+        pageTitle: 'Accedi',
         welcome: 'Benvenuto',
         signIn: 'Accedi a OpenZEV',
         email: 'Indirizzo e-mail',
@@ -631,6 +635,7 @@ export const it = {
     pages: {
         myInvoices: {
             title: 'Le mie fatture',
+            allCommunities: 'Tutte le tue comunità',
             description: 'Fatture emesse a tuo indirizzo. Fai clic su una fattura per vedere i dettagli o aprire il PDF.',
             failed: 'Impossibile caricare le fatture.',
             empty: {
@@ -2297,6 +2302,10 @@ export const it = {
             wholeZevTotal: 'Totale (v)ZEV (tutti i contatori)',
             noPointSelectedTitle: 'Nessun punto di misurazione selezionato',
             noPointSelected: 'Seleziona sopra un punto di misurazione per visualizzare le letture dell\'energia.',
+            noMetersTitle: 'Nessun punto di misurazione',
+            noMeters: 'Per questa comunità non è ancora configurato alcun punto di misurazione.',
+            noOwnMetersTitle: 'Nessun punto di misurazione assegnato',
+            noOwnMeters: 'In questa comunità non ti è assegnato alcun punto di misurazione. Contatta i suoi gestori.',
             allMeteringPoints: 'Tutti i punti di misurazione…',
             meterIdOptional: 'ID contatore (opzionale)',
             resolution: 'Risoluzione',
@@ -2672,6 +2681,8 @@ export const it = {
                 firstRunTitle: 'Configura il tuo CEE',
                 firstRunDescription: 'Completa questi passaggi prima della prima fatturazione.',
                 awaitingFirstPeriod: 'Tutto è configurato — il primo periodo di fatturazione non è ancora terminato.',
+                setupDone: 'Fatto:',
+                setupTodo: 'Da fare:',
                 setupParticipants: 'Aggiungi partecipanti',
                 setupMeteringPoints: 'Aggiungi punti di misurazione',
                 setupTariffs: 'Definisci una tariffa energetica',

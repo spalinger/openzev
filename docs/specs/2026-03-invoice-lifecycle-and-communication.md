@@ -990,7 +990,9 @@ Strips legacy period suffixes from `description` on serialization.
 ### 9.4 Manager Overview and billing email delivery
 
 `OverviewPage` is the canonical manager work surface. It renders
-`SetupGuidance` (first-run checklist, awaiting-first-period message,
+`SetupGuidance` (first-run checklist — each step links to its page, with
+visually hidden done/to-do text in the link and a decorative icon —
+awaiting-first-period message,
 assignment, IBAN and issuer warnings — the issuer one says whether the issuer or its address is missing and links to ZEV settings → People & access), followed by `BillingPeriodsPage`.
 Period cards carry billing work and cross-period attention. Energy balance
 remains a separate `/dashboard` page.

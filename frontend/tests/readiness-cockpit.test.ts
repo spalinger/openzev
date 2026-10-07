@@ -184,6 +184,16 @@ describe('SetupGuidance (manager start page)', () => {
         expect(page.text()).toContain('pages.dashboard.cockpit.setupMeteringPoints')
         expect(page.text()).toContain('pages.dashboard.cockpit.setupTariffs')
         expect(page.container.querySelector('a[href="/zev-settings/billing"]')?.closest('li')?.getAttribute('data-complete')).toBe('false')
+        // Each step's link names its progress; the icon is decorative.
+        const steps = Array.from(page.container.querySelectorAll('.setup-guidance-list li'))
+        expect(steps.map((step) => step.querySelector('a')?.textContent)).toEqual([
+            'pages.dashboard.cockpit.setupDone pages.dashboard.cockpit.setupParticipants',
+            'pages.dashboard.cockpit.setupTodo pages.dashboard.cockpit.setupMeteringPoints',
+            'pages.dashboard.cockpit.setupTodo pages.dashboard.cockpit.setupTariffs',
+            'pages.dashboard.cockpit.setupTodo pages.dashboard.cockpit.setupSettings',
+        ])
+        expect(steps.every((step) => step.querySelector('svg')?.getAttribute('aria-hidden') === 'true')).toBe(true)
+        expect(page.text()).not.toMatch(/[✓○]/)
         page.unmount()
     })
 

@@ -24,7 +24,7 @@ import { businessDayStartMs, nextIsoDate } from '../lib/dates'
 import { useAuth } from '../lib/auth'
 import { useWriteScope } from '../lib/useWriteScope'
 import { useManagedZev } from '../lib/managedZev'
-import { useCommunityAccess } from '../lib/communityAccess'
+import { useCommunityAccess, useScopeNote } from '../lib/communityAccess'
 import { useTranslation } from 'react-i18next'
 import { useToast } from '../lib/toast'
 import type { ImportLog, ImportTimestampTimezone } from '../types/api'
@@ -58,11 +58,13 @@ import { Notice } from '../components/Notice'
 
 export function ImportsPage() {
     const { t } = useTranslation()
+    const scopeNote = useScopeNote()
     const { selectedZev } = useManagedZev()
     return (
         <div className="page-stack">
             <PageHeader
                 eyebrow={selectedZev?.name}
+                scopeNote={scopeNote}
                 title={t('pages.imports.title')}
                 description={t('pages.imports.description')}
             />

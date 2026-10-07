@@ -1,3 +1,5 @@
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { faCircle, faCircleCheck } from '@fortawesome/free-solid-svg-icons'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import type { ReadinessResponse, ReadinessSetupBlock } from '../../types/api'
@@ -45,26 +47,26 @@ function SetupWarnings({ setup }: { setup: ReadinessSetupBlock | null | undefine
 }
 
 function SetupChecklist({ setup }: { setup: NonNullable<ReadinessResponse['setup']> }) {
-    const { t } = useTranslation()
     return (
         <ul className="setup-guidance-list">
-            <li data-complete={setup.participants > 0}>
-                {setup.participants > 0 ? '✓ ' : '○ '}
-                <Link to="/participants">{t('pages.dashboard.cockpit.setupParticipants')}</Link>
-            </li>
-            <li data-complete={setup.metering_points > 0}>
-                {setup.metering_points > 0 ? '✓ ' : '○ '}
-                <Link to="/metering/points">{t('pages.dashboard.cockpit.setupMeteringPoints')}</Link>
-            </li>
-            <li data-complete={setup.tariffs > 0}>
-                {setup.tariffs > 0 ? '✓ ' : '○ '}
-                <Link to="/tariffs">{t('pages.dashboard.cockpit.setupTariffs')}</Link>
-            </li>
-            <li data-complete={setup.settings_complete}>
-                {setup.settings_complete ? '✓ ' : '○ '}
-                <Link to="/zev-settings/billing">{t('pages.dashboard.cockpit.setupSettings')}</Link>
-            </li>
+            <SetupStep complete={setup.participants > 0} to="/participants" labelKey="pages.dashboard.cockpit.setupParticipants" />
+            <SetupStep complete={setup.metering_points > 0} to="/metering/points" labelKey="pages.dashboard.cockpit.setupMeteringPoints" />
+            <SetupStep complete={setup.tariffs > 0} to="/tariffs" labelKey="pages.dashboard.cockpit.setupTariffs" />
+            <SetupStep complete={setup.settings_complete} to="/zev-settings/billing" labelKey="pages.dashboard.cockpit.setupSettings" />
         </ul>
+    )
+}
+
+function SetupStep({ complete, to, labelKey }: { complete: boolean; to: string; labelKey: string }) {
+    const { t } = useTranslation()
+    return (
+        <li data-complete={complete}>
+            <FontAwesomeIcon icon={complete ? faCircleCheck : faCircle} fixedWidth className="setup-guidance-icon" />
+            <Link to={to}>
+                <span className="visually-hidden">{t(complete ? 'pages.dashboard.cockpit.setupDone' : 'pages.dashboard.cockpit.setupTodo')} </span>
+                {t(labelKey)}
+            </Link>
+        </li>
     )
 }
 

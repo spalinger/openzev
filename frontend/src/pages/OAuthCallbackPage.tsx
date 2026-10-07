@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { useDocumentTitle } from '../lib/useDocumentTitle'
 import { useAuth } from '../lib/auth'
 import { oauthTokenExchange } from '../lib/api/auth'
 
@@ -48,6 +49,8 @@ export function OAuthCallbackPage() {
                 setError(t('auth.oauth.errors.exchangeFailed'))
             })
     }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+    useDocumentTitle(t(error ? 'auth.oauth.errors.title' : 'auth.oauth.completing'))
 
     if (error) {
         return (

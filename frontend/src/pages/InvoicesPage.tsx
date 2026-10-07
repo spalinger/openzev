@@ -28,7 +28,7 @@ import { fetchInvoicePeriodOverview } from '../lib/api/invoices'
 import { queryKeys } from '../lib/api/queryKeys'
 import { useAuth } from '../lib/auth'
 import { useManagedZev } from '../lib/managedZev'
-import { useCommunityAccess } from '../lib/communityAccess'
+import { useCommunityAccess, useScopeNote } from '../lib/communityAccess'
 import { PageHeader } from '../components/PageHeader'
 import { Notice } from '../components/Notice'
 import { PageSkeleton } from '../components/PageSkeleton'
@@ -40,11 +40,13 @@ const GENERATING_ITEMS = new Set(['generate', 'generate-again', 'generate-all'])
 
 export function InvoicesPage() {
     const { t } = useTranslation()
+    const scopeNote = useScopeNote()
     const { selectedZev } = useManagedZev()
     return (
         <div className="page-stack">
             <PageHeader
                 eyebrow={selectedZev?.name}
+                scopeNote={scopeNote}
                 title={t('pages.invoices.title')}
                 description={t('pages.invoices.description')}
             />

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { useDocumentTitle } from '../lib/useDocumentTitle'
 
 import { useAuth } from '../lib/auth'
 import { consumeMagicLink } from '../lib/api/public'
@@ -74,6 +75,12 @@ export function MagicSignInPage() {
 
     // A passkey-only account can only answer with a recovery code.
     const recoveryOnly = challengeInput(mfaMethods, false).recovery
+
+    useDocumentTitle(t({
+        'signing-in': 'pages.magicSignIn.signingIn',
+        'mfa-required': 'auth.mfa.title',
+        error: 'pages.magicSignIn.errorTitle',
+    }[step]))
 
     if (step === 'error') {
         return (

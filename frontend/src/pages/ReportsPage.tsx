@@ -5,7 +5,7 @@ import { downloadFinancialSummary } from '../lib/api/invoices'
 import { downloadBlob } from '../lib/downloadBlob'
 import { useAuth } from '../lib/auth'
 import { useManagedZev } from '../lib/managedZev'
-import { useCommunityAccess } from '../lib/communityAccess'
+import { useCommunityAccess, useScopeNote } from '../lib/communityAccess'
 import { YearDownloadCard } from '../features/reports/YearDownloadCard'
 import { AnnualReportSection } from '../features/reports/AnnualReportSection'
 import { AnnualStatementsExportCard } from '../features/reports/AnnualStatementsExportCard'
@@ -13,17 +13,19 @@ import { ParticipantYearDocuments } from '../features/reports/ParticipantYearDoc
 import { PageHeader } from '../components/PageHeader'
 import { ScopeGuard } from '../components/ScopeGuard'
 import { YearPicker } from '../components/YearPicker'
+import { selectedCommunityName } from '../lib/membership'
 
 const YEAR_COUNT = 5
 
 export function ReportsPage() {
     const { t } = useTranslation()
+    const scopeNote = useScopeNote()
     const { user } = useAuth()
     const { entries, selectedZevId, selectedZev } = useManagedZev()
 
     const { isZevScope: isZevScopedRole, isParticipantScope: isParticipant } = useCommunityAccess()
     const participantZevId = isParticipant && (entries?.length ?? 0) > 1 ? selectedZevId : undefined
-    const scopeName = isZevScopedRole ? selectedZev?.name : entries?.find((entry) => entry.id === selectedZevId)?.name
+    const scopeName = selectedCommunityName({ selectedZev, entries, selectedZevId })
 
     // Recomputed per render so a long-lived session picks up the year rollover.
     const years = Array.from({ length: YEAR_COUNT }, (_, i) => new Date().getFullYear() - i)
@@ -44,6 +46,7 @@ export function ReportsPage() {
         <div className="page-stack">
             <PageHeader
                 eyebrow={scopeName}
+                scopeNote={scopeNote}
                 title={t('pages.reports.title')}
                 description={isParticipant ? t('pages.reports.participantDescription') : t('pages.reports.description')}
             />

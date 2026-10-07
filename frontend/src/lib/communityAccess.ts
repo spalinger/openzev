@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useAuth } from './auth'
 import { useOptionalManagedZev } from './managedZev'
 import { relationOf, type CommunityRelation } from './membership'
@@ -91,4 +92,19 @@ export function relationToZev(user: User | null | undefined, zevId: string | nul
 /** The account's shell role for a given community. */
 export function shellRoleForZev(user: User | null | undefined, zevId: string | null | undefined): ShellRole {
     return shellRoleFor(user, relationToZev(user, zevId))
+}
+
+/**
+ * The note beside a page's community name: read-only access for a viewer
+ * (the switcher's own label), nothing for anyone who can act there.
+ */
+export function scopeNoteKey(shellRole: ShellRole): string | undefined {
+    return shellRole === 'viewer' ? 'nav.relation.viewer' : undefined
+}
+
+/** The selected community's scope note, translated. */
+export function useScopeNote(): string | undefined {
+    const { t } = useTranslation()
+    const key = scopeNoteKey(useCommunityAccess().shellRole)
+    return key ? t(key) : undefined
 }

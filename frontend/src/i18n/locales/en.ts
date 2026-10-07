@@ -21,6 +21,8 @@ export const en = {
     },
     app: {
         title: 'OpenZEV',
+        documentTitle: '{{page}} – {{app}}',
+        documentTitleScoped: '{{page}} · {{scope}} – {{app}}',
     },
     nav: {
         dashboard: 'Dashboard',
@@ -45,6 +47,7 @@ export const en = {
         collapseSidebar: 'Collapse sidebar',
         expandSidebar: 'Expand sidebar',
         menu: 'Menu',
+        skipToContent: 'Skip to main content',
         zevs: 'ZEVs',
         participants: 'Participants',
         meteringPoints: 'Metering Points',
@@ -71,6 +74,7 @@ export const en = {
         logout: 'Logout',
     },
     auth: {
+        pageTitle: 'Sign in',
         welcome: 'Welcome back',
         signIn: 'Sign in to OpenZEV',
         email: 'Email address',
@@ -640,6 +644,7 @@ export const en = {
     pages: {
         myInvoices: {
             title: 'My invoices',
+            allCommunities: 'All your communities',
             description: 'Invoices issued to you. Click an invoice to view its details or open the PDF.',
             failed: 'Failed to load invoices.',
             empty: {
@@ -2308,6 +2313,10 @@ export const en = {
             wholeZevTotal: 'Whole ZEV total (all meters)',
             noPointSelectedTitle: 'No metering point selected',
             noPointSelected: 'Select a metering point above to view its energy readings.',
+            noMetersTitle: 'No metering points yet',
+            noMeters: 'No metering points are set up for this community yet.',
+            noOwnMetersTitle: 'No metering points assigned',
+            noOwnMeters: 'No metering points are assigned to you in this community. Contact its managers.',
             allMeteringPoints: 'All metering points…',
             meterIdOptional: 'Meter ID (optional)',
             resolution: 'Resolution',
@@ -2683,6 +2692,8 @@ export const en = {
                 firstRunTitle: 'Set up your ZEV',
                 firstRunDescription: 'Complete these steps before the first billing run.',
                 awaitingFirstPeriod: 'Everything is set up — the first billing period has not ended yet.',
+                setupDone: 'Done:',
+                setupTodo: 'To do:',
                 setupParticipants: 'Add participants',
                 setupMeteringPoints: 'Add metering points',
                 setupTariffs: 'Define an energy tariff',

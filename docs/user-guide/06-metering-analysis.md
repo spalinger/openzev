@@ -18,15 +18,18 @@ Use the selectors above the chart:
 
 | Selector | Purpose | Default |
 | --- | --- | --- |
-| **Metering Point** | Single meter, or (admins and managers only) **Whole ZEV total** to sum every meter in the selected ZEV into one series — **required** to see a chart | None selected |
+| **Metering Point** | Single meter, or (admins, managers and viewers) **Whole ZEV total** to sum every meter in the selected ZEV into one series | **Whole ZEV total** for admins, managers and viewers; a participant's only meter; none when a participant has several |
 | **Date Range** | Period to display | Current billing period (matches the ZEV's billing interval) |
 | **Resolution** | Aggregation level (`Hourly`, `Daily`, `Monthly`) | Daily |
 
-Until a metering point is selected, the chart area shows a prompt instead of
-data. The **Whole ZEV total** option is only offered when managing a ZEV
-(admin or manager) — a participant selects among their own metering
-points instead. Selecting it hides the Raw Readings Table below, since raw
-readings only make sense for one physical meter.
+The chart selects a default automatically: admins, managers and viewers see
+the **Whole ZEV total**, and a participant with one metering point sees that
+meter. A participant with several metering points picks one from the
+selector; until then the chart area shows a prompt. If the community has no
+metering points yet, the page says so instead of showing a chart — admins,
+managers and viewers get a link to **Metering points**. Selecting the **Whole
+ZEV total** hides the Raw Readings Table below, since raw readings only make
+sense for one physical meter.
 
 Bookmark or share the chart URL to retain its exact date range and selected
 meter, including **Whole ZEV total** while the community is loading. Links use
@@ -93,7 +96,8 @@ Two flags can appear next to a day's date:
 
 - **Zero consumption** — the day has an assignment holder but recorded no
   energy at all, which usually means a meter or import problem rather than
-  genuinely nothing used.
+  genuinely nothing used. Only admins, managers and viewers see this flag:
+  assignment holders are not shown to participants.
 - **Negative total** — the day's consumption or feed-in total is below zero,
   which should not happen for a normal reading.
 
