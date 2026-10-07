@@ -34,8 +34,8 @@ the original community; its completion leaves a new draft in another community o
      bill.
    - **Email** (where onboarding links and invoice emails go)
    - **Phone** (optional)
-   - **Address** — address lines, postal code and city (needed on the invoice
-     on the invoice). It is the billing address, not necessarily where
+   - **Address** — address lines, postal code and city (needed on the invoice).
+     It is the billing address, not necessarily where
      the participant's meters are: that is the metering point's
      [building](04-metering-points.md#buildings). When the community has a
      building with an address, **Copy address from building** fills the
@@ -161,15 +161,21 @@ this setting at all.
 
 ![Allocation weight on the participant form](screenshots/03b-participant-allocation-weight.png)
 
-Each participant card shows the resulting share, for example:
+Current participants' cards show today's allocation-weight share. For example,
+with three current participants weighted `1`, `1`, and `2`, each of the first two
+cards shows:
 
 ```
 ALLOCATION WEIGHT
-25.0000 % — 1.0000 of 4.0000 weights
+25 % — 1 of 4 weights
 ```
 
-The percentage is informational and recomputed from current membership. It
-changes on its own when somebody joins or leaves, because the total changes.
+Shares use memberships valid today in Swiss time, including their first and
+last day. Ended and upcoming memberships show only their configured weight.
+Search and filters do not affect the total.
+
+Invoice shares may differ: common-area energy uses membership on each reading's
+date, while shared fixed fees use eligibility for each billed month.
 
 ### Choosing weights
 

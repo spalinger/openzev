@@ -116,6 +116,30 @@ it('closes a successful participant save in the submitting scope', async () => {
     expect(state.toast).toHaveBeenCalledWith('pages.participants.messages.created', 'success')
 })
 
+it('classifies membership inclusively using the Swiss civil date for card shares', async () => {
+    // It is already 7 October in Zurich, while the UTC date is still 6 October.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-06T22:30:00Z'))
+    try {
+        const membershipDates = [
+            { id: 'starts-today', valid_from: '2026-10-07', valid_to: null },
+            { id: 'ends-today', valid_from: '2026-01-01', valid_to: '2026-10-07' },
+            { id: 'ended-yesterday', valid_from: '2026-01-01', valid_to: '2026-10-06' },
+            { id: 'starts-tomorrow', valid_from: '2026-10-08', valid_to: null },
+        ].map(dates => ({ ...participants[0], ...dates }))
+        client.setQueryData(queryKeys.zev.participants('A'), membershipDates)
+        await render()
+        expect(Object.fromEntries(state.cards!.participantCards.map(({ participant, validityState }) => [
+            participant.id, validityState,
+        ]))).toEqual({
+            'starts-today': 'current', 'ends-today': 'current',
+            'ended-yesterday': 'ended', 'starts-tomorrow': 'upcoming',
+        })
+    } finally {
+        vi.useRealTimers()
+    }
+})
+
 const onboarding = [
     { name: 'send', run: () => state.cards!.onSendOnboardingLink('pA') },
     { name: 'copy', run: () => state.cards!.onCopyOnboardingLink('pA') },

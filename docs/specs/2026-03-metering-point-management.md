@@ -481,6 +481,14 @@ matching selected community record, and its management filter never treats a
 missing selection as all communities. Covered by
 `frontend/tests/participant-write-scope.test.ts`.
 
+### 8.6 Participant allocation-weight display
+
+Participant cards (`ParticipantCardsSection.tsx`) show today's allocation-weight
+share among current members. Ended and upcoming memberships show only their
+configured weight. See
+[shared metering points §8.2](2026-08-shared-metering-points.md#82-participants)
+for eligibility, filtering, formatting and billing rules.
+
 ## 9. Observability, auditability, and security
 
 - **Timestamps:** `created_at` and `updated_at` on both models provide

@@ -1407,7 +1407,8 @@ export const en = {
                 allocationWeightHint: 'A relative weight for splitting community-meter costs, not a percentage or per-mille. Leave empty for the default (1).',
             },
             weightShare: '{{percent}} % — {{weight}} of {{total}} weights',
-            weightShareHint: 'This participant\'s share of community-meter costs, based on their allocation weight relative to the ZEV total.',
+            weightShareHint: 'Today\'s allocation-weight share among current participants.',
+            weightShareUnavailableHint: 'No share today: this membership has ended or has not started.',
             validation: {
                 nameRequired: 'Enter the first and last name.',
                 organisationNameRequired: 'An organisation needs a name.',

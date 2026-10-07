@@ -1396,7 +1396,8 @@ export const de = {
                 allocationWeightHint: 'Ein relatives Gewicht zur Aufteilung der Kosten eines Gemeinschaftszählers, keine Prozent- oder Promilleangabe. Leer lassen für den Standardwert (1).',
             },
             weightShare: '{{percent}} % — {{weight}} von {{total}} Gewichten',
-            weightShareHint: 'Der Anteil dieses Teilnehmers an den Kosten von Gemeinschaftszählern, basierend auf seinem Zuteilungsgewicht im Verhältnis zur ZEV-Gesamtheit.',
+            weightShareHint: 'Heutiger Anteil am gesamten Zuteilungsgewicht der aktuellen Teilnehmer.',
+            weightShareUnavailableHint: 'Heute kein Anteil: Die Teilnahme ist beendet oder hat noch nicht begonnen.',
             validation: {
                 nameRequired: 'Vor- und Nachnamen eingeben.',
                 organisationNameRequired: 'Eine Organisation braucht einen Namen.',
