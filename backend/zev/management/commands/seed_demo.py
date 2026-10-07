@@ -1148,7 +1148,11 @@ class Command(BaseCommand):
         # / ``--end-date`` can never leave stale rows outside the new window
         # or stale billing periods behind. ``_seed_invoices`` never deletes;
         # its callers own wiping.
-        MeterReading.objects.filter(metering_point__zev=zev).delete()
+        # Filter the foreign key directly: a joined DELETE adds a readings
+        # self-join that PostgreSQL can plan poorly with stale statistics.
+        MeterReading.objects.filter(
+            metering_point__in=MeteringPoint.objects.filter(zev=zev),
+        ).delete()
         Invoice.objects.filter(zev=zev).delete()
 
         owner_participant = self._upsert_participant(

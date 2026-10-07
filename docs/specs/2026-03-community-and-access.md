@@ -2016,6 +2016,13 @@ lists the test classes per module (test counts are the `test_*` methods).
 | `MeteringPointBehindMeterGenerationTests` | 4 | Behind-the-meter generation flag (SPEC-2026-behind-the-meter-generation): defaults false, allowed on bidirectional/production meters, rejected on consumption (including via PATCH) |
 | `AllocationModelAndApiTests` | 6 | Shared-metering-point allocation (SPEC-2026-08-shared-metering-points): `allocation_mode`/`allocation_weight` model defaults and API round-trip, zero/negative weight rejected, both exposed in the serializers |
 
+The second demo community's reading wipe in `seed_demo._seed_second_community`
+filters `MeterReading.metering_point` through a `MeteringPoint` subquery scoped to
+that ZEV. This avoids a readings self-join in the generated `DELETE`, which can
+become a costly nested loop on PostgreSQL when test fixtures are uncommitted and
+table statistics estimate an empty readings table. The wipe still removes all
+prior readings for that community, including rows outside the new seed window.
+
 **Other `zev/` test modules:**
 
 | Module | Classes | Tests | Coverage |
