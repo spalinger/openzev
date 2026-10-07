@@ -5,9 +5,10 @@
  *   npm run screenshots
  *
  * The `setup` project logs in once and saves the authenticated storage state
- * (see auth.setup.ts); the `capture` project depends on it and starts every
- * test from that state, so a full run costs one login instead of one per
- * test — the backend throttles `auth/token/` per IP at 40/hour.
+ * (see auth.setup.ts); the other projects depend on it and start every test
+ * from that state, so a full run costs one login instead of one per test —
+ * the backend throttles `auth/token/` per IP at 40/hour. `capture` (the
+ * user-guide set) runs after `capture-data`; `browser` (the rest) does not.
  *
  * Environment variables (optional overrides):
  *   SCREENSHOT_BASE_URL  – default http://localhost:8080
@@ -34,6 +35,9 @@ export default defineConfig({
     actionTimeout: 10_000,
     locale: 'de-CH',
     colorScheme: 'light',
+    // Recharts' default isAnimationActive ('auto') honours this, so charts
+    // render without animating.
+    reducedMotion: 'reduce',
     screenshot: 'off', // we take them manually
     // Full chromium build: the headless shell renders inline PDFs blank.
     channel: process.env.SCREENSHOT_CHANNEL ?? 'chromium',
@@ -45,9 +49,21 @@ export default defineConfig({
       use: { storageState: undefined },
     },
     {
-      name: 'capture',
+      name: 'capture-data',
       dependencies: ['setup'],
-      testIgnore: /auth\.setup\.ts/,
+      testMatch: /capture\.setup\.ts/,
+      use: { storageState: AUTH_STATE_PATH },
+    },
+    {
+      name: 'capture',
+      dependencies: ['capture-data'],
+      testMatch: /capture\.spec\.ts/,
+      use: { storageState: AUTH_STATE_PATH },
+    },
+    {
+      name: 'browser',
+      dependencies: ['setup'],
+      testIgnore: /(auth|capture)\.setup\.ts|capture\.spec\.ts/,
       use: { storageState: AUTH_STATE_PATH },
     },
   ],

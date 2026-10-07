@@ -38,11 +38,11 @@ export const DEMO_PARTICIPANT_EMAIL = 'anna@openzev.local'
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Navigate and wait until the page is fully loaded and idle. */
+/** Navigate, then wait for network idle, webfonts and no visible loading placeholder. */
 export async function navigateTo(page: Page, urlPath: string) {
   await page.goto(`${BASE}${urlPath}`, { waitUntil: 'networkidle' })
-  // Extra settle time for React renders and TanStack Query fetches
-  await page.waitForTimeout(1500)
+  await page.evaluate(() => document.fonts.ready)
+  await expect(page.locator('.skeleton-block:visible')).toHaveCount(0, { timeout: 30_000 })
 }
 
 /**
@@ -116,6 +116,19 @@ async function findDemoParticipant(request: APIRequestContext, headers: Record<s
   const live = account!.memberships?.find(entry => entry.zev === zevId)?.participants.find(row => row.live)
   expect(live, `${DEMO_PARTICIPANT_EMAIL} has no live participation in ${DEMO_ZEV_NAME}`).toBeTruthy()
   return { zevId: zevId!, account: account!, participantId: live!.id }
+}
+
+/** The demo participant's newest invoice, which 08b opens. */
+export async function findDemoInvoice(
+  request: APIRequestContext, headers: Record<string, string>,
+): Promise<{ id: string; pdf_url: string | null }> {
+  const { zevId, participantId } = await findDemoParticipant(request, headers)
+  const resp = await request.get(
+    `${API_BASE}/invoices/invoices/?zev_id=${zevId}&participant_id=${participantId}`, { headers })
+  expect(resp.ok(), `Invoice list request failed (${resp.status()})`).toBeTruthy()
+  const body = await resp.json() as { results: Array<{ id: string; pdf_url: string | null }> }
+  expect(body.results.length, `${DEMO_PARTICIPANT_EMAIL} has no invoice — run seed_demo`).toBeGreaterThan(0)
+  return body.results[0]
 }
 
 /**

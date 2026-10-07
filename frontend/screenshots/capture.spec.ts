@@ -18,12 +18,12 @@ import { fileURLToPath } from 'url'
 import {
   assertPdfPainted,
   closePdfSidebar,
+  findDemoInvoice,
   getAdminToken,
   goToPreviousPeriod,
   impersonateDemoParticipant,
   navigateTo,
   pinDemoZev,
-  resolveDemoZevId,
   screenshotFull as captureFull,
   screenshotViewport as captureViewport,
   API_BASE,
@@ -47,6 +47,9 @@ const screenshotViewport = (page: Page, name: string) => captureViewport(page, S
 //
 // Every test starts from the authenticated storage state the `setup` project
 // saved (see screenshots.config.ts), so tests must not log in themselves.
+//
+// No test may change data another capture shows; shared fixtures belong in
+// capture.setup.ts.
 // ---------------------------------------------------------------------------
 
 // Keep this outside the authenticated suite: its beforeEach pins the demo ZEV.
@@ -318,28 +321,12 @@ test.describe('User Guide Screenshots', () => {
   // 08b — Invoice Detail page
   test('08b-invoice-detail', async ({ page }) => {
     const headers = { Authorization: `Bearer ${await getAdminToken(page)}` }
-    const demoZevId = await resolveDemoZevId(page)
-    expect(demoZevId, 'Demo ZEV not found — run seed_demo before capturing screenshots').toBeTruthy()
-    const resp = await page.request.get(`${API_BASE}/invoices/invoices/?zev_id=${demoZevId}`, { headers })
-    expect(resp.ok(), `Invoice list request failed (${resp.status()})`).toBeTruthy()
-
-    const body = await resp.json() as { results?: Array<{ id: string; pdf_url: string | null }> }
-    const invoice = body.results?.[0]
-
-    // Fail loudly rather than silently capturing the invoices overview under the
-    // invoice-detail name, which is how this file came to hold a duplicate.
-    expect(invoice, 'No invoice found — run `manage.py seed_demo` first').toBeTruthy()
-
-    // Reseeding the database wipes stored PDF artifacts, so the embed would
-    // show the "generate" card instead of a document. Generate one up front.
-    if (!invoice!.pdf_url) {
-      const gen = await page.request.post(`${API_BASE}/invoices/invoices/${invoice!.id}/generate-pdf/`, { headers })
-      expect(gen.ok(), `PDF generation failed (${gen.status()})`).toBeTruthy()
-    }
+    const invoice = await findDemoInvoice(page.request, headers)
+    expect(invoice.pdf_url, 'Invoice PDF missing — capture.setup.ts renders it').toBeTruthy()
 
     // screenshotFull grows the viewport to the content height, so the embedded
     // PDF viewer — which Chromium only paints inside the viewport — renders.
-    await navigateTo(page, `/billing/invoices/${invoice!.id}`)
+    await navigateTo(page, `/billing/invoices/${invoice.id}`)
     await page.waitForSelector('.grid-4', { timeout: 10_000 })
     await page.waitForSelector('iframe[title]', { timeout: 15_000 })
     await page.waitForTimeout(3500)
