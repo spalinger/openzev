@@ -9,6 +9,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 const mockState = vi.hoisted(() => ({
     // The account's relation to the selected community (#761).
     relation: 'manager',
+    selectedZevId: 'z1',
     summary: null as unknown,
     summaryCalls: [] as Array<Record<string, unknown>>,
     hourlyProfile: null as unknown,
@@ -33,11 +34,14 @@ vi.mock('../src/lib/auth', () => ({
 vi.mock('../src/lib/managedZev', () => {
     const context = {
         useManagedZev: () => ({
-            managedZevs: [{ id: 'z1', name: 'Z1' }],
-            selectedZevId: 'z1',
-            selectedZev: mockState.relation === 'participant' ? null : { id: 'z1', name: 'Z1', billing_interval: 'monthly' },
+            managedZevs: [{ id: 'z1', name: 'Z1' }, { id: 'z2', name: 'Z2' }],
+            selectedZevId: mockState.selectedZevId,
+            selectedZev:
+                mockState.relation === 'participant'
+                    ? null
+                    : { id: mockState.selectedZevId, name: mockState.selectedZevId.toUpperCase(), billing_interval: 'monthly' },
             relation: mockState.relation,
-            entries: [{ id: 'z1', name: 'Z1', relation: mockState.relation }],
+            entries: [{ id: mockState.selectedZevId, name: mockState.selectedZevId.toUpperCase(), relation: mockState.relation }],
             isLoading: false,
         }),
     }
@@ -78,6 +82,7 @@ import { openInvoicePdf } from '../src/lib/api/invoices'
 const cleanups: Array<() => void> = []
 afterEach(() => {
     cleanups.splice(0).forEach((cleanup) => cleanup())
+    mockState.selectedZevId = 'z1'
     vi.clearAllMocks()
 })
 
@@ -130,12 +135,15 @@ function participantSummary(currentParticipantId: string | null) {
     }
 }
 
+// Re-renders the last mounted dashboard, as a community switch in the provider would.
+let rerenderDashboard: () => Promise<void> = async () => {}
+
 async function renderDashboard() {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const container = document.createElement('div')
     document.body.appendChild(container)
     const root = createRoot(container)
-    await act(async () => {
+    const render = () =>
         root.render(
             createElement(
                 MantineProvider,
@@ -147,7 +155,14 @@ async function renderDashboard() {
                 ),
             ),
         )
+    await act(async () => {
+        render()
     })
+    rerenderDashboard = async () => {
+        await act(async () => {
+            render()
+        })
+    }
     await act(async () => {
         await new Promise((r) => setTimeout(r, 20))
     })
@@ -283,6 +298,32 @@ describe('dashboard behavior preservation', () => {
             h.textContent?.includes('pages.dashboard.consumptionAndProduction'),
         )
         expect(balanceHeading?.textContent).toContain('Alice')
+    })
+
+    it('manager community switch clears the participant filter before requesting', async () => {
+        mockState.relation = 'manager'
+        mockState.summaryCalls = []
+        mockState.summary = managerSummary()
+        mockState.hourlyProfile = null
+        mockState.hourlyCalls = []
+        mockState.invoices = []
+        const container = await renderDashboard()
+
+        await act(async () => {
+            container.querySelector('tbody tr')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        })
+        await flush()
+        expect(mockState.summaryCalls.some((call) => call.zevId === 'z1' && call.participantId === 'p1')).toBe(true)
+
+        mockState.selectedZevId = 'z2'
+        await rerenderDashboard()
+        await flush()
+
+        const z2Summaries = mockState.summaryCalls.filter((call) => call.zevId === 'z2')
+        expect(z2Summaries.length).toBeGreaterThan(0)
+        expect(z2Summaries.every((call) => call.participantId === undefined)).toBe(true)
+        expect(mockState.hourlyCalls.some((call) => call.zevId === 'z2')).toBe(false)
+        expect((container.querySelector('select') as HTMLSelectElement).value).toBe('')
     })
 
     it('manager participant buttons and numeric cells select their rows', async () => {

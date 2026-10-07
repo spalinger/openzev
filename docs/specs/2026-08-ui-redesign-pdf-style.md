@@ -154,7 +154,7 @@ All five are pure derivations; hand-editing them is a lint/test error.
 |---|---|---|
 | `frontend/src/styles/tokens.css` | `primitives + semantics + themes + fields` → `:root` map (alternate `[data-theme]` maps only when a second theme ships) | Imported in `frontend/src/main.tsx` before `index.css`; every component uses `var(--semantic)` (colors) and `var(--field-*)` (field dimensions) |
 | `frontend/src/styles/generatedTheme.ts` | Mantine theme object: `primitives.brand` ramp + semantics (`primaryColor: "brand"`, `primaryShade: 6`, `fontFamily` sync with `index.css:2`) — replaces sky ramp `#f0f9ff … #0c4a6e` | Imported by `MantineProvider` in `main.tsx`; the entrypoint stays hand-written — generated code lives only in visibly generated files |
-| `frontend/src/lib/chartTokens.ts` | `charts` block, emitted as **resolved literal strings** (Recharts props and SVG `fill="…"` need real color values; they do not resolve `var(--…)`) | `DashboardPage`, `MeteringChartPage`, `TariffPriceHistoryChart`, feasibility charts, `EnergyFlowChart`, `RawMeteringTable` (recharts) |
+| `frontend/src/lib/chartTokens.ts` | `charts` block, emitted as **resolved literal strings** (Recharts props and SVG `fill="…"` need real color values; they do not resolve `var(--…)`) | dashboard cards (`components/dashboard/`), `MeteringChartPage`, `TariffPriceHistoryChart`, `DynamicPriceHistoryModal`, `AnnualReportSection`, feasibility charts, `EnergyFlowChart`, `RawMeteringTable` (recharts); `BuildingsMap` (building footprints, Leaflet) |
 | `backend/invoices/generated_chart_tokens.py` | `charts` block as plain Python constants (same literals as `chartTokens.ts`) | imported by `invoices/pdf_charts.py` and `invoices/annual_statement.py` (its SVG chart) — no duplicated color literals in Python |
 | `backend/templates/pdf/_tokens.css` | `primitives` (same block as `shared_pdf_base.html:23-42`) | `{% include "pdf/_tokens.css" %}` from `shared_pdf_base.html` (or an equivalent `_tokens.html` partial) — the PDF stays the source of the same hex values; no hex drift between screen and print |
 
@@ -368,7 +368,7 @@ The planned dev-only mockup routes `frontend/src/pages/design/PreviewDashboard.t
 
 | Page | File | Route | Query key | Mutation |
 |---|---|---|---|---|
-| Dashboard | `frontend/src/pages/DashboardPage.tsx` (cards in `frontend/src/components/dashboard/`: `BalanceChart`, `ConsumptionSplitCard`, `EnergyFlowCard`, `HourlyProfileCard`, `ParticipantInvoicesCard`, `ParticipantTableCard`) | manager `/dashboard` (Energy balance) + participant `/` | `queryKeys.metering.dashboardSummary({…})` + `queryKeys.invoices.list()` (participant-only, top-level parallel fetch) + `queryKeys.metering.hourlyProfile(…)` (participant always; manager when a participant is selected) | none — read-only. Manager: ZEV-wide KPI row (5 `StatCard`s from `zev_totals`) → `EnergyFlowCard` → `BalanceChart` (both keep `selectedParticipantId` highlight/filter; the consumption chart carries a right-hand 0–100 % axis with a `from_zev_rate` line = locally consumed ÷ consumed, next to the production chart's self-consumption line) → `ParticipantTableCard` (row click sets the participant filter; the name button supports keyboard selection, and the table scrolls with a sticky header and name column) → `HourlyProfileCard` when a participant is selected and profile data is available. Participant: 4 `StatCard`s (consumed from ZEV, imported from grid, total consumption, and the from-ZEV share `consumed_from_zev_kwh / total_consumed_kwh`) → `EnergyFlowCard` (requires `current_participant_id`) → `ConsumptionSplitCard` (stacked from-ZEV/from-grid kWh bars plus a right-hand 0–100 % axis with a `from_zev_rate` line) → `HourlyProfileCard` → `ParticipantInvoicesCard` (role-scoped `fetchInvoices` filtered to `sent|paid` with `pdf_url`, details + PDF actions; includes all participant communities and labels that scope when multiple communities are selectable). Header eyebrow is the scope line: selected ZEV name for owners/admins, the selected membership entry's community name for participants; blank when no community is selected. Report exports live on Reports; participant invoice PDF actions remain on the dashboard. |
+| Dashboard | `frontend/src/pages/DashboardPage.tsx`; role bodies in `frontend/src/features/dashboard/`; cards in `frontend/src/components/dashboard/` | manager `/dashboard` (Energy balance) + participant `/` | `queryKeys.metering.dashboardSummary({…})` + `queryKeys.metering.hourlyProfile(…)`; participant also `queryKeys.invoices.list()` | none — read-only; layout in [Dashboard](#dashboard) below |
 | Reports | `frontend/src/pages/ReportsPage.tsx` + `frontend/src/features/reports/ParticipantYearDocuments.tsx` | `/reports` (participant branch also served at `/me/statement`) | none (manager mutation + local `usePdfObjectUrl` state) | `downloadAnnualStatement({year, zev_id?}, signal?)` behind the participant Annual Statement tab; `downloadFinancialSummary({year, zev_id?}, signal?)` — management requests use the selected ZEV; participant tabs supply it when there are multiple community entries. ScopeGuard gates the management content. Managers get the annual ZEV report (`AnnualReportSection`, spec `2026-09-annual-zev-report.md`), then an **Annual documents** grid with the tax-overview mutation card and the whole-ZEV ZIP card (`AnnualStatementsExportCard`; `/billing/statements` redirects here); participants get the document tabs (shared year selector above, per-document description + Download/new-tab row above one full-width viewer). Each tab's hook sits above its `Tabs.Panel` so inactive documents keep their state; panels are keyed by document/user/year, the feature by user id, and the fetcher identity changes with year, document descriptor, or retry attempt. |
 | Participant statement | `frontend/src/pages/ReportsPage.tsx` + `frontend/src/features/reports/ParticipantYearDocuments.tsx` | `/me/statement` (participant-only canonical host; `/reports` serves all three roles) | none (local `usePdfObjectUrl` state per document) | Statement generates on entry, tax overview on first selection; revisits, Download, and Open-in-new-tab reuse the loaded blob; per-document Retry; year change preserves the tab and fetches only the active document; user change/unmount disposes all participant document state. |
 | Invoices list | `frontend/src/pages/InvoicesPage.tsx` (`InvoicesContent` shared with Billing hub) | `/billing/invoices` | `queryKeys.invoices.periodOverview(...)` = `['invoices', 'period-overview', zevId, periodStart, periodEnd]` (`lib/api/queryKeys.ts`) | `generate/approve-all/send-all` invalidates period-overview |
@@ -390,6 +390,64 @@ amounts in personal/period lists, translated missing-day plurals and labelled
 PDF controls. Admin invoice totals retain the trailing currency format
 (`114.94 CHF`). Row models, permissions, workflow eligibility and pagination
 stay consumer-owned.
+
+#### Dashboard
+
+`DashboardPage` owns the header and the billing period (above) and, inside a
+`ScopeGuard` with the `kpiRow` skeleton, renders `ManagementDashboardBody` for
+ZEV-scoped roles or `ParticipantDashboardBody` for participants. Each body
+starts with the period selector and a resolution select (hour / day / month,
+default day) and shows a retryable notice when the summary fails. The page is
+read-only: report exports live on Reports; participant invoice PDF actions
+remain on the dashboard.
+
+- **Header.** The title is the Energy balance title for ZEV-scoped roles and the
+  dashboard title for participants. The eyebrow is the scope line,
+  `selectedCommunityName` (`frontend/src/lib/membership.ts`): the readable ZEV
+  record's name, else the selected switcher entry's name, for every role;
+  blank when no community is selected. Viewers get the `nav.relation.viewer`
+  note after it (`useScopeNote()` → `PageHeader` `scopeNote`). The
+  participant body's energy-flow card takes the same name.
+- **Manager body.** A participant filter (default all participants; reset when
+  the selected community changes) sits next to the resolution select. Cards, in
+  order:
+  1. KPI row: five `StatCard`s from `zev_totals`, ZEV-wide whatever the
+     participant filter: self-consumption rate (accent; (produced − exported) ÷
+     produced, with both kWh as hint), produced, consumed, imported from grid,
+     exported to grid. A muted note follows when the ZEV has behind-meter
+     generation.
+  2. `EnergyFlowCard` (when there are participant stats), highlighting the
+     selected participant.
+  3. `BalanceChart`, on the filtered timeline. The consumption chart stacks
+     from-ZEV (consumed − imported) over from-grid kWh, with a right-hand
+     0–100 % axis carrying the `from_zev_rate` line (locally consumed ÷
+     consumed; empty when the selected participant has behind-meter
+     generation). The production chart stacks used-locally over exported, with
+     the self-consumption-rate line on the same kind of axis.
+  4. `ParticipantTableCard`: consumption, production/export, from ZEV, from
+     grid and from-ZEV % per participant (— for behind-meter participants). A
+     row click sets the participant filter, the name button makes that
+     keyboard-reachable, and the table scrolls with a sticky header and name
+     column.
+  5. `HourlyProfileCard`, only when a participant is selected and the profile
+     has data (the hourly-profile query runs only with a selection).
+- **Participant body.** No participant filter; the summary and hourly-profile
+  requests pass the ZEV only when the account has several communities. Cards, in
+  order:
+  1. Four `StatCard`s: consumed from ZEV, imported from grid, total consumption,
+     and the from-ZEV share `consumed_from_zev_kwh / total_consumed_kwh` (— with
+     a behind-meter hint when the participant has behind-meter generation). The
+     same behind-meter ZEV note follows.
+  2. `EnergyFlowCard`, highlighting `current_participant_id` (shown only when
+     the summary carries it).
+  3. `ConsumptionSplitCard`: stacked from-ZEV / from-grid kWh bars plus a
+     right-hand 0–100 % axis with the `from_zev_rate` line.
+  4. `HourlyProfileCard` when the profile has data.
+  5. `ParticipantInvoicesCard`: the invoice list, fetched alongside the summary
+     and not tied to the period, filtered to the account's own participants,
+     status `sent|paid` and a `pdf_url`, with a details link and an open-PDF
+     action per row. It spans all the account's communities and says so in its
+     title when more than one is selectable.
 
 ### 7.10 TypeScript types
 
@@ -525,7 +583,8 @@ Order: Dashboard → invoices list → participants → metering/imports → tar
 - The five date-picker call sites (`ZevGeneralSettingsFields`, `AdminVatSettingsPage`, `TariffFormModal`, `MeteringAssignmentFormModal`, `TariffVersionModal`) — MUI `DatePicker` → Mantine `DatePickerInput` (Phase 2).
 - Phase 5: `ImportsPage`/`AdminInvoicesPage` to TanStack Table; `ActionMenu`, `AuditEventDrawer`, `MeteringPointFormModal`, `AdminSystemSettingsPage` MUI widgets → Mantine; delete `lib/dataGridLocale.ts`.
 - `package.json`: remove `@mui/x-date-pickers` (Phase 2); Phase 5 adds `@tanstack/react-table` and removes `@mui/material`, `@mui/x-data-grid`, `@emotion/react`, `@emotion/styled`.
-- Pages: `DashboardPage` (slimmed: KPI → flow → exceptions → charts; no downloads; scope-line eyebrow), `ReportsPage` (`/reports`, manager `YearDownloadCard`, tabbed participant annual documents),
+- Pages: `DashboardPage` (slimmed, role bodies; card order in §7.9 [Dashboard](#dashboard); no downloads; scope-line eyebrow), `ReportsPage` (`/reports`, manager `YearDownloadCard`, tabbed participant annual documents).
+- `frontend/src/features/dashboard/` — `ManagementDashboardBody` / `ParticipantDashboardBody` (the role bodies `DashboardPage` renders), `ResolutionSelect`, `dashboardShared.ts` (body props, bucket label formatters, hourly-profile rows); cards in `frontend/src/components/dashboard/`.
 - `frontend/src/lib/api/invoices.ts` — `previewPdfTemplateBlob(content, templateType, signal?)` (always posts `output:"pdf"`).
 
 **Deleted:** `frontend/src/App.css`; `@mui/x-date-pickers` (Phase 2); `@mui/material` + `@mui/x-data-grid` + `@emotion/*` (Phase 5).
