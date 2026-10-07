@@ -819,18 +819,18 @@ Plus `npm run lint`, `npm run lint:style`, the hex sweep, `npm run test:unit`, `
 
 ### Acceptance criteria
 
-- [ ] A user can enrol a passkey and sign in with it **without entering a password** (D1).
-- [ ] A user can enrol TOTP, and a password login then requires a code.
-- [ ] A recovery code completes a challenge exactly once and is then dead.
-- [ ] Each of the seven doors behaves as §5.4 specifies, with a test naming it.
-- [ ] An admin can reset another user's factors, and `auth.mfa.reset` records who did it (D3).
-- [ ] The TOTP secret is never returned once the device is confirmed, and never stored in plain text.
-- [ ] `MFA_ENCRYPTION_KEYS` is independent of `SECRET_KEY`; rotating `SECRET_KEY` does not affect enrolled users (D4).
-- [ ] With the key unset, enrolment is refused with a message naming the setting, and `manage.py check` warns.
-- [ ] A required role is not locked out during the grace period.
-- [ ] Every enrolment, challenge failure, removal, reset and recovery use appears in the platform audit log.
-- [ ] An account with no factor sees byte-identical login behaviour to 1.15.0.
-- [ ] All new user-facing strings exist in de, en, fr and it.
+- [x] A user can enrol a passkey and sign in with it **without entering a password** (D1).
+- [x] A user can enrol TOTP, and a password login then requires a code.
+- [x] A recovery code completes a challenge exactly once and is then dead.
+- [x] Each of the seven doors behaves as §5.4 specifies, with a test naming it.
+- [x] An admin can reset another user's factors, and `auth.mfa.reset` records who did it (D3).
+- [x] The TOTP secret is never returned once the device is confirmed, and never stored in plain text.
+- [x] `MFA_ENCRYPTION_KEYS` is independent of `SECRET_KEY`; rotating `SECRET_KEY` does not affect enrolled users (D4).
+- [x] With the key unset, enrolment is refused with a message naming the setting, and `manage.py check` warns.
+- [x] The requirement is the single global `AppSettings.mfa_required` switch, and every account gets the grace period before its writes are refused.
+- [x] Every enrolment, challenge failure, removal, reset and recovery use appears in the platform audit log.
+- [x] An account with no factor keeps the pre-MFA login path unchanged (`test_account_without_a_factor_is_unaffected`). The regression test covers that path rather than a byte-for-byte comparison with 1.15.0.
+- [x] All new user-facing strings exist in de, en, fr and it.
 
 ---
 

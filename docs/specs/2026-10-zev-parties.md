@@ -1,7 +1,7 @@
 # Feature Spec: Parties of a ZEV and dated issuer, representative and landowner roles (#761 phase 2)
 
 - Spec ID: SPEC-2026-10-zev-parties
-- Status: Approved
+- Status: Completed
 - Scope: Major
 - Type: Change
 - Owners: Sebastian Plattner
@@ -673,7 +673,7 @@ through the participant endpoints keep the existing participant audit events.
   and overlapping issuers are rejected); `SchemaParityTests` covers `PARTY_FIELDS` and
   `PARTY_ROLE_FIELDS`; the legacy-format tests rewrite exports with `as_format_version`.
   Backend 3824 passed.
-- **PR 6** (shipped): `zev/test_party_roles.py` `PartyWriteApiTests` (10: a manager adds,
+- **PR 6** (shipped): `zev/test_party_roles.py` `PartyWriteApiTests` (9: a manager adds,
   edits and deletes a contact with audit events; names required by kind; a party in use cannot be
   deleted; edits show on every participation; a manager of another ZEV cannot add a party here;
   a viewer reads but cannot write; a new issuer ends the previous one, with the audit event; a

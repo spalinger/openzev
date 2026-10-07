@@ -563,12 +563,12 @@ python -m pytest -q
 
 ## 13. Acceptance criteria
 
-- [ ] Metering-point CRUD is fully ZEV-scope-safe for `admin` and `zev_owner` (§5)
-- [ ] Participants can read their assigned metering points but cannot mutate (§5.3)
-- [ ] Assignment overlap is rejected by model validation (`clean()` and `save()`) and serializer validation (§3.4 rule 3)
-- [ ] Cross-ZEV participant-to-meter assignment is rejected (§3.4 rule 1)
-- [ ] Assignment dates must fall within participant validity window (§3.4 rule 4)
-- [ ] Soft deactivation preserves historical readings, assignments, and invoice references (§7)
-- [ ] Assignment queryset supports filtering by `metering_point` parameter (§4.3)
-- [ ] Participant serializer exposes nested metering points and assignment flag (§4.4)
-- [ ] Billing engine and period overview correctly resolve assignment windows (§8)
+- [x] Metering-point CRUD is fully ZEV-scope-safe: platform `admin`, plus per-ZEV managers through their grants (§5; the `zev_owner` platform role was replaced by per-ZEV access in #761/ADR 0027)
+- [x] Participants can read their assigned metering points but cannot mutate (§5.3)
+- [x] Assignment overlap is rejected by model validation (`clean()` and `save()`) and serializer validation (§3.4 rule 3)
+- [x] Cross-ZEV participant-to-meter assignment is rejected (§3.4 rule 1)
+- [x] Assignment dates must fall within participant validity window (§3.4 rule 4)
+- [x] Soft deactivation preserves historical readings, assignments, and invoice references (§7)
+- [x] Assignment queryset supports filtering by `metering_point` parameter (§4.3)
+- [x] Participant serializer exposes nested metering points and assignment flag (§4.4)
+- [x] Billing engine and period overview correctly resolve assignment windows (§8)

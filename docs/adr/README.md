@@ -31,6 +31,8 @@ This directory captures key architectural decisions for OpenZEV.
 - [0025: The MCP server runs inside Django and answers through the REST views](0025-mcp-server-in-process-over-rest.md)
 - [0026: Readings are UTC instants; every calendar question is answered in Swiss civil time](0026-swiss-civil-time-for-billing.md) (supersedes 0007)
 - [0027: Access is granted per ZEV; the platform role only says "admin or not"](0027-per-zev-access-grants.md) (supersedes 0003)
+- [0028: Every person or organisation of a ZEV is a party; issuer, representative and landowner are dated roles](0028-zev-parties-and-dated-roles.md) (amends 0027)
+- [0029: Buildings sit between a ZEV and its metering points](0029-buildings-between-zev-and-metering-points.md)
 
 ## Conventions
 

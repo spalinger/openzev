@@ -1,7 +1,7 @@
 # Feature Spec: Participant onboarding link (phase 1)
 
 - Spec ID: SPEC-2026-participant-onboarding-link
-- Status: Draft — implemented, not yet reviewed/merged
+- Status: Completed
 - Scope: Major
 - Type: Feature
 - Owners: Sebastian Plattner

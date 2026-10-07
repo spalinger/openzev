@@ -66,7 +66,7 @@ PVshare Cockpit is a closed, subscription-based SaaS (CHF ~30/participant/year) 
 |---|---|---|
 | LEG (Lokale Elektrizitätsgemeinschaft) support | Planned — billing-model spec exists | Invoicing & Billing — LEG billing model (high) |
 | Demand tariff (Leistungstarif) | Not supported | Metering & Data Quality — demand tariff (high), #529 |
-| Participant self-service onboarding via email auto-link | Partial — QR/magic-link access shipped; operator-sent onboarding link in progress (#712) | Participants & Community — email auto-link (medium) |
+| Participant self-service onboarding via email auto-link | Partial — QR/magic-link access shipped; operator-sent onboarding link shipped (#712) | Participants & Community — email auto-link (medium) |
 | Invoice run reject + auto-recalculate workflow | Approve/cancel only | Invoicing & Billing (medium) |
 | Vacant unit auto-billing to ZEV responsible | Not explicit | Invoicing & Billing (medium) |
 | Proactive status-check page for ZEV owners | Partial — readiness/attention cockpit shipped | Participant Self-Service — status-check page (medium) |
@@ -110,11 +110,13 @@ PVshare Cockpit is a closed, subscription-based SaaS (CHF ~30/participant/year) 
 | Eight billing modes (six base + two shared community-fee modes) | `shipped` | — | [spec](specs/2026-03-tariffs-and-billing-engine.md) |
 | Per-band invoice lines for multi-band tariffs (`Zev.itemize_tariff_bands`, off by default) | `shipped` | — | [release notes 1.9.0](release-notes/1.9.0.md) |
 | Time-band pricing with time-of-day, weekday, and month windows | `shipped` | — | HT/NT plus seasonal bands (#527) and three-or-more bands per tariff (#528) — [spec](specs/2026-03-tariffs-and-billing-engine.md) |
+| Time-of-use bands for percentage-of-energy tariffs | `shipped` | — | [spec](specs/2026-09-percentage-tariff-bands.md) |
 | Four tariff categories (energy, grid fees, levies, metering) | `shipped` | — | [spec](specs/2026-03-tariffs-and-billing-engine.md) |
 | Tariff-only JSON export/import (tariff preset) | `removed` | — | Superseded by whole-ZEV transfer — [spec](specs/2026-08-zev-transfer-archive.md), [guide](user-guide/17-zev-transfer.md) |
 | Tariff import from the grid operator's Art. 7b publication (VSE/AES standard, URL fetch, previewed and per-entry selected) | `shipped` | — | [spec](specs/2026-09-vse-tariff-import.md), #507 |
 | VAT application with validity-windowed VAT rate table | `shipped` | — | [spec](specs/2026-03-tariffs-and-billing-engine.md) |
 | Annual financial report for tax purposes | `shipped` | — | — |
+| Annual ZEV report | `shipped` | — | [spec](specs/2026-09-annual-zev-report.md) |
 | Period overview with strict daily completeness checking | `shipped` | — | [spec](specs/2026-03-invoice-lifecycle-and-communication.md) |
 | Invoice readiness + attention cockpit | `shipped` | — | [spec](specs/2026-03-invoice-lifecycle-and-communication.md) §5.6a |
 | Tariff overview PDF | `shipped` | — | [spec](specs/2026-09-tariff-overview-pdf.md), #566 |
@@ -181,12 +183,15 @@ PVshare Cockpit is a closed, subscription-based SaaS (CHF ~30/participant/year) 
 | Configurable map tile server / operator privacy notice for the participant map | `idea` | `medium` | Remaining parts of #796 — tiles still load from `tile.openstreetmap.org` unconditionally, and there's no privacy-notice surface for `/join` and `/i/` public pages |
 | `MeteringPoint` CRUD (consumption, production, bidirectional types) | `shipped` | — | [spec](specs/2026-03-metering-point-management.md) |
 | Assignment-only validity model (`MeteringPointAssignment` with date range) | `shipped` | — | [ADR 0009](adr/0009-remove-direct-meteringpoint-participant-fk.md) |
+| Buildings and sites between a ZEV and its metering points (owner link, geocoded outlines) | `shipped` | — | [spec](specs/2026-10-buildings-and-sites.md), [ADR 0029](adr/0029-buildings-between-zev-and-metering-points.md), #761 |
+| Generation behind the meter on bidirectional / production metering points (excluded from local share) | `shipped` | — | [spec](specs/2026-09-behind-the-meter-generation.md) |
 | Community-allocated metering points (common-area meter split by `allocation_weight`) | `shipped` | — | [spec](specs/2026-08-shared-metering-points.md), #387 |
 | `MeteringPointAssignment` CRUD with overlap/containment validation | `shipped` | — | [spec](specs/2026-03-metering-point-management.md) |
 | Bulk participant import from CSV | `idea` | `medium` | Useful when onboarding large ZEVs; reduces manual data entry |
 | Participant move between ZEVs | `idea` | `low` | Complex; requires data migration of assignments and readings |
 | ZEV merge (combine two ZEVs into one) | `idea` | `low` | Rare edge case; needs dedicated spec |
-| Participant self-service onboarding via email auto-link | `in progress` | `medium` | Phase 1 (operator-sent onboarding link, no password ever issued) implemented, pending review — [spec](specs/2026-09-participant-onboarding-link.md), #712. Phase 2 (self-service `/join` with an email field, PVshare's literal model) not started |
+| Participant self-service onboarding via email auto-link | `shipped` | — | Phase 1 (operator-sent onboarding link, no password ever issued) — [spec](specs/2026-09-participant-onboarding-link.md), #712. Phase 2 (self-service `/join` with an email field, PVshare's literal model) not started |
+| ZEV parties; dated issuer, representative and landowner roles that manage the community while they last | `shipped` | — | [spec](specs/2026-10-zev-parties.md), [ADR 0028](adr/0028-zev-parties-and-dated-roles.md), #761 |
 | Guided ZEV founding wizard with grid-operator document templates | `idea` | `medium` | Step-by-step process for new ZEV setup including document templates for VNB correspondence; PVshare key differentiator |
 | Partner / third-party billing access model | `idea` | `low` | Allow a solar installer or billing service partner to manage a ZEV on behalf of the responsible party; requires scoped delegation role |
 
@@ -221,7 +226,7 @@ PVshare Cockpit is a closed, subscription-based SaaS (CHF ~30/participant/year) 
 |---|---|---|---|
 | Navigation regroup (task-based sidebar, Setup/Platform hubs, tab URLs with aliases) | `shipped` | — | [release notes 1.12.0](release-notes/1.12.0.md) |
 | JWT authentication (SimpleJWT; email or username login) | `shipped` | — | [spec](specs/2026-03-community-and-access.md) |
-| Role hierarchy: `admin`, `zev_owner`, `participant`, `guest` | `shipped` | — | [spec](specs/2026-03-community-and-access.md) |
+| Platform role is `admin` or `user`; managing a ZEV is a per-ZEV grant (manager / viewer) | `shipped` | — | [spec](specs/2026-10-zev-access-grants.md), [ADR 0027](adr/0027-per-zev-access-grants.md), #761 |
 | ZEV-scoped permission classes enforced at object level | `shipped` | — | [ADR 0003](adr/0003-role-and-zev-scope-enforcement.md) |
 | Self-registration for ZEV owners with email verification | `shipped` | — | [spec](specs/2026-03-community-and-access.md) |
 | Email verification (24h token, auto-issues JWT on success) | `shipped` | — | — |
@@ -238,6 +243,7 @@ PVshare Cockpit is a closed, subscription-based SaaS (CHF ~30/participant/year) 
 | Session management page (list and revoke active tokens) | `idea` | `low` | Useful for security-conscious owners |
 | Per-user API keys for automated integrations | `shipped` | — | Owner-managed keys with revoke; backend key auth + throttling — [guide](user-guide/16-api-keys.md) |
 | Admin console for API key management | `shipped` | — | PR #409 |
+| MCP server for AI assistants (read-only, in-process over the REST views) | `shipped` | — | [spec](specs/2026-09-mcp-server.md), [ADR 0025](adr/0025-mcp-server-in-process-over-rest.md) |
 | External SSO / enterprise IdP (SAML, OIDC beyond current OAuth) | `deferred` | — | Out of scope; requires significant auth infrastructure work |
 
 ---

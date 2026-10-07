@@ -923,6 +923,12 @@ A lone `date_from`/`date_to` still filters one-sided
 wherever the endpoint documents them as such. This avoids Django's `__date`
 lookup, whose result depends on the connection timezone rather than the helper.
 
+Bounds derived from the readings themselves follow the same rule: the
+dashboard's assignment window takes `civil_date()` of the queryset's
+`Min`/`Max` timestamp (`metering.analytics._qs_bounds`), never the UTC date of
+those instants — otherwise a reading after local 22:00/23:00 would put the
+window one day early and drop the assignment holding it.
+
 **Import normalization:**
 - Timezone-aware timestamps → converted to UTC.
 - Naive CSV/Excel timestamps → wall-clock time in the import's
@@ -1094,7 +1100,6 @@ type MeteringDashboardSummary =
 | `DashboardSummaryAlignmentTests` | §5.4: timestamp-level local/grid split for participant view; owner participant-filter produces correct totals; multi-participant filtering exclusion |
 | `DashboardMidPeriodTransferTests` | §5.4: readings attributed per assignment timestamp for owner stats, participant totals/timeline, ZEV-wide stats, and the hourly profile; post-transfer readings excluded |
 | `ParticipantImportRestrictionTests` | §6.2: participant cannot list import logs, preview CSV, or upload CSV (all 403) |
-| `ImportParserRobustnessTests` | §4.1: malformed CSV reported without crash; malformed SDAT-CH reported without crash; timezone offset normalized to UTC; duplicate rows skipped; idempotent re-import; overwrite mode updates value without creating new row |
 | `MeteringRawDataEndpointTests` | §5.3: owner gets daily-grouped raw rows with correct direction sums; participant can read own metering point's raw data |
 | `ChartDataEndpointTests` | §5.2: direction aggregates; Swiss day/month boundaries agree with raw data (`test_daily_bucket_uses_the_same_civil_day_as_raw_data`, `test_month_bucket_does_not_cross_the_civil_month_boundary`); hourly buckets stay distinct across both DST transitions |
 | `DashboardCivilDayBucketingTests` | §5.4: a 23:45 Swiss-time reading stays in its civil-day bucket (`+02:00`); 00:00 the next day is excluded |
@@ -1219,12 +1224,12 @@ component test infra exists).
 - [x] Preview endpoint requires `zev_id`, returns row-level validation without writing data, covers the whole file as unique meters with bounded `missing_meter_ids`, keeps display rows capped at `max_rows`, validates fields regardless of meter existence, stops row validation at the error cap while keeping whole-file meter coverage, and reports truncated daily rows once — matching import (§4.3, §5.6). Daily import validation is atomic for truncated/invalid rows (no readings); duplicates gap-fill per slot, fully duplicate rows write no readings
 - [x] Default write mode gap-fills per slot and skips duplicates; overwrite mode is opt-in, confirmed in the UI, and reports the count in `warnings`; import `log.zev` is always the validated target (§4.1, §8.3)
 - [x] Import log captures filename, batch ID, row counts, and per-row errors for every import (§3.3)
-- [ ] Chart data endpoint returns direction-pivoted aggregates with configurable time buckets (§5.2)
-- [ ] Raw data endpoint returns daily-grouped individual readings (§5.3)
-- [ ] Dashboard summary returns role-differentiated response with correct local/grid split (§5.4)
-- [ ] Dashboard readings are attributed per assignment timestamp; gap readings appear in ZEV aggregates but on no participant's totals (§5.4)
-- [ ] Data quality status returns per-metering-point gap detection with severity thresholds (§5.5)
-- [ ] Data quality status flags holder-less readings and overlapping windows per metering point without failing the whole response (§5.5)
-- [ ] All date queries and civil dates go through `allocation.validity` (§7)
-- [ ] Participants cannot import or access import logs (§6.2)
-- [ ] Metering data filters and date ranges behave consistently across all endpoints (§7)
+- [x] Chart data endpoint returns direction-pivoted aggregates with configurable time buckets (§5.2)
+- [x] Raw data endpoint returns daily-grouped individual readings (§5.3)
+- [x] Dashboard summary returns role-differentiated response with correct local/grid split (§5.4)
+- [x] Dashboard readings are attributed per assignment timestamp; gap readings appear in ZEV aggregates but on no participant's totals (§5.4)
+- [x] Data quality status returns per-metering-point gap detection with severity thresholds (§5.5)
+- [x] Data quality status flags holder-less readings and overlapping windows per metering point without failing the whole response (§5.5)
+- [x] All date queries and civil dates go through `allocation.validity` (§7)
+- [x] Participants cannot import or access import logs (§6.2)
+- [x] Metering data filters and date ranges behave consistently across all endpoints (§7)

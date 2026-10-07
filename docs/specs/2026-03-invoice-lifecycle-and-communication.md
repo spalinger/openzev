@@ -1145,7 +1145,7 @@ the cockpit readiness and attention caches.
 | `test_workflow.py` | `test_concurrent_cancel_and_mark_paid_serialize_on_the_row_lock` (PostgreSQL only — CI's "Verify PostgreSQL retention and concurrency" step) | §5.3 concurrency (#572): two genuinely overlapping transactions — one holding the invoice row lock, the other running real `mark_invoice_paid` — serialize on that lock (verified via `pg_blocking_pids`) rather than racing; the second sees the first's committed `cancelled` status and correctly refuses |
 | `test_period_overview.py` | `InvoicePeriodOverviewTests` | §5.5: metering completeness, missing-day detection, partial-assignment windows, no-assignment exclusion, cross-ZEV permission denial, whom a row bills (`test_row_names_who_it_bills`: kind, name addition, participation dates and party; `test_meter_labels_use_location_or_meter_id`: location/ID fallback) |
 | `test_period_overview_unit.py` | `ComputePeriodOverviewTests` (10 tests) | §5.5 unit level: complete/incomplete participants, single missing day, exclusion without assignment, partial-assignment required-day windows and gaps, invoice period matching, row ordering, multiple-metering-point counts |
-| `test_readiness.py` | 22 test classes (104 tests) | §5.6a: cockpit period resolution, bulk parity and stable query count, exact historical periods, running-versus-ended lifecycle metadata, first-run/awaiting/caught-up states, structured step details, attention and RBAC |
+| `test_readiness.py` | 22 test classes (106 tests) | §5.6a: cockpit period resolution, bulk parity and stable query count, exact historical periods, running-versus-ended lifecycle metadata, first-run/awaiting/caught-up states, structured step details, attention and RBAC |
 | `test_engine_edge_cases.py` | `InvoiceMathEdgeCaseTests` | Edge cases: monthly fee month-boundary counting, tariff validity windows, zero/negative fees, rounding |
 | `test_engine_edge_cases.py` | `InvoiceVatRateSelectionTests` | VAT rate active at period_end, zero VAT when no vat_number |
 | `test_email_formatting.py` | `InvoiceEmailFormattingTests` | §7.1–7.2: date format in email body, custom ZEV templates, auto-transition to sent |
@@ -1274,22 +1274,22 @@ the cockpit readiness and attention caches.
 
 ## 14. Acceptance criteria
 
-- [ ] Only legal transitions are possible through API and UI (§4.2)
-- [ ] Regeneration replaces draft/cancelled only; locked states return 409 (§4.4)
-- [ ] Deletion respects role-based rules: admin any, owner draft/cancelled only (§4.5)
-- [ ] Email delivery is async with up to 3 retries and 60s countdown (§7.2)
-- [ ] Email audit trail records every attempt with status and error detail (§7.2)
-- [ ] Auto-transition from approved → sent on successful email delivery (§4.3)
-- [ ] PDF includes localized content, QR-Rechnung (when data is complete), and charts (§8)
-- [ ] PDF uses an inline QR payment layout for short invoices and a dedicated payment page as fallback (§8.2, §8.4)
-- [ ] Period overview correctly computes metering completeness per assignment window (§5.5)
-- [ ] Participants with no active assignment are excluded from period overview (§5.5)
-- [ ] Role-scoped queryset filtering is enforced server-side (§6.1)
-- [ ] PDF template is hot-updatable by admin only; changes persist to DB and survive restarts (§5.7)
-- [ ] Contract PDF template is hot-updatable by admin only via the same mechanism (§5.7)
-- [ ] Annual statement PDF template is hot-updatable by admin only via the same mechanism (§5.7)
-- [ ] Template preview renders submitted content with sample data for all three template types (§5.7)
+- [x] Only legal transitions are possible through API and UI (§4.2)
+- [x] Regeneration replaces draft/cancelled only; locked states return 409 (§4.4)
+- [x] Deletion respects role-based rules: admin any, owner draft/cancelled only (§4.5)
+- [x] Email delivery is async with up to 3 retries and 60s countdown (§7.2)
+- [x] Email audit trail records every attempt with status and error detail (§7.2)
+- [x] Auto-transition from approved → sent on successful email delivery (§4.3)
+- [x] PDF includes localized content, QR-Rechnung (when data is complete), and charts (§8)
+- [x] PDF uses an inline QR payment layout for short invoices and a dedicated payment page as fallback (§8.2, §8.4)
+- [x] Period overview correctly computes metering completeness per assignment window (§5.5)
+- [x] Participants with no active assignment are excluded from period overview (§5.5)
+- [x] Role-scoped queryset filtering is enforced server-side (§6.1)
+- [x] PDF template is hot-updatable by admin only; changes persist to DB and survive restarts (§5.7)
+- [x] Contract PDF template is hot-updatable by admin only via the same mechanism (§5.7)
+- [x] Annual statement PDF template is hot-updatable by admin only via the same mechanism (§5.7)
+- [x] Template preview renders submitted content with sample data for all three template types (§5.7)
 - [x] Participant annual-statement preview is scoped to the authenticated participant + selected year, never reuses a stale object URL, and keeps loading/error/viewer states mutually exclusive (§5.4)
-- [ ] Whole-ZEV annual statements are prepared asynchronously: the UI polls until the archive is ready, then downloads; partial failures show omission counts, total failure shows an error with retry (§5.4, §8.1)
-- [ ] Completed export artifacts expire after the retention window and downloads of expired artifacts return `410` (§8.1, ADR 0017)
-- [ ] Reset-to-default DELETE reverts to on-disk file without modifying it (§5.7)
+- [x] Whole-ZEV annual statements are prepared asynchronously: the UI polls until the archive is ready, then downloads; partial failures show omission counts, total failure shows an error with retry (§5.4, §8.1)
+- [x] Completed export artifacts expire after the retention window and downloads of expired artifacts return `410` (§8.1, ADR 0017)
+- [x] Reset-to-default DELETE reverts to on-disk file without modifying it (§5.7)

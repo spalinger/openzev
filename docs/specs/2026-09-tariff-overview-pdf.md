@@ -97,6 +97,7 @@ Built by `invoices/tariff_overview.py`; never serialised over the API.
 | `is_current` | `bool` | In force on `as_of`. Always `True` when `scope="valid"` |
 | `notes` | `str` | `Tariff.notes`, printed as a muted line when non-empty |
 | `price_rows` | `list[PriceRow]` | At least one; a static tariff with no configured price is skipped, while a dynamic tariff with no fetched price gets an explicit unavailable row |
+| `inline_price` | `PriceRow \| None` | `price_rows[0]` when the tariff has exactly one price (its label blanked when redundant, §8.1), else `None`; the template renders it on the tariff's own row |
 
 **`PriceRow`** — one printed price line under a tariff.
 
@@ -429,12 +430,14 @@ test covers them.
 selected by `zev.invoice_language` with a German fallback, exactly as
 `FINANCIAL_SUMMARY_TRANSLATIONS`.
 
-Keys: `document_label`, `valid_at`, `all_versions`, `generated_on`,
-`tariff_count`, `vat_label`, `vat_not_registered`, `vat_registered`,
+Keys: `document_label`, `all_versions`, `vat_label`, `vat_not_registered`, `vat_registered`,
 `vat_inclusive`, `vat_note_registered`, `vat_note_inclusive`, `valid_open`,
 `valid_span`, `no_tariffs`, `unit_rp`, `unit_chf_month`, `unit_chf_year`,
 `unit_percent`, `fee_per_metering_point`, `fee_shared_equal`,
-`fee_shared_weight`, `footnote_multiband_base`, `page_of`, and
+`fee_shared_weight`, `footnote_multiband_base`, the dynamic-tariff keys
+(`dynamic_average_label`, `dynamic_partial_label`, `dynamic_unavailable_label`,
+`dynamic_reference_dates`, `dynamic_minimum`, `footnote_dynamic_average`,
+`footnote_dynamic_partial`, `footnote_dynamic_unavailable`), and
 `billing_modes` (a sub-dict over every `BillingMode` value, mirroring the
 frontend's `billingModes` block).
 
@@ -501,7 +504,7 @@ enforces them across all four locales.
 | `test_scope_all_includes_superseded_versions` | Both versions' prices in the text |
 | `test_unknown_scope_is_400` | |
 
-**`TariffOverviewContentTests`** (11 tests, via `PdfReader.extract_text()`):
+**`TariffOverviewContentTests`** (17 tests, via `PdfReader.extract_text()`):
 
 | Test | Asserts |
 |---|---|
@@ -509,6 +512,10 @@ enforces them across all four locales.
 | `test_empty_category_is_omitted` | A category with no tariffs prints no header |
 | `test_every_band_of_a_multi_band_tariff_is_listed` | Three bands → three prices, none averaged |
 | `test_band_labels_match_the_contract` | Same tariff rendered into both documents yields the same band label strings |
+| `test_single_band_tariff_folds_onto_one_row` | `inline_price` set with amount `22.50` and an empty label (§8.1) |
+| `test_multi_band_tariff_keeps_its_band_rows` | HT/NT tariff: `inline_price` is `None`, two `price_rows` |
+| `test_inline_form_keeps_a_label_that_carries_information` | Folding drops only the flat band's name: a shared fee keeps its split wording and a percentage row keeps its formula |
+| `test_context_carries_exactly_one_date` | `as_of_display` present; `generated_on_display`, `valid_at_display` and `tariff_count` absent |
 | `test_seasonal_band_carries_its_season` | `Hochtarif (Okt–Mär)` |
 | `test_prices_are_printed_in_rappen` | `22.50`, not `0.22500` |
 | `test_shared_fee_names_its_split` | Split wording and `split_key` present |
@@ -519,13 +526,18 @@ enforces them across all four locales.
 | `test_a_two_band_percentage_tariff_prints_one_row_per_band` | An HT/NT-shaped pair of percentage bands (90%/60%) prints two rows, each at that band's own effective rate, not an average (SPEC-2026-percentage-tariff-bands §5.4) |
 | `test_a_single_flat_band_percentage_row_matches_the_pre_band_row` | A single flat percentage band still prints exactly the pre-band formula row, with no band-label prefix |
 
-**`TariffOverviewVatTests`** (3 tests):
+**`TariffOverviewVatTests`** (4 tests):
 
 | Test | Asserts |
 |---|---|
 | `test_inclusive_states_prices_are_net` | Net-price footnote present |
 | `test_registered_states_prices_exclude_vat` | Excl.-VAT footnote and the VAT number |
 | `test_not_registered_has_no_vat_footnote` | Neither footnote |
+| `test_inclusive_net_note_reaches_the_rendered_page` | The `inclusive` net-price note is in the extracted PDF text and precedes the first price (§13's top risk) |
+
+**`TariffOverviewDynamicTariffTests`** (6 tests): unfetched, fetched-average,
+floored and unfloored feed-in, and dynamic-base percentage cases; listed in
+`2026-09-dynamic-tariffs.md` §12.
 
 **`TariffOverviewEdgeTests`** (3 tests):
 
@@ -554,19 +566,19 @@ and `scope: 'all'` for the two filter values, and the filename helper produces
 
 ### Acceptance criteria
 
-- [ ] An owner downloads a tariff overview from the Tariffs page in one click
-- [ ] The PDF lists every tariff in force today, grouped by category in the
+- [x] An owner downloads a tariff overview from the Tariffs page in one click
+- [x] The PDF lists every tariff in force today, grouped by category in the
       invoice's order, with one row per price band
-- [ ] Band labels are byte-identical to the participation contract's for the
+- [x] Band labels are byte-identical to the participation contract's for the
       same tariff
-- [ ] A percentage-of-energy tariff prints the same effective price as the
+- [x] A percentage-of-energy tariff prints the same effective price as the
       contract
-- [ ] The ZEV's VAT treatment is stated on the document, and under `inclusive`
+- [x] The ZEV's VAT treatment is stated on the document, and under `inclusive`
       the prices are explicitly marked net
-- [ ] Switching the page's validity filter to "all" produces a PDF including
+- [x] Switching the page's validity filter to "all" produces a PDF including
       superseded versions
-- [ ] The document is PDF/A-3b and visually a sibling of the invoice
-- [ ] No migration is required
+- [x] The document is PDF/A-3b and visually a sibling of the invoice
+- [x] No migration is required
 
 ## 15. Open questions
 

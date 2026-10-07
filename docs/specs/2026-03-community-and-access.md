@@ -1924,7 +1924,7 @@ interface ParticipantAccountCreateResult { participant: Participant; account: Us
 Line counts are not tracked here — they drift with every change. The inventory
 lists the test classes per module (test counts are the `test_*` methods).
 
-**`accounts/tests.py`** (16 test classes):
+**`accounts/tests.py`** (17 test classes):
 
 | Class | Tests | Description |
 |---|---|---|
@@ -1932,7 +1932,7 @@ lists the test classes per module (test counts are the `test_*` methods).
 | `PasswordChangeFlagTests` | 1 | `must_change_password` cleared on password change |
 | `TokenLoginCredentialTests` | 1 | Email login issues httpOnly cookie JWTs instead of a response body token |
 | `PasswordLoginAuditTests` | 5 | Successful login records `auth.login` with the user as actor and target; wrong password, unknown username, and inactive account each record `auth.login_failed` (status `failed`, no actor) with the attempted identifier in `target_display`; a request with no identifier is still audited |
-| `RegistrationTests` | 4 | Self-registration accepts email only and generates a username; creates an inactive account that may set up a ZEV; verification activates the account; disabled registration is refused |
+| `RegistrationTests` | 5 | Self-registration accepts email only and generates a username; the verification template uses the send-time context; a duplicate email is rejected case-insensitively; login still accepts a username; disabled registration is refused |
 | `FeatureFlagsApiTests` | 5 | Anonymous 401 and non-admin 403 on list; admin can list and toggle; defaults sync on read |
 | `ImpersonationTests` | 4 | Admin can impersonate participant/owner; non-admin blocked; admin cannot impersonate admin |
 | `LinkedAccountSafetyTests` | 8 | Admin can edit linked account; cannot delete linked; can delete unlinked; cannot delete last admin (with audit-denied assertion); can delete self when other admin exists (with audit actor SET_NULL assertion); can delete other admin when multiple exist; cannot change own role (via both detail and me endpoints) |
@@ -1944,13 +1944,14 @@ lists the test classes per module (test counts are the `test_*` methods).
 | `UserListCreateAdminOnlyTests` | 6 | Owner/participant/anonymous cannot list or create users; admin can list all users and create |
 | `RbacEndpointMatrixTests` | 6 | Full list/create/update/action-delete/unauthenticated matrix across all endpoints |
 | `OAuthTokenCleanupTaskTests` | 1 | Token cleanup task keeps active and removes expired entries |
+| `PreferredZevApiTests` | 7 | Account-level default community (`preferred_zev`) on `/auth/me/`: none by default; an owner sets one of their own, cannot prefer another owner's or an unknown ZEV, and clears it back to first-by-name; a participant is refused; an admin may prefer any community |
 
 **Other `accounts/` test modules:**
 
 | Module | Classes | Tests | Coverage |
 |---|---|---|---|
-| `test_session_hardening.py` | 5 | 44 | Self-service profile lockdown (protected fields rejected, repeats accepted, names/preferred community still editable); session revocation (revoked/new/legacy tokens, dead access cookie leaves public endpoints working, refresh refusal, deactivation, stale-instance save cannot revive, API keys and impersonation); password change and revoke endpoints; verified email change (request/confirm, single-use, dies on password/address/deactivation/expiry, no enumeration, throttle, mail failure, API keys) |
-| `test_security_notifications.py` | 6 | 26 | Every event composes (subject, body, `{detail}` filled, admin vs. self advice, no-turn-off line); guards (no address, inactive, gone/deactivated by send time); hooked into passkey add/remove, TOTP enable/disable (not for an abandoned enrolment), recovery-code regeneration, password change (not on failure), admin MFA reset (not when nothing was removed) and admin session revocation (not for the self-service one); a broker or mail failure never fails the triggering request |
+| `test_session_hardening.py` | 6 | 55 | Self-service profile lockdown (protected fields rejected, repeats accepted, names/preferred community still editable); session revocation (revoked/new/legacy tokens, dead access cookie leaves public endpoints working, refresh refusal, deactivation, stale-instance save cannot revive, API keys and impersonation); password change and revoke endpoints; verified email change (request/confirm, single-use, dies on password/address/deactivation/expiry, no enumeration, throttle, mail failure, API keys) |
+| `test_security_notifications.py` | 5 | 26 | Every event composes (subject, body, `{detail}` filled, admin vs. self advice, no-turn-off line); guards (no address, inactive, gone/deactivated by send time); hooked into passkey add/remove, TOTP enable/disable (not for an abandoned enrolment), recovery-code regeneration, password change (not on failure), admin MFA reset (not when nothing was removed) and admin session revocation (not for the self-service one); a broker or mail failure never fails the triggering request |
 | `test_admin_users_list.py` | 2 | 13 | Admin user list: memberships per relationship (participant, owner-who-is-also-participant merged into one, owner of several communities sorted by name), confirmed-only `mfa_methods`, `last_login` exposed and `null` before the first sign-in, fixed query count, `/auth/me/` unaffected; `mfa_compliance` (`null` outside the policy, `"grace"` before the deadline, `"overdue"` after it, `"compliant"` once enrolled regardless of the deadline, no added query per account) |
 | `test_last_login.py` | 4 | 7 | `last_login` stamped by a plain password login (not by a failed one, not by the password step of a two-step login until `/token/mfa/` completes it) and by the auto-login after email verification; not restamped by a password change or by setting your initial password moments after verifying; untouched on either side of an impersonation session |
 | `test_admin_account_actions.py` | 2 | 12 | Account creation (generated password when omitted, returned once and never re-listed, two accounts get different passwords, a supplied password is still accepted, mismatched/weak supplied passwords rejected, generated password passes the validators anyway, response carries the new id, non-admin blocked); self-deactivation guard (blocked with a field error, deactivating someone else works and is audited, reactivating your own account is unaffected, deactivating someone else still revokes their sessions) |
@@ -1959,10 +1960,10 @@ lists the test classes per module (test counts are the `test_*` methods).
 | `test_passkeys.py` | 9 | 64 | Passkey registration and passwordless sign-in against a software authenticator, MFA policy and grace arithmetic, removal guard, admin reset, RP-ID/origin system checks |
 | `test_mfa.py` | 4 | 28 | TOTP enrolment/removal/recovery codes, two-step login, MFA at the magic-link/onboarding/OAuth/impersonation/email-verification doors, per-account throttle (`SPEC-2026-09-two-factor-authentication`) |
 | `test_cookie_oauth.py` | — (7 module-level test functions) | 7 | Refresh/logout cookie handling; token exchange sets cookies, consumes codes, and stamps `last_login` |
-| `test_impersonation.py` | 5 | 21 | Permissions, audit, cookie round-trip, stop-impersonation |
-| `test_throttling.py` | 3 | 14 | Per-IP 429 boundaries for all six public auth write endpoints; budgets are independent; production settings wiring and spoofed `X-Forwarded-For` regression coverage; headers neither evade the login bucket without a trusted proxy nor escape the right-most-entry bucket with one trusted hop |
+| `test_impersonation.py` | 5 | 22 | Permissions, audit, cookie round-trip, stop-impersonation |
+| `test_throttling.py` | 4 | 15 | Per-IP 429 boundaries for all six public auth write endpoints; budgets are independent; production settings wiring and spoofed `X-Forwarded-For` regression coverage; headers neither evade the login bucket without a trusted proxy nor escape the right-most-entry bucket with one trusted hop |
 
-**`config/test_settings_guards.py`** (3 test classes, 22 tests):
+**`config/test_settings_guards.py`** (4 test classes, 22 tests):
 
 | Class | Tests | Description |
 |---|---:|---|
@@ -1970,13 +1971,13 @@ lists the test classes per module (test counts are the `test_*` methods).
 | `ProductionHostsCheckTests` | 11 | Rejects unsafe hosts and frontend origins; accepts a complete production configuration; preserves distinct system-check IDs |
 | `ProductionConfigurationCheckTests` / `SeedDemoGuardTests` | 7 | Rejects empty/insecure CSRF origins, console or incomplete SMTP mail, and empty WebAuthn settings; refuses demo seeding in production |
 
-**`zev/tests.py`** (14 test classes):
+**`zev/tests.py`** (32 test classes):
 
 | Class | Tests | Description |
 |---|---|---|
 | `ZevPaymentTermTests` | 4 | Payment term default (30 days), range validation, API accept/reject |
 | `ParticipantEndpointRestrictionTests` | 7 | Participant cannot access ZEV/participant lists; can list own metering points; cannot create/update/delete metering points; cannot access assignments |
-| `ZevCreationWizardTests` | 5 | Non-admin cannot create ZEV; admin wizard creates ZEV + owner + participant + assignments; invalid IBAN and a valid IBAN without the owner address are rejected; wizard payload persists normalized `bank_iban` + `bank_name` |
+| `ZevCreationWizardTests` | 6 | Non-admin cannot create ZEV; admin wizard rejects an invalid IBAN and an IBAN without the owner address; creates ZEV + owner + participant + assignments keeping the ZEV's own postal code apart from the owner's; payload persists normalized `bank_iban` + `bank_name` |
 | `ZevSelfSetupTests` | 3 | Self-setup persists `bank_iban` + `bank_name` on the created ZEV (owner participant created); an IBAN without the required owner address is rejected without creating the ZEV; falsy-but-valid JSON address values reach serializer validation without being replaced as missing |
 | `ParticipantAccountLifecycleTests` | 3 | Create participant auto-creates account with initial password; update saves contact details; invitation resets password and sends email |
 | `AdminCanEditOwnerParticipantTests` | 4 | `test_admin_can_edit_the_owner_participant_address` preserves the owner role and ZEV API access; `test_profile_sync_preserves_privileged_roles` synchronizes name/email while preserving owner/admin roles and ZEV API access; `test_onboarding_link_leaves_roles_alone_and_keeps_privileged_logins` leaves every role unchanged (#761), keeps the login of an admin, a self-registered account and a grant holder and neutralises it for a plain account, and verifies email delivery; `test_zev_owner_cannot_edit_their_own_owner_participant_record` retains the edit restriction (now: a non-admin may not edit a participant row whose account has its own login) |
@@ -1997,10 +1998,15 @@ lists the test classes per module (test counts are the `test_*` methods).
 | `NextInvoiceNumberTests` | 3 | Invoice number allocation |
 | `SeedDemoPeriodHelpersTests` | 6 | Demo seed period helpers |
 | `SeedDemoTariffVersionTests` | 11 | Demo seed tariff versioning |
-| `SeedDemoLegacyNameCollisionTests` | 4 | Legacy row next to an already-migrated row dropped; duplicate legacy rows keep the newest; current-name upsert does not take over another owner's community; only the demo owner is affected |
+| `SeedDemoLegacyNameCollisionTests` | 5 | Legacy row next to an already-migrated row dropped; duplicate legacy rows keep the newest; a duplicate legacy row with invoices is cleared; current-name upsert does not take over another owner's community; only the demo owner is affected |
 | `SeedDemoWindowShiftTests` | 1 | Shifted seed window leaves no readings outside it |
 | `SeedDemoAuditResetTests` | 1 | Audit reset clears demo trails but keeps events on other communities |
-| `SeedDemoEndToEndTests` | 1 | Seed runs end to end on a small fixed window and re-seeding is identical |
+| `SeedDemoEndToEndTests` | 3 | Seed runs end to end on a small fixed window and re-seeding is identical; the flagship community gains a representative and a contact; the access personas survive a re-seed |
+| `ZevVatModeTests` | 5 | ZEV VAT mode: default `not_registered`; `clean()` requires a number for `registered` and forbids one otherwise; a PATCH to `inclusive` is accepted and to `registered` without a number rejected |
+| `SeedDemoFeatureFlagTests` | 3 | Demo seed enables the features that ship off by default (#691): enables the feasibility-calculator flag, re-enables a flag an admin turned off, and is idempotent |
+| `MeteringPointCascadeInfoTests` | 3 | Metering-point list/retrieve/create responses report cascade counts (`reading_count`, `assignment_count`) and the first/last reading span |
+| `MeteringPointBehindMeterGenerationTests` | 4 | Behind-the-meter generation flag (SPEC-2026-behind-the-meter-generation): defaults false, allowed on bidirectional/production meters, rejected on consumption (including via PATCH) |
+| `AllocationModelAndApiTests` | 6 | Shared-metering-point allocation (SPEC-2026-08-shared-metering-points): `allocation_mode`/`allocation_weight` model defaults and API round-trip, zero/negative weight rejected, both exposed in the serializers |
 
 **Other `zev/` test modules:**
 
@@ -2008,7 +2014,7 @@ lists the test classes per module (test counts are the `test_*` methods).
 |---|---|---|---|
 | `test_scoping.py` | 1 | 4 | `ZevScopedQuerySetMixin` read scoping (admin, grant, participant link, manager-only resource) |
 | `test_access_regression.py` | 2 | 17 | #761: pins what an account with one relationship sees and may change (lists, cross-ZEV detail, reports, dashboard, statements, MCP, main writes); unchanged by the per-ZEV rewrite |
-| `test_access.py` | 4 | 25 | #761: `ZevAccessGrant` model, `zev.access` helpers, owner-grant invariant, migration 0031 (SPEC-2026-10-zev-access-grants §13) |
+| `test_access.py` | 4 | 24 | #761: `ZevAccessGrant` model, `zev.access` helpers, owner-grant invariant, migration 0031 (SPEC-2026-10-zev-access-grants §13) |
 | `test_access_api.py` | 3 | 25 | #761 step 5: the grant API (`/zev/zevs/{id}/access/`: list, give, change, revoke, last-manager rule, audit), email invitations (inactive account, 7-day link, accept via verify-email, resend, revoke, failed send, templates), `/auth/me` memberships, `may_create_zev`, grant holders' logins protected |
 | `test_access_scoping.py` | 4 | 14 | #761: viewers read what managers read and write nothing (`ViewerWriteRouterWalkTests` tries every unsafe route); accounts with several relationships get the union; former participants keep sent invoices only |
 | `test_write_scoping.py` | 5 | 19 | Write scoping: foreign create refused, move-via-PATCH refused, legit writes and admin bypass still work, audit retained; DELETE on a ZEV is `405` for every role, since the only supported removal path is disable then purge |
@@ -2016,8 +2022,8 @@ lists the test classes per module (test counts are the `test_*` methods).
 | `test_disabled_zev_scoping.py` | 5 | 27 | ZEV lifecycle phase 2 (§7.1a): creating into a disabled ZEV refused for every `scope_parent_path` model, admin exempt; PATCH/DELETE on an existing `Participant`/`MeteringPoint`/`MeteringPointAssignment` row blocked for the owner, admin exempt, reads unaffected; PATCH/DELETE on an existing `Tariff`/`TariffPeriod`/`MeterReading` row blocked the same way via `assert_target_not_disabled`, including a field unrelated to the ZEV relation (which `assert_within_scope` alone would miss); a participant loses read access to metering points, invoices and readings under a disabled ZEV while the owner keeps it; access returns in full after `enable` |
 | `test_purge.py` | 3 | 8 | ZEV lifecycle phase 4 (§7.1b): refuses an active ZEV; a full purge deletes the ZEV and every `CASCADE` child (including both `PROTECT` relations, `Invoice` and `ExportJob`) and removes their media files from storage; `SET_NULL` rows (`AuditEvent`, `ContractIssue`, `BackupJob`) survive with their ZEV link cleared; the endpoint is admin-only, requires the exact ZEV name, refuses an active ZEV, and is audited |
 | `test_zev_id_filter.py` | 5 | 15 | `?zev_id=` narrowing on list endpoints |
-| `test_transfer.py` | 6 | 66 | Whole-ZEV archive shape, round-trip, rejected archives, schema parity, transfer endpoints |
-| `test_geocoding.py` | 4 | 20 | Building footprint cache, warm tasks for buildings, trigger-on-save dispatches after the surrounding transaction commits |
+| `test_transfer.py` | 11 | 92 | Whole-ZEV archive shape, round-trip, rejected archives, schema parity, transfer endpoints, percentage-band/dynamic-source/party/building sections |
+| `test_geocoding.py` | 5 | 24 | Building footprint cache, warm tasks for buildings, trigger-on-save dispatches after the surrounding transaction commits, feature flag |
 | `test_iban.py` | 4 | 13 | `normalize_iban`/`is_valid_iban` vectors plus shared recipient-address validation: whitespace/case normalization, MOD-97 accept/reject, blank-means-absent, and required address completeness when an IBAN is configured |
 
 ### 16.2 Frontend
@@ -2040,7 +2046,7 @@ lists the test classes per module (test counts are the `test_*` methods).
   forced-password access including trailing-slash account URLs.
 - `frontend/tests/route-aliases.test.ts` — legacy alias redirects preserve
   query and params (the §9.2 matrix is the frozen contract).
-- `frontend/tests/managed-zev-selection.test.ts` (27 tests) — the §9.4
+- `frontend/tests/managed-zev-selection.test.ts` (28 tests) — the §9.4
   resolution order (explicit pick → account preference → first managed),
   optimistic switches, failed-save tolerance, and account-switch isolation
   (no cross-account leakage). `frontend/tests/auth-preferred-zev.test.ts`

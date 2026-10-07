@@ -556,7 +556,7 @@ Order: Dashboard → invoices list → participants → metering/imports → tar
 
 ### Backend — `invoices/test_template_admin.py` / `invoices/test_pdf.py` delta
 
-Existing suites stay green (contract: 58 tests in `test_contract_context.py`; template admin: 49 in `test_template_admin.py`, 15 of them added or rewritten by this spec's preview/fetch/PDF-download work; invoice: `InvoicePdfRenderingTests` etc.).
+Existing suites stay green (contract: 59 tests in `test_contract_context.py`; template admin: 50 in `test_template_admin.py`, 15 of them added or rewritten by this spec's preview/fetch/PDF-download work; invoice: `InvoicePdfRenderingTests` etc.).
 
 **`PdfTemplatePreviewTests`** ( `invoices/test_template_admin.py`) — 11 tests:
 
