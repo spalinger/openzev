@@ -28,6 +28,7 @@ import {
   screenshotViewport as captureViewport,
   API_BASE,
   DEMO_ZEV_NAME,
+  MISSING_DEMO_ZEV,
   SECOND_DEMO_ZEV_NAME,
 } from './helpers'
 
@@ -64,8 +65,7 @@ test.describe('Unauthenticated Screenshots', () => {
 
 test.describe('User Guide Screenshots', () => {
   test.beforeEach(async ({ page }) => {
-    const pinned = await pinDemoZev(page)
-    expect(pinned, 'Demo ZEV not found — run seed_demo before capturing screenshots').toBe(true)
+    expect(await pinDemoZev(page), MISSING_DEMO_ZEV).toBe(true)
   })
 
   // 02 — Manager Overview
@@ -89,11 +89,7 @@ test.describe('User Guide Screenshots', () => {
 
   // 02b — Participant Dashboard (via impersonation)
   test('02b-participant-dashboard', async ({ page }) => {
-    const ok = await impersonateDemoParticipant(page)
-    if (!ok) {
-      test.skip()
-      return
-    }
+    await impersonateDemoParticipant(page)
     await navigateTo(page, '/')
     await page.waitForSelector('.card, .stat-card', { timeout: 10_000 })
     await Promise.all([
@@ -112,8 +108,8 @@ test.describe('User Guide Screenshots', () => {
   })
 
   // 03b — Participant create form with the allocation weight filled in, so
-  // the guide can show how a weighted cost split is entered. Weight 2 reads
-  // against the seeded 1 / 1 / 2 split instead of an arbitrary number.
+  // the guide can show how a weighted cost split is entered. Weight 2 is what
+  // seed_demo gives most flats.
   test('03b-participant-allocation-weight', async ({ page }) => {
     await navigateTo(page, '/participants')
     await page.waitForSelector('table, .card', { timeout: 10_000 })
@@ -354,11 +350,7 @@ test.describe('User Guide Screenshots', () => {
 
   // 08c — Participant My Invoices (via impersonation)
   test('08c-my-invoices', async ({ page }) => {
-    const ok = await impersonateDemoParticipant(page, { requireSentInvoice: true })
-    if (!ok) {
-      test.skip()
-      return
-    }
+    await impersonateDemoParticipant(page, { requireSentInvoice: true })
     await navigateTo(page, '/me/invoices')
     await page.waitForSelector('table, .card', { timeout: 10_000 })
     // Rows appear even without a PDF — the state the guide's list section shows.
@@ -490,11 +482,7 @@ test.describe('User Guide Screenshots', () => {
   })
 
   test('23b-participant-annual-statement', async ({ page }) => {
-    const ok = await impersonateDemoParticipant(page)
-    if (!ok) {
-      test.skip()
-      return
-    }
+    await impersonateDemoParticipant(page)
     await navigateTo(page, '/me/statement')
     await page.getByRole('combobox', { name: 'Jahr', exact: true }).selectOption(String(new Date().getFullYear()))
     await page.waitForSelector('#yearly-documents-preview iframe[title]', { timeout: 30_000 })

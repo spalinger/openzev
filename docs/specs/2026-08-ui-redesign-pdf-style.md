@@ -595,7 +595,8 @@ Existing suites stay green (contract: 58 tests in `test_contract_context.py`; te
 
 - `npm run test:unit` (if present) + `npm run build` green; `stylelint` step green ( `pr-quality.yml`).
 - `scripts/generate-tokens.mjs` idempotence test `design/tokens.test.mjs`: write→read→generate→diff → `0`; brand-ramp monotonicity negative test: inverted/tied ramp in a temp tree → non-zero exit in both generate and `--check` modes.
-- Playwright `npm run screenshots` captures the guide against seeded demo data. Participant captures choose a live participant from community memberships; the dynamic-source capture additionally requires the configured demo tariff described in `capture.spec.ts`.
+- Playwright `npm run screenshots` captures the guide against seeded demo data.
+- Participant captures impersonate the seeded Anna (`anna@openzev.local`) and fail unless she is a plain user with a live participation in the flagship ZEV and no management access; the dynamic-source capture additionally requires the configured demo tariff described in `capture.spec.ts`.
 - Preview editor: revision guard ignores out-of-order responses; superseded requests are aborted (`AbortController`).
 - `use-pdf-object-url.test.ts`, `participant-documents.test.ts`, `pdf-preview.test.ts`, `api-reports.test.ts`, and `invoice-pdf-preview.test.ts` cover blob lifecycle, participant tabs, actions, routing, and invoice embeds. Existing report and export tests remain separate.
 - Date-picker cutover matrix: each of the five converted pickers displays and submits the same plain civil-date format as before (no local-time shift, ADR 0007).
