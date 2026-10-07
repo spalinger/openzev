@@ -653,7 +653,10 @@ directly by `manage.py openzev_backup`, which must work with no broker.
    `atomic(durable=True)` block, with `SET TRANSACTION ISOLATION LEVEL REPEATABLE
    READ` on PostgreSQL: sections are read over minutes, and READ COMMITTED would
    produce an archive of a state that never existed. `durable=True` makes it the
-   outermost transaction, so called inside another it fails loudly.
+   outermost transaction, so called inside another it fails loudly. The level is
+   set only when the block opens the transaction (`not connection.in_atomic_block`
+   beforehand, the same guard as the ZEV transfer export): Django's `TestCase`
+   may nest a durable block, and its transaction has already run queries.
 4. When a key is set, encrypt to a second file and delete the plaintext (the
    peak-disk moment), then digest the stored file (SHA-256 and size).
 5. `storage.store_archive` — local: copy to a `.partial` name, `chmod 0600`, atomic

@@ -21,7 +21,7 @@ from backups.fixtures import PDF_BYTES, build_world
 from backups.models import BackupJobStatus, RestoreJob
 from backups.registry import ZEV_SECTIONS
 from backups.test_archive import build
-from backups.test_restore_instance import lines, put_lines, snapshot, tamper
+from backups.test_restore_instance import lines, plain_value, put_lines, snapshot, tamper
 from exports.models import ExportJob
 from invoices.models import ContractIssue, Invoice, InvoiceStatus
 from metering.models import MeterReading
@@ -40,7 +40,7 @@ def zev_rows(zev_id) -> dict[str, list[dict]]:
             model = apps.get_model(part.label)
             fields = [f.name for f in model._meta.concrete_fields if f.serialize]
             rows = [
-                {"pk": obj.pk, **{n: getattr(obj, model._meta.get_field(n).attname) for n in fields}}
+                {"pk": obj.pk, **{n: plain_value(getattr(obj, model._meta.get_field(n).attname)) for n in fields}}
                 for obj in model._base_manager.filter(**{part.lookup: zev_id}).order_by("pk")
             ]
             result[part.label] = rows
