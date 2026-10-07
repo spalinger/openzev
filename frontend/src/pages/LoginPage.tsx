@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { AppFooter } from '../components/AppFooter'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { useDocumentTitle } from '../lib/useDocumentTitle'
 import { useAuth } from '../lib/auth'
 import { fetchRegistrationEnabled, fetchOAuthProviders, oauthLoginInitiate, register as apiRegister } from '../lib/api/auth'
 import { formatApiError } from '../lib/api/errors'
@@ -173,6 +174,8 @@ export function LoginPage() {
         setRegSuccess(null)
         setShowModal(true)
     }
+
+    useDocumentTitle(t(pendingMfa ? 'auth.mfa.title' : 'auth.pageTitle'))
 
     return (
         <div className="login-shell">

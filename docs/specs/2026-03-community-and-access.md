@@ -1534,10 +1534,11 @@ ignores the saved desktop collapse preference. Returning to desktop restores
 it, closes the drawer and releases the scroll lock. Breakpoint changes close
 the community disclosure and move focus from hidden controls to a visible
 navigation control. Focus elsewhere is preserved.
-Opening one disclosure
-closes the other. The account disclosure
-in the top bar follows the same focus and dismissal rules while keeping its
-language choices as ordinary buttons; selecting a language leaves it open.
+The shell's skip link, `main` landmark and focus after navigation follow
+SPEC-2026-04 §7.1. Opening one disclosure closes the other. The account
+disclosure in the top bar follows the same focus and dismissal rules while
+keeping its language choices as ordinary buttons; selecting a language leaves
+it open.
 Every ZEV-scoped page header carries the selected ZEV name as an eyebrow
 above the page title. Participant pages that list across every membership (metering points, chart,
 My invoices) show the community name only when the account has exactly one

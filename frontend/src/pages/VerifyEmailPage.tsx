@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { useDocumentTitle } from '../lib/useDocumentTitle'
 import { useAuth } from '../lib/auth'
 import { verifyEmail, setInitialPassword, type VerificationPurpose } from '../lib/api/auth'
 import { createSelfSetupZev } from '../lib/api/zev'
@@ -131,6 +132,14 @@ export function VerifyEmailPage() {
             setZevLoading(false)
         }
     }
+
+    // `done` hands over to the app, which titles itself.
+    useDocumentTitle(step === 'done' ? undefined : t({
+        verifying: 'auth.verify.verifying',
+        error: 'auth.verify.errorTitle',
+        'set-password': 'auth.verify.passwordTitle',
+        'create-zev': 'auth.verify.zevTitle',
+    }[step]))
 
     if (step === 'verifying') {
         return (

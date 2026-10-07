@@ -12,6 +12,8 @@ export const de = {
     },
     app: {
         title: 'OpenZEV',
+        documentTitle: '{{page}} – {{app}}',
+        documentTitleScoped: '{{page}} · {{scope}} – {{app}}',
     },
     nav: {
         dashboard: 'Dashboard',
@@ -36,6 +38,7 @@ export const de = {
         collapseSidebar: 'Seitenleiste einklappen',
         expandSidebar: 'Seitenleiste ausklappen',
         menu: 'Menü',
+        skipToContent: 'Zum Hauptinhalt springen',
         zevs: 'ZEVs',
         participants: 'Teilnehmer',
         meteringPoints: 'Messstellen',
@@ -62,6 +65,7 @@ export const de = {
         logout: 'Abmelden',
     },
     auth: {
+        pageTitle: 'Anmelden',
         welcome: 'Willkommen',
         signIn: 'Melden Sie sich bei OpenZEV an',
         email: 'E-Mail-Adresse',

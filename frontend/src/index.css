@@ -703,6 +703,37 @@ label > small.muted {
   padding: 2.5rem;
 }
 
+/* Page content only; the top bar is a separate banner. Programmatic focus
+   target for the skip link and route changes, not a tab stop. */
+.content-main {
+  min-width: 0;
+}
+
+.content-main:focus,
+.page-header h1:focus {
+  outline: none;
+}
+
+/* First tab stop; off screen until focused. Above the mobile drawer (200),
+   below modals (zLayers.ts). */
+.skip-link {
+  position: fixed;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 300;
+  padding: 0.6rem 1rem;
+  border: 1px solid var(--border-default);
+  border-radius: 0.6rem;
+  background: var(--surface-card);
+  color: var(--interactive);
+  font-weight: 600;
+  transform: translateY(calc(-100% - 1.5rem));
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
 .top-nav {
   display: flex;
   align-items: center;

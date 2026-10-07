@@ -12,6 +12,8 @@ export const it = {
     },
     app: {
         title: 'OpenZEV',
+        documentTitle: '{{page}} – {{app}}',
+        documentTitleScoped: '{{page}} · {{scope}} – {{app}}',
     },
     nav: {
         dashboard: 'Pannello di controllo',
@@ -36,6 +38,7 @@ export const it = {
         collapseSidebar: 'Riduci barra laterale',
         expandSidebar: 'Espandi barra laterale',
         menu: 'Menu',
+        skipToContent: 'Vai al contenuto principale',
         zevs: 'RCP',
         participants: 'Partecipanti',
         meteringPoints: 'Punti di misurazione',
@@ -62,6 +65,7 @@ export const it = {
         logout: 'Esci',
     },
     auth: {
+        pageTitle: 'Accedi',
         welcome: 'Benvenuto',
         signIn: 'Accedi a OpenZEV',
         email: 'Indirizzo e-mail',

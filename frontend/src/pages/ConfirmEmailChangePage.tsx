@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { useDocumentTitle } from '../lib/useDocumentTitle'
 import { confirmEmailChange } from '../lib/api/auth'
 
 type Step = 'confirming' | 'done' | 'error'
@@ -30,6 +31,12 @@ export function ConfirmEmailChangePage() {
             .then(() => setStep('done'))
             .catch(() => setStep('error'))
     }, [searchParams])
+
+    useDocumentTitle(t({
+        confirming: 'auth.emailChange.confirming',
+        done: 'auth.emailChange.successTitle',
+        error: 'auth.emailChange.errorTitle',
+    }[step]))
 
     return (
         <div className="center-screen">

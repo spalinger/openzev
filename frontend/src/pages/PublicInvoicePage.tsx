@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+import { useDocumentTitle } from '../lib/useDocumentTitle'
 
 import { groupItemsByCategory } from '../features/publicInvoice/grouping'
 import {
@@ -82,6 +83,11 @@ export function PublicInvoicePage() {
 
     const formatDate = (value: string) =>
         new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(new Date(value))
+
+    // The invoice's own language, like the page itself.
+    useDocumentTitle(!prefix || !secret || isError
+        ? t('pages.publicInvoice.invalidTitle')
+        : data ? t('pages.publicInvoice.title', { number: data.invoice_number }) : t('pages.publicInvoice.loading'))
 
     if (!prefix || !secret || isError) {
         return (

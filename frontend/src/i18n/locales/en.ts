@@ -21,6 +21,8 @@ export const en = {
     },
     app: {
         title: 'OpenZEV',
+        documentTitle: '{{page}} – {{app}}',
+        documentTitleScoped: '{{page}} · {{scope}} – {{app}}',
     },
     nav: {
         dashboard: 'Dashboard',
@@ -45,6 +47,7 @@ export const en = {
         collapseSidebar: 'Collapse sidebar',
         expandSidebar: 'Expand sidebar',
         menu: 'Menu',
+        skipToContent: 'Skip to main content',
         zevs: 'ZEVs',
         participants: 'Participants',
         meteringPoints: 'Metering Points',
@@ -71,6 +74,7 @@ export const en = {
         logout: 'Logout',
     },
     auth: {
+        pageTitle: 'Sign in',
         welcome: 'Welcome back',
         signIn: 'Sign in to OpenZEV',
         email: 'Email address',

@@ -223,7 +223,7 @@ The PDF language is an excellent print system and a mediocre spec for a dense bi
 
 - Page title + description; toolbar = filters left, primary action right, no second card wrapper.
 - Sidebar `var(--brand-deep)`; active item = `var(--brand-pale)` pill + 3px `var(--brand-mid)` leading bar (functional, not a decorative dot).
-- Focus: `2px solid var(--focus-ring)` / `2px` offset, everywhere — including Mantine widgets (`DatePickerInput`, `Menu`, `Switch`) via global `:focus-visible` + Mantine `focusRing`.
+- Focus: `2px solid var(--focus-ring)` / `2px` offset, everywhere — including Mantine widgets (`DatePickerInput`, `Menu`, `Switch`) via global `:focus-visible` + Mantine `focusRing`. Exception: programmatic focus targets that are not tab stops (the shell's `main` and the page `h1`, focused by the skip link and after navigation) show no outline.
 - Readability > "premium": for a Swiss billing tool, clear > ornamental.
 
 ---
