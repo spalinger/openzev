@@ -78,8 +78,22 @@ jobs:
               run: helm template openzev ./charts/openzev > /tmp/openzev-helm-render.yaml
 
     backend-check-test:
-        name: Backend checks and tests
+        name: Backend checks and tests (${{ matrix.database }})
         runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                # The whole suite on both: SQLite is the zero-setup local
+                # default, PostgreSQL is what production runs, and failures
+                # that only PostgreSQL shows (plans, isolation levels, bytea)
+                # would otherwise go unnoticed.
+                include:
+                    - database: sqlite
+                      database-url: sqlite:///db.sqlite3
+                    - database: postgresql
+                      database-url: postgres://openzev:openzev@localhost:5432/openzev
+        env:
+            DATABASE_URL: ${{ matrix.database-url }}
         services:
             postgres:
                 image: postgres:18
@@ -122,8 +136,3 @@ jobs:
 
             - name: Run tests with coverage
               run: python -m pytest --cov --cov-report=term-missing --cov-report=xml
-
-            - name: Verify PostgreSQL retention and concurrency
-              env:
-                  DATABASE_URL: postgres://openzev:openzev@localhost:5432/openzev
-              run: python -m pytest -n 2 invoices/test_dynamic_evidence.py tariffs/test_dynamic_fetch.py zev/test_transfer.py invoices/test_workflow.py

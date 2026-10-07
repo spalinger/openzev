@@ -43,6 +43,7 @@ From `backend/`:
 - Lint: `ruff check .`
 - Run tests: `python -m pytest -q` (parallel; `-n 0` = serial, `-m "not slow"` = skip slow PDF tests; counts: `pytest -v | tail -2`, pipe masks exit code)
 - Run invoice tests only: `python -m pytest invoices -q`
+- Run tests on PostgreSQL, as CI's second leg does: prefix with `DATABASE_URL=postgres://openzev:openzev@localhost:5432/openzev` (the dev stack's database; the runner creates its own `test_*` databases)
 
 ### Frontend
 
