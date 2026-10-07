@@ -3332,6 +3332,13 @@ input.recurrence-chip-input {
   gap: 1rem;
 }
 
+fieldset.form-grid {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
 .payment-recipient-section {
   display: grid;
   gap: 0.45rem;

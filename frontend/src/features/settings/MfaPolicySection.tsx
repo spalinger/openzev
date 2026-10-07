@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+import { Notice } from '../../components/Notice'
 import { fetchSystemHealth, updateAppSettings } from '../../lib/api/auth'
 import { formatApiError } from '../../lib/api/errors'
 import { queryKeys } from '../../lib/api/queryKeys'
@@ -8,25 +9,21 @@ import { useAppSettings } from '../../lib/appSettings'
 import { useToast } from '../../lib/toast'
 
 /**
- * Whether every account must hold a second factor, and for how long it may be
- * put off. One switch since #761 (roles became per ZEV). Spec
+ * Configures the account-wide MFA requirement and grace period.
+ * Disabled until policy fields load or when the encryption key is missing. See
  * 2026-09-two-factor-authentication.md §7.4.
- *
- * Disabled — with the reason stated — while the instance has no
- * `MFA_ENCRYPTION_KEYS`: a requirement the server cannot honour must not be
- * settable (the API refuses it too).
  */
 export function MfaPolicySection() {
     const { t } = useTranslation()
     const { pushToast } = useToast()
     const queryClient = useQueryClient()
-    const { settings } = useAppSettings()
+    const { settings, isError } = useAppSettings()
+    const [isRetrying, setIsRetrying] = useState(false)
 
     const healthQuery = useQuery({ queryKey: queryKeys.auth.systemHealth(), queryFn: fetchSystemHealth })
     // Only a positive "not configured" disables the form; while loading or on
     // a failed probe the API's own validation remains the backstop.
     const keyMissing = healthQuery.data ? !healthQuery.data.mfa.encryption_key_configured : false
-    // Policy fields arrive only with an admin's loaded settings; stay disabled until then.
     const policyLoaded = settings.mfa_required !== undefined && settings.mfa_grace_period_days !== undefined
     const disabled = keyMissing || !policyLoaded
 
@@ -48,6 +45,15 @@ export function MfaPolicySection() {
         onError: (error) => pushToast(formatApiError(error, t('adminSystemSettings.mfaPolicy.saveFailed')), 'error'),
     })
 
+    async function retrySettings() {
+        setIsRetrying(true)
+        try {
+            await queryClient.refetchQueries({ queryKey: queryKeys.auth.appSettings() })
+        } finally {
+            setIsRetrying(false)
+        }
+    }
+
     function handleSubmit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault()
         saveMutation.mutate({
@@ -63,39 +69,49 @@ export function MfaPolicySection() {
                 <p className="muted" style={{ margin: 0 }}>{t('adminSystemSettings.mfaPolicy.description')}</p>
             </div>
 
-            {keyMissing && <div className="warning-banner" role="status">{t('adminSystemSettings.mfaPolicy.keyMissing')}</div>}
+            {keyMissing && <Notice tone="warning">{t('adminSystemSettings.mfaPolicy.keyMissing')}</Notice>}
+            {(isError || isRetrying) && !policyLoaded && (
+                <Notice
+                    tone="error"
+                    onRetry={() => void retrySettings()}
+                    isRetrying={isRetrying}
+                >
+                    {t('adminSystemSettings.mfaPolicy.loadError')}
+                </Notice>
+            )}
 
-            <form className="form-grid" onSubmit={handleSubmit}>
-                <fieldset disabled={disabled} style={{ border: 0, padding: 0, margin: 0 }}>
-                    <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <form onSubmit={handleSubmit}>
+                <fieldset className="form-grid" disabled={disabled}>
+                    <div>
+                        <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                            <input
+                                type="checkbox"
+                                checked={required}
+                                onChange={(event) => setRequired(event.target.checked)}
+                            />
+                            <span>{t('adminSystemSettings.mfaPolicy.requiredLabel')}</span>
+                        </label>
+                        <p className="muted">{t('adminSystemSettings.mfaPolicy.requiredHint')}</p>
+                    </div>
+
+                    <label>
+                        <span>{t('adminSystemSettings.mfaPolicy.graceLabel')}</span>
                         <input
-                            type="checkbox"
-                            checked={required}
-                            onChange={(event) => setRequired(event.target.checked)}
+                            type="number"
+                            min={0}
+                            max={365}
+                            value={graceDays}
+                            onChange={(event) => setGraceDays(event.target.value)}
                         />
-                        <span>{t('adminSystemSettings.mfaPolicy.requiredLabel')}</span>
+                        <small className="muted">{t('adminSystemSettings.mfaPolicy.graceHint')}</small>
                     </label>
-                    <p className="muted">{t('adminSystemSettings.mfaPolicy.requiredHint')}</p>
+
+                    <div className="actions-row actions-row-end actions-row-wrap">
+                        <button className="button button-primary" type="submit" disabled={saveMutation.isPending}>
+                            {t('common.save')}
+                        </button>
+                    </div>
                 </fieldset>
-
-                <label>
-                    <span>{t('adminSystemSettings.mfaPolicy.graceLabel')}</span>
-                    <input
-                        type="number"
-                        min={0}
-                        max={365}
-                        disabled={disabled}
-                        value={graceDays}
-                        onChange={(event) => setGraceDays(event.target.value)}
-                    />
-                    <small className="muted">{t('adminSystemSettings.mfaPolicy.graceHint')}</small>
-                </label>
-
-                <div className="actions-row actions-row-end actions-row-wrap">
-                    <button className="button button-primary" type="submit" disabled={disabled || saveMutation.isPending}>
-                        {t('adminSystemSettings.regional.save')}
-                    </button>
-                </div>
             </form>
         </section>
     )
