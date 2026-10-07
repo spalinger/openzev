@@ -175,7 +175,7 @@ inherit that protection with no extra work. No new views.
 
 Existing validation is unchanged: `clean()` enforces same-ZEV participant,
 `valid_to >= valid_from`, participant-validity containment, and
-`_validate_no_overlap()` — a metering point still has exactly one assignment at
+`_validate_no_overlap()` — a metering point still has at most one assignment at
 any time, regardless of allocation mode. Since #390 that overlap check runs from
 `save()` as well as `clean()`, so a programmatic write cannot create the
 overlapping windows the allocation runtime refuses to resolve.
