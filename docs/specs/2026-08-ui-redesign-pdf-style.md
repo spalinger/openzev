@@ -595,7 +595,8 @@ Existing suites stay green (contract: 59 tests in `test_contract_context.py`; te
 
 - `npm run test:unit` (if present) + `npm run build` green; `stylelint` step green ( `pr-quality.yml`).
 - `scripts/generate-tokens.mjs` idempotence test `design/tokens.test.mjs`: write→read→generate→diff → `0`; brand-ramp monotonicity negative test: inverted/tied ramp in a temp tree → non-zero exit in both generate and `--check` modes.
-- Playwright `npm run screenshots` captures the guide against seeded demo data. Participant captures choose a live participant from community memberships; the dynamic-source capture additionally requires the configured demo tariff described in `capture.spec.ts`.
+- Playwright `npm run screenshots` captures the guide against seeded demo data with reduced motion, so charts render without animating. The `capture-data` project (`capture.setup.ts`) prepares the data the captures share (the 08b invoice PDF) before any of them runs.
+- Participant captures impersonate the seeded Anna (`anna@openzev.local`) and fail unless she is a plain user with a live participation in the flagship ZEV and no management access; the dynamic-source capture additionally requires the configured demo tariff described in `capture.spec.ts`.
 - Preview editor: revision guard ignores out-of-order responses; superseded requests are aborted (`AbortController`).
 - `use-pdf-object-url.test.ts`, `participant-documents.test.ts`, `pdf-preview.test.ts`, `api-reports.test.ts`, and `invoice-pdf-preview.test.ts` cover blob lifecycle, participant tabs, actions, routing, and invoice embeds. Existing report and export tests remain separate.
 - Date-picker cutover matrix: each of the five converted pickers displays and submits the same plain civil-date format as before (no local-time shift, ADR 0007).
@@ -708,11 +709,10 @@ Existing suites stay green (contract: 59 tests in `test_contract_context.py`; te
   `VITE_DEV_PROXY_TARGET=http://127.0.0.1:8000` (otherwise `/media` proxies
   to `backend:8000` and `08b-invoice-detail` shows `pdfError`);
   `capture.spec.ts` resets hover (`page.mouse.move(0,0)` + 250 ms) before
-  every shot, and `08b` generates the invoice PDF via the API first
-  (reseeds wipe stored artifacts). A full run makes ~28 token logins against
-  the `auth_login` throttle (40/hour) — when rerunning within the hour,
-  flush the throttle counters first (`docker compose exec redis redis-cli
-  -n 1 FLUSHDB`; celery uses db 0). Screenshots ship unblurred: the demo
+  every shot, and the `capture-data` project renders the PDF of the invoice
+  `08b` opens first (reseeds wipe stored artifacts). The `setup` project logs
+  in once and every other test reuses its storage state, so a run stays far
+  below the `auth_login` throttle (40/hour). Screenshots ship unblurred: the demo
   seed carries fictional data, so the former PII blur CSS and its selector
   test were removed. **A11y pass completed** (see "Four-locale keyboard/a11y
   pass" below).

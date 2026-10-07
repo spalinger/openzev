@@ -1,5 +1,5 @@
 /** Shared helpers for screenshot capture (user-guide + one-off release-note shots). */
-import { expect, type Page } from '@playwright/test'
+import { expect, type APIRequestContext, type Page } from '@playwright/test'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import type { User } from '../src/types/api'
@@ -29,16 +29,20 @@ export const AUTH_STATE_PATH = path.join(__dirname, '.auth', 'admin.json')
  */
 export const DEMO_ZEV_NAME = 'ZEV STWEG Sonnenhof'
 export const SECOND_DEMO_ZEV_NAME = 'ZEV Sonnenfirma AG'
+export const MISSING_DEMO_ZEV = 'Demo ZEV not found — run seed_demo before capturing screenshots'
+
+/** Seeded participant the participant-side captures show. */
+export const DEMO_PARTICIPANT_EMAIL = 'anna@openzev.local'
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Navigate and wait until the page is fully loaded and idle. */
+/** Navigate, then wait for network idle, webfonts and no visible loading placeholder. */
 export async function navigateTo(page: Page, urlPath: string) {
   await page.goto(`${BASE}${urlPath}`, { waitUntil: 'networkidle' })
-  // Extra settle time for React renders and TanStack Query fetches
-  await page.waitForTimeout(1500)
+  await page.evaluate(() => document.fonts.ready)
+  await expect(page.locator('.skeleton-block:visible')).toHaveCount(0, { timeout: 30_000 })
 }
 
 /**
@@ -82,15 +86,49 @@ export async function getAdminToken(page: Page): Promise<string> {
   return token!
 }
 
-/** Resolve the id of the data-bearing demo ZEV via the admin API. */
-export async function resolveDemoZevId(page: Page): Promise<string | null> {
-  const adminToken = await getAdminToken(page)
-  const zevsResp = await page.request.get(`${API_BASE}/zev/zevs/`, {
-    headers: { Authorization: `Bearer ${adminToken}` },
-  })
+async function fetchDemoZevId(request: APIRequestContext, headers: Record<string, string>): Promise<string | null> {
+  const zevsResp = await request.get(`${API_BASE}/zev/zevs/`, { headers })
   expect(zevsResp.ok(), `Fetching ZEVs failed (${zevsResp.status()})`).toBeTruthy()
   const zevsBody = await zevsResp.json() as { results?: Array<{ id: string; name: string }> }
   return zevsBody.results?.find(z => z.name === DEMO_ZEV_NAME)?.id ?? null
+}
+
+/** Resolve the id of the data-bearing demo ZEV via the admin API. */
+export async function resolveDemoZevId(page: Page): Promise<string | null> {
+  return fetchDemoZevId(page.request, { Authorization: `Bearer ${await getAdminToken(page)}` })
+}
+
+/** The demo participant's account and live participation in the demo ZEV. */
+async function findDemoParticipant(request: APIRequestContext, headers: Record<string, string>) {
+  const zevId = await fetchDemoZevId(request, headers)
+  expect(zevId, MISSING_DEMO_ZEV).toBeTruthy()
+
+  // The list is paginated and has no email filter; walk it.
+  let account: User | undefined
+  for (let url: string | null = `${API_BASE}/auth/users/`; url && !account;) {
+    const usersResp = await request.get(url, { headers })
+    expect(usersResp.ok(), `Fetching users failed (${usersResp.status()})`).toBeTruthy()
+    const usersBody = await usersResp.json() as { results: User[]; next: string | null }
+    account = usersBody.results.find(user => user.email === DEMO_PARTICIPANT_EMAIL)
+    url = usersBody.next
+  }
+  expect(account, `${DEMO_PARTICIPANT_EMAIL} not found — run seed_demo`).toBeTruthy()
+  const live = account!.memberships?.find(entry => entry.zev === zevId)?.participants.find(row => row.live)
+  expect(live, `${DEMO_PARTICIPANT_EMAIL} has no live participation in ${DEMO_ZEV_NAME}`).toBeTruthy()
+  return { zevId: zevId!, account: account!, participantId: live!.id }
+}
+
+/** The demo participant's newest invoice, which 08b opens. */
+export async function findDemoInvoice(
+  request: APIRequestContext, headers: Record<string, string>,
+): Promise<{ id: string; pdf_url: string | null }> {
+  const { zevId, participantId } = await findDemoParticipant(request, headers)
+  const resp = await request.get(
+    `${API_BASE}/invoices/invoices/?zev_id=${zevId}&participant_id=${participantId}`, { headers })
+  expect(resp.ok(), `Invoice list request failed (${resp.status()})`).toBeTruthy()
+  const body = await resp.json() as { results: Array<{ id: string; pdf_url: string | null }> }
+  expect(body.results.length, `${DEMO_PARTICIPANT_EMAIL} has no invoice — run seed_demo`).toBeGreaterThan(0)
+  return body.results[0]
 }
 
 /**
@@ -114,44 +152,34 @@ export async function pinDemoZev(page: Page): Promise<boolean> {
 }
 
 /**
- * Impersonate a participant of the demo ZEV. Impersonating the first
- * participant overall would land on whichever empty tenant sorts first and the
- * participant dashboard would render without any readings.
+ * Impersonate the demo participant. Fails unless the seed has her as a plain
+ * user with a live participation in the demo ZEV and, when asked, a sent or
+ * paid invoice.
  */
-export async function impersonateDemoParticipant(page: Page, { requireSentInvoice = false } = {}): Promise<boolean> {
-  const adminToken = await getAdminToken(page)
-  const headers = { Authorization: `Bearer ${adminToken}` }
+export async function impersonateDemoParticipant(page: Page, { requireSentInvoice = false } = {}) {
+  const headers = { Authorization: `Bearer ${await getAdminToken(page)}` }
+  const { zevId, account, participantId } = await findDemoParticipant(page.request, headers)
 
-  const zevId = await resolveDemoZevId(page)
-  if (!zevId) return false
+  // Any of these would render the manager shell instead.
+  const memberships = account.memberships ?? []
+  expect(account.role, `${DEMO_PARTICIPANT_EMAIL} must be a plain user`).toBe('user')
+  expect(memberships.every(entry => entry.access === null),
+    `${DEMO_PARTICIPANT_EMAIL} must hold no access grant`).toBe(true)
+  expect(memberships.every(entry => !entry.roles?.length),
+    `${DEMO_PARTICIPANT_EMAIL} must hold no issuer or representative role`).toBe(true)
 
-  // User ids linked to participants of the demo ZEV.
-  const partsResp = await page.request.get(`${API_BASE}/zev/participants/?zev_id=${zevId}`, { headers })
-  expect(partsResp.ok(), `Fetching participants failed (${partsResp.status()})`).toBeTruthy()
-  const partsBody = await partsResp.json() as { results?: Array<{ id: string; user: number | null }> }
-  let participants = partsBody.results ?? []
   if (requireSentInvoice) {
-    // Personal invoice captures need a billed participant, not a new account
-    // whose drafts are correctly hidden from the participant list.
-    const response = await page.request.get(`${API_BASE}/invoices/invoices/?zev_id=${zevId}&status=sent,paid`, { headers })
+    // Personal invoice captures need a billed participant: drafts are hidden
+    // from the participant's list.
+    const response = await page.request.get(
+      `${API_BASE}/invoices/invoices/?zev_id=${zevId}&participant_id=${participantId}&status=sent,paid`, { headers })
     expect(response.ok(), `Fetching sent invoices failed (${response.status()})`).toBeTruthy()
-    const body = await response.json() as { results: Array<{ participant: string }> }
-    const billedIds = new Set(body.results.map(invoice => invoice.participant))
-    participants = participants.filter(participant => billedIds.has(participant.id))
+    const body = await response.json() as { results: unknown[] }
+    expect(body.results.length, `${DEMO_PARTICIPANT_EMAIL} has no sent or paid invoice`).toBeGreaterThan(0)
   }
-  const demoUserIds = new Set(participants.map(p => p.user).filter((u): u is number => u != null))
-  if (demoUserIds.size === 0) return false
-
-  const usersResp = await page.request.get(`${API_BASE}/auth/users/`, { headers })
-  expect(usersResp.ok(), `Fetching users failed (${usersResp.status()})`).toBeTruthy()
-  const usersBody = await usersResp.json() as { results: User[] }
-  const participant = usersBody.results.find(user => user.role === 'user' && demoUserIds.has(user.id) &&
-    user.memberships?.every(entry => entry.access === null) &&
-    user.memberships.some(entry => entry.zev === zevId && entry.participants.some(row => row.live)))
-  if (!participant) return false
 
   // Call the impersonate endpoint — the server rotates the cookies automatically.
-  const impResp = await page.request.post(`${API_BASE}/auth/users/${participant.id}/impersonate/`, { headers })
+  const impResp = await page.request.post(`${API_BASE}/auth/users/${account.id}/impersonate/`, { headers })
   expect(impResp.ok(), `Impersonation failed (${impResp.status()})`).toBeTruthy()
 
   // The app detects impersonation from the JWT claim (impersonated_by) returned by
@@ -165,8 +193,6 @@ export async function impersonateDemoParticipant(page: Page, { requireSentInvoic
       // Storage may be unavailable.
     }
   })
-
-  return true
 }
 
 /** Move the mouse off any element so no hover state leaks into the shot. */
