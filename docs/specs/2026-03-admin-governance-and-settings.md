@@ -52,7 +52,7 @@ Global settings (date formats, VAT rates) and ZEV-level configuration (billing i
 | `participant` | Read only | No access | No access | No access | No access | No access | No access |
 | `guest` | Read only | No access | No access | No access | No access | No access | No access |
 
-"Read only" for AppSettings means GET `/api/v1/auth/app-settings/` is allowed for any authenticated user; the frontend `AppSettingsProvider` loads it at boot for date formatting everywhere.
+"Read only" for AppSettings means GET `/api/v1/auth/app-settings/` is allowed for any authenticated user; a non-admin gets the date formats but not the two-factor policy fields (§5.1). The frontend `AppSettingsProvider` loads it at boot for date formatting everywhere.
 
 Admin-only frontend routes are wrapped in `<ProtectedRoute allowedRoles={['admin']}>`. On the backend, VAT rates, the invoice dashboard, PDF templates, the email-template list, and email-template mutations use `IsAdmin`. The invoice-email detail `GET` is the one exception: `EmailTemplateView.get_permissions()` returns `HasZevAccess` for `invoice_email` GET, allowing ZEV owners to read their effective global fallback and catalog; other global email-template details remain admin-only. This intentional read exception exposes only global template text and static catalog metadata needed for the per-ZEV editor, not per-ZEV overrides, recipient data, credentials, or other communities' data. Participants receive `403` and unauthenticated callers `401`. The `app_settings` endpoint uses `IsAuthenticated` with a manual `request.user.is_admin` check in the view body.
 
@@ -77,7 +77,11 @@ Singleton pattern with `pk=1` enforced by `save()` plus a `singleton_enforcer = 
 - `save()` — Forces `pk=1` and `singleton_enforcer=True` before calling `super().save()`.
 - `load()` (classmethod) — `get_or_create(pk=1, defaults={…})`, returns the singleton.
 
-**Serializer:** `AppSettingsSerializer` — exposes `date_format_short`, `date_format_long`, `date_time_format`, `updated_at` (read-only).
+The two-factor policy fields `mfa_required`, `mfa_grace_period_days` and `mfa_policy_changed_at` live on the same singleton; they are specified in `2026-09-two-factor-authentication.md` §4.4.
+
+**Serializers:**
+- `PublicAppSettingsSerializer` — what a non-admin reads: `date_format_short`, `date_format_long`, `date_time_format`, `updated_at`, all read-only.
+- `AppSettingsSerializer` — the admin read and the write serializer: the date formats plus `mfa_required`, `mfa_grace_period_days`, and `updated_at` (read-only). `validate_mfa_required` delegates to `AppSettings.validate_mfa_required`.
 
 ### 4.2 VatRate
 
@@ -175,10 +179,10 @@ DEFAULT_EMAIL_BODY_TEMPLATE = (
 
 | Endpoint | Method | Permission | Behaviour |
 |---|---|---|---|
-| `/api/v1/auth/app-settings/` | GET | `IsAuthenticated` | Returns current singleton via `AppSettings.load()` |
-| `/api/v1/auth/app-settings/` | PATCH | `IsAdmin` | Partial update of date format fields. Returns updated singleton. |
+| `/api/v1/auth/app-settings/` | GET | `IsAuthenticated` | Returns the singleton via `AppSettings.load()`: `AppSettingsSerializer` (date formats + two-factor policy) for an admin, `PublicAppSettingsSerializer` (date formats + `updated_at` only) for anyone else |
+| `/api/v1/auth/app-settings/` | PATCH | `IsAdmin` | Partial update of the date format and two-factor policy fields. Returns the updated singleton through `AppSettingsSerializer`. |
 
-**View:** `accounts.views.app_settings` — function-based view decorated with `@api_view(["GET", "PATCH"])` and `@permission_classes([IsAuthenticated])`. Admin check for PATCH: `if not request.user.is_admin: raise PermissionDenied(…)` — produces a DRF `{"detail": "…"}` 403 response.
+**View:** `accounts.views.app_settings` — function-based view decorated with `@api_view(["GET", "PATCH"])` and `@permission_classes([IsAuthenticated])`. GET picks the serializer by `request.user.is_admin`. Admin check for PATCH: `if not request.user.is_admin: raise PermissionDenied(…)` — produces a DRF `{"detail": "…"}` 403 response.
 
 ### 5.2 VAT Rates
 
@@ -388,7 +392,7 @@ Template: `TEMPLATE_NAME = "invoices/invoice_pdf.html"` — editable by admins v
 **File:** `frontend/src/lib/appSettings.tsx`
 
 - `AppSettingsContext` with `useAppSettings()` hook providing `{ settings, isLoading }`.
-- `DEFAULT_APP_SETTINGS`: `date_format_short: 'dd.MM.yyyy'`, `date_format_long: 'd MMMM yyyy'`, `date_time_format: 'dd.MM.yyyy HH:mm'`.
+- `DEFAULT_APP_SETTINGS`: `date_format_short: 'dd.MM.yyyy'`, `date_format_long: 'd MMMM yyyy'`, `date_time_format: 'dd.MM.yyyy HH:mm'`. It carries no two-factor policy fields; the admin policy form stays disabled until they load.
 - `SHORT_DATE_FORMAT_OPTIONS`, `LONG_DATE_FORMAT_OPTIONS`, `DATE_TIME_FORMAT_OPTIONS` — arrays of `{ value, label }` for dropdowns.
 - `formatDateByPattern(value, pattern)` — Pure function that parses ISO date strings and formats using the chosen pattern. Uses `Intl.DateTimeFormat` for month names.
 - `formatShortDate(value, settings)` — Convenience wrapper.
@@ -623,6 +627,8 @@ interface AppSettings {
     date_format_short: ShortDateFormat
     date_format_long: LongDateFormat
     date_time_format: DateTimeFormat
+    mfa_required?: boolean          // admin-only; absent for everyone else
+    mfa_grace_period_days?: number  // admin-only; absent for everyone else
     updated_at: string
 }
 
@@ -630,6 +636,8 @@ interface AppSettingsInput {
     date_format_short?: ShortDateFormat
     date_format_long?: LongDateFormat
     date_time_format?: DateTimeFormat
+    mfa_required?: boolean
+    mfa_grace_period_days?: number
 }
 
 interface VatRate {
@@ -744,11 +752,13 @@ Changing date formats does NOT retroactively modify already-generated PDF files 
 
 ### 13.1 Backend — `accounts/tests.py`
 
-**`AppSettingsTests`** (3 tests):
+**`AppSettingsTests`** (5 tests):
 | Test | Asserts |
 |---|---|
 | `test_authenticated_user_can_read_settings` | ZEV owner can GET `/auth/app-settings/` → 200, returns default format values |
-| `test_admin_can_update_settings` | Admin PATCH all 3 format fields → 200, `AppSettings.load()` reflects new values |
+| `test_non_admin_read_omits_the_mfa_policy` | With the policy on, a non-admin GET returns exactly `date_format_short`, `date_format_long`, `date_time_format`, `updated_at` |
+| `test_admin_read_includes_the_mfa_policy` | Admin GET returns `mfa_required` and `mfa_grace_period_days` alongside the date formats |
+| `test_admin_can_update_settings` | Admin PATCH all 3 format fields → 200, response includes the policy fields, `AppSettings.load()` reflects new values |
 | `test_non_admin_cannot_update_settings` | ZEV owner PATCH → 403 |
 
 **`VatRateSettingsTests`** (4 tests — `setUp` clears the migration-installed defaults so the class owns its VAT fixtures):
@@ -802,6 +812,7 @@ Tests cover dashboard access (`test_invoice_dashboard_is_admin_only`) confirming
 ### 13.2 Frontend
 
 - AdminSystemSettingsPage: tab selector switches between regional settings, feature flags, OAuth providers, and VAT rates. Regional format selector renders all 4 options per format type, preview updates live, and save mutation calls `updateAppSettings`.
+- `frontend/tests/mfa-policy-section.test.ts` (1 test): `MfaPolicySection` stays disabled (save included) while the settings lack the policy fields, then shows the policy once they arrive.
 - VatSettingsSection (VAT tab): form validates percentage 0–100, converts to fraction, create/edit/delete flows work. Overlap errors display as toast.
 - `templates-hub.test.ts` covers the two-row hub, seven route keys, category switching, and fallbacks. `field-reference.test.ts` covers token parsing, whitespace/filter normalization, syntax-aware occurrence counting, and caret insertion; `zev-email-template-fields.test.ts` checks keyboard focusability, example rendering, catalog loading/error states, insertion into the last-focused subject, and the pending per-field inheritance cue. `admin-email-template-source.test.ts` and `admin-pdf-template-source.test.ts` cover dirty refetches, definitive mutation responses after failed refreshes, reset confirmation, single failure reporting, and preservation of server validation messages. `zev-email-template-fields.test.ts` also covers clearing and retyping inherited subject/body text without losing focus; `zev-settings-tabs.test.ts` covers returning to the inherited preview after Discard or Save. `email-template-parity.test.ts` checks the four frontend/backend email keys, tabs, and that every backend email/PDF catalog description key has an English translation; `locale-parity.test.ts` covers structural parity across all four locales. The hub tests mock the editor pages; real PDF preview rendering remains outside the unit tests.
 - AdminDashboardPage: stats display, auto-refresh at 30s interval (as the

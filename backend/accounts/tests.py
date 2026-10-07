@@ -597,6 +597,10 @@ class AppSettingsTests(TestCase):
 		self.admin = User.objects.create_user(username="admin_settings", password="pass1234", role=UserRole.ADMIN)
 		self.owner = User.objects.create_user(username="owner_settings", password="pass1234", role=UserRole.USER)
 
+	def _enable_policy(self):
+		AppSettings.load()  # the row must exist before .update() can touch it
+		AppSettings.objects.update(mfa_required=True, mfa_grace_period_days=30)
+
 	def test_authenticated_user_can_read_settings(self):
 		self._auth(self.client, self.owner)
 
@@ -606,6 +610,29 @@ class AppSettingsTests(TestCase):
 		self.assertEqual(resp.data["date_format_short"], AppSettings.SHORT_DATE_DD_MM_YYYY)
 		self.assertEqual(resp.data["date_format_long"], AppSettings.LONG_DATE_D_MMMM_YYYY)
 		self.assertEqual(resp.data["date_time_format"], AppSettings.DATETIME_DD_MM_YYYY_HH_MM)
+
+	def test_non_admin_read_omits_the_mfa_policy(self):
+		self._enable_policy()
+		self._auth(self.client, self.owner)
+
+		resp = self.client.get("/api/v1/auth/app-settings/")
+
+		self.assertEqual(resp.status_code, 200)
+		self.assertEqual(
+			set(resp.data),
+			{"date_format_short", "date_format_long", "date_time_format", "updated_at"},
+		)
+
+	def test_admin_read_includes_the_mfa_policy(self):
+		self._enable_policy()
+		self._auth(self.client, self.admin)
+
+		resp = self.client.get("/api/v1/auth/app-settings/")
+
+		self.assertEqual(resp.status_code, 200)
+		self.assertIs(resp.data["mfa_required"], True)
+		self.assertEqual(resp.data["mfa_grace_period_days"], 30)
+		self.assertEqual(resp.data["date_format_short"], AppSettings.SHORT_DATE_DD_MM_YYYY)
 
 	def test_admin_can_update_settings(self):
 		self._auth(self.client, self.admin)
@@ -621,6 +648,9 @@ class AppSettingsTests(TestCase):
 		)
 
 		self.assertEqual(resp.status_code, 200)
+		# The admin form caches this response, so it must carry the policy too.
+		self.assertIn("mfa_required", resp.data)
+		self.assertIn("mfa_grace_period_days", resp.data)
 		settings_obj = AppSettings.load()
 		self.assertEqual(settings_obj.date_format_short, AppSettings.SHORT_DATE_YYYY_MM_DD)
 		self.assertEqual(settings_obj.date_format_long, AppSettings.LONG_DATE_MMMM_D_YYYY)
