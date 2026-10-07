@@ -2681,6 +2681,8 @@ export const it = {
                 firstRunTitle: 'Configura il tuo CEE',
                 firstRunDescription: 'Completa questi passaggi prima della prima fatturazione.',
                 awaitingFirstPeriod: 'Tutto è configurato — il primo periodo di fatturazione non è ancora terminato.',
+                setupDone: 'Fatto:',
+                setupTodo: 'Da fare:',
                 setupParticipants: 'Aggiungi partecipanti',
                 setupMeteringPoints: 'Aggiungi punti di misurazione',
                 setupTariffs: 'Definisci una tariffa energetica',

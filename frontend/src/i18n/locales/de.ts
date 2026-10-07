@@ -2681,6 +2681,8 @@ export const de = {
                 firstRunTitle: 'Richten Sie Ihren ZEV ein',
                 firstRunDescription: 'Erfüllen Sie diese Schritte vor der ersten Abrechnung.',
                 awaitingFirstPeriod: 'Alles ist eingerichtet — die erste Abrechnungsperiode ist noch nicht abgelaufen.',
+                setupDone: 'Erledigt:',
+                setupTodo: 'Offen:',
                 setupParticipants: 'Teilnehmende hinzufügen',
                 setupMeteringPoints: 'Messpunkte hinzufügen',
                 setupTariffs: 'Energietarif definieren',

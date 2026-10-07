@@ -2692,6 +2692,8 @@ export const en = {
                 firstRunTitle: 'Set up your ZEV',
                 firstRunDescription: 'Complete these steps before the first billing run.',
                 awaitingFirstPeriod: 'Everything is set up — the first billing period has not ended yet.',
+                setupDone: 'Done:',
+                setupTodo: 'To do:',
                 setupParticipants: 'Add participants',
                 setupMeteringPoints: 'Add metering points',
                 setupTariffs: 'Define an energy tariff',

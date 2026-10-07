@@ -2681,6 +2681,8 @@ export const fr = {
                 firstRunTitle: 'Configurez votre CEL',
                 firstRunDescription: 'Terminez ces étapes avant la première facturation.',
                 awaitingFirstPeriod: 'Tout est configuré — la première période de facturation n\'est pas encore terminée.',
+                setupDone: 'Fait :',
+                setupTodo: 'À faire :',
                 setupParticipants: 'Ajouter des participants',
                 setupMeteringPoints: 'Ajouter des points de comptage',
                 setupTariffs: 'Définir un tarif d\'énergie',

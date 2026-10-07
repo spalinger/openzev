@@ -1515,6 +1515,20 @@ label > small.muted {
   gap: 0.45rem;
 }
 
+.setup-guidance-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.setup-guidance-icon {
+  color: var(--text-muted);
+}
+
+.setup-guidance-list li[data-complete="true"] .setup-guidance-icon {
+  color: var(--success-700);
+}
+
 .setup-guidance-list a {
   color: var(--interactive);
   font-weight: 600;
