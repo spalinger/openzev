@@ -19,15 +19,18 @@
  *                           "chromium" (the headless shell renders PDFs blank).
  */
 import { defineConfig } from '@playwright/test'
+import os from 'node:os'
 import { AUTH_STATE_PATH } from './screenshots/helpers'
 
 export default defineConfig({
   testDir: './screenshots',
   timeout: 60_000,
   expect: { timeout: 10_000 },
-  fullyParallel: false,
+  fullyParallel: true,
   retries: 0,
-  workers: 1,
+  // Half the cores, capped at 8: more workers overload the dev backend and
+  // flake (12 failed hub-workflow-links). Override per run with --workers=N.
+  workers: Math.min(8, Math.max(1, Math.floor(os.cpus().length / 2))),
   use: {
     baseURL: process.env.SCREENSHOT_BASE_URL ?? 'http://localhost:8080',
     viewport: { width: 1440, height: 900 },
