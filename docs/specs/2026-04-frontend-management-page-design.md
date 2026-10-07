@@ -561,11 +561,11 @@ These pages define the current management-page reference set.
 
 ### Acceptance criteria
 
-- [ ] Management pages use a documented default shell: header, summary/actions, filters when needed, main content, modals.
-- [ ] Visible CRUD actions use icon + text buttons with consistent semantics.
-- [ ] The tariff page uses category sections instead of tabs for the four tariff categories.
-- [ ] Billing mode and energy type badges render directly after the tariff name on tariff cards.
-- [ ] New page work can reference this spec to choose between sections, tabs, tables, and cards without inventing a new pattern.
+- [x] Management pages use a documented default shell: header, summary/actions, filters when needed, main content, modals.
+- [x] Visible CRUD actions use icon + text buttons with consistent semantics.
+- [x] The tariff page uses category sections instead of tabs for the four tariff categories.
+- [x] Billing mode and energy type badges render directly after the tariff name on tariff cards.
+- [x] New page work can reference this spec to choose between sections, tabs, tables, and cards without inventing a new pattern.
 - [x] Shared management-page shells keep one `PageHeader` title across data and scope states; embedded views inherit the host title. Authentication gates and route suspense are outside this contract.
 - [x] Migrated state UI reuses `PageSkeleton`, `Notice`, `EmptyState`, and the `ScopeGuard` contract.
 - [x] Migrated context/action rows reuse `Toolbar`; tile rows combine the base `.stat-grid` with any modifier.

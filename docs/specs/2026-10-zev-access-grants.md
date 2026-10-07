@@ -1,7 +1,7 @@
 # Feature Spec: Per-ZEV access grants (accounts layer of #761)
 
 - Spec ID: SPEC-2026-10-zev-access-grants
-- Status: Approved
+- Status: Completed
 - Scope: Major
 - Type: Change
 - Owners: Sebastian Plattner
@@ -234,14 +234,13 @@ with `Zev.owner`.
 - `backups/restore_zev.py`: `access_grants` is a **kept** section
   (`_KEPT_SECTIONS = {"audit_events", "access_grants"}`): a per-ZEV restore rolls
   data back, not who may act on the community today, just as it never writes
-  accounts. After loading, `zev.access.ensure_a_manager(zev)` gives the owner a
-  manager grant when the community has no active manager at all — the case of a
-  deleted community being recreated, whose grants were deleted with it.
+  accounts. A community recreated by a per-ZEV restore is left without
+  managers (its grants were deleted with it); an admin grants access afterwards.
   Restoring an archive from before grants existed needs the database migrated
   back first (`check_migrations`); migrating forward again runs §4.6.
   Recorded in `2026-09-backup-and-restore.md` (decision 18a).
 - ZEV transfer archive: grants are **not** exported (accounts never are). On
-  import, the importing account becomes `Zev.owner`, and §4.7 gives it a manager
+  import, `zev.access.grant_manager` gives the importing account a manager
   grant. Recorded in `2026-08-zev-transfer-archive.md`.
 
 ## 5. Access helpers (`backend/zev/access.py`)
@@ -268,8 +267,8 @@ never answers from stale rows; `invalidate(user)` drops it outright. Bulk
 | `can_view(user, zev) -> bool` | admin, or `zev.pk in viewable_zev_ids(user)` |
 | `active_grants(user)` | queryset of active grants (for `/auth/me`) |
 | `live_participant_q(prefix="") -> Q` | participant rows that are still current (see below) |
-| `sync_owner_grant(zev, previous_owner_id=None)` | §4.7 |
-| `ensure_a_manager(zev)` | `sync_owner_grant(zev)` only when the ZEV has no active manager grant at all (§4.8) |
+| `grant_manager(zev, user, *, by=None)` | an active manager grant from today; returns one the account already holds, promotes an open grant of another role (what a transfer import does for the importing account) |
+| `grant_manager_until_role(zev, user, role_start)` | bridges the days before a managing role starts: a manager grant from today to the day before `role_start`; `None` when the role already applies today |
 | `revoke(grant, *, today=None)` / `change_role(grant, role, *, by=None)` | §4.2; `revoke` leaves an already-ended grant alone |
 | `is_last_manager(grant) -> bool` | the grant is `manager` and no other active manager grant exists on its ZEV |
 | `invalidate(user)` | drop the per-request memo after a write |
@@ -984,7 +983,7 @@ fails the list, detail and MCP checks, so the suite discriminates.
 
 ### Backend — `zev/test_access.py` (PR 3)
 
-Shipped with 25 tests (plus 2 in `backups/test_restore_zev.py`,
+Shipped with 24 tests (plus 2 in `backups/test_restore_zev.py`,
 `AccessGrantRestoreTests`).
 
 **`ZevAccessGrantModelTests`** (7): one open grant per account and ZEV; a closed
@@ -999,11 +998,11 @@ anonymous may do nothing; the id sets; inclusive window bounds and inactive
 future grants; `participant_zev_ids` skips ended rows unless asked; future
 participant rows count as current; one query per memoised user; `is_last_manager`.
 
-**`OwnerGrantInvariantTests`** (7): creating a ZEV makes its owner manager;
-saving without an owner change adds nothing; moving ownership moves the
-manager grant; a new owner who was a viewer is promoted; the owner's grant can be
-revoked afterwards; `ensure_a_manager` acts only when nobody manages; a
-transfer import makes the importer manager.
+**`CreatorGrantTests`** (6): creating a ZEV makes its owner manager;
+saving without an owner change adds nothing; granting manager to a viewer
+promotes the existing grant; the owner's grant can be revoked afterwards;
+granting manager twice keeps one grant; a transfer import makes the importer
+manager.
 
 **`GrantMigrationTests`** (1, `TransactionTestCase`): migrating forward from
 `0030` grants every owner, from the creation date even when `start_date` is in
@@ -1155,12 +1154,12 @@ memberships; `account-list.test.ts` the admin/user filter and the
 
 ### Acceptance criteria
 
-- [ ] Every account with one relationship sees and can do exactly what it could before (PR 2 suite green from PR 3 on).
-- [ ] One account can be a participant in two ZEVs, and a manager in one ZEV and a participant in another; each ZEV shows what that relation allows.
-- [ ] A ZEV can have several managers and viewers; the last manager cannot be removed.
-- [ ] A viewer sees everything a manager sees in that ZEV and every write is refused by the backend.
-- [ ] A manager can invite an unknown email; the invitee sets a password and lands in the ZEV without the setup wizard.
-- [ ] A former participant sees their sent invoices and nothing else of that ZEV.
-- [ ] Admins can impersonate any non-admin account and see its full union.
-- [ ] 2FA is one switch; turning it on gives every account the grace period.
+- [x] Every account with one relationship sees and can do exactly what it could before (PR 2 suite green from PR 3 on).
+- [x] One account can be a participant in two ZEVs, and a manager in one ZEV and a participant in another; each ZEV shows what that relation allows.
+- [x] A ZEV can have several managers and viewers; the last manager cannot be removed.
+- [x] A viewer sees everything a manager sees in that ZEV and every write is refused by the backend.
+- [x] A manager can invite an unknown email; the invitee sets a password and lands in the ZEV without the setup wizard.
+- [x] A former participant sees their sent invoices and nothing else of that ZEV.
+- [x] Admins can impersonate any non-admin account and see its full union.
+- [x] 2FA is the single global `AppSettings.mfa_required` switch; turning it on gives every account the grace period.
 - [x] `User.role` holds only `admin`/`user` after PR 7, and nothing reads `is_zev_owner`.

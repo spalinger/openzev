@@ -798,7 +798,9 @@ configuration invariants, including the Helm schema constraint on
 
 **File:** `frontend/src/lib/api/audit.ts` (client), `frontend/src/pages/AdminAuditLogsPage.tsx` (page)
 
-- `frontend/tests/api-audit.test.ts` for client request/response handling.
+- `frontend/src/lib/api/audit.ts` has no standalone client test; the page tests
+  below stub its `fetchAuditEvents` / `fetchAuditEvent` / `fetchAuditFilterOptions`
+  and drive the page through the client's contract.
 - `frontend/tests/audit-log-scope.test.ts` for the owner scope binding:
   request carries the selected community, switching rescopes and resets
   page/drawer, clearing filters keeps the scope, no request without a

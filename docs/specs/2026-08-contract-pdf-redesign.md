@@ -620,7 +620,7 @@ real PDFs (WeasyPrint) and asserting markup with the `<style>` blocks stripped
 | `test_cookie_post_without_csrf_is_forbidden` | Cookie-authenticated POST without CSRF is rejected with 403 |
 | `test_cookie_post_with_csrf_issues` | Cookie-authenticated POST with a valid CSRF token issues normally |
 
-Total: 58 test methods across 9 classes in `test_contract_context.py`.
+Total: 59 test methods across 9 classes in `test_contract_context.py`.
 
 ### Backend — `invoices/test_template_admin.py`
 

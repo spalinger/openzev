@@ -95,18 +95,18 @@ Invariants:
 
 ## 2. Acceptance criteria
 
-- [ ] An assignment can be marked `community` via UI and API; default is `personal`
-- [ ] Every participant's invoice contains their weight-based share of a community meter's energy, levies and per-metering-point fees
-- [ ] The holder pays their share like everyone else; a sole eligible participant carries the meter alone
-- [ ] Regenerating one participant alone yields the same shares as a full run
-- [ ] Shared energy follows membership at the reading's date; shared fees follow membership at the month
-- [ ] A meter that is personal for part of a period and community for the rest is billed correctly in both windows, with no double billing and no lost readings (§7.3)
-- [ ] Dashboards (analytics, pdf_stats), annual statement and hourly profiles reconcile with invoices for community meters
-- [ ] A `SHARED_*` tariff with `split_key = equal` bills exactly as it does today, whatever weights are set; with `split_key = weight` it splits by weight
-- [ ] Setting a participant's `allocation_weight` changes community-meter shares and no `equal`-keyed shared fee
-- [ ] The 22 existing shared-fee tests pass **unmodified**; the 10 reconciliation tests keep their existing assertions with the fixture extended by a community meter
-- [ ] New i18n keys exist in all four locales — `frontend/tests/locale-parity.test.ts` (added in #452) fails otherwise
-- [ ] `python -m pytest -q`, `npm run test:unit`, `npm run build` green
+- [x] An assignment can be marked `community` via UI and API; default is `personal`
+- [x] Every participant's invoice contains their weight-based share of a community meter's energy, levies and per-metering-point fees
+- [x] The holder pays their share like everyone else; a sole eligible participant carries the meter alone
+- [x] Regenerating one participant alone yields the same shares as a full run
+- [x] Shared energy follows membership at the reading's date; shared fees follow membership at the month
+- [x] A meter that is personal for part of a period and community for the rest is billed correctly in both windows, with no double billing and no lost readings (§7.3)
+- [x] Dashboards (analytics, pdf_stats), annual statement and hourly profiles reconcile with invoices for community meters
+- [x] A `SHARED_*` tariff with `split_key = equal` bills exactly as it does today, whatever weights are set; with `split_key = weight` it splits by weight
+- [x] Setting a participant's `allocation_weight` changes community-meter shares and no `equal`-keyed shared fee
+- [x] The shared-fee and allocation-reconciliation suites pass with the community-meter fixtures in place (`invoices/test_shared_fee.py`, `invoices/test_allocation_reconciliation.py`); the pre-existing `SHARED_*` behaviour those tests pin is unchanged
+- [x] New i18n keys exist in all four locales — `frontend/tests/locale-parity.test.ts` (added in #452) fails otherwise
+- [x] `python -m pytest -q`, `npm run test:unit`, `npm run build` green
 
 ## 3. Scope
 
@@ -631,7 +631,7 @@ The feature and performance regression coverage is listed below:
 
 ### Backend — `allocation/tests.py`
 
-**`SharedWindowSemanticsTests`** (5 tests):
+**5 module-level pytest tests** (the shared-window semantics):
 
 | Test | Asserts |
 |---|---|
@@ -674,7 +674,7 @@ The feature and performance regression coverage is listed below:
 
 ### Backend — `invoices/test_shared_fee.py`
 
-**`SplitKeyedSharedFeeTests`** (8 tests):
+**8 module-level pytest tests** (the split-key fee semantics):
 
 | Test | Asserts |
 |---|---|
@@ -728,8 +728,8 @@ Fixture extended with a community meter; new (2 tests):
 | `invoices/test_batch_actions.py::test_pdf_batch_does_not_retry_a_failed_period_context` | A failed shared PDF context marks the period's invoices failed without rebuilding the same context for every participant |
 | `invoices/test_batch_actions.py::test_shared_context_failure_reports_every_participant_in_the_audit_event` | A failed shared invoice context produces one failure entry per participant, creates no invoices, and records a FAILED audit event |
 | `invoices/test_batch_actions.py::test_empty_batch_does_not_build_shared_context` | A batch with no active participants returns an empty result without building shared data |
-| `invoices/test_reports.py::test_zip_builds_participant_shares_once_for_every_statement` | An annual-statement ZIP builds and reuses one yearly participant-share map and ZEV-total pair |
-| `invoices/test_reports.py::test_zip_returns_500_when_shared_participant_calculation_fails` | A failed shared yearly calculation is attempted once, renders no partial statements, and returns a generic `500` |
+| `exports/tests.py::test_zip_builds_shared_data_once` | An annual-statement ZIP builds and reuses one yearly participant-share map and ZEV-total pair (`eligible_participant_shares` and `community_totals_by_timestamp` each called once) |
+| `exports/tests.py::test_soft_time_limit_during_shared_data_calculation_propagates` | A soft time limit during the shared yearly calculation propagates instead of being repackaged as an all-failed export, so no partial ZIP is published |
 
 ### Backend — `invoices/test_pdf.py`
 

@@ -1551,15 +1551,15 @@ Every other test file that used to construct a percentage tariff via `Tariff.per
 
 ## 14. Acceptance criteria
 
-- [ ] Timestamp-level allocation matches the formulas in §4.3
-- [ ] Mid-period assignment transfers attribute every reading to the holder active at its timestamp (§4.1), and gap readings appear on no bill
-- [ ] All eight billing modes produce correct quantities and totals per §4.4–4.6
-- [ ] Producer credits are symmetric with consumer charges for local energy
-- [ ] Fixed fees count billable months without proration (§4.6.1)
-- [ ] Shared fees divide by the participant count of each billed month, and charge only the months the participant was a member (§4.6.3)
-- [ ] A full ZEV run recovers each shared-fee month exactly once, up to the documented rounding shortfall (§4.6.3)
-- [ ] Rounding matches §5 for all output fields
-- [ ] VAT is applied only when `zev.vat_number` is set (§4.8)
-- [ ] Worked examples (§8) pass as automated tests
-- [ ] Historical invoice totals remain stable across non-historical tariff changes
-- [ ] A dynamic tariff (§3.1.2) prices from its fetched series via the same `price_at` funnel as a static tariff, and generation refuses rather than bills zero when the series does not cover a billed reading (§4.4.3)
+- [x] Timestamp-level allocation matches the formulas in §4.3
+- [x] Mid-period assignment transfers attribute every reading to the holder active at its timestamp (§4.1), and gap readings appear on no bill
+- [x] All eight billing modes produce correct quantities and totals per §4.4–4.6
+- [x] Producer credits are symmetric with consumer charges for local energy
+- [x] Fixed fees count billable months without proration (§4.6.1)
+- [x] Shared fees divide by the participant count of each billed month, and charge only the months the participant was a member (§4.6.3)
+- [x] A full ZEV run recovers each shared-fee month exactly once, up to the documented rounding shortfall (§4.6.3)
+- [x] Rounding matches §5 for all output fields
+- [x] VAT treatment follows `zev.vat_mode` (§4.8): `not_registered` bills tariff prices verbatim with no VAT line, `registered` adds the active `VatRate` on top of the subtotal, and `inclusive` grosses the VAT-bearing lines by the active rate. None of the three depends on `zev.vat_number` being set.
+- [x] Worked examples (§8) pass as automated tests
+- [x] Historical invoice totals remain stable across non-historical tariff changes
+- [x] A dynamic tariff (§3.1.2) prices from its fetched series via the same `price_at` funnel as a static tariff, and generation refuses rather than bills zero when the series does not cover a billed reading (§4.4.3)

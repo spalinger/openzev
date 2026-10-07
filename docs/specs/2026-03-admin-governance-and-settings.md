@@ -294,7 +294,7 @@ keys are `invoice_email`, `participant_onboarding`, `email_verification`, `parti
 
 | Endpoint | Method | Permission | Behaviour |
 |---|---|---|---|
-| `/api/v1/zev/zevs/{id}/` | PATCH | `IsAdmin` or `IsZevOwner` | Partial update of any Zev field including billing, email templates, contract notes |
+| `/api/v1/zev/zevs/{id}/` | PATCH | `ZevManagementPermission` (a manager of that ZEV, or an admin) | Partial update of any Zev field including billing, email templates, contract notes |
 
 Handled by `ZevViewSet` with `ZevSerializer`. All Zev fields (billing_interval, invoice_prefix, invoice_language, payment_term_days, bank_iban, bank_name, vat_mode, vat_number, itemize_tariff_bands, email_subject_template, email_body_template, local_tariff_notes, additional_contract_notes, notes) are writable. `ZevSerializer.validate()` enforces the `vat_mode`/`vat_number` pairing; non-empty IBANs that fail the ISO 13616 MOD-97 checksum are rejected by the shared `BankIbanValidationMixin.validate_bank_iban` (same mixin on `ZevCreateWithOwnerSerializer`, same message as `Zev.clean()`).
 
@@ -769,7 +769,7 @@ Changing date formats does NOT retroactively modify already-generated PDF files 
 | `test_vat_rate_ranges_cannot_overlap` | Pre-existing 2024–2025 rate. POST overlapping 2025-12–2026-12 → 400, error contains "overlap" |
 | `test_vat_rate_valid_to_must_be_after_valid_from` | POST with valid_to < valid_from → 400, error contains "valid_to" |
 
-**`accounts/test_vat_rate_seed.py`** (12 tests — drives the real `0015_seed_vat_rates.seed_vat_rates` against historical models):
+**`accounts/test_vat_rate_seed.py`** (13 tests — drives the real `0015_seed_vat_rates.seed_vat_rates` against historical models):
 | Test | Asserts |
 |---|---|
 | `SeedVatRatesMigrationTests::test_forward_migration_seeds_empty_table` | Real predecessor → new migration installs exactly the two canonical tuples; runtime lookup resolves them |
@@ -784,6 +784,7 @@ Changing date formats does NOT retroactively modify already-generated PDF files 
 | `SeedVatRatesForwardFunctionTests::test_seed_does_not_modify_existing_invoice` | Persisted invoice fields and line items identical before/after seeding |
 | `SeededVatLookupTests::test_lookup_boundaries_against_seeded_table` | `active_for_day` + engine rate for 2017-12-31 / 2018-01-01 / 2023-12-31 / 2024-01-01 / 2026-09-11 |
 | `SeededVatLookupTests::test_missing_rate_falls_back_to_zero` | Empty table → `None` lookup and `Decimal("0")` engine rate |
+| `SchemaLeftFullyMigratedTests::test_a_user_can_still_be_created_afterwards` | Regression: the migration tests' cleanup leaves the schema fully migrated, so a later test on the same worker can still insert a user |
 
 **`RbacEndpointMatrixTests`** (6 tests):
 Tests cover dashboard access (`test_invoice_dashboard_is_admin_only`) confirming admin→200, owner/participant/guest→403. Plus list/create/update/delete/unauthenticated endpoint matrices that include settings-adjacent endpoints.
@@ -817,8 +818,9 @@ Tests cover dashboard access (`test_invoice_dashboard_is_admin_only`) confirming
 - `templates-hub.test.ts` covers the two-row hub, seven route keys, category switching, and fallbacks. `field-reference.test.ts` covers token parsing, whitespace/filter normalization, syntax-aware occurrence counting, and caret insertion; `zev-email-template-fields.test.ts` checks keyboard focusability, example rendering, catalog loading/error states, insertion into the last-focused subject, and the pending per-field inheritance cue. `admin-email-template-source.test.ts` and `admin-pdf-template-source.test.ts` cover dirty refetches, definitive mutation responses after failed refreshes, reset confirmation, single failure reporting, and preservation of server validation messages. `zev-email-template-fields.test.ts` also covers clearing and retyping inherited subject/body text without losing focus; `zev-settings-tabs.test.ts` covers returning to the inherited preview after Discard or Save. `email-template-parity.test.ts` checks the four frontend/backend email keys, tabs, and that every backend email/PDF catalog description key has an English translation; `locale-parity.test.ts` covers structural parity across all four locales. The hub tests mock the editor pages; real PDF preview rendering remains outside the unit tests.
 - AdminDashboardPage: stats display, auto-refresh at 30s interval (as the
   Overview hub tab).
-- `accounts/test_system_health.py` (8 tests): 401 unauthenticated,
-  403 for owner/participant, response shape for all probes, unknown-broker
+- `accounts/test_system_health.py` (10 tests): 401 unauthenticated,
+  403 for owner/participant, response shape for all probes, the `mfa` probe
+  (unconfigured by default, configured key), unknown-broker
   degradation (bounded connection retries and credential-safe diagnostics),
   configured queue selection, broken-DB-probe degradation, zero-worker
   degradation, and real Kombu publication failure without reconnect retries.
@@ -827,15 +829,15 @@ Tests cover dashboard access (`test_invoice_dashboard_is_admin_only`) confirming
 
 ### 13.3 Acceptance criteria
 
-- [ ] Platform admin can view and edit regional date formats; changes take effect system-wide for new renderings
-- [ ] Platform admin can create, edit, and delete VAT rates with non-overlapping validity windows
-- [ ] VAT rate overlap and invalid date range produce clear error messages
-- [ ] Non-admin users cannot access VAT management, dashboard, PDF templates, email-template list/mutations, or account management
-- [ ] ZEV owners can read the global invoice-email detail and its `fields`, but no other global email template; participants and unauthenticated users cannot
-- [ ] Admin dashboard shows ZEV count, participant count, invoice status breakdown, email stats, and recent invoices with 30-second auto-refresh
-- [ ] Admin can view and edit the invoice PDF HTML template through the browser
-- [ ] ZEV owner can configure billing interval, invoice prefix, language, banking, email templates, and contract notes for their ZEV
-- [ ] Invoice email resolution falls back per ZEV override → global `invoice_email` override → shipped default; `KeyError`/`ValueError` rendering failures fall back, while other formatting errors are not guaranteed to degrade gracefully
-- [ ] Contract PDFs render in the ZEV's configured language (de/fr/it/en) and include local tariff notes and additional contract notes
-- [ ] Invoice PDFs use `AppSettings.date_format_short` for all formatted dates
-- [ ] Changing settings does not retroactively modify already-generated PDFs or sent emails
+- [x] Platform admin can view and edit regional date formats; changes take effect system-wide for new renderings
+- [x] Platform admin can create, edit, and delete VAT rates with non-overlapping validity windows
+- [x] VAT rate overlap and invalid date range produce clear error messages
+- [x] Non-admin users cannot access VAT management, dashboard, PDF templates, email-template list/mutations, or account management
+- [x] ZEV owners can read the global invoice-email detail and its `fields`, but no other global email template; participants and unauthenticated users cannot
+- [x] Admin dashboard shows ZEV count, participant count, invoice status breakdown, email stats, and recent invoices with 30-second auto-refresh
+- [x] Admin can view and edit the invoice PDF HTML template through the browser
+- [x] ZEV owner can configure billing interval, invoice prefix, language, banking, email templates, and contract notes for their ZEV
+- [x] Invoice email resolution falls back per ZEV override → global `invoice_email` override → shipped default; `KeyError`/`ValueError` rendering failures fall back, while other formatting errors are not guaranteed to degrade gracefully
+- [x] Contract PDFs render in the ZEV's configured language (de/fr/it/en) and include local tariff notes and additional contract notes
+- [x] Invoice PDFs use `AppSettings.date_format_short` for all formatted dates
+- [x] Changing settings does not retroactively modify already-generated PDFs or sent emails

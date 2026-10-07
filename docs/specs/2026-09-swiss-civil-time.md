@@ -133,6 +133,7 @@ changed as stated; no other behaviour changes.
 | `metering/analytics.py` | `_distribute_reading` | UTC date | `civil_date(ts)` |
 | `metering/analytics.py` | `compute_hourly_profile` | `ts.hour` (UTC) | `wall_clock(ts).hour`. The autumn DST day adds two hours to bucket 2 and the spring day none to it; the per-day average keeps dividing by the number of civil days |
 | `metering/analytics.py` | `compute_data_quality_status` | UTC date | `civil_date(ts)` |
+| `metering/analytics.py` | `_qs_bounds` | `Min/Max("timestamp").date()` (UTC) | `civil_date(...)` on both bounds — assignment validity is date-granular in civil time, so a UTC bound dropped the holder of a reading after local 22:00/23:00 |
 | `invoices/pdf_stats.py` | `_entry` (both) | UTC date | `civil_date(reading.timestamp)` |
 | `invoices/pdf_charts.py` | `_build_hourly_profile_chart_svg` | UTC date, `ts.hour` | `civil_date(ts)`, `wall_clock(ts).hour` |
 | `invoices/annual_statement.py` | `_compute_monthly_data` | `datetime(year, 1, 1, tzinfo=utc)` bounds | `period_window(date(year, 1, 1), date(year, 12, 31))` |
@@ -596,6 +597,11 @@ Tests that encoded UTC days or hours now express the same intent in Swiss time:
   (`test_late_evening_reading_stays_in_its_civil_day_bucket`);
   `test_daily_bucket_uses_the_same_civil_day_as_raw_data`,
   `test_month_bucket_does_not_cross_the_civil_month_boundary`.
+- `metering/tests.py`: new `DashboardCivilBoundsTests`
+  (`test_reading_after_local_midnight_is_attributed_to_the_new_holder`) pins
+  `_qs_bounds` to civil dates: the only reading sits at 00:30 Swiss time on
+  1 February, so a UTC-derived bound would drop the assignment that starts
+  that day and the reading would land on no participant.
 - `metering/test_import_csv_characterization.py`: `test_naive_timestamp_is_read_as_swiss_time`,
   `test_date_only_timestamp_becomes_swiss_midnight`,
   `test_standard_profile_with_timestamp_format_reads_swiss_time`,
@@ -630,20 +636,20 @@ Tests that encoded UTC days or hours now express the same intent in Swiss time:
 
 ### Acceptance criteria
 
-- [ ] All five tests in `tariffs/test_band_timezone.py` pass.
-- [ ] No reading-timestamp civil date or hour is derived outside
+- [x] All five tests in `tariffs/test_band_timezone.py` pass.
+- [x] No reading-timestamp civil date or hour is derived outside
       `allocation.validity` (grep for `.astimezone(`, `.date()` and `.hour` on
       timestamps in the §4.3 modules returns only helper calls).
-- [ ] An SDAT file and the same data as an offset-less CSV (Zurich) produce
+- [x] An SDAT file and the same data as an offset-less CSV (Zurich) produce
       identical stored timestamps and identical invoices.
-- [ ] A January invoice covers exactly [2025-12-31T23:00Z, 2026-01-31T23:00Z).
-- [ ] Importing a Zurich-time CSV spanning both 2026 DST changes produces no
+- [x] A January invoice covers exactly [2025-12-31T23:00Z, 2026-01-31T23:00Z).
+- [x] Importing a Zurich-time CSV spanning both 2026 DST changes produces no
       duplicate errors and no data gaps.
-- [ ] `reanchor_readings` dry run and apply behave as §6.3 on a copy of the demo
+- [x] `reanchor_readings` dry run and apply behave as §6.3 on a copy of the demo
       data.
 - [ ] Charts, raw table, PDFs and the MCP hourly profile show the solar peak
       around 13:00 in summer for seeded demo data.
-- [ ] Frontend shows the same times with the browser set to `America/New_York`.
+- [x] Frontend shows the same times with the browser set to `America/New_York`.
 
 ## 10. Documentation updates in the same PR
 

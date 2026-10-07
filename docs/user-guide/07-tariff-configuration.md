@@ -449,6 +449,8 @@ Flat monthly or yearly charges (not energy-dependent).
   [community metering point](04-metering-points.md#shared-common-area-metering-points)
   is charged once and split across the community by allocation weight, instead
   of being charged to its holder.
+- **Per-metering-point yearly fee** — CHF Y per active meter per year, billed in
+  monthly instalments (CHF Y/12). Split the same way as the monthly variant.
 - **Shared monthly fee** — CHF X per month for the *whole community*, divided between the participants
 - **Shared yearly fee** — CHF X per year for the whole community, divided and paid monthly
 

@@ -34,10 +34,16 @@ from .models import MeterReading
 # ---------------------------------------------------------------------------
 
 def _qs_bounds(qs, today: date_type) -> tuple[date_type, date_type]:
-    """The date window covered by a readings queryset."""
+    """The civil-date window covered by a readings queryset.
+
+    Assignment validity is date-granular in civil time, so the bounds must be
+    civil dates too: ``timestamp.date()`` reads the UTC date, which is the
+    previous day for every reading after local 22:00/23:00 and would drop the
+    assignment holding a reading in that window.
+    """
     bounds = qs.aggregate(first=Min("timestamp"), last=Max("timestamp"))
-    start = bounds["first"].date() if bounds["first"] else today
-    end = bounds["last"].date() if bounds["last"] else today
+    start = civil_date(bounds["first"]) if bounds["first"] else today
+    end = civil_date(bounds["last"]) if bounds["last"] else today
     return start, end
 
 
