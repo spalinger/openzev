@@ -1,66 +1,80 @@
 import { useTranslation } from 'react-i18next'
-import { Link } from 'react-router-dom'
-import { openInvoicePdf } from '../../lib/api/invoices'
 import { formatShortDate, useAppSettings } from '../../lib/appSettings'
 import type { Invoice } from '../../types/api'
+import { InvoiceAmount, InvoiceLink, InvoicePdfCell, InvoiceRowActions, InvoiceStatusBadge } from '../InvoicePresentation'
+import { Notice } from '../Notice'
 import { PageSkeleton } from '../PageSkeleton'
 
 interface ParticipantInvoicesCardProps {
-    invoices: Invoice[]
-    isLoading: boolean
+    /** Undefined until a response arrives. */
+    invoices: Invoice[] | undefined
     isError: boolean
-    allCommunities: boolean
+    isRetrying: boolean
+    onRetry: () => void
+    showCommunity: boolean
 }
 
-export function ParticipantInvoicesCard({ invoices, isLoading, isError, allCommunities }: ParticipantInvoicesCardProps) {
+export function ParticipantInvoicesCard({ invoices, isError, isRetrying, onRetry, showCommunity }: ParticipantInvoicesCardProps) {
     const { t } = useTranslation()
     const { settings } = useAppSettings()
+    const errorNotice = (
+        <Notice tone={invoices ? 'warning' : 'error'} onRetry={onRetry} isRetrying={isRetrying}>
+            {t('pages.dashboard.failedInvoices')}
+        </Notice>
+    )
+    if (isError && !invoices) return errorNotice
 
     return (
         <section className="card">
-            <h3>{t(allCommunities ? 'pages.dashboard.invoicesAllCommunitiesSection' : 'pages.dashboard.invoicesSection')}</h3>
-            {isLoading ? (
+            <h3>{t(showCommunity ? 'pages.dashboard.invoicesAllCommunitiesSection' : 'pages.dashboard.invoicesSection')}</h3>
+            {isError && errorNotice}
+            {!invoices ? (
                 <PageSkeleton variant="tableRows" />
-            ) : isError ? (
-                <p className="muted">{t('pages.dashboard.failedInvoices')}</p>
             ) : invoices.length === 0 ? (
                 <p className="muted">{t('pages.dashboard.noInvoices')}</p>
             ) : (
-                <table className="participant-invoices-table">
-                    <thead>
-                        <tr>
-                            <th>{t('pages.dashboard.invoiceCol.invoice')}</th>
-                            <th>{t('pages.dashboard.invoiceCol.period')}</th>
-                            <th className="participant-invoices-total">{t('pages.dashboard.invoiceCol.total')}</th>
-                            <th>{t('pages.dashboard.invoiceCol.actions')}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {invoices.map((invoice) => (
-                            <tr key={invoice.id}>
-                                <td>{invoice.invoice_number}</td>
-                                <td>{formatShortDate(invoice.period_start, settings)} → {formatShortDate(invoice.period_end, settings)}</td>
-                                <td className="participant-invoices-total">CHF {invoice.total_chf}</td>
-                                <td>
-                                    <div className="participant-invoice-actions">
-                                        <Link className="button button-primary" to={`/billing/invoices/${invoice.id}`} state={{ from: '/' }}>
-                                            {t('pages.dashboard.viewDetails')}
-                                        </Link>
-                                        <button
-                                            type="button"
-                                            onClick={() => openInvoicePdf(invoice.id)}
-                                            className="button button-primary participant-invoice-pdf"
-                                            aria-label={t('pages.dashboard.openInvoicePdf', { number: invoice.invoice_number })}
-                                            title={t('common.openPdf')}
-                                        >
-                                            📄
-                                        </button>
-                                    </div>
-                                </td>
+                <div className="table-scroll">
+                    <table className="billing-workflow-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">{t('pages.dashboard.invoiceCol.invoice')}</th>
+                                {showCommunity && <th scope="col">{t('pages.dashboard.invoiceCol.community')}</th>}
+                                <th scope="col">{t('pages.dashboard.invoiceCol.period')}</th>
+                                <th scope="col">{t('pages.dashboard.invoiceCol.total')}</th>
+                                <th scope="col">{t('pages.dashboard.invoiceCol.status')}</th>
+                                <th scope="col">{t('pages.dashboard.invoiceCol.actions')}</th>
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            {invoices.map((invoice) => (
+                                <tr key={invoice.id}>
+                                    <td className="invoice-number-cell"><InvoiceLink invoice={invoice} from="/" /></td>
+                                    {showCommunity && <td>{invoice.zev_name}</td>}
+                                    <td className="billing-period-cell">
+                                        {formatShortDate(invoice.period_start, settings)} →{' '}
+                                        {formatShortDate(invoice.period_end, settings)}
+                                    </td>
+                                    <td className="numeric"><InvoiceAmount value={invoice.total_chf} /></td>
+                                    <td><InvoiceStatusBadge status={invoice.status} /></td>
+                                    <td>
+                                        <InvoiceRowActions>
+                                            <InvoiceLink className="button button-secondary" invoice={invoice} from="/">
+                                                {t('pages.dashboard.viewDetails')}
+                                            </InvoiceLink>
+                                            <InvoicePdfCell
+                                                invoice={invoice}
+                                                showReadyStatus={false}
+                                                keepExistingDuringPending
+                                                buttonClassName="button button-secondary"
+                                                ariaLabel={t('pages.dashboard.openInvoicePdf', { number: invoice.invoice_number })}
+                                            />
+                                        </InvoiceRowActions>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
             )}
         </section>
     )

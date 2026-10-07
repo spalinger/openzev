@@ -9,7 +9,7 @@ export type DashboardBucket = 'hour' | 'day' | 'month'
 
 /** The billing period the page owns and hands to either body. */
 export type DashboardBodyProps = {
-    interval: BillingInterval
+    interval: BillingInterval | undefined
     period: BillingRange
     onPeriodChange: (range: BillingRange) => void
     periodReady: boolean

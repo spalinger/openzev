@@ -225,7 +225,8 @@ label > small.muted {
   min-width: 48rem;
 }
 
-.billing-period-cell {
+.billing-period-cell,
+.invoice-number-cell {
   white-space: nowrap;
 }
 
@@ -1773,27 +1774,6 @@ h3 {
 
 .energy-flow-node--dimmed {
   opacity: 0.3;
-}
-
-/* Denser cells than the .page-stack table it sits in. */
-.participant-invoices-table th,
-.participant-invoices-table td {
-  padding: 0.5rem 0.6rem;
-}
-
-.participant-invoices-table .participant-invoices-total {
-  text-align: right;
-}
-
-.participant-invoice-actions {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.button.participant-invoice-pdf {
-  padding: 0.3rem 0.5rem;
-  line-height: 1;
 }
 
 /* Admin dashboard invoice-status tiles */

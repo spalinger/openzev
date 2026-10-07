@@ -13,7 +13,7 @@ import { usePageNavigation } from './usePageNavigation'
 export type BillingRange = { from: string; to: string }
 
 type BillingPeriodParamsPolicy = {
-    interval: BillingInterval
+    interval: BillingInterval | undefined
     /** False until the consumer has the scope/interval data it needs. */
     ready: boolean
     scopeId: string
@@ -64,15 +64,16 @@ export function resolveBillingPeriodTarget({
 
 /** The URL is authoritative; no effect copies an old period into a new scope's query. */
 export function useBillingPeriodParams({
-    interval, ready, scopeId, fallback, minimumRangeStart, minimumFallback,
+    interval, ready: scopeReady, scopeId, fallback, minimumRangeStart, minimumFallback,
     legacyParams = false, scopeChange,
 }: BillingPeriodParamsPolicy) {
     const { searchParams, updateParams } = usePageNavigation()
+    const ready = scopeReady && interval !== undefined
     const context = `${scopeId}|${interval}`
     const [resolvedContext, setResolvedContext] = useState<string | null>(() => ready ? context : null)
     const scopeChanged = ready && resolvedContext !== null && resolvedContext !== context
 
-    const defaultRange = fallback === 'previous-complete'
+    const defaultRange = interval === undefined ? UNRESOLVED_RANGE : fallback === 'previous-complete'
         ? getPreviousBillingPeriod(interval)
         : getCurrentBillingPeriod(interval)
     const fallbackRange = minimumFallback && defaultRange.from < minimumFallback.from ? minimumFallback : defaultRange
@@ -81,7 +82,7 @@ export function useBillingPeriodParams({
     const hasRangeParams = searchParams.has('period_start') || searchParams.has('period_end')
         || (legacyParams && (searchParams.has('from') || searchParams.has('to')))
     const rejected = ready && scopeChange === 'align' && hasRangeParams && !validRange
-    const target = ready ? resolveBillingPeriodTarget({
+    const target = ready && interval ? resolveBillingPeriodTarget({
         scopeChanged, scopeChange, interval, validRange, hasRangeParams,
         fallbackRange, minimumRangeStart, minimumFallback,
     }) : null

@@ -105,6 +105,7 @@ function BillingEmailsContent() {
             ))
             pushToast(t('pages.billingEmails.retryQueued'), 'success')
             void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.lists() })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.mine() })
             void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.detail(invoice.id) })
         },
         onError: () => {

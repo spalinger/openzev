@@ -33,6 +33,7 @@ from invoices.models import (
     Invoice,
     InvoiceStatus,
 )
+from invoices.pdf import save_invoice_pdf
 from metering.models import ImportLog, ImportSource, MeterReading, ReadingDirection, ReadingResolution
 from tariffs.dynamic.models import DynamicApiVersion, DynamicTariffSource, DynamicTariffType, FetchStatus
 from tariffs.dynamic.storage import store_points
@@ -838,7 +839,7 @@ class Command(BaseCommand):
         # tax overview has a full reports year to render) plus the open last
         # complete quarter in draft/approved/sent.
         invoice_period_start, invoice_period_end = previous_quarter(end_date)
-        Invoice.objects.filter(zev=zev).delete()
+        self._delete_invoices(Invoice.objects.filter(zev=zev))
         year_paid_invoices = self._seed_paid_year_invoices(
             zev,
             year=end_date.year - 1,
@@ -1119,8 +1120,43 @@ class Command(BaseCommand):
         email logs) before deleting the row itself.
         """
         for zev in rows:
-            zev.invoices.all().delete()
+            self._delete_invoices(zev.invoices.all())
             zev.delete()
+
+    def _delete_invoices(self, invoices) -> None:
+        """Delete invoice rows; remove unreferenced PDFs after commit."""
+        stale = {name for name in invoices.values_list("pdf_file", flat=True) if name}
+        invoices.delete()
+        if stale:
+            transaction.on_commit(lambda: self._delete_stale_pdfs(stale), robust=True)
+
+    def _delete_stale_pdfs(self, names: set[str]) -> None:
+        # A storage that overwrites could have handed a name to a new PDF.
+        names = names - set(Invoice.objects.filter(pdf_file__in=names).values_list("pdf_file", flat=True))
+        storage = Invoice._meta.get_field("pdf_file").storage
+        for name in sorted(names):
+            try:
+                storage.delete(name)
+            except OSError as exc:
+                self.stdout.write(self.style.WARNING(f"seed_demo: stale PDF {name} not removed ({exc})"))
+
+    def _seed_invoice_pdfs(self, invoice_ids) -> None:
+        created = 0
+        for invoice in Invoice.objects.filter(pk__in=invoice_ids).order_by("period_start"):
+            try:
+                # Isolate a failed database write so the remaining PDFs can be saved.
+                with transaction.atomic():
+                    save_invoice_pdf(invoice)
+            except Exception as exc:
+                self.stdout.write(
+                    self.style.WARNING(
+                        f"seed_demo: PDF for invoice {invoice.invoice_number} skipped "
+                        f"({exc.__class__.__name__}: {exc})"
+                    )
+                )
+            else:
+                created += 1
+        self.stdout.write(f"  Invoice PDFs: {created}")
 
     def _scaled_kwh(self, profile: Profile, factor: float) -> Profile:
         """A main-community profile at another amplitude (one shape per meter kind)."""
@@ -1163,7 +1199,7 @@ class Command(BaseCommand):
         MeterReading.objects.filter(
             metering_point__in=MeteringPoint.objects.filter(zev=zev),
         ).delete()
-        Invoice.objects.filter(zev=zev).delete()
+        self._delete_invoices(Invoice.objects.filter(zev=zev))
 
         owner_participant = self._upsert_participant(
             zev=zev,
@@ -1393,11 +1429,11 @@ class Command(BaseCommand):
         Re-created on every run instead of appended to, so re-seeding stays
         stable: import logs (CSV provenance on a real meter month of the main
         ZEV), one email log per sent invoice, participation contracts via the
-        real issuance path (unchanged re-seeds reuse the stored snapshot), and
-        audit events across categories including one denied. Audit timestamps
-        are anchored to the seeded periods rather than to "today minus fixed
-        offsets", so a custom ``--end-date`` in the past still tells a
-        consistent story.
+        real issuance path (unchanged re-seeds reuse the stored snapshot), the
+        PDFs of Anna's sent/paid invoices after commit, and audit events across categories
+        including one denied. Audit timestamps are anchored to the seeded
+        periods rather than to "today minus fixed offsets", so a custom
+        ``--end-date`` in the past still tells a consistent story.
         """
         stats = {"import_logs": 0, "email_logs": 0, "audit_events": 0, "contracts": 0}
 
@@ -1504,6 +1540,14 @@ class Command(BaseCommand):
         stats["contracts"] = ContractIssue.objects.filter(
             zev__in=[zev, second_zev]
         ).count()
+
+        # A failed seed must not leave newly written PDFs without invoice rows.
+        invoice_ids = list(Invoice.objects.filter(
+            zev=zev,
+            participant__user=anna_user,
+            status__in=[InvoiceStatus.SENT, InvoiceStatus.PAID],
+        ).values_list("pk", flat=True))
+        transaction.on_commit(lambda: self._seed_invoice_pdfs(invoice_ids), robust=True)
 
         # Reset the demo trail first (including anything a presenter clicked
         # during a previous session): this command is the demo's reset button.

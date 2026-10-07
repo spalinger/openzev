@@ -368,7 +368,7 @@ The planned dev-only mockup routes `frontend/src/pages/design/PreviewDashboard.t
 
 | Page | File | Route | Query key | Mutation |
 |---|---|---|---|---|
-| Dashboard | `frontend/src/pages/DashboardPage.tsx`; role bodies in `frontend/src/features/dashboard/`; cards in `frontend/src/components/dashboard/` | manager `/dashboard` (Energy balance) + participant `/` | `queryKeys.metering.dashboardSummary({…})` + `queryKeys.metering.hourlyProfile(…)`; participant also `queryKeys.invoices.list()` | none — read-only; layout in [Dashboard](#dashboard) below |
+| Dashboard | `frontend/src/pages/DashboardPage.tsx`; role bodies in `frontend/src/features/dashboard/`; cards in `frontend/src/components/dashboard/` | manager `/dashboard` (Energy balance) + participant `/` | `queryKeys.metering.dashboardSummary({…})` + `queryKeys.metering.hourlyProfile(…)`; participant also `queryKeys.invoices.mine()` | none — read-only; layout in [Dashboard](#dashboard) below |
 | Reports | `frontend/src/pages/ReportsPage.tsx` + `frontend/src/features/reports/ParticipantYearDocuments.tsx` | `/reports` (participant branch also served at `/me/statement`) | none (manager mutation + local `usePdfObjectUrl` state) | `downloadAnnualStatement({year, zev_id?}, signal?)` behind the participant Annual Statement tab; `downloadFinancialSummary({year, zev_id?}, signal?)` — management requests use the selected ZEV; participant tabs supply it when there are multiple community entries. ScopeGuard gates the management content. Managers get the annual ZEV report (`AnnualReportSection`, spec `2026-09-annual-zev-report.md`), then an **Annual documents** grid with the tax-overview mutation card and the whole-ZEV ZIP card (`AnnualStatementsExportCard`; `/billing/statements` redirects here); participants get the document tabs (shared year selector above, per-document description + Download/new-tab row above one full-width viewer). Each tab's hook sits above its `Tabs.Panel` so inactive documents keep their state; panels are keyed by document/user/year, the feature by user id, and the fetcher identity changes with year, document descriptor, or retry attempt. |
 | Participant statement | `frontend/src/pages/ReportsPage.tsx` + `frontend/src/features/reports/ParticipantYearDocuments.tsx` | `/me/statement` (participant-only canonical host; `/reports` serves all three roles) | none (local `usePdfObjectUrl` state per document) | Statement generates on entry, tax overview on first selection; revisits, Download, and Open-in-new-tab reuse the loaded blob; per-document Retry; year change preserves the tab and fetches only the active document; user change/unmount disposes all participant document state. |
 | Invoices list | `frontend/src/pages/InvoicesPage.tsx` (`InvoicesContent` shared with Billing hub) | `/billing/invoices` | `queryKeys.invoices.periodOverview(...)` = `['invoices', 'period-overview', zevId, periodStart, periodEnd]` (`lib/api/queryKeys.ts`) | `generate/approve-all/send-all` invalidates period-overview |
@@ -393,8 +393,11 @@ stay consumer-owned.
 
 #### Dashboard
 
-`DashboardPage` owns the header and the billing period (above) and, inside a
-`ScopeGuard` with the `kpiRow` skeleton, renders `ManagementDashboardBody` for
+`DashboardPage` owns the header and the billing period (above). Its interval is
+the selected ZEV record's `billing_interval`, else the selected membership's
+`zev_billing_interval`. Without either interval, the selector and analytics
+requests wait; invoice loading remains independent. Inside a
+`ScopeGuard` with the `kpiRow` skeleton, it renders `ManagementDashboardBody` for
 ZEV-scoped roles or `ParticipantDashboardBody` for participants. Each body
 starts with the period selector and a resolution select (hour / day / month,
 default day) and shows a retryable notice when the summary fails. The page is
@@ -402,7 +405,9 @@ read-only: report exports live on Reports; participant invoice PDF actions
 remain on the dashboard.
 
 - **Header.** The title is the Energy balance title for ZEV-scoped roles and the
-  dashboard title for participants. The eyebrow is the scope line,
+  dashboard title for participants. The description is
+  `pages.energyBalancePage.description` for ZEV-scoped roles and
+  `dashboard.participantDescription` for participants. The eyebrow is the scope line,
   `selectedCommunityName` (`frontend/src/lib/membership.ts`): the readable ZEV
   record's name, else the selected switcher entry's name, for every role;
   blank when no community is selected. Viewers get the `nav.relation.viewer`
@@ -444,10 +449,19 @@ remain on the dashboard.
      right-hand 0–100 % axis with the `from_zev_rate` line.
   4. `HourlyProfileCard` when the profile has data.
   5. `ParticipantInvoicesCard`: the invoice list, fetched alongside the summary
-     and not tied to the period, filtered to the account's own participants,
-     status `sent|paid` and a `pdf_url`, with a details link and an open-PDF
-     action per row. It spans all the account's communities and says so in its
-     title when more than one is selectable.
+     and not tied to the period. It renders outside the analytics block, so it
+     also shows when the summary request fails. Its rows use
+     `personalInvoiceFilter` (`lib/membership.ts`, shared with My invoices): the
+     account's own invoices once sent (`sent_at`, or status `sent`/`paid`). A
+     missing PDF never hides a row. It spans all the account's communities and
+     says so in its title and community column when the account has more than
+     one membership, including former or disabled communities.
+
+Dashboard and My invoices share the unscoped `invoices.mine()` cache and poll
+every 15 s while a personal invoice PDF is pending. Existing PDFs stay usable
+during regeneration. Failed refetches keep cached rows under a retry warning;
+an initial failure shows an error, and the first load shows a table skeleton.
+Invoice actions, email retries and admin deletion invalidate the shared cache.
 
 ### 7.10 TypeScript types
 

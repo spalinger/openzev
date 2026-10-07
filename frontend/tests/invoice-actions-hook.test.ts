@@ -375,6 +375,7 @@ describe('recommendedBatchAction ordering', () => {
     expect((queued.context as { participantIds: string[] }).participantIds).toEqual(['p1'])
     queued.accept()
     expect(onPdfQueued).toHaveBeenCalledWith(['p1'])
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['invoices', 'mine'] })
     // The busy rows report a queued batch; no toast repeats it.
     expect(pushToast).not.toHaveBeenCalled()
   })

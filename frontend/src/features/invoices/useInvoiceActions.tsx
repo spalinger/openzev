@@ -104,6 +104,7 @@ export function useInvoiceActions({
 
     const invalidateInvoicesList = useCallback(() => {
         void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.lists() })
+        void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.mine() })
     }, [queryClient])
 
     // Billing mutations also move Overview's period cards: readiness steps

@@ -1,6 +1,8 @@
+import tempfile
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from io import StringIO
+from pathlib import Path
 from unittest import mock
 from zoneinfo import ZoneInfo
 
@@ -2622,8 +2624,124 @@ class SeedDemoEndToEndTests(TestCase):
 		with mock.patch(
 			"zev.management.commands.seed_demo.issue_contract_pdf",
 			return_value=(None, False),
-		):
+		), mock.patch(
+			"zev.management.commands.seed_demo.save_invoice_pdf",
+		) as save_pdf, self.captureOnCommitCallbacks(execute=True):
 			call_command("seed_demo", *(window or self.WINDOW), stdout=buf, stderr=buf)
+		return save_pdf
+
+	def test_the_seed_renders_only_annas_sent_and_paid_invoices(self):
+		save_pdf = self._run()
+		rendered = [call.args[0].pk for call in save_pdf.call_args_list]
+		annas = set(
+			Invoice.objects.filter(
+				zev__name=DEMO_ZEV_NAME,
+				participant__user__email="anna@openzev.local",
+				status__in=[InvoiceStatus.SENT, InvoiceStatus.PAID],
+			).values_list("pk", flat=True)
+		)
+		self.assertTrue(annas)
+		self.assertCountEqual(rendered, annas)
+
+	def test_a_reseed_keeps_the_current_pdfs_and_removes_the_previous_ones(self):
+		# Real storage, mocked rendering: only the file lifecycle is under test.
+		with tempfile.TemporaryDirectory() as media, override_settings(MEDIA_ROOT=media), mock.patch(
+			"zev.management.commands.seed_demo.issue_contract_pdf",
+			return_value=(None, False),
+		), mock.patch("invoices.pdf.generate_pdf", return_value=b"%PDF-1.7 demo"):
+			for _ in range(2):
+				with self.captureOnCommitCallbacks(execute=True):
+					call_command("seed_demo", *self.WINDOW, stdout=StringIO(), stderr=StringIO())
+			stored = {path.relative_to(media).as_posix() for path in Path(media).rglob("*") if path.is_file()}
+		referenced = set(Invoice.objects.exclude(pdf_file="").values_list("pdf_file", flat=True))
+		annas = Invoice.objects.filter(
+			zev__name=DEMO_ZEV_NAME,
+			participant__user__email="anna@openzev.local",
+			status__in=[InvoiceStatus.SENT, InvoiceStatus.PAID],
+		)
+		self.assertEqual(len(referenced), annas.count())
+		self.assertEqual(stored, referenced)
+
+	def test_a_failed_reseed_preserves_invoice_rows_and_files(self):
+		with tempfile.TemporaryDirectory() as media, override_settings(MEDIA_ROOT=media), mock.patch(
+			"zev.management.commands.seed_demo.issue_contract_pdf",
+			return_value=(None, False),
+		), mock.patch("invoices.pdf.generate_pdf", return_value=b"%PDF-1.7 demo") as render:
+			with self.captureOnCommitCallbacks(execute=True):
+				call_command("seed_demo", *self.WINDOW, stdout=StringIO(), stderr=StringIO())
+			original = set(Invoice.objects.values_list("pk", "pdf_file"))
+			original_files = {
+				path.relative_to(media).as_posix(): path.read_bytes()
+				for path in Path(media).rglob("*") if path.is_file()
+			}
+			self.assertTrue(original_files)
+			render.reset_mock()
+			with mock.patch.object(SeedDemoCommand, "_reset_demo_audit_trail", side_effect=RuntimeError("late failure")):
+				with self.captureOnCommitCallbacks(execute=True), self.assertRaisesRegex(RuntimeError, "late failure"):
+					call_command("seed_demo", *self.WINDOW, stdout=StringIO(), stderr=StringIO())
+			self.assertEqual(set(Invoice.objects.values_list("pk", "pdf_file")), original)
+			self.assertEqual({
+				path.relative_to(media).as_posix(): path.read_bytes()
+				for path in Path(media).rglob("*") if path.is_file()
+			}, original_files)
+			render.assert_not_called()
+
+	def test_pdf_cleanup_preserves_a_referenced_filename(self):
+		from testing.factories import InvoiceFactory
+
+		InvoiceFactory(pdf_file="invoices/pdf/a.pdf")
+		with mock.patch.object(Invoice._meta.get_field("pdf_file").storage, "delete") as delete:
+			SeedDemoCommand(stdout=StringIO())._delete_stale_pdfs({"invoices/pdf/a.pdf", "invoices/pdf/b.pdf"})
+		delete.assert_called_once_with("invoices/pdf/b.pdf")
+
+	def test_a_database_error_rendering_one_pdf_does_not_stop_the_others(self):
+		from django.db import connection
+		from testing.factories import InvoiceFactory
+
+		invoices = InvoiceFactory.create_batch(2)
+		command = SeedDemoCommand(stdout=StringIO())
+
+		def render(invoice):
+			if invoice.pk == invoices[0].pk:
+				with connection.cursor() as cursor:
+					cursor.execute("SELECT * FROM seed_demo_missing_table")
+			else:
+				Invoice.objects.filter(pk=invoice.pk).update(pdf_file="invoices/pdf/saved.pdf")
+
+		with mock.patch("zev.management.commands.seed_demo.save_invoice_pdf", side_effect=render) as save:
+			command._seed_invoice_pdfs([invoice.pk for invoice in invoices])
+		self.assertCountEqual([call.args[0].pk for call in save.call_args_list], [invoice.pk for invoice in invoices])
+		invoices[1].refresh_from_db()
+		self.assertEqual(invoices[1].pdf_file.name, "invoices/pdf/saved.pdf")
+		self.assertIn("Invoice PDFs: 1", command.stdout.getvalue())
+
+	def test_an_unexpected_cleanup_error_does_not_stop_pdf_rendering(self):
+		from testing.factories import InvoiceFactory
+
+		old = InvoiceFactory(pdf_file="invoices/pdf/old.pdf")
+		with mock.patch.object(SeedDemoCommand, "_delete_stale_pdfs", side_effect=RuntimeError("storage unavailable")), mock.patch(
+			"zev.management.commands.seed_demo.issue_contract_pdf", return_value=(None, False),
+		), mock.patch("zev.management.commands.seed_demo.save_invoice_pdf") as save:
+			with self.assertLogs("django.test", level="ERROR"), self.captureOnCommitCallbacks(execute=True):
+				SeedDemoCommand(stdout=StringIO())._delete_invoices(Invoice.objects.filter(pk=old.pk))
+				call_command("seed_demo", *self.WINDOW, stdout=StringIO(), stderr=StringIO())
+		self.assertCountEqual(
+			[call.args[0].pk for call in save.call_args_list],
+			Invoice.objects.filter(
+				zev__name=DEMO_ZEV_NAME, participant__user__email="anna@openzev.local",
+				status__in=[InvoiceStatus.SENT, InvoiceStatus.PAID],
+			).values_list("pk", flat=True),
+		)
+		self.assertGreater(save.call_count, 0)
+
+	def test_a_failed_pdf_cleanup_still_removes_the_others(self):
+		command = SeedDemoCommand(stdout=StringIO())
+		with mock.patch.object(
+			Invoice._meta.get_field("pdf_file").storage, "delete", side_effect=[OSError("busy"), None],
+		) as delete:
+			command._delete_stale_pdfs({"invoices/pdf/a.pdf", "invoices/pdf/b.pdf"})
+		self.assertEqual(delete.call_count, 2)
+		self.assertIn("invoices/pdf/a.pdf not removed", command.stdout.getvalue())
 
 	def _snapshot(self):
 		return {

@@ -6,9 +6,8 @@ import { formatShortDate, useAppSettings } from '../lib/appSettings'
 import { InvoiceAmount, InvoiceLink, InvoicePdfCell, InvoiceRowActions, InvoiceStatusBadge } from '../components/InvoicePresentation'
 import { PageSkeleton } from '../components/PageSkeleton'
 import { useAuth } from '../lib/auth'
-import { soleCommunityName, ownParticipantIds } from '../lib/membership'
+import { soleCommunityName, personalInvoiceFilter } from '../lib/membership'
 import { PageHeader } from '../components/PageHeader'
-import type { Invoice } from '../types/api'
 import { Notice } from '../components/Notice'
 
 /**
@@ -22,9 +21,7 @@ export function MyInvoicesPage() {
     const { settings } = useAppSettings()
     const { user } = useAuth()
 
-    const ownIds = ownParticipantIds(user)
-    const isPersonalInvoice = (invoice: Invoice) => ownIds.has(invoice.participant)
-        && (!!invoice.sent_at || invoice.status === 'sent' || invoice.status === 'paid')
+    const isPersonalInvoice = personalInvoiceFilter(user)
     const invoicesQuery = useQuery({
         // No zev_id: personal invoices span all participant memberships.
         queryKey: queryKeys.invoices.mine(),
@@ -32,8 +29,6 @@ export function MyInvoicesPage() {
         refetchInterval: (query) =>
             query.state.data?.some((invoice) => isPersonalInvoice(invoice) && invoice.pdf_status === 'pending') ? 15000 : false,
     })
-    // The unscoped list is the union of management/viewer access and the
-    // caller's participant invoices: keep only the caller's own, previously sent rows here.
     const invoices = (invoicesQuery.data ?? []).filter(isPersonalInvoice)
     // Several memberships: a community column, and the header names all of them.
     const showCommunity = (user?.memberships?.length ?? 0) > 1
@@ -75,7 +70,7 @@ export function MyInvoicesPage() {
                             <tbody>
                                 {invoices.map((invoice) => (
                                     <tr key={invoice.id}>
-                                        <td><InvoiceLink invoice={invoice} from="/me/invoices" /></td>
+                                        <td className="invoice-number-cell"><InvoiceLink invoice={invoice} from="/me/invoices" /></td>
                                         {showCommunity && <td>{invoice.zev_name}</td>}
                                         <td className="billing-period-cell">
                                             {formatShortDate(invoice.period_start, settings)} →{' '}

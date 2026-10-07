@@ -12,7 +12,7 @@ vi.mock('../src/lib/managedZev', () => ({ useManagedZev: () => ({ setSelectedZev
 import { AccountMemberships } from '../src/features/accounts/AccountMemberships'
 
 const membership = (zev: string, over: Partial<Membership> = {}): Membership => ({
-    zev, zev_name: `ZEV ${zev}`, zev_disabled: false, access: null, participants: [], ...over,
+    zev, zev_name: `ZEV ${zev}`, zev_disabled: false, zev_billing_interval: 'monthly', access: null, participants: [], ...over,
 })
 
 const cleanups: (() => void)[] = []
