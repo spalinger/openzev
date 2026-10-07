@@ -53,17 +53,18 @@ export function PdfPreview({ src, title, height = '72vh', openInNewTabFetcher, a
           <iframe
             src={src}
             title={title ?? t('pdf.previewTitle')}
-            style={{ width: '100%', height, border: 0, display: 'block' }}
+            className="pdf-preview-frame"
+            style={{ height }}
           />
           {actions ? null : (
-            <p className="muted" style={{ padding: '0.5rem 0.75rem', margin: 0 }}>
+            <p className="muted pdf-preview-link">
               {newTabLink}
             </p>
           )}
         </>
       ) : (
-        <div style={{ padding: '2rem', textAlign: 'center' }}>
-          <p className="muted" style={{ margin: 0 }}>{t('pdf.noDocument')}</p>
+        <div className="pdf-preview-empty">
+          <p className="muted m-0">{t('pdf.noDocument')}</p>
         </div>
       )}
     </div>

@@ -113,37 +113,20 @@ export function ConfirmDialog({
     }, [stackId])
     const depth = Math.max(0, modalDepth(stackId))
     return (
-        <div
-            style={{
-                position: 'fixed',
-                inset: 0,
-                backgroundColor: 'rgba(0, 0, 0, 0.5)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                zIndex: Z_MODAL + depth,
-            }}
-            onClick={onCancel}
-        >
+        <div className="dialog-scrim" style={{ zIndex: Z_MODAL + depth }} onClick={onCancel}>
             <div
                 ref={dialogRef}
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby={titleId}
                 tabIndex={-1}
-                className="card"
-                style={{
-                    maxWidth: '400px',
-                    padding: '2rem',
-                    animation: 'fadeIn 0.2s ease',
-                    outline: 'none',
-                }}
+                className="card confirm-dialog"
                 onClick={(e) => e.stopPropagation()}
             >
-                <h3 id={titleId} style={{ marginBottom: '1rem' }}>{title}</h3>
-                <p style={{ marginBottom: '1.5rem', color: 'var(--text-body)', lineHeight: '1.5' }}>{message}</p>
-                {children ? <div className="form-grid" style={{ marginBottom: '1.5rem' }}>{children}</div> : null}
-                <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+                <h3 id={titleId} className="mb-1">{title}</h3>
+                <p className="confirm-dialog-message">{message}</p>
+                {children ? <div className="form-grid mb-15">{children}</div> : null}
+                <div className="dialog-actions">
                     <button
                         className="button button-secondary"
                         onClick={onCancel}

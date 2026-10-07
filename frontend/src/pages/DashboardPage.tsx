@@ -208,7 +208,7 @@ export function DashboardPage() {
                     <section className="card">
                         <div className="grid">
                             <PeriodSelector interval={interval} from={period.from} to={period.to} onChange={setPeriod} />
-                            <div className="inline-form" style={{ maxWidth: '320px' }}>
+                            <div className="inline-form inline-form--narrow">
                                 <label>
                                     <span>{t('pages.dashboard.resolution')}</span>
                                     <select value={bucket} onChange={(e) => setBucket(e.target.value as 'day' | 'hour' | 'month')}>

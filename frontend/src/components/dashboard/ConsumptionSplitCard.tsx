@@ -24,8 +24,8 @@ export function ConsumptionSplitCard({
 }: ConsumptionSplitCardProps) {
     const { t } = useTranslation()
     return (
-        <section className="card" style={{ minHeight: 360 }}>
-            <h3 style={{ marginTop: 0 }}>{t('pages.dashboard.consumptionSplit')}</h3>
+        <section className="card chart-card">
+            <h3>{t('pages.dashboard.consumptionSplit')}</h3>
             {data.length === 0 ? (
                 <p className="muted">{t('pages.dashboard.noData')}</p>
             ) : (

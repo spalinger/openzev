@@ -14,7 +14,7 @@ type FormModalFooterProps = {
 export function FormModalFooter({ onCancel, isPending, submitIcon, submitLabel, cancelIcon, compact }: FormModalFooterProps) {
   const { t } = useTranslation()
   return (
-    <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: compact ? '0.5rem' : '1rem' }}>
+    <div className={`dialog-actions grid-span-full ${compact ? 'mt-05' : 'mt-1'}`}>
       <button className="button button-secondary" type="button" onClick={onCancel}>
         {cancelIcon}
         {t('common.cancel')}

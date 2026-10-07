@@ -110,55 +110,23 @@ export function FormModal({ isOpen, title, children, onClose, maxWidth = '600px'
     if (!isOpen) return null
 
     return (
-        <div
-            style={{
-                position: 'fixed',
-                inset: 0,
-                backgroundColor: 'rgba(0, 0, 0, 0.5)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                zIndex: Z_MODAL,
-            }}
-            onClick={onClose}
-        >
+        <div className="dialog-scrim" style={{ zIndex: Z_MODAL }} onClick={onClose}>
             <div
                 ref={dialogRef}
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby={titleId}
                 tabIndex={-1}
-                style={{
-                    backgroundColor: 'var(--surface-card)',
-                    borderRadius: '0.5rem',
-                    boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
-                    maxWidth,
-                    width: '90%',
-                    maxHeight: '90vh',
-                    overflow: 'auto',
-                    padding: '2rem',
-                    outline: 'none',
-                }}
+                className="form-modal"
+                style={{ maxWidth }}
                 onClick={(e) => e.stopPropagation()}
             >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-                    <h2 id={titleId} style={{ margin: 0 }}>{title}</h2>
+                <div className="form-modal-header">
+                    <h2 id={titleId}>{title}</h2>
                     <button
                         onClick={onClose}
                         aria-label={t('common.close')}
-                        style={{
-                            background: 'none',
-                            border: 'none',
-                            fontSize: '1.5rem',
-                            cursor: 'pointer',
-                            color: 'var(--text-muted)',
-                            padding: '0',
-                            width: '2rem',
-                            height: '2rem',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                        }}
+                        className="form-modal-close"
                     >
                         <span aria-hidden="true">✕</span>
                     </button>

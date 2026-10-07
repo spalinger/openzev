@@ -132,7 +132,7 @@ export function DataTable<T>({
                 than one page — a single-page footer would render permanently
                 disabled buttons. */}
             {rows.length > 0 && table.getPageCount() > 1 && (
-                <div className="data-table-footer actions-row actions-row-end muted" style={{ fontSize: '0.82rem', alignItems: 'center' }}>
+                <div className="data-table-footer actions-row actions-row-end muted">
                     <span>
                         {t('common.pagination.range', {
                             from: table.getState().pagination.pageIndex * table.getState().pagination.pageSize + 1,
@@ -140,13 +140,12 @@ export function DataTable<T>({
                             total: table.getFilteredRowModel().rows.length,
                         })}
                     </span>
-                    <span style={{ flex: 1 }} />
-                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <span className="flex-1" />
+                    <label className="data-table-page-size">
                         <span>{t('common.pagination.rowsPerPage')}</span>
                         <select
                             value={table.getState().pagination.pageSize}
                             onChange={(e) => table.setPageSize(Number(e.target.value))}
-                            style={{ width: 'auto' }}
                         >
                             {pageSizeOptions.map((size) => (
                                 <option key={size} value={size}>{size}</option>

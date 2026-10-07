@@ -158,7 +158,7 @@ export function ZevGeneralSettingsFields({ form, onChange, group, zevId, readOnl
                         />
                         {inlineError('payment_term_days')}
                     </label>
-                    <label data-zev-field="itemize_tariff_bands" className="checkbox-row grid-span-full" style={{ alignItems: 'flex-start' }}>
+                    <label data-zev-field="itemize_tariff_bands" className="checkbox-row align-start grid-span-full">
                         <input
                             type="checkbox"
                             checked={form.itemize_tariff_bands ?? false}
@@ -166,13 +166,13 @@ export function ZevGeneralSettingsFields({ form, onChange, group, zevId, readOnl
                             {...describeInvalid('itemize_tariff_bands')}
                             onChange={(event) => onChange({ itemize_tariff_bands: event.target.checked })}
                         />
-                        <span style={{ display: 'grid', gap: '0.15rem' }}>
+                        <span className="checkbox-row-text">
                             <span>{t('pages.zevSettings.fields.itemizeTariffBands')}</span>
                             <small className="muted">{t('pages.zevSettings.fields.itemizeTariffBandsHint')}</small>
                             {inlineError('itemize_tariff_bands')}
                         </span>
                     </label>
-                    <label data-zev-field="participant_invoice_access" className="checkbox-row grid-span-full" style={{ alignItems: 'flex-start' }}>
+                    <label data-zev-field="participant_invoice_access" className="checkbox-row align-start grid-span-full">
                         <input
                             type="checkbox"
                             checked={form.participant_invoice_access ?? false}
@@ -182,7 +182,7 @@ export function ZevGeneralSettingsFields({ form, onChange, group, zevId, readOnl
                                 onChange({ participant_invoice_access: event.target.checked })
                             }
                         />
-                        <span style={{ display: 'grid', gap: '0.15rem' }}>
+                        <span className="checkbox-row-text">
                             <span>{t('pages.zevSettings.fields.participantInvoiceAccess')}</span>
                             <small className="muted">
                                 {t('pages.zevSettings.fields.participantInvoiceAccessHint')}

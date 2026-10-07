@@ -1,5 +1,6 @@
 import { type EmailLog } from '../types/api'
 import { formatDateTime, useAppSettings } from '../lib/appSettings'
+import { Z_MODAL } from '../lib/zLayers'
 import { useTranslation } from 'react-i18next'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faRotate, faXmark } from '@fortawesome/free-solid-svg-icons'
@@ -11,12 +12,6 @@ interface EmailLogsModalProps {
     onClose: () => void
     onRetry?: (emailLogId: string) => void
     isRetrying?: boolean
-}
-
-const statusColors: Record<string, string> = {
-    pending: 'var(--warning-800)',  // amber
-    sent: 'var(--success-600)',     // green
-    failed: 'var(--danger-600)',   // red
 }
 
 export function EmailLogsModal({
@@ -40,86 +35,35 @@ export function EmailLogsModal({
     if (!isOpen) return null
 
     return (
-        <div
-            style={{
-                position: 'fixed',
-                inset: 0,
-                backgroundColor: 'rgba(0, 0, 0, 0.5)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                zIndex: 999,
-            }}
-            onClick={onClose}
-        >
-            <div
-                className="card"
-                style={{
-                    maxWidth: '600px',
-                    maxHeight: '80vh',
-                    overflow: 'auto',
-                    padding: '2rem',
-                }}
-                onClick={(e) => e.stopPropagation()}
-            >
-                <h3 style={{ marginBottom: '1.5rem' }}>{t('pages.invoices.emailLogs.title', { number: invoiceNumber })}</h3>
+        <div className="dialog-scrim" style={{ zIndex: Z_MODAL }} onClick={onClose}>
+            <div className="card email-logs-dialog" onClick={(e) => e.stopPropagation()}>
+                <h3 className="mb-15">{t('pages.invoices.emailLogs.title', { number: invoiceNumber })}</h3>
 
                 {emailLogs.length === 0 ? (
-                    <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '2rem 0' }}>{t('pages.invoices.emailLogs.empty')}</p>
+                    <p className="email-logs-empty">{t('pages.invoices.emailLogs.empty')}</p>
                 ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    <div className="email-logs-list">
                         {emailLogs.map((log) => (
-                            <div
-                                key={log.id}
-                                style={{
-                                    border: '1px solid var(--border-default)',
-                                    borderRadius: '0.4rem',
-                                    padding: '1rem',
-                                    backgroundColor: 'var(--surface)',
-                                }}
-                            >
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+                            <div key={log.id} className="email-log">
+                                <div className="email-log-header">
                                     <div>
                                         <strong>{log.recipient}</strong>
-                                        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                                        <div className="email-log-subject">
                                             {t('pages.invoices.emailLogs.subject', { subject: log.subject })}
                                         </div>
                                     </div>
-                                    <div
-                                        style={{
-                                            display: 'inline-block',
-                                            padding: '0.35rem 0.8rem',
-                                            borderRadius: '0.3rem',
-                                            backgroundColor: statusColors[log.status] ?? 'var(--text-muted)',
-                                            color: 'var(--white)',
-                                            fontSize: '0.8rem',
-                                            fontWeight: '600',
-                                            textAlign: 'center',
-                                            minWidth: '80px',
-                                        }}
-                                    >
+                                    <div className={`email-log-status email-log-status--${log.status}`}>
                                         {statusLabels[log.status] ?? t('pages.invoices.emailLogs.status.unknown')}
                                     </div>
                                 </div>
 
-                                <div style={{ fontSize: '0.85rem', color: 'var(--text-body)', marginBottom: '0.5rem' }}>
+                                <div className="email-log-meta">
                                     <div>{t('pages.invoices.emailLogs.queued')} {formatDateTime(log.created_at, settings)}</div>
                                     {log.sent_at && <div>{t('pages.invoices.emailLogs.sent')} {formatDateTime(log.sent_at, settings)}</div>}
                                 </div>
 
                                 {log.error_message && (
-                                    <div
-                                        style={{
-                                            backgroundColor: 'var(--danger-100)',
-                                            border: '1px solid var(--danger-300)',
-                                            borderRadius: '0.3rem',
-                                            padding: '0.5rem 0.75rem',
-                                            fontSize: '0.85rem',
-                                            color: 'var(--danger-700)',
-                                            marginBottom: '0.5rem',
-                                            fontFamily: 'monospace',
-                                        }}
-                                    >
+                                    <div className="email-log-error">
                                         {log.error_message}
                                     </div>
                                 )}
@@ -140,7 +84,7 @@ export function EmailLogsModal({
                     </div>
                 )}
 
-                <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'flex-end' }}>
+                <div className="dialog-actions email-logs-footer">
                     <button className="button button-secondary" onClick={onClose} type="button">
                         <FontAwesomeIcon icon={faXmark} fixedWidth />
                         {t('common.close')}

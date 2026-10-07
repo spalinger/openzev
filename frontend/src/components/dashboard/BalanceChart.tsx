@@ -32,7 +32,7 @@ export function BalanceChart({
     const { t } = useTranslation()
     return (
         <section className="card">
-            <h3 style={{ marginTop: 0 }}>
+            <h3>
                 {t('pages.dashboard.consumptionAndProduction')}
                 {zevName ? ` — ${zevName}` : ''}
                 {participantName ? ` — ${participantName}` : ''}
@@ -40,9 +40,9 @@ export function BalanceChart({
             {data.length === 0 ? (
                 <p className="muted">{t('pages.dashboard.noData')}</p>
             ) : (
-                <div className="form-grid" style={{ gap: '2rem' }}>
+                <div className="form-grid balance-chart-grid">
                     <div>
-                        <p style={{ margin: '0 0 0.5rem', fontWeight: 600, fontSize: '0.875rem', color: CHART_LABEL }}>
+                        <p className="balance-chart-label" style={{ color: CHART_LABEL }}>
                             {t('pages.dashboard.consumption')}
                         </p>
                         <ResponsiveContainer width="100%" height={300}>
@@ -75,7 +75,7 @@ export function BalanceChart({
                         </ResponsiveContainer>
                     </div>
                     <div>
-                        <p style={{ margin: '0 0 0.5rem', fontWeight: 600, fontSize: '0.875rem', color: CHART_LABEL }}>
+                        <p className="balance-chart-label" style={{ color: CHART_LABEL }}>
                             {t('pages.dashboard.production')}
                         </p>
                         <ResponsiveContainer width="100%" height={300}>
