@@ -846,10 +846,11 @@ in isolation therefore yields the same share as a full ZEV run.
 month's `monthly_amount` is recovered exactly once, regardless of how membership
 changed during the period — subject to the rounding shortfall below.
 
-**Rounding.**  Line totals are rounded to the centime independently
-(§6), so a fee that does not divide evenly leaves the community short by up to
-`N - 1` centimes per month: CHF 100 across 3 participants bills 33.33 each and
-recovers 99.99.  This is deliberate.  The alternative — assigning the leftover
+**Rounding.**  Line totals are rounded half-up to the centime independently
+(§6), so a fee that does not divide evenly can miss the monthly amount by up to
+half a centime per participant, in either direction: CHF 100 across 3
+participants bills 33.33 each and recovers 99.99; across 6 it bills 16.67 each
+and recovers 100.02.  This is deliberate.  The alternative — assigning the leftover
 centimes to one participant by a deterministic order — couples every invoice to
 the others and reconciles only when every participant is actually invoiced.
 Consistent with the treatment of an indivisible local-energy pool, where the
