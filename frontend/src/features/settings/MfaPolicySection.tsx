@@ -26,13 +26,16 @@ export function MfaPolicySection() {
     // Only a positive "not configured" disables the form; while loading or on
     // a failed probe the API's own validation remains the backstop.
     const keyMissing = healthQuery.data ? !healthQuery.data.mfa.encryption_key_configured : false
+    // Policy fields arrive only with an admin's loaded settings; stay disabled until then.
+    const policyLoaded = settings.mfa_required !== undefined && settings.mfa_grace_period_days !== undefined
+    const disabled = keyMissing || !policyLoaded
 
-    const [required, setRequired] = useState(settings.mfa_required)
-    const [graceDays, setGraceDays] = useState(String(settings.mfa_grace_period_days))
+    const [required, setRequired] = useState(settings.mfa_required ?? false)
+    const [graceDays, setGraceDays] = useState(String(settings.mfa_grace_period_days ?? ''))
 
     useEffect(() => {
-        setRequired(settings.mfa_required)
-        setGraceDays(String(settings.mfa_grace_period_days))
+        setRequired(settings.mfa_required ?? false)
+        setGraceDays(String(settings.mfa_grace_period_days ?? ''))
     }, [settings.mfa_required, settings.mfa_grace_period_days])
 
     const saveMutation = useMutation({
@@ -63,7 +66,7 @@ export function MfaPolicySection() {
             {keyMissing && <div className="warning-banner" role="status">{t('adminSystemSettings.mfaPolicy.keyMissing')}</div>}
 
             <form className="form-grid" onSubmit={handleSubmit}>
-                <fieldset disabled={keyMissing} style={{ border: 0, padding: 0, margin: 0 }}>
+                <fieldset disabled={disabled} style={{ border: 0, padding: 0, margin: 0 }}>
                     <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                         <input
                             type="checkbox"
@@ -81,7 +84,7 @@ export function MfaPolicySection() {
                         type="number"
                         min={0}
                         max={365}
-                        disabled={keyMissing}
+                        disabled={disabled}
                         value={graceDays}
                         onChange={(event) => setGraceDays(event.target.value)}
                     />
@@ -89,7 +92,7 @@ export function MfaPolicySection() {
                 </label>
 
                 <div className="actions-row actions-row-end actions-row-wrap">
-                    <button className="button button-primary" type="submit" disabled={keyMissing || saveMutation.isPending}>
+                    <button className="button button-primary" type="submit" disabled={disabled || saveMutation.isPending}>
                         {t('adminSystemSettings.regional.save')}
                     </button>
                 </div>

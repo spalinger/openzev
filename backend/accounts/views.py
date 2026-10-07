@@ -37,6 +37,7 @@ from .serializers import (
     AdminUserSerializer, SelfUserSerializer, UserSerializer, UserCreateSerializer, ChangePasswordSerializer, CustomTokenObtainPairSerializer,
     ApiKeySerializer, ApiKeyCreateSerializer, AdminApiKeySerializer,
     AppSettingsSerializer,
+    PublicAppSettingsSerializer,
     FeatureFlagSerializer,
     TotpDeviceSerializer,
     VatRateSerializer,
@@ -609,10 +610,12 @@ def change_password(request):
 @api_view(["GET", "PATCH"])
 @permission_classes([IsAuthenticated])
 def app_settings(request):
+    """Everyone reads the date formats; only admins read or write the MFA policy."""
     settings_instance = AppSettings.load()
 
     if request.method == "GET":
-        return Response(AppSettingsSerializer(settings_instance).data)
+        serializer_class = AppSettingsSerializer if request.user.is_admin else PublicAppSettingsSerializer
+        return Response(serializer_class(settings_instance).data)
 
     if not request.user.is_admin:
         record_audit_event(
@@ -949,8 +952,8 @@ class MfaStatusView(APIView):
             "recovery_codes_remaining": (
                 user.mfa_recovery_codes.filter(used_at__isnull=True).count() if protected else 0
             ),
-            # Whether the policy names this user's role. The frontend's
-            # enrolment gate acts on ``required`` with no factor registered.
+            # Whether the policy applies to this account; the enrolment gate
+            # acts on it.
             "required": deadline is not None,
             # An ISO datetime rather than a bare date: the deadline is a
             # moment, and the gate compares it with now. Null once enrolled —

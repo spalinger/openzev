@@ -130,9 +130,9 @@ export interface AppSettings {
     date_format_short: ShortDateFormat
     date_format_long: LongDateFormat
     date_time_format: DateTimeFormat
-    /** Every account must hold a second factor (a passkey or TOTP). */
-    mfa_required: boolean
-    mfa_grace_period_days: number
+    /** Every account must hold a second factor (a passkey or TOTP). Admin-only. */
+    mfa_required?: boolean
+    mfa_grace_period_days?: number
     updated_at: string
 }
 

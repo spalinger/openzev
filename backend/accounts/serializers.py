@@ -285,7 +285,23 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         return token
 
 
+class PublicAppSettingsSerializer(serializers.ModelSerializer):
+    """Date formats for any signed-in account; the MFA policy is admin-only."""
+
+    class Meta:
+        model = AppSettings
+        fields = [
+            "date_format_short",
+            "date_format_long",
+            "date_time_format",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
 class AppSettingsSerializer(serializers.ModelSerializer):
+    """Admin read and write serializer: date formats plus the MFA policy."""
+
     class Meta:
         model = AppSettings
         fields = [

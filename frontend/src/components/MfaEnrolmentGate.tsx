@@ -9,8 +9,8 @@ import { formatDateTime, useAppSettings } from '../lib/appSettings'
 import { mfaGateState } from '../lib/mfaGate'
 
 /**
- * The app shell is withheld from a user whose role must hold a second factor
- * and who has none. Spec 2026-09-two-factor-authentication.md §7.3.
+ * The app shell is withheld from a user the two-factor policy applies to and
+ * who has no factor. Spec 2026-09-two-factor-authentication.md §7.3.
  *
  * Before `grace_until` the interstitial can be dismissed for the session; after
  * it, it cannot. The grace period exists because switching the requirement on

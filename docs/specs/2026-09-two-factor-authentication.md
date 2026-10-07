@@ -211,7 +211,9 @@ printout stops working.
 `clean()` rejects `mfa_required=True` when `MFA_ENCRYPTION_KEYS` is unset (§4.5) — a policy that
 cannot be honoured must not be saveable.
 
-**Serializer:** `AppSettingsSerializer` gains both fields, writable by `admin` only. Validation lives
+**Serializer:** `AppSettingsSerializer` gains both fields, readable and writable by `admin` only: a
+non-admin `GET app-settings/` goes through `PublicAppSettingsSerializer` (date formats and `updated_at`) and
+learns whether the policy applies to them from `me/mfa/` (`required`, `grace_until`). Validation lives
 in `AppSettings.validate_mfa_required`, shared by `clean()` and the serializer (DRF does not run
 `clean()`), and switching the requirement off never needs a key. Policy changes are audited through the existing
 `app_settings.update` diff.
@@ -368,6 +370,7 @@ the already-installed `qrcode` dependency, so the secret never reaches a third-p
 | Endpoint | Method | Permission | Behaviour |
 |---|---|---|---|
 | `users/<int:pk>/mfa/` | DELETE | `IsAdmin` | Removes **all** factors and recovery codes for that user. Audited as `auth.mfa.reset` (D3) |
+| `app-settings/` | GET | `IsAuthenticated` | Includes `mfa_required`, `mfa_grace_period_days` for an admin only (§4.4) |
 | `app-settings/` | PATCH | `IsAdmin` | Now also accepts `mfa_required`, `mfa_grace_period_days` |
 
 An admin **cannot** enrol a factor *for* another user, and cannot read any secret — the reset is
@@ -594,10 +597,11 @@ refresh is never caught by it.
 **File:** `frontend/src/pages/AdminSystemSettingsPage.tsx` · Route `/admin/system-settings`
 
 The existing **Security** area (or a new tab alongside `regional`, `features`, `oauth`, `vat`)
-gains a checkbox for `mfa_required` ("Require two-factor authentication for every account"; a
-multi-select of roles until #761) and a number input for `mfa_grace_period_days`.
+gains a checkbox for `mfa_required` ("Require two-factor authentication for every account") and a
+number input for `mfa_grace_period_days`.
 Both are disabled, with an explanatory hint, when `/auth/system-health/` reports the encryption
-key as unconfigured — mirroring the pattern PR #732 used for the dynamic-source picker.
+key as unconfigured — mirroring the pattern PR #732 used for the dynamic-source picker — and while
+the admin's settings have not loaded yet (`MfaPolicySection`).
 
 ### 7.5 `AdminAccountsPage`
 
@@ -608,7 +612,7 @@ naming the user and what will be removed. The row also shows which factors the a
 `AdminUserSerializer.mfa_methods`) — see `2026-03-community-and-access.md` §6.4.
 An admin reset also signs the account out of every session it holds (`revoke_sessions`, ADR 0022): whoever
 was inside may have been let in by the factors that were just removed.
-The row also shows, when the policy names its role, a compliance badge — "2FA required · due
+The row also shows, while the policy is on, a compliance badge — "2FA required · due
 `<date>`" during the grace period, "2FA overdue" once it has passed — and there is a "Needs setup"
 filter for exactly those accounts (`AdminUserSerializer.mfa_compliance`, `mfa.compliance_status`) —
 see `2026-03-community-and-access.md` §6.1 and §6.4.
