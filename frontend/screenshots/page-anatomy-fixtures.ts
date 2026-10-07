@@ -22,6 +22,8 @@ export type ApiState = {
   interval?: 'monthly' | 'quarterly' | 'semi_annual' | 'annual'
   communityStart?: string
   populated?: boolean
+  /** Metering points per community in the populated list (default 1). */
+  meterCount?: number
   periodRows?: InvoicePeriodParticipantRow[]
   invoices?: Array<{
     id: string; invoice_number: string; zev: string; zev_name: string;
@@ -37,6 +39,10 @@ export type ApiState = {
   /** Fake timers too, so a test can step polling intervals itself. */
   fakeTimers?: boolean
 }
+
+/** The fixture's metering point IDs in one community: `mp42`, then `mp42-2`, … */
+const meterIds = (zevId: string, count = 1) =>
+  Array.from({ length: count }, (_, index) => `mp${zevId}${index === 0 ? '' : `-${index + 1}`}`)
 
 export async function mockApi(page: Page, state: ApiState = {}) {
   const errors: string[] = []
@@ -95,6 +101,11 @@ export async function mockApi(page: Page, state: ApiState = {}) {
     const selectedId = state.expectedScope ?? (state.preferred && zevs().some(zev => zev.id === state.preferred) ? state.preferred : zevs()[0]?.id)
     const scope = params.get('zev_id')
     const isManagement = !['participant', 'former', 'none'].includes(state.role ?? 'admin')
+    // The selected community's relation decides what may be read (#761).
+    const selectedRelation = (selectedId ? state.roleByZev?.[selectedId] : undefined) ?? state.role ?? 'admin'
+    if (path.endsWith('/zev/metering-point-assignments/') && ['participant', 'former'].includes(selectedRelation)) {
+      return failure(`Participant read of ${path} (403 in production)`)
+    }
     // Only removal scenarios allow an old-scope request during reconciliation.
     if (scope && scope !== selectedId && scope !== state.transitionScope) return failure(`Wrong scope for ${path}: ${scope}, expected ${selectedId}`)
     const requiredScope = ['/dashboard-summary/', '/hourly-profile/', '/data-quality-status/', '/annual-report/', '/invoices/invoices/', '/invoices/invoices/period-overview/', '/readiness/', '/attention/']
@@ -112,7 +123,7 @@ export async function mockApi(page: Page, state: ApiState = {}) {
       && params.has('participant_id') && params.get('participant_id') !== `p${scope ?? selectedId}`) {
       return failure(`Participant from another scope for ${path}: ${params.get('participant_id')}`)
     }
-    if (params.has('metering_point') && params.get('metering_point') !== `mp${scope ?? selectedId}`) {
+    if (params.has('metering_point') && !meterIds(scope ?? selectedId ?? '', state.meterCount).includes(params.get('metering_point')!)) {
       return failure(`Meter from another scope for ${path}: ${params.get('metering_point')}`)
     }
     // Charts open the current month; meter health uses a rolling window.
@@ -218,9 +229,12 @@ export async function mockApi(page: Page, state: ApiState = {}) {
     }))
     const lists: Record<string, unknown[]> = {
       '/zev/participants/': participants,
-      '/zev/metering-points/': ids.filter(id => !scope || id === scope).map(id => ({ id: `mp${id}`, zev: id, meter_id: `MP-${id}`, metering_code: `MP-${id}`,
-        meter_type: 'consumption', is_active: true, has_behind_meter_generation: false,
-        reading_count: 0, assignment_count: 0, first_reading_at: null, last_reading_at: null })),
+      '/zev/metering-points/': ids.filter(id => !scope || id === scope).flatMap(id => meterIds(id, state.meterCount).map(meterId => {
+        const label = meterId.replace(/^mp/, 'MP-')
+        return { id: meterId, zev: id, meter_id: label, metering_code: label,
+          meter_type: 'consumption', is_active: true, has_behind_meter_generation: false,
+          reading_count: 0, assignment_count: 0, first_reading_at: null, last_reading_at: null }
+      })),
       '/zev/metering-point-assignments/': [],
       '/zev/buildings/': [],
       '/zev/party-roles/': [],
