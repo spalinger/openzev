@@ -199,6 +199,28 @@ export function resolveMeterSelection({
     }
 }
 
+/**
+ * Chart default without `?metering_point=`: the community total for management
+ * readers, a participant's sole meter, else none. Derived; never written to the URL.
+ */
+export function defaultMeterSelection({
+    isManagedScope,
+    selectedZevId,
+    meterListResolved,
+    meteringPointIds,
+}: {
+    isManagedScope: boolean
+    selectedZevId: string
+    meterListResolved: boolean
+    meteringPointIds: ReadonlyArray<string>
+}): { selectedMpId: string; isResolving: boolean } {
+    if (isManagedScope) {
+        return { selectedMpId: selectedZevId ? ALL_METERING_POINTS_VALUE : '', isResolving: false }
+    }
+    if (!meterListResolved) return { selectedMpId: '', isResolving: true }
+    return { selectedMpId: meteringPointIds.length === 1 ? meteringPointIds[0] : '', isResolving: false }
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports' }) {
@@ -257,22 +279,33 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
     const isSentinelRequested = requestedMpId === ALL_METERING_POINTS_VALUE
     const meterListResolved = mpQuery.data !== undefined
     const meterListPending = mpQuery.isPending || mpQuery.isFetching
+    const meteringPointIds = meteringPoints.map(mp => mp.id)
     const { selectedMpId, isResolving: selectionUnresolved, valid: validMpSelection } = resolveMeterSelection({
         requestedMpId,
         meterListResolved,
-        meteringPointIds: meteringPoints.map(mp => mp.id),
+        meteringPointIds,
         isManagedScope,
         selectedZevId,
     })
-    const isResolvingMpSelection = selectionUnresolved && meterListPending
+    // Without an explicit meter the chart opens on a default (the Data
+    // Quality tab keeps "all meters").
+    const defaultSelection = defaultMeterSelection({ isManagedScope, selectedZevId, meterListResolved, meteringPointIds })
+    const chartMpId = requestedMpId ? selectedMpId : defaultSelection.selectedMpId
+    const isResolvingMpSelection = (selectionUnresolved && meterListPending)
+        || (!requestedMpId && defaultSelection.isResolving && !mpQuery.isError)
+    const hasNoMeters = meterListResolved && meteringPoints.length === 0
     const qualityBlockedOnMeterList = tab === 'quality' && !!requestedMpId && !isSentinelRequested && !meterListResolved
-    const isZevTotal = selectedMpId === ALL_METERING_POINTS_VALUE
+    const isZevTotal = chartMpId === ALL_METERING_POINTS_VALUE
+    // The total is requested at once but only shown once the meter list is
+    // known, so an empty community never flashes a chart.
+    const awaitingMeterList = !!chartMpId && !meterListResolved && !mpQuery.isError
+    const showChart = !!chartMpId && !hasNoMeters && !awaitingMeterList
     const chartQuery = useQuery({
         // Distinct cache entry per ZEV, since the "meteringPointId" slot of
         // the key is the same fixed sentinel regardless of which ZEV is
         // being totalled.
         queryKey: queryKeys.metering.chartData(
-            isZevTotal ? `zev:${selectedZevId}` : selectedMpId,
+            isZevTotal ? `zev:${selectedZevId}` : chartMpId,
             period.from,
             period.to,
             effectiveBucket,
@@ -280,8 +313,8 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
         queryFn: () =>
             isZevTotal
                 ? fetchChartData({ zevId: selectedZevId, dateFrom: period.from, dateTo: period.to, bucket: effectiveBucket })
-                : fetchChartData({ meteringPoint: selectedMpId, dateFrom: period.from, dateTo: period.to, bucket: effectiveBucket }),
-        enabled: periodReady && tab === 'chart' && (isZevTotal ? !!selectedZevId : !!selectedMpId),
+                : fetchChartData({ meteringPoint: chartMpId, dateFrom: period.from, dateTo: period.to, bucket: effectiveBucket }),
+        enabled: periodReady && tab === 'chart' && !hasNoMeters && (isZevTotal ? !!selectedZevId : !!chartMpId),
     })
 
     // The Data Quality tab has no concept of "whole ZEV total" — it already
@@ -289,7 +322,7 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
     // is what the sentinel would mean here anyway. Forwarding it as a
     // metering_point filter would 500 the request (it isn't a UUID, #671),
     // so it's treated the same as "no meter filter" on this tab.
-    const qualityMeteringPointFilter = isZevTotal ? undefined : selectedMpId || undefined
+    const qualityMeteringPointFilter = selectedMpId === ALL_METERING_POINTS_VALUE ? undefined : selectedMpId || undefined
 
     const qualityQuery = useQuery({
         queryKey: queryKeys.metering.qualityStatus(period.from, period.to, isManagedScope ? selectedZevId || undefined : undefined, qualityMeteringPointFilter),
@@ -376,7 +409,7 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
         })
     }, [])
 
-    const selectedMp = meteringPoints.find((m) => m.id === selectedMpId)
+    const selectedMp = meteringPoints.find((m) => m.id === chartMpId)
     const selectedMpDataRange = meteringPointDataRange(selectedMp)
 
     useEffect(() => {
@@ -559,25 +592,27 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
                                 gap: '1rem',
                             }}
                         >
-                            <label>
-                                <span>{t('pages.meteringData.meteringPoint')}</span>
-                                <select
-                                    value={selectedMpId}
-                                    onChange={(e) => handleMpChange(e.target.value)}
-                                >
-                                    <option value="">{t('pages.meteringData.selectMeteringPoint')}</option>
-                                    {isManagedScope && selectedZevId && (
-                                        <option value={ALL_METERING_POINTS_VALUE}>
-                                            {t('pages.meteringData.wholeZevTotal')}
-                                        </option>
-                                    )}
-                                    {meteringPoints.map((mp) => (
-                                        <option key={mp.id} value={mp.id}>
-                                            {meteringPointOptionLabel(mp, zevNameById.get(mp.zev), t)}
-                                        </option>
-                                    ))}
-                                </select>
-                            </label>
+                            {!hasNoMeters && (
+                                <label>
+                                    <span>{t('pages.meteringData.meteringPoint')}</span>
+                                    <select
+                                        value={chartMpId}
+                                        onChange={(e) => handleMpChange(e.target.value)}
+                                    >
+                                            {!chartMpId && <option value="">{t('pages.meteringData.selectMeteringPoint')}</option>}
+                                        {isManagedScope && selectedZevId && (
+                                            <option value={ALL_METERING_POINTS_VALUE}>
+                                                {t('pages.meteringData.wholeZevTotal')}
+                                            </option>
+                                        )}
+                                        {meteringPoints.map((mp) => (
+                                            <option key={mp.id} value={mp.id}>
+                                                {meteringPointOptionLabel(mp, zevNameById.get(mp.zev), t)}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </label>
+                            )}
 
                             <label>
                                 <span>{t('pages.meteringData.resolution')}</span>
@@ -621,7 +656,7 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
                                     // (this tab already lists every meter as its own row) — show
                                     // it as the "all metering points" option instead of a value
                                     // React can't match to anything (#671).
-                                    value={isZevTotal ? '' : selectedMpId}
+                                    value={selectedMpId === ALL_METERING_POINTS_VALUE ? '' : selectedMpId}
                                     onChange={(e) => handleMpChange(e.target.value)}
                                 >
                                     <option value="">{t('pages.meteringData.allMeteringPoints')}</option>
@@ -638,21 +673,34 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
 
                 <Tabs.Panel value="chart">
                     <div className="page-stack">
-                        {isResolvingMpSelection ? (
+                        {isResolvingMpSelection || awaitingMeterList ? (
                             <PageSkeleton variant="card" />
-                        ) : !selectedMpId && !requestedMpId ? (
+                        ) : hasNoMeters ? (
+                            isManagedScope ? (
+                                <EmptyState
+                                    titleKey="pages.meteringData.noMetersTitle"
+                                    descriptionKey="pages.meteringData.noMeters"
+                                    actions={[{ labelKey: 'nav.meteringPoints', to: '/metering/points' }]}
+                                />
+                            ) : (
+                                <EmptyState
+                                    titleKey="pages.meteringData.noOwnMetersTitle"
+                                    descriptionKey="pages.meteringData.noOwnMeters"
+                                />
+                            )
+                        ) : !chartMpId && !requestedMpId && meterListResolved ? (
                             <EmptyState
                                 titleKey="pages.meteringData.noPointSelectedTitle"
                                 descriptionKey="pages.meteringData.noPointSelected"
                             />
                         ) : null}
 
-                        {selectedMpId && chartQuery.isLoading && <PageSkeleton variant="card" />}
-                        {selectedMpId && chartQuery.isError && (
+                        {showChart && chartQuery.isLoading && <PageSkeleton variant="card" />}
+                        {showChart && chartQuery.isError && (
                             <Notice tone="error" onRetry={() => void chartQuery.refetch()} isRetrying={chartQuery.isFetching}>{formatApiError(chartQuery.error)}</Notice>
                         )}
 
-                        {selectedMpId && chartQuery.data && (
+                        {showChart && chartQuery.data && (
                             <>
                                 <div className="stat-grid">
                                     <StatCard
@@ -752,7 +800,7 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
                                     <p className="muted">{t('pages.meteringData.rawTable.unavailableForZevTotal')}</p>
                                 ) : (
                                     <RawMeteringTable
-                                        meteringPointId={selectedMpId}
+                                        meteringPointId={chartMpId}
                                         dateFrom={period.from}
                                         dateTo={period.to}
                                         hasOut={hasOut}

@@ -776,6 +776,22 @@ chart/quality data survive failed refetches, with an error notice; meter-list
 failure has Retry. Import history does not request the meter list or period
 data.
 
+**Default chart selection:** without `?metering_point=`, the Chart tab derives a
+selection (`defaultMeterSelection`) and never writes it to the URL, so links
+stay role-neutral and explicit-meter cleanup is unchanged. Management readers
+(admin, manager, viewer) with a selected community get the whole-ZEV total
+(`__zev_total__`): it is requested without waiting for the meter list but
+shown only once that list has resolved (or failed), with a skeleton until then,
+so an empty community never flashes a chart. A participant gets their only
+meter in the selected community once the list resolves (skeleton until then),
+and no selection with several (placeholder option and the `noPointSelected`
+empty state); the empty placeholder option is offered only while nothing is
+selected. A resolved empty meter list replaces the chart with `noMeters`
+(management, linking to `/metering/points`) or `noOwnMeters` (participant),
+hides the meter selector and stops the chart query. An explicit
+`metering_point` always wins; Data Quality keeps "all metering points" when none
+is given.
+
 Import history is the third tab of the same hub —
 `/metering/imports` renders `MeteringChartPage tab="imports"`, which
 mounts `ImportsContent` (header-free body shared with `ImportsPage`, `PeriodSelector` hidden on

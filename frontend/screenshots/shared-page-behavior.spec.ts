@@ -103,8 +103,9 @@ test('scope switches clear invalid meters and participants before their next req
   state.expectedScope = '43'
   await page.locator('.zev-dropdown-item').filter({ hasText: 'Other ZEV' }).click()
   await expect(page.locator('main .eyebrow').first()).toHaveText('Other ZEV')
-  await expect(meter).toHaveValue('')
+  // The unavailable meter is cleared; the chart falls back to the new community's total.
   await expect.poll(() => new URL(page.url()).searchParams.has('metering_point')).toBe(false)
+  await expect(meter).toHaveValue('__zev_total__')
   await expect(page.locator('.period-selector-range')).toHaveText('12.02.2026 → 14.03.2026')
   expect(new URL(page.url()).hash).toBe('#readings')
 
@@ -173,7 +174,9 @@ test('the meter-list retry disables while a cached list refetches', async ({ pag
   const errors = await mockApi(page, state)
   await page.goto('/metering/chart?period_start=2026-10-01&period_end=2026-10-31')
   const meter = page.getByRole('combobox', { name: 'Metering Point *', exact: true })
-  await expect(meter.locator('option')).toHaveCount(3)
+  // Whole-community total (the management default) and the one meter; no empty placeholder.
+  await expect(meter.locator('option')).toHaveCount(2)
+  await expect(meter).toHaveValue('__zev_total__')
   state.endpoint = '/zev/metering-points/'
   state.failed = true
   await page.evaluate(() => {
