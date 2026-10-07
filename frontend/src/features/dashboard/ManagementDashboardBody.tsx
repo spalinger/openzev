@@ -65,6 +65,10 @@ export function ManagementDashboardBody({ interval, period, onPeriodChange, peri
     })
 
     const summary = summaryQuery.data
+    const highlightParticipantIds = useMemo(
+        () => selectedParticipantId ? [selectedParticipantId] : undefined,
+        [selectedParticipantId],
+    )
     const selectedZevName = selectedZev?.name
     const selectedParticipantName = summary?.summary_kind === 'zev' ? summary.selected_participant_name : undefined
     // Behind-meter generation makes the selected participant's from-ZEV rate misleading (spec §7.2).
@@ -150,7 +154,7 @@ export function ManagementDashboardBody({ interval, period, onPeriodChange, peri
                         <EnergyFlowCard
                             totals={summary.zev_totals}
                             participantStats={summary.participant_stats}
-                            highlightParticipantId={selectedParticipantId || undefined}
+                            highlightParticipantIds={highlightParticipantIds}
                             zevName={selectedZevName}
                         />
                     )}

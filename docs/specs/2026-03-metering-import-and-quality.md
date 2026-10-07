@@ -542,6 +542,10 @@ Returns two response shapes, told apart by `summary_kind` (#761; the key was
 `role`, with `"zev_owner"` / `"participant"`, until the platform role
 collapsed):
 
+Both dashboard endpoints reject malformed `zev_id`, `participant_id`,
+`date_from` and `date_to` with field-specific HTTP 400 errors before resolving
+scope. Dashboard summary dates are optional; hourly profile requires both.
+
 **Community (manager, viewer, admin) response:**
 
 ```json
@@ -612,6 +616,28 @@ net-metered in the window (personally holds a flagged meter); each entry of
 `zev_participant_stats` (the Sankey/ZEV-wide breakdown) also carries its own
 `has_behind_meter_generation`, same semantics as the owner response above.
 
+Participant cards, timeline and flow use one pass over date-filtered readings
+from enabled membership ZEVs. Personal totals include consumption attributed
+to the account's live records (`valid_to` null or at least today), including
+community shares normalized by `allocation_weight` and membership eligibility
+on each reading's Swiss civil date, even without a personal meter.
+Raw-reading access remains assignment-scoped. Each ZEV has its own timestamp
+pool; imports and exports are calculated per ZEV before summing communities.
+Names are loaded for every attributed participant, including community-only members.
+
+Personal `total_consumed_kwh`, `consumed_from_zev_kwh` and
+`imported_from_grid_kwh` equal the sum of the account's flow rows'
+`total_consumed_kwh`, `from_zev_kwh` and `from_grid_kwh`, respectively; timeline
+sums equal the same values. The flow combines live membership rows with
+consumption into one node, labelled Total consumption when several rows consume,
+and groups other records as Others. Manager drill-downs highlight only the selection.
+If membership IDs are absent or empty, highlighting falls back to
+`current_participant_id` (the smallest live UUID in scope); this preserves
+single-record highlighting but cannot reconstruct other account-owned IDs.
+
+Disabled-only participant scopes return zero totals, empty rows and a null
+`current_participant_id`. Management access to disabled communities is unchanged.
+
 **Local/grid energy split algorithm (timestamp-level):**
 
 For each timestamp $t$:
@@ -649,6 +675,14 @@ though no participant is charged for them.
 - If `zev_id` provided → validate ownership for non-admin users.
 - If omitted and user owns exactly 1 ZEV → auto-select.
 - If omitted and user owns multiple ZEVs → return 400 requiring selection.
+
+**Hourly profile:** `GET /readings/hourly-profile/` returns `hourly_profile`
+(24 hourly local/grid averages, or null) and, when computed,
+`has_behind_meter_generation`. Participant scope excludes disabled ZEVs before
+selecting a community; disabled-only scopes return a null profile. With several
+enabled memberships and no `zev_id`, it retains a single-community profile,
+selecting the smallest enabled ZEV UUID; it does not combine communities.
+Management requests require a participant selection to compute a profile.
 
 ### 5.5 Data quality status
 
@@ -1113,8 +1147,9 @@ type MeteringDashboardSummary =
 
 | Test class | Validates |
 |---|---|
-| `DashboardSummaryAlignmentTests` | §5.4: timestamp-level local/grid split for participant view; owner participant-filter produces correct totals; multi-participant filtering exclusion |
+| `DashboardSummaryAlignmentTests` | §5.4: timestamp-level local/grid split; owner participant filtering; malformed dashboard query parameters for participant, manager and admin accounts |
 | `DashboardMidPeriodTransferTests` | §5.4: readings attributed per assignment timestamp for owner stats, participant totals/timeline, ZEV-wide stats, and the hourly profile; post-transfer readings excluded |
+| `SharedMeteringDashboardTests` | §5.4: personal/community reconciliation; multi-record accounts; separate ZEV pools; membership and assignment boundaries; Swiss period boundaries; disabled membership scopes; weighted hourly profile |
 | `ParticipantImportRestrictionTests` | §6.2: participant cannot list import logs, preview CSV, or upload CSV (all 403) |
 | `MeteringRawDataEndpointTests` | §5.3: owner gets daily-grouped raw rows with correct direction sums; participant can read own metering point's raw data |
 | `ChartDataEndpointTests` | §5.2: direction aggregates; Swiss day/month boundaries agree with raw data (`test_daily_bucket_uses_the_same_civil_day_as_raw_data`, `test_month_bucket_does_not_cross_the_civil_month_boundary`); hourly buckets stay distinct across both DST transitions |

@@ -5,11 +5,11 @@ import type { ZevOwnerDashboardSummary } from '../../types/api'
 interface EnergyFlowCardProps {
     totals: ZevOwnerDashboardSummary['zev_totals']
     participantStats: ZevOwnerDashboardSummary['participant_stats']
-    highlightParticipantId?: string
+    highlightParticipantIds?: string[]
     zevName?: string
 }
 
-export function EnergyFlowCard({ totals, participantStats, highlightParticipantId, zevName }: EnergyFlowCardProps) {
+export function EnergyFlowCard({ totals, participantStats, highlightParticipantIds, zevName }: EnergyFlowCardProps) {
     const { t } = useTranslation()
     if (participantStats.length === 0) return null
     return (
@@ -18,7 +18,7 @@ export function EnergyFlowCard({ totals, participantStats, highlightParticipantI
                 {t('pages.dashboard.energyFlow.title')}
                 {zevName ? ` — ${zevName}` : ''}
             </h3>
-            <EnergyFlowChart totals={totals} participantStats={participantStats} highlightParticipantId={highlightParticipantId} />
+            <EnergyFlowChart totals={totals} participantStats={participantStats} highlightParticipantIds={highlightParticipantIds} />
         </section>
     )
 }

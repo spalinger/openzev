@@ -5,6 +5,7 @@ import { act } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import { MantineProvider } from '@mantine/core'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { MembershipParticipant } from '../src/types/api'
 
 const mockState = vi.hoisted(() => ({
     // The account's relation to the selected community (#761).
@@ -20,6 +21,8 @@ const mockState = vi.hoisted(() => ({
     invoices: [] as Invoice[],
     invoiceCalls: [] as Array<unknown>,
     invoiceError: null as Error | null,
+    participantMemberships: [{ id: 'me', valid_from: '2026-01-01', valid_to: null, live: true }] as MembershipParticipant[],
+    membershipsAvailable: true,
 }))
 
 vi.mock('react-i18next', () => ({
@@ -33,10 +36,12 @@ vi.mock('../src/lib/auth', () => ({
     useAuth: () => ({
         user: {
             role: 'user',
-            memberships: [
-                { zev: 'z1', zev_billing_interval: mockState.membershipInterval, participants: [{ id: 'me', valid_from: '2026-01-01', valid_to: null, live: true }] },
-                ...(mockState.secondMembershipInterval ? [{ zev: 'z2', zev_billing_interval: mockState.secondMembershipInterval, participants: [{ id: 'me-z2', valid_from: '2026-01-01', valid_to: null, live: true }] }] : []),
-            ],
+            memberships: mockState.membershipsAvailable
+                ? [
+                    ...(mockState.participantMemberships.length ? [{ zev: 'z1', zev_billing_interval: mockState.membershipInterval, participants: mockState.participantMemberships }] : []),
+                    ...(mockState.secondMembershipInterval ? [{ zev: 'z2', zev_billing_interval: mockState.secondMembershipInterval, participants: [{ id: 'me-z2', valid_from: '2026-01-01', valid_to: null, live: true }] }] : []),
+                ]
+                : undefined,
         },
     }),
 }))
@@ -90,6 +95,7 @@ vi.mock('../src/lib/api/invoices', () => ({
 }))
 
 import { DashboardPage } from '../src/pages/DashboardPage'
+import { ParticipantDashboardBody } from '../src/features/dashboard/ParticipantDashboardBody'
 import { ParticipantInvoicesCard } from '../src/components/dashboard/ParticipantInvoicesCard'
 import { openInvoicePdf } from '../src/lib/api/invoices'
 import type { Invoice } from '../src/types/api'
@@ -105,6 +111,8 @@ afterEach(() => {
     mockState.secondMembershipSelectable = true
     mockState.invoiceError = null
     mockState.invoiceCalls = []
+    mockState.participantMemberships = [{ id: 'me', valid_from: '2026-01-01', valid_to: null, live: true }]
+    mockState.membershipsAvailable = true
 })
 
 function makeInvoice(overrides: Partial<Invoice> = {}): Invoice {
@@ -582,6 +590,87 @@ describe('dashboard behavior preservation', () => {
         expect(container.querySelector('tbody button')?.textContent).toContain('common.openPdf')
         await act(async () => { await vi.advanceTimersByTimeAsync(30000) })
         expect(mockState.invoiceCalls).toHaveLength(3)
+    })
+
+    it.each(['missing', 'empty'])('participant flow falls back to the summary ID with %s membership data', async (membershipState) => {
+        mockState.relation = 'participant'
+        mockState.hourlyProfile = null
+        mockState.invoices = []
+        mockState.membershipsAvailable = membershipState !== 'missing'
+        mockState.participantMemberships = []
+        const base = participantSummary('me')
+        mockState.summary = {
+            ...base,
+            zev_participant_stats: [
+                ...base.zev_participant_stats,
+                { participant_id: 'other', participant_name: 'Other', total_consumed_kwh: 30, total_produced_kwh: 0, from_zev_kwh: 20, from_grid_kwh: 10 },
+            ],
+        }
+        const container = await renderDashboard(createElement(ParticipantDashboardBody, {
+            interval: 'monthly',
+            period: { from: '2026-10-01', to: '2026-10-31' },
+            onPeriodChange: vi.fn(),
+            periodReady: true,
+        }))
+        const titles = Array.from(container.querySelectorAll('svg title'), title => title.textContent)
+        expect(titles).toContain('Me: 50 kWh')
+        expect(titles).toContain('pages.dashboard.energyFlow.others: 30 kWh')
+        expect(titles).not.toContain('Other: 30 kWh')
+        expect(titles).toContain('pages.dashboard.energyFlow.localConsumption → Me: 35 kWh')
+        expect(titles).toContain('pages.dashboard.energyFlow.gridImport → Me: 15 kWh')
+    })
+
+    it('participant flow omits a zero-consumption account node and groups consuming records as others', async () => {
+        mockState.relation = 'participant'
+        mockState.hourlyProfile = null
+        mockState.invoices = []
+        const base = participantSummary('me')
+        mockState.summary = {
+            ...base,
+            totals: { consumed_from_zev_kwh: 0, imported_from_grid_kwh: 0, total_consumed_kwh: 0 },
+            zev_totals: { produced_kwh: 20, consumed_kwh: 30, imported_kwh: 10, exported_kwh: 0 },
+            zev_participant_stats: [
+                { ...base.zev_participant_stats[0], total_consumed_kwh: 0, total_produced_kwh: 0, from_zev_kwh: 0, from_grid_kwh: 0 },
+                { participant_id: 'other', participant_name: 'Other', total_consumed_kwh: 30, total_produced_kwh: 0, from_zev_kwh: 20, from_grid_kwh: 10 },
+            ],
+        }
+        const container = await renderDashboard()
+        const titles = Array.from(container.querySelectorAll('svg title'), title => title.textContent)
+        expect(titles).toContain('pages.dashboard.energyFlow.others: 30 kWh')
+        expect(titles.some(title => title?.includes('Me'))).toBe(false)
+        expect(titles.some(title => title?.includes('pages.dashboard.participantStats.totalConsumption'))).toBe(false)
+        expect(titles).toContain('pages.dashboard.energyFlow.localConsumption → pages.dashboard.energyFlow.others: 20 kWh')
+        expect(titles).toContain('pages.dashboard.energyFlow.gridImport → pages.dashboard.energyFlow.others: 10 kWh')
+    })
+
+    it('participant flow combines all current records and leaves ended records with others', async () => {
+        mockState.relation = 'participant'
+        mockState.hourlyProfile = null
+        mockState.invoices = []
+        mockState.participantMemberships = [
+            { id: 'me', valid_from: '2026-01-01', valid_to: null, live: true },
+            { id: 'parking', valid_from: '2026-01-01', valid_to: null, live: true },
+            { id: 'ended', valid_from: '2026-01-01', valid_to: '2026-01-31', live: false },
+        ]
+        const base = participantSummary('me')
+        mockState.summary = {
+            ...base,
+            totals: { consumed_from_zev_kwh: 55, imported_from_grid_kwh: 25, total_consumed_kwh: 80 },
+            zev_totals: { produced_kwh: 100, consumed_kwh: 130, imported_kwh: 75, exported_kwh: 45 },
+            zev_participant_stats: [
+                ...base.zev_participant_stats,
+                { participant_id: 'parking', participant_name: 'Me', total_consumed_kwh: 30, total_produced_kwh: 0, from_zev_kwh: 20, from_grid_kwh: 10 },
+                { participant_id: 'ended', participant_name: 'Former me', total_consumed_kwh: 40, total_produced_kwh: 0, from_zev_kwh: 0, from_grid_kwh: 40 },
+                { participant_id: 'other', participant_name: 'Other', total_consumed_kwh: 10, total_produced_kwh: 0, from_zev_kwh: 0, from_grid_kwh: 10 },
+            ],
+        }
+        const container = await renderDashboard()
+        const titles = Array.from(container.querySelectorAll('svg title'), title => title.textContent)
+        expect(titles).toContain('pages.dashboard.participantStats.totalConsumption: 80 kWh')
+        expect(titles).toContain('pages.dashboard.energyFlow.others: 50 kWh')
+        expect(titles).not.toContain('Me: 50 kWh')
+        expect(titles).toContain('pages.dashboard.energyFlow.localConsumption → pages.dashboard.participantStats.totalConsumption: 55 kWh')
+        expect(titles).toContain('pages.dashboard.energyFlow.gridImport → pages.dashboard.participantStats.totalConsumption: 25 kWh')
     })
 
     it('participant invoices list sent/paid rows with details actions, with or without a PDF', async () => {
