@@ -12,7 +12,7 @@ import {
 import { queryKeys } from '../lib/api/queryKeys'
 import { formatShortDate, useAppSettings } from '../lib/appSettings'
 import { useAuth } from '../lib/auth'
-import { shellRoleForZev } from '../lib/communityAccess'
+import { scopeNoteKey, shellRoleForZev } from '../lib/communityAccess'
 import { PdfPreview } from '../components/PdfPreview'
 import { InvoiceAccessLinkCard } from '../features/invoices/InvoiceAccessLinkCard'
 
@@ -68,6 +68,8 @@ export function InvoiceDetailPage() {
     // invoices); participants without
     // one fall back to /me/invoices.
     const invoiceShellRole = shellRoleForZev(user, invoiceQuery.data?.zev)
+    // The invoice's own community, which may not be the selected one.
+    const invoiceScopeNoteKey = scopeNoteKey(invoiceShellRole)
     const canManageAccessLink = invoiceShellRole === 'admin' || invoiceShellRole === 'manager'
     const isParticipant = invoiceShellRole === 'participant' || invoiceShellRole === 'former'
     const origin = (location.state as { from?: string; period_start?: string; period_end?: string } | null)
@@ -110,6 +112,7 @@ export function InvoiceDetailPage() {
         <div className="page-stack">
             <PageHeader
                 eyebrow={inv.zev_name}
+                scopeNote={invoiceScopeNoteKey ? t(invoiceScopeNoteKey) : undefined}
                 title={t('pages.invoiceDetail.title', { number: inv.invoice_number })}
                 description={`${inv.participant_name} · ${formatShortDate(inv.period_start, settings)} → ${formatShortDate(inv.period_end, settings)}`}
                 actions={

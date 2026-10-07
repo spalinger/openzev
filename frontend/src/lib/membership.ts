@@ -31,3 +31,12 @@ export function soleCommunityName(user: Pick<User, 'memberships'> | null | undef
     const memberships = user?.memberships ?? []
     return memberships.length === 1 ? memberships[0].zev_name : undefined
 }
+
+/** Selected community name, falling back to the switcher entry for participants. */
+export function selectedCommunityName({ selectedZev, entries, selectedZevId }: {
+    selectedZev?: { name: string } | null
+    entries?: ReadonlyArray<{ id: string; name: string }>
+    selectedZevId?: string
+}): string | undefined {
+    return selectedZev?.name ?? entries?.find((entry) => entry.id === selectedZevId)?.name
+}

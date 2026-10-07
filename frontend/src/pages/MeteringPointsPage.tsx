@@ -17,19 +17,21 @@ import { useMeteringPointActions } from '../features/meteringPoints/useMeteringP
 import { useAppSettings } from '../lib/appSettings'
 import { useAuth } from '../lib/auth'
 import { useManagedZev } from '../lib/managedZev'
-import { useCommunityAccess } from '../lib/communityAccess'
-import { soleCommunityName } from '../lib/membership'
+import { useCommunityAccess, useScopeNote } from '../lib/communityAccess'
+import { selectedCommunityName } from '../lib/membership'
 
 export function MeteringPointsPage() {
     const { user } = useAuth()
     const { selectedZevId, selectedZev, entries } = useManagedZev()
     const { canWriteSelectedCommunity: canWrite, isAdmin, isZevScope } = useCommunityAccess()
     const { t } = useTranslation()
+    const scopeNote = useScopeNote()
     // Drafts survive a failed refresh, but never cross accounts, communities or write access.
     return (
         <div className="page-stack">
             <PageHeader
-                eyebrow={selectedZev?.name ?? entries?.find(entry => entry.id === selectedZevId)?.name ?? soleCommunityName(user)}
+                eyebrow={selectedCommunityName({ selectedZev, entries, selectedZevId })}
+                scopeNote={scopeNote}
                 title={t('pages.meteringPoints.title')}
                 description={t(isZevScope ? 'pages.meteringPoints.adminDescription' : 'pages.meteringPoints.participantDescription')}
             />

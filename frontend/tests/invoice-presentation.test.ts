@@ -132,6 +132,8 @@ describe('shared invoice presentation', () => {
         expect(container.querySelectorAll('tbody tr')).toHaveLength(2)
         expect(container.textContent).toContain('Community A')
         expect(container.textContent).toContain('Community B')
+        // Several memberships: the header names the broader scope, not one community.
+        expect(container.querySelector('.eyebrow')?.textContent).toBe('pages.myInvoices.allCommunities')
         expect(container.textContent).toContain('pages.invoices.pdfFailed')
         expect(container.textContent).toContain('common.openPdf')
         expect(container.textContent).not.toContain('pages.invoices.generateInvoice')

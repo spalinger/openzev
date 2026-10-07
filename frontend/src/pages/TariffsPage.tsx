@@ -25,7 +25,7 @@ import { downloadBlob } from '../lib/downloadBlob'
 import { useAppSettings } from '../lib/appSettings'
 import { useAuth } from '../lib/auth'
 import { useManagedZev } from '../lib/managedZev'
-import { useCommunityAccess } from '../lib/communityAccess'
+import { useCommunityAccess, useScopeNote } from '../lib/communityAccess'
 import { PageSkeleton } from '../components/PageSkeleton'
 import { useTranslation } from 'react-i18next'
 import { useToast } from '../lib/toast'
@@ -48,6 +48,7 @@ export function TariffsPage() {
     const { settings } = useAppSettings()
     const { selectedZevId, selectedZev } = useManagedZev()
     const { t } = useTranslation()
+    const scopeNote = useScopeNote()
     const { isZevScope, canWriteSelectedCommunity } = useCommunityAccess()
     const isManagedScope = isZevScope
     const readOnly = !canWriteSelectedCommunity
@@ -253,6 +254,7 @@ export function TariffsPage() {
     const header = (
         <PageHeader
             eyebrow={selectedZev?.name}
+            scopeNote={scopeNote}
             title={t('pages.tariffs.title')}
             description={t('pages.tariffs.description')}
         />

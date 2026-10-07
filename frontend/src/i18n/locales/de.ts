@@ -635,6 +635,7 @@ export const de = {
     pages: {
         myInvoices: {
             title: 'Meine Rechnungen',
+            allCommunities: 'Alle Ihre Gemeinschaften',
             description: 'Rechnungen, die für Sie ausgestellt wurden. Klicken Sie auf eine Rechnung, um Details zu sehen oder das PDF zu öffnen.',
             failed: 'Rechnungen konnten nicht geladen werden.',
             empty: {

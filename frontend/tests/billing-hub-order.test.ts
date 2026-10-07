@@ -5,9 +5,10 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
+vi.mock('../src/lib/auth', () => ({ useAuth: () => ({ user: { role: 'user' } }) }))
 vi.mock('../src/lib/managedZev', () => {
     const context = {
-        useManagedZev: () => ({ selectedZev: { id: 'z1', name: 'ZEV' } }),
+        useManagedZev: () => ({ selectedZev: { id: 'z1', name: 'ZEV' }, relation: 'manager' }),
     }
     return { ...context, useOptionalManagedZev: context.useManagedZev }
 })

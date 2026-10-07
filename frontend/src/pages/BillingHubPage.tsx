@@ -5,6 +5,7 @@ import { usePageNavigation } from '../lib/usePageNavigation'
 import { InvoicesContent } from './InvoicesPage'
 import { BillingEmailsPage } from './BillingEmailsPage'
 import { PageHeader } from '../components/PageHeader'
+import { useScopeNote } from '../lib/communityAccess'
 
 /**
  * Billing hub: tabs are routes — Invoices · Email delivery — each with its
@@ -15,6 +16,7 @@ export type BillingTab = 'invoices' | 'emails'
 
 export function BillingHubPage({ tab }: { tab: BillingTab }) {
     const { t } = useTranslation()
+    const scopeNote = useScopeNote()
     const { navigateTab } = usePageNavigation()
     const { selectedZev } = useManagedZev()
 
@@ -29,6 +31,7 @@ export function BillingHubPage({ tab }: { tab: BillingTab }) {
         <div className="page-stack">
             <PageHeader
                 eyebrow={selectedZev?.name}
+                scopeNote={scopeNote}
                 title={t('nav.billing')}
                 description={t('pages.billingHub.description')}
             />

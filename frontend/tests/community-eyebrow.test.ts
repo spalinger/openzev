@@ -102,7 +102,7 @@ vi.mock('../src/lib/api/auth', () => ({
     fetchUsers: () => Promise.resolve([]),
 }))
 
-function mockOwner() {
+function mockOwner(relation: 'manager' | 'viewer' = 'manager', memberships?: unknown[]) {
     mockAuth.mockReturnValue({
         isAuthenticated: true,
         isLoading: false,
@@ -117,12 +117,13 @@ function mockOwner() {
             role: 'user',
             must_change_password: false,
             preferred_zev: null,
+            memberships,
         },
     })
     mockManagedZev.mockReturnValue({
         managedZevs: [{ id: 'z1', name: 'Selected ZEV' }],
-        entries: [{ id: 'z1', name: 'Selected ZEV', relation: 'manager' }],
-        relation: 'manager',
+        entries: [{ id: 'z1', name: 'Selected ZEV', relation }],
+        relation,
         selectedZevId: 'z1',
         selectedZev: { id: 'z1', name: 'Selected ZEV', billing_interval: 'monthly' },
         isSelectable: false,
@@ -259,6 +260,26 @@ describe('community eyebrow', { timeout: 30000 }, () => {
         unmount()
     })
 
+    it('notes read-only access beside the community for a viewer, not for a manager', async () => {
+        mockOwner('viewer')
+        const viewer = await renderAt('/audit-logs')
+        expect(viewer.container.querySelector('.page-stack .eyebrow')?.textContent).toBe('Selected ZEV · nav.relation.viewer')
+        // The browser tab names the community only.
+        expect(document.title).not.toContain('nav.relation.viewer')
+        viewer.unmount()
+        mockOwner('manager')
+        const manager = await renderAt('/audit-logs')
+        expect(manager.container.querySelector('.page-stack .eyebrow-note')).toBeNull()
+        manager.unmount()
+    })
+
+    it('invoice detail notes read-only access to the invoice community', async () => {
+        mockOwner('manager', [{ zev: 'z2', zev_name: 'Invoice ZEV', access: 'viewer', participants: [] }])
+        const { container, unmount } = await renderAt('/billing/invoices/inv-1')
+        expect(container.querySelector('.page-stack .eyebrow')?.textContent).toBe('Invoice ZEV · nav.relation.viewer')
+        unmount()
+    })
+
     it('metering points shows the participant community without a selection', async () => {
         mockParticipant()
         const { container, unmount } = await renderAt('/metering-points')
@@ -298,10 +319,11 @@ describe('community eyebrow', { timeout: 30000 }, () => {
         unmount()
     })
 
-    it('chart shows no community with several memberships', async () => {
+    it('chart shows the selected community with several memberships', async () => {
+        // Its meters belong to the selected community (zev_id), like metering points.
         mockParticipant(2)
         const { container, unmount } = await renderAt('/metering/chart')
-        expect(container.querySelector('.page-stack .eyebrow')).toBeNull()
+        expect(container.querySelector('.page-stack .eyebrow')?.textContent).toBe('Member ZEV')
         unmount()
     })
 
@@ -335,6 +357,13 @@ describe('community eyebrow', { timeout: 30000 }, () => {
         const { container, unmount } = await renderAt('/me/statement')
         const eyebrow = container.querySelector('.page-stack .eyebrow')
         expect(eyebrow?.textContent).toBe('Member ZEV')
+        unmount()
+    })
+
+    it('my invoices names the broader scope with several memberships', async () => {
+        mockParticipant(2)
+        const { container, unmount } = await renderAt('/me/invoices')
+        expect(container.querySelector('.page-stack .eyebrow')?.textContent).toBe('pages.myInvoices.allCommunities')
         unmount()
     })
 

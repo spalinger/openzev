@@ -1540,14 +1540,21 @@ disclosure in the top bar follows the same focus and dismissal rules while
 keeping its language choices as ordinary buttons; selecting a language leaves
 it open.
 Every ZEV-scoped page header carries the selected ZEV name as an eyebrow
-above the page title. Participant pages that list across every membership (metering points, chart,
-My invoices) show the community name only when the account has exactly one
-membership (`soleCommunityName(user)`, from `/auth/me` `memberships`), so a
-single name never mislabels the scope. The participant dashboard and the
-statement page name the selected community, because they ask about it
-(`zev_id` with more than one membership). The invoice detail page shows the invoice's own `zev_name` (a deep link may land on
-an invoice of a different community than the global selection). The owner
-audit-logs page follows the Setup convention (selected ZEV name); every
+above the page title. My invoices, the one participant page that lists across
+every membership, shows the community name only when the account has exactly
+one membership (`soleCommunityName(user)`, from `/auth/me` `memberships`) and
+otherwise names the broader scope (`pages.myInvoices.allCommunities`), so a
+single name never mislabels it. The participant dashboard, statement page,
+metering points and chart name the selected community, because they ask about
+it (`zev_id`): `selectedCommunityName` (`frontend/src/lib/membership.ts`) takes
+the readable ZEV record, else the selected switcher entry. Viewers get
+`nav.relation.viewer` after the community name (`PageHeader` `scopeNote`),
+including when the switcher is unmounted; invoice detail uses the relation to
+the invoice's own community. No other relation adds a note, and the note is not
+part of the browser tab title.
+The invoice detail page shows the invoice's own `zev_name` (a deep link may
+land on an invoice of a different community than the global selection). The
+owner audit-logs page follows the Setup convention (selected ZEV name); every
 `/admin/*` page instead shows the platform label (`nav.platformScope`), so
 platform headers never name a community and never a role.
 Group labels (`nav.setupGroup`, `nav.platformGroup`) separate ZEV-scoped

@@ -4,6 +4,8 @@ import { useDocumentTitle } from '../lib/useDocumentTitle'
 export type PageHeaderProps = {
     /** Community name above the title. */
     eyebrow?: ReactNode
+    /** Access label beside the community (a viewer's read-only access); excluded from the browser title. */
+    scopeNote?: string
     /** Plain text: it also names the browser tab. */
     title: string
     description?: ReactNode
@@ -11,7 +13,7 @@ export type PageHeaderProps = {
     actions?: ReactNode
 }
 
-export function PageHeader({ eyebrow, title, description, actions }: PageHeaderProps) {
+export function PageHeader({ eyebrow, scopeNote, title, description, actions }: PageHeaderProps) {
     useDocumentTitle(title, typeof eyebrow === 'string' ? eyebrow : undefined)
     // Focus lands on the h1 after navigation; it describes itself by the scope line.
     const eyebrowId = useId()
@@ -21,6 +23,7 @@ export function PageHeader({ eyebrow, title, description, actions }: PageHeaderP
             {eyebrow ? (
                 <p className="eyebrow" id={eyebrowId}>
                     {eyebrow}
+                    {scopeNote ? <span className="eyebrow-note"> · {scopeNote}</span> : null}
                 </p>
             ) : null}
             <div className="page-header-main">

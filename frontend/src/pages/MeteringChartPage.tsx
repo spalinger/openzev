@@ -25,7 +25,7 @@ import { PeriodSelector } from '../components/PeriodSelector'
 import { RawMeteringTable } from '../components/RawMeteringTable'
 import { useAuth } from '../lib/auth'
 import { useManagedZev } from '../lib/managedZev'
-import { useCommunityAccess } from '../lib/communityAccess'
+import { useCommunityAccess, useScopeNote } from '../lib/communityAccess'
 import {
     firstAlignedBillingPeriod,
     type BillingInterval,
@@ -39,7 +39,7 @@ import { formatMeteringBucketLabel, meteringPointOptionLabel, outReadingLabelKey
 import type { AppSettings, ChartDataPoint, DataQualitySeverity, MeteringPoint, MeteringPointDataQuality } from '../types/api'
 import { AXIS_COLOR, CHART_GRID, CHART_GRIDLINE, CONS_COLORS, NEGATIVE_COLOR, PROD_COLORS } from '../lib/chartTokens'
 import { CHART_AXIS_TICK, CHART_TOOLTIP_STYLE } from '../lib/chartTheme'
-import { soleCommunityName } from '../lib/membership'
+import { selectedCommunityName } from '../lib/membership'
 import { PageHeader } from '../components/PageHeader'
 import { ScopeGuard } from '../components/ScopeGuard'
 import { Notice } from '../components/Notice'
@@ -204,10 +204,10 @@ export function resolveMeterSelection({
 export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports' }) {
     const { searchParams, updateParams } = usePageNavigation()
     const { t } = useTranslation()
+    const scopeNote = useScopeNote()
     const { user } = useAuth()
     const { settings } = useAppSettings()
-    const { selectedZevId, selectedZev, isLoading: scopeLoading, isError: scopeError } = useManagedZev()
-    const participantScopeName = soleCommunityName(user)
+    const { selectedZevId, selectedZev, entries, isLoading: scopeLoading, isError: scopeError } = useManagedZev()
     const { isZevScope: isManagedScope } = useCommunityAccess()
     const interval: BillingInterval = (selectedZev?.billing_interval as BillingInterval) ?? 'monthly'
 
@@ -511,7 +511,8 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
     return (
         <div className="page-stack">
             <PageHeader
-                eyebrow={selectedZev?.name ?? participantScopeName}
+                eyebrow={selectedCommunityName({ selectedZev, entries, selectedZevId })}
+                scopeNote={scopeNote}
                 title={t('pages.meteringData.title')}
                 description={t('pages.meteringData.description')}
             />

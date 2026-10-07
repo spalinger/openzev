@@ -635,6 +635,7 @@ export const it = {
     pages: {
         myInvoices: {
             title: 'Le mie fatture',
+            allCommunities: 'Tutte le tue comunità',
             description: 'Fatture emesse a tuo indirizzo. Fai clic su una fattura per vedere i dettagli o aprire il PDF.',
             failed: 'Impossibile caricare le fatture.',
             empty: {

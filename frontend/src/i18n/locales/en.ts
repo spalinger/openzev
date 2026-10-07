@@ -644,6 +644,7 @@ export const en = {
     pages: {
         myInvoices: {
             title: 'My invoices',
+            allCommunities: 'All your communities',
             description: 'Invoices issued to you. Click an invoice to view its details or open the PDF.',
             failed: 'Failed to load invoices.',
             empty: {

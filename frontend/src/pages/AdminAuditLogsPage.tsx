@@ -6,6 +6,7 @@ import { queryKeys } from '../lib/api/queryKeys'
 import { formatDateTime, useAppSettings } from '../lib/appSettings'
 import { useAuth } from '../lib/auth'
 import { useManagedZev } from '../lib/managedZev'
+import { useScopeNote } from '../lib/communityAccess'
 import { CivilDateInput } from '../components/CivilDateInput'
 import { AuditEventDrawer } from '../features/audit/AuditEventDrawer'
 import type { AuditActionCategory, AuditEventFilters, AuditEventStatus } from '../types/api'
@@ -71,6 +72,7 @@ function statusBadgeClass(status: AuditEventStatus): string {
 /** `embedded` drops the page header inside the Overview and Settings hubs. */
 export function AuditLogsPage({ scope, embedded = false }: AuditLogsPageProps & { embedded?: boolean }) {
     const { t } = useTranslation()
+    const scopeNote = useScopeNote()
     const { settings } = useAppSettings()
     const { user } = useAuth()
     const { searchParams, updateParams } = usePageNavigation()
@@ -218,6 +220,7 @@ export function AuditLogsPage({ scope, embedded = false }: AuditLogsPageProps & 
             {!embedded && (
                 <PageHeader
                     eyebrow={isAdminView ? t('nav.platformScope') : selectedZev?.name}
+                    scopeNote={isAdminView ? undefined : scopeNote}
                     title={t('pages.auditLogs.title')}
                     description={scopeDescription}
                 />

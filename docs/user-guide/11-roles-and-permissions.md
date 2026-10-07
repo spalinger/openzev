@@ -27,7 +27,7 @@ rent a flat in another, or be a tenant in two communities.
 | --- | --- |
 | **Manager** | Everything in the community: participants, metering, tariffs, invoices, settings, and giving others access |
 | **Issuer** or **representative** | The same as a manager, while the role lasts |
-| **Viewer** | Sees everything a manager sees and may download and export, but changes nothing |
+| **Viewer** | Sees everything a manager sees and may download and export, but changes nothing. Pages show *Viewer (read only)* next to the community name above the title |
 | **Participant** | Own consumption, own invoices and annual statement |
 | **Former participant** | Own invoices that were sent, after leaving the community |
 

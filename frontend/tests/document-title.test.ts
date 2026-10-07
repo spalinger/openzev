@@ -50,11 +50,17 @@ describe('document title', () => {
         expect(document.title).toBe('Billing · Muster ZEV – OpenZEV')
     })
 
-    it('describes the focusable title by its scope line', async () => {
-        await render(createElement(PageHeader, { eyebrow: 'Muster ZEV', title: 'Billing' }))
+    it('shows a scope note beside the community but keeps it out of the title', async () => {
+        await render(createElement(PageHeader, { eyebrow: 'Muster ZEV', scopeNote: 'Viewer (read only)', title: 'Billing' }))
+        expect(document.querySelector('.eyebrow')?.textContent).toBe('Muster ZEV · Viewer (read only)')
+        expect(document.title).toBe('Billing · Muster ZEV – OpenZEV')
+    })
+
+    it('describes the focusable title by its scope line, note included', async () => {
+        await render(createElement(PageHeader, { eyebrow: 'Muster ZEV', scopeNote: 'Viewer (read only)', title: 'Billing' }))
         const heading = document.querySelector('h1')!
         const description = document.getElementById(heading.getAttribute('aria-describedby')!)
-        expect(description?.textContent).toBe('Muster ZEV')
+        expect(description?.textContent).toBe('Muster ZEV · Viewer (read only)')
     })
 
     it('omits the scope when the header has none, and follows title changes', async () => {
