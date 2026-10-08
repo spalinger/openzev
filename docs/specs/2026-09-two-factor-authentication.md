@@ -212,8 +212,8 @@ printout stops working.
 cannot be honoured must not be saveable.
 
 **Serializer:** `AppSettingsSerializer` gains both fields, readable and writable by `admin` only: a
-non-admin `GET app-settings/` goes through `PublicAppSettingsSerializer` (date formats and `updated_at`) and
-learns whether the policy applies to them from `me/mfa/` (`required`, `grace_until`). Validation lives
+non-admin `GET app-settings/` goes through `PublicAppSettingsSerializer` (date formats and `updated_at`);
+see §5.3 for account-specific policy status from `me/mfa/`. Validation lives
 in `AppSettings.validate_mfa_required`, shared by `clean()` and the serializer (DRF does not run
 `clean()`), and switching the requirement off never needs a key. Policy changes are audited through the existing
 `app_settings.update` diff.
@@ -602,6 +602,9 @@ number input for `mfa_grace_period_days`.
 Both are disabled, with an explanatory hint, when `/auth/system-health/` reports the encryption
 key as unconfigured — mirroring the pattern PR #732 used for the dynamic-source picker — and while
 the admin's settings have not loaded yet (`MfaPolicySection`).
+A failed settings fetch shows a load-error notice only while the policy fields are unavailable.
+Its Retry button refetches `/auth/app-settings/` in place and is disabled with busy feedback during the request.
+After a failed refresh, cached policy values remain editable unless the encryption key is missing.
 
 ### 7.5 `AdminAccountsPage`
 

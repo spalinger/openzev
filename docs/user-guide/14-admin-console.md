@@ -176,6 +176,8 @@ Choose whether every account must use two-factor authentication, and the grace
 period they get, in **Platform → Settings → Security**. See
 [Roles and Permissions → Requiring it for everyone](11-roles-and-permissions.md#requiring-it-for-everyone-administrators).
 
+If the policy cannot be loaded initially, the controls stay disabled. Choose **Retry** in the error notice to load it again without reloading the page.
+
 ### VAT
 
 Configure VAT rates in **Platform → Settings → VAT**. See [VAT Settings](#vat-settings) for validity-window behavior and the workflow.

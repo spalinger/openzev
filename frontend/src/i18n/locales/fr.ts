@@ -3291,6 +3291,7 @@ export const fr = {
         },
         mfaPolicy: {
             title: 'Politique d\'authentification à deux facteurs',
+            loadError: 'Impossible de charger la politique.',
             description: 'Exigez de chaque compte une clé d\'accès ou une application d\'authentification. Les utilisateurs sont avertis puis, après le délai de grâce, invités à s\'inscrire avant de pouvoir continuer.',
             keyMissing: 'L\'authentification à deux facteurs n\'est pas disponible sur cette instance : MFA_ENCRYPTION_KEYS n\'est pas configurée, aucune obligation ne peut donc être définie.',
             requiredLabel: 'Exiger l\'authentification à deux facteurs pour chaque compte',

@@ -37,6 +37,7 @@ export const DATE_TIME_FORMAT_OPTIONS: Array<{ value: DateTimeFormat; label: str
 interface AppSettingsContextValue {
     settings: AppSettings
     isLoading: boolean
+    isError: boolean
 }
 
 const AppSettingsContext = createContext<AppSettingsContextValue | undefined>(undefined)
@@ -170,8 +171,9 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
         () => ({
             settings: settingsQuery.data ?? DEFAULT_APP_SETTINGS,
             isLoading: isAuthenticated ? settingsQuery.isLoading : false,
+            isError: isAuthenticated ? settingsQuery.isError : false,
         }),
-        [isAuthenticated, settingsQuery.data, settingsQuery.isLoading],
+        [isAuthenticated, settingsQuery.data, settingsQuery.isLoading, settingsQuery.isError],
     )
 
     return <AppSettingsContext.Provider value={value}>{children}</AppSettingsContext.Provider>

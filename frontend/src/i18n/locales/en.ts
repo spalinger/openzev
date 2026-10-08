@@ -3302,6 +3302,7 @@ export const en = {
         },
         mfaPolicy: {
             title: 'Two-factor authentication policy',
+            loadError: 'Could not load the policy.',
             description: 'Require every account to hold a passkey or an authenticator app. Users are reminded and, after the grace period, asked to enrol before they can continue.',
             keyMissing: 'Two-factor authentication is not available on this instance: MFA_ENCRYPTION_KEYS is not configured, so a requirement cannot be set.',
             requiredLabel: 'Require two-factor authentication for every account',

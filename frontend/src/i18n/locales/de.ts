@@ -3291,6 +3291,7 @@ export const de = {
         },
         mfaPolicy: {
             title: 'Richtlinie zur Zwei-Faktor-Authentifizierung',
+            loadError: 'Die Richtlinie konnte nicht geladen werden.',
             description: 'Verlangen Sie für jedes Konto einen Passkey oder eine Authenticator-App. Benutzer werden erinnert und nach der Übergangsfrist zur Einrichtung aufgefordert, bevor sie weiterarbeiten können.',
             keyMissing: 'Zwei-Faktor-Authentifizierung ist auf dieser Instanz nicht verfügbar: MFA_ENCRYPTION_KEYS ist nicht konfiguriert, daher kann keine Pflicht festgelegt werden.',
             requiredLabel: 'Zwei-Faktor-Authentifizierung für jedes Konto verlangen',

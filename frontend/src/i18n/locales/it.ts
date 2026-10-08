@@ -3291,6 +3291,7 @@ export const it = {
         },
         mfaPolicy: {
             title: 'Criterio di autenticazione a due fattori',
+            loadError: 'Impossibile caricare il criterio.',
             description: 'Richiedi a ogni account una passkey o un\'app di autenticazione. Gli utenti ricevono un promemoria e, dopo il periodo di tolleranza, devono configurarla prima di poter continuare.',
             keyMissing: 'L\'autenticazione a due fattori non è disponibile su questa istanza: MFA_ENCRYPTION_KEYS non è configurata, quindi non si può imporre un obbligo.',
             requiredLabel: 'Richiedi l\'autenticazione a due fattori per ogni account',
