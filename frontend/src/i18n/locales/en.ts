@@ -177,7 +177,6 @@ export const en = {
         empty: 'No data yet.',
         pagination: {
             range: '{{from}}–{{to}} of {{total}}',
-            rowsPerPage: 'Rows',
             previous: 'Previous page',
             next: 'Next page',
         },

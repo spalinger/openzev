@@ -168,7 +168,6 @@ export const it = {
         empty: 'Nessun dato.',
         pagination: {
             range: '{{from}}–{{to}} di {{total}}',
-            rowsPerPage: 'Righe',
             previous: 'Pagina precedente',
             next: 'Pagina successiva',
         },
