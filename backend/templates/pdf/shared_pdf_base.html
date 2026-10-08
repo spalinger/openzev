@@ -338,8 +338,13 @@ How to use:
         margin-top: 1mm;
     }
 
+    /* Lit like the invoice's savings card: the forest gradient with a soft
+       light in the top corner (the app's accent tile matches). */
     .kpi-card--accent {
-        background: var(--brand-deep);
+        background-color: var(--brand-deep);
+        background-image:
+            radial-gradient(circle at 100% 0%, rgba(255, 255, 255, 0.13) 0%, rgba(255, 255, 255, 0) 62%),
+            linear-gradient(160deg, var(--brand) 0%, var(--brand-deep) 100%);
         border-color: var(--brand-deep);
     }
 

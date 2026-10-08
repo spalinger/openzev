@@ -2060,9 +2060,14 @@ select.select-compact {
 }
 
 /* The dark figure tile — the invoice's savings tile. At most one per view. */
+/* The dark accent tile is lit like the documents' dark cards: their forest
+   gradient with a soft light in the top corner. */
 .stat-card--accent {
-  background: var(--brand-deep);
   border-color: var(--brand-deep);
+  background-color: var(--brand-deep);
+  background-image:
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--white) 13%, transparent), transparent 62%),
+    linear-gradient(160deg, var(--brand) 0%, var(--brand-deep) 100%);
 }
 
 .stat-card--accent .stat-label,

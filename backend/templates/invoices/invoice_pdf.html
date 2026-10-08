@@ -46,9 +46,9 @@
             right: -10mm;
             width: 50mm;
             height: 50mm;
-            background: var(--white);
-            opacity: 0.08;
-            border-radius: 50%;
+            /* A soft light rather than a disc — the corner glow every dark
+               card and tile shares, on paper and on screen. */
+            background: radial-gradient(circle, rgba(255, 255, 255, 0.13) 0%, rgba(255, 255, 255, 0) 70%);
             pointer-events: none;
         }
 
