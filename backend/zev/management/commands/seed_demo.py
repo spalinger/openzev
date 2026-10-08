@@ -34,6 +34,9 @@ from invoices.models import (
     InvoiceStatus,
 )
 from metering.models import ImportLog, ImportSource, MeterReading, ReadingDirection, ReadingResolution
+from tariffs.dynamic.models import DynamicApiVersion, DynamicTariffSource, DynamicTariffType, FetchStatus
+from tariffs.dynamic.storage import store_points
+from tariffs.dynamic.vse_v1 import PricePoint
 from tariffs.models import BillingMode, EnergyType, PeriodType, Tariff, TariffCategory, TariffPeriod
 from zev.models import (
     AllocationMode,
@@ -75,6 +78,10 @@ SECOND_DEMO_ZEV_NAME = "ZEV Sonnenfirma AG"
 # The second, smaller community: a property-company (AG) site that invoices in
 # English, is VAT-registered (UID shown) and runs as a ``vzev`` — the
 # counterpart that makes the community switcher show two different setups.
+
+DEMO_DYNAMIC_TARIFF_NAME = "Netznutzung dynamisch"
+DEMO_DYNAMIC_SOURCE_LABEL = "Demo – dynamische Netznutzung (synthetisch)"
+DEMO_DYNAMIC_SOURCE_URL = "https://dynamic-tariffs.openzev.invalid/v2/tariffs"
 
 # One hourly ``(timestamp, day_index) -> energy_kwh`` curve per meter kind;
 # the second community reuses these shapes at different amplitudes.
@@ -786,6 +793,7 @@ class Command(BaseCommand):
                 participant.save(update_fields=["allocation_weight"])
 
         self._seed_tariffs(zev, start_date, history_start=main_valid_from)
+        dynamic_tariff = self._seed_dynamic_tariff(zev, end_date=end_date)
         self._upsert_vat_rates()
 
         # Rerun hygiene: drop every earlier reading on the main meters (both
@@ -936,6 +944,8 @@ class Command(BaseCommand):
             f"(feeds the producer's tax overview)",
             f"  Tariffs: {zev.tariffs.count()} versions across "
             f"{zev.tariffs.values('name').distinct().count()} tariffs",
+            f"  Dynamic demo: {dynamic_tariff.name} from {dynamic_tariff.valid_from} "
+            "(synthetic, fetching disabled)",
             f"  Deleted existing demo readings: {deleted_readings}",
             f"  Production total ({history_start} -> {end_date}): {production_total} kWh",
             f"  Consumption total ({history_start} -> {end_date}): {consumption_total} kWh",
@@ -1982,6 +1992,69 @@ class Command(BaseCommand):
             # Unchanged tariffs must cover the paid historical invoices too.
             first_day = min(valid_from, history_start) if history_start and not history else valid_from
             self._create_tariff_version(zev, spec, {}, valid_from=first_day, valid_to=None)
+
+    def _seed_dynamic_tariff(self, zev: Zev, *, end_date: date) -> Tariff:
+        """A local price series for the tariff drawer and platform console.
+
+        The tariff starts in the quarter after every seeded invoice period, so
+        it must be reset before invoices are rebuilt. Prices depend only on the
+        civil date and time, so overlapping re-seeds store identical points.
+        """
+        valid_from = quarter_start(end_date)
+        source, _ = DynamicTariffSource.objects.update_or_create(
+            url=DEMO_DYNAMIC_SOURCE_URL,
+            api_version=DynamicApiVersion.V2_0_0,
+            tariff_type=DynamicTariffType.GRID,
+            tariff_name="demo-grid",
+            defaults={
+                "label": DEMO_DYNAMIC_SOURCE_LABEL,
+                "enabled": False,
+                "supports_range": False,
+                "query_tariff_type": "grid",
+            },
+        )
+        points = []
+        # Include tomorrow, as a day-ahead source would. UTC iteration preserves
+        # all 92/100 quarter-hours on Swiss daylight-saving transition days.
+        for timestamp in self._iter_quarters(valid_from, end_date + timedelta(days=1)):
+            local = wall_clock(timestamp)
+            hour = local.hour + local.minute / 60.0
+            variation = ((local.date().toordinal() % 7) - 3) * 0.002
+            price = (
+                0.045 + variation
+                + 0.060 * self._gaussian(hour, 7.5, 1.6)
+                + 0.095 * self._gaussian(hour, 19.0, 2.0)
+                - 0.075 * self._gaussian(hour, 13.0, 2.2)
+            )
+            points.append(PricePoint(
+                valid_from=timestamp,
+                valid_to=timestamp + timedelta(minutes=15),
+                price_chf_per_kwh=Decimal(str(price)).quantize(Decimal("0.00001")),
+            ))
+        store_points(source, points)
+        seeded_at = datetime.now(dt_timezone.utc)
+        source.last_fetch_status = FetchStatus.OK
+        source.last_fetch_at = seeded_at
+        source.last_success_at = seeded_at
+        source.last_fetch_error = ""
+        source.recovery_from = None
+        source.save(update_fields=[
+            "last_fetch_status", "last_fetch_at", "last_success_at",
+            "last_fetch_error", "recovery_from", "updated_at",
+        ])
+        # Rebuild rather than upsert, for the reasons given in _seed_tariffs: a
+        # demo session may have added versions or switched it back to bands.
+        Tariff.objects.filter(zev=zev, name=DEMO_DYNAMIC_TARIFF_NAME).delete()
+        return Tariff.objects.create(
+            zev=zev,
+            name=DEMO_DYNAMIC_TARIFF_NAME,
+            category=TariffCategory.GRID_FEES,
+            billing_mode=BillingMode.ENERGY,
+            energy_type=EnergyType.GRID,
+            dynamic_source=source,
+            valid_from=valid_from,
+            notes="Synthetic prices generated by seed_demo; no API calls.",
+        )
 
     def _create_tariff_version(
         self,

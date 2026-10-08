@@ -280,6 +280,10 @@ data to show. It also has a viewer of the flagship community and a property
 manager who manages both, to show per-community access. Credentials and the full list of what the seed creates are in
 the root [`README.md`](../../README.md#seed-data--demo-accounts).
 
+The flagship includes **Netznutzung dynamisch**, a dynamic tariff with
+synthetic demo prices, so its tariff details and the platform's dynamic-price
+console have data to show. It starts after the demo's invoiced periods.
+
 ### Resetting Demo Data
 
 To reload the demo dataset:
@@ -289,7 +293,8 @@ docker compose exec backend python manage.py seed_demo
 ```
 
 This refreshes demo readings, invoices, import/email logs and audit events for
-both communities. Issued contract snapshots are retained.
+both communities, and fills the synthetic dynamic-price series through tomorrow.
+Its stored price history and issued contract snapshots are retained.
 
 ## First-Time Setup
 

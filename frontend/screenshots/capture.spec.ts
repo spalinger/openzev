@@ -15,6 +15,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import type { DynamicTariffSource, TariffSeries } from '../src/types/api'
 import {
   assertPdfLoaded,
   closePdfSidebar,
@@ -24,6 +25,7 @@ import {
   impersonateDemoParticipant,
   navigateTo,
   pinDemoZev,
+  resolveDemoZevId,
   screenshotFull as captureFull,
   screenshotViewport as captureViewport,
   API_BASE,
@@ -41,6 +43,25 @@ const SCREENSHOT_DIR = path.resolve(__dirname, '../../docs/user-guide/screenshot
 
 const screenshotFull = (page: Page, name: string) => captureFull(page, SCREENSHOT_DIR, name)
 const screenshotViewport = (page: Page, name: string) => captureViewport(page, SCREENSHOT_DIR, name)
+
+const DEMO_DYNAMIC_TARIFF = 'Netznutzung dynamisch'
+const SEED_HINT = 'run `manage.py seed_demo` with its default end date before capturing screenshots'
+
+/** Fail early when the seeded dynamic tariff or its prices are missing. */
+async function requireDemoDynamicSource(page: Page): Promise<DynamicTariffSource> {
+  const headers = { Authorization: `Bearer ${await getAdminToken(page)}` }
+  const zevId = await resolveDemoZevId(page)
+  const response = await page.request.get(`${API_BASE}/tariffs/tariffs/series/?zev_id=${zevId}`, { headers })
+  expect(response.ok(), `Tariff series request failed (${response.status()})`).toBe(true)
+  const series = await response.json() as TariffSeries[]
+  const tariff = series.find(row => row.name === DEMO_DYNAMIC_TARIFF)?.versions[0]
+  expect(tariff?.dynamic_source, `Dynamic demo tariff missing — ${SEED_HINT}`).toBeTruthy()
+  const sourceResponse = await page.request.get(`${API_BASE}/tariffs/dynamic-sources/${tariff!.dynamic_source}/`, { headers })
+  expect(sourceResponse.ok(), `Dynamic source request failed (${sourceResponse.status()})`).toBe(true)
+  const source = await sourceResponse.json() as DynamicTariffSource
+  expect(source.point_count, `Dynamic demo prices missing — ${SEED_HINT}`).toBeGreaterThan(0)
+  return source
+}
 
 // ---------------------------------------------------------------------------
 // Screenshot tests — one test per page / state
@@ -196,6 +217,8 @@ test.describe('User Guide Screenshots', () => {
     // Readings Table this screenshot is meant to show.
     const mpSelect = page.locator('select').first()
     const options = mpSelect.locator('option')
+    await expect(mpSelect.locator('option[value]:not([value=""]):not([value="__zev_total__"])').first(),
+      `Demo metering points missing — ${SEED_HINT}`).toBeAttached()
     const count = await options.count()
     for (let i = 0; i < count; i++) {
       const label = await options.nth(i).textContent()
@@ -280,26 +303,16 @@ test.describe('User Guide Screenshots', () => {
   })
 
   // 07d — A dynamic tariff's detail drawer, showing its Dynamic badge and
-  // fetched-price section (stats, chart and point table render inline now,
-  // no separate click into a modal — see 07e's removal below). Requires a
-  // tariff named "Netznutzung dynamisch" linked to a real dynamic source —
-  // seed_demo does not create this on its own; the checked-in screenshot was
-  // captured against a source manually configured for Groupe E's public
-  // vario grid endpoint (https://api.tariffs.groupe-e.ch/v2/tariffs,
-  // tariff_type=grid), created through the ordinary two-step wizard / POST
-  // .../dynamic-sources/ and linked to a tariff on the demo ZEV. Re-running
-  // this against a stack without that fixture will time out on the card
-  // lookup below.
+  // locally seeded price history (stats, chart and point table render inline).
   test('07d-tariff-dynamic-source', async ({ page }) => {
+    await requireDemoDynamicSource(page)
     await navigateTo(page, '/tariffs')
-    const card = page.locator('article.tariff-card').filter({ hasText: 'Netznutzung dynamisch' }).first()
+    const card = page.locator('article.tariff-card').filter({ hasText: DEMO_DYNAMIC_TARIFF }).first()
     await card.waitFor({ timeout: 10_000 })
     await card.getByRole('button', { expanded: false }).click()
     const drawer = page.locator('.tariff-drawer')
-    await drawer.locator('.tariff-period-section').filter({ hasText: /price|preis/i }).waitFor({ timeout: 10_000 })
-    // Let the inline price-history panel's own chart finish laying out too —
-    // it fetches and renders as part of this same drawer now.
-    await page.waitForTimeout(1000)
+    await expect(drawer.locator('.recharts-surface'), `Dynamic price chart missing — ${SEED_HINT}`).toBeVisible()
+    await expect(drawer.locator('tbody tr').first()).toBeVisible()
     await screenshotFull(page, '07d-tariff-dynamic-source')
   })
 
@@ -446,13 +459,11 @@ test.describe('User Guide Screenshots', () => {
   })
 
   // 17b — Admin Dynamic Price Sources
-  // Note: seed_demo does not configure a dynamic tariff source on its own —
-  // this captures whatever is configured, populated or empty. The
-  // checked-in screenshot shows the source set up for 07d/07e above; without
-  // that fixture this instead captures the accurate empty-state console.
+  // The same disabled synthetic source as the dynamic tariff drawer above.
   test('17b-admin-dynamic-sources', async ({ page }) => {
+    const source = await requireDemoDynamicSource(page)
     await navigateTo(page, '/admin/dynamic-sources')
-    await page.waitForSelector('.data-table, .card', { timeout: 10_000 })
+    await expect(page.getByRole('row').filter({ hasText: source.label })).toBeVisible()
     await screenshotFull(page, '17b-admin-dynamic-sources')
   })
 

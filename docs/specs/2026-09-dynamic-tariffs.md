@@ -822,6 +822,26 @@ barrier tests run on PostgreSQL only: SQLite cannot verify row-lock behavior.
 captures** taken on 2026-09-11; the BKW one **cannot be re-taken**, because that
 endpoint serves only the current day and keeps no history.
 
+`zev/management/commands/seed_demo.py::_seed_dynamic_tariff` creates a local
+screenshot fixture on **ZEV STWEG Sonnenhof**:
+
+- Tariff `Netznutzung dynamisch` (`grid_fees`, `energy`, `grid`, no bands),
+  valid from `quarter_start(end_date)`, open-ended. It is deleted and recreated
+  before invoice generation, so it never overlaps a seeded invoice period and a
+  demo session's extra versions or bands cannot break a re-seed.
+- Source `https://dynamic-tariffs.openzev.invalid/v2/tariffs` (`v2_0_0`, `grid`,
+  `demo-grid`), labelled `Demo – dynamische Netznutzung (synthetisch)`. Every
+  seed sets `enabled=False` and `last_fetch_status=ok`; nothing is fetched or
+  queued.
+- Deterministic quarter-hourly prices, with morning/evening peaks and negative
+  midday prices, cover Swiss civil days from the tariff start through
+  `end_date + 1 day`, DST days included. They are written with `store_points`,
+  so re-seeds keep existing points and extend coverage.
+- Captures `07d`/`17b` in `frontend/screenshots/capture.spec.ts` fail early with
+  a `seed_demo` hint when the fixture is missing.
+
+Tests: `zev/test_seed_dynamic_tariff.py` and `zev/tests.py::SeedDemoEndToEndTests`.
+
 ### 12.3 Frontend
 
 | Module | Coverage |
