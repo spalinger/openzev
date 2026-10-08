@@ -1,17 +1,16 @@
+import { useMutation } from '@tanstack/react-query'
+import { useToast } from '../../lib/toast'
+import { formatApiError } from '../../lib/api/errors'
 import { useTranslation } from 'react-i18next'
 
-import { ConfirmDialog, useConfirmDialog } from '../../components/ConfirmDialog'
+import { ConfirmDialog, consumeReportedError, useConfirmDialog } from '../../components/ConfirmDialog'
 import { formatShortDate, useAppSettings } from '../../lib/appSettings'
 import type { InvoiceAccessLink } from '../../types/api'
 
 /**
- * The QR link printed on this invoice, and the one control over it.
- *
- * The token has no expiry — it is on a document that sits in a folder for
- * years — so revoking is the only way a leaked or mis-sent invoice stops
- * granting access. That makes this card the security control the feature
- * otherwise only claims to have, which is why it says plainly what revoking
- * costs: the printed QR stops working for good.
+ * Shows the invoice access link and allows revocation.
+ * Printed links do not expire; revocation stops access through a leaked invoice.
+ * Revocation permanently invalidates the QR link printed on the invoice.
  */
 export function InvoiceAccessLinkCard({
     link,
@@ -22,6 +21,11 @@ export function InvoiceAccessLinkCard({
 }) {
     const { t } = useTranslation()
     const { settings } = useAppSettings()
+    const { pushToast } = useToast()
+    const revokeMutation = useMutation({
+        mutationFn: onRevoke,
+        onError: error => pushToast(formatApiError(error, t('common.error')), 'error'),
+    })
     const { dialog, confirm, handleConfirm, handleCancel, isLoading } = useConfirmDialog()
 
     return (
@@ -47,13 +51,14 @@ export function InvoiceAccessLinkCard({
             <button
                 type="button"
                 className="button danger"
+                disabled={revokeMutation.isPending}
                 onClick={() =>
                     confirm({
                         title: t('pages.invoiceDetail.accessLink.revokeTitle'),
                         message: t('pages.invoiceDetail.accessLink.revokeWarning'),
                         confirmText: t('pages.invoiceDetail.accessLink.revoke'),
                         isDangerous: true,
-                        onConfirm: onRevoke,
+                        onConfirm: () => consumeReportedError(revokeMutation.mutateAsync()),
                     })
                 }
             >

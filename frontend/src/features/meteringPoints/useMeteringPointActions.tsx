@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
-import { useConfirmDialog } from '../../components/ConfirmDialog'
+import { useConfirmDialog, consumeReportedError } from '../../components/ConfirmDialog'
 import {
     createBuilding,
     createMeteringPoint,
@@ -360,7 +360,7 @@ export function useMeteringPointActions({
             message: t('pages.meteringPoints.buildings.deleteMessage', { name: building.name }),
             confirmText: t('common.delete'),
             isDangerous: true,
-            onConfirm: () => deleteBuildingMutation.mutateAsync({ id: building.id, scope: submittingScope }).then(() => undefined),
+            onConfirm: () => consumeReportedError(deleteBuildingMutation.mutateAsync({ id: building.id, scope: submittingScope })),
         })
     }
     const meteringPointsQuery = useQuery({

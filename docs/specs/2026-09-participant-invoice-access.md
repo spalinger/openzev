@@ -391,6 +391,10 @@ The invoice **detail** payload carries `access_link` — `prefix`, `created_at`,
 Never the secret: the prefix identifies the row but cannot open anything without
 it, and it is what ties the card to the `invoice_link.*` audit events.
 
+`InvoiceAccessLinkCard` owns revocation and follows the
+[dialog contract](2026-04-frontend-management-page-design.md#dialog-behavior).
+A successful revocation refetches the invoice.
+
 ## 6. Async and integration behavior
 
 **Email.** A new `EMAIL_TEMPLATE_DEFAULTS` entry `participant_magic_link`,

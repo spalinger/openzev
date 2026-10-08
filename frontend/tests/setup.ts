@@ -1,3 +1,11 @@
+import { vi } from 'vitest'
+
+// jsdom has no layout; browser tests cover tabbability of hidden subtrees.
+vi.mock('tabbable', async importOriginal => {
+    const actual = await importOriginal<typeof import('tabbable')>()
+    return { ...actual, tabbable: (node: HTMLElement) => actual.tabbable(node, { displayCheck: 'none' }) }
+})
+
 // Enable React's act() environment; provide Mantine's missing matchMedia.
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 

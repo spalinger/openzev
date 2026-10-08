@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { consumeReportedError } from '../../components/ConfirmDialog'
 import { linkableAccounts } from '../accounts/accountList'
 import { fetchUsers } from '../../lib/api/auth'
 import { formatApiError } from '../../lib/api/errors'
@@ -85,9 +86,7 @@ export function useParticipantAccountLinking({
                 message: t('pages.accounts.unlinkMessage', { username, name }),
                 confirmText: t('pages.accounts.unlinkConfirm'),
                 cancelText: t('common.cancel'),
-                onConfirm: async () => {
-                    await unlinkMutation.mutateAsync(participant.id)
-                },
+                onConfirm: () => consumeReportedError(unlinkMutation.mutateAsync(participant.id)),
             })
         },
         linkModal: target ? (

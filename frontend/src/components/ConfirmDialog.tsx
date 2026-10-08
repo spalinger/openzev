@@ -1,8 +1,8 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useToast } from '../lib/toast'
 import { Z_MODAL } from '../lib/zLayers'
-import { focusables, isTopModal, modalDepth, useModalStack } from './FormModal'
+import { useDialogBehavior } from './useDialogBehavior'
 
 interface ConfirmDialogOptions {
     title: string
@@ -10,44 +10,77 @@ interface ConfirmDialogOptions {
     confirmText?: string
     cancelText?: string
     isDangerous?: boolean
+    /** Initial submission guard; changing typed input must be validated in onConfirm. */
     confirmDisabled?: boolean
     children?: ReactNode
-    onConfirm: () => void | Promise<void>
+    /**
+     * Return false to keep the dialog open when submission validation fails.
+     * Callers must report failures after dismissal; the hook only reports active failures.
+     * Consume rejections already reported by the caller with consumeReportedError.
+     */
+    onConfirm: () => void | false | Promise<void | false>
     onCancel?: () => void
+}
+
+type ConfirmDialogProps = Omit<ConfirmDialogOptions, 'onConfirm' | 'onCancel'> & {
+    isLoading?: boolean
+    /** Disables the rendered button; onConfirm still validates current typed input. */
+    confirmDisabled?: boolean
+    onConfirm: () => void
+    onCancel: () => void
+}
+
+/** Consume a rejection only when the operation already reports its own error. */
+export function consumeReportedError(operation: Promise<unknown>): Promise<void> {
+    return operation.then(() => undefined, () => undefined)
 }
 
 export function useConfirmDialog() {
     const { t } = useTranslation()
     const { pushToast } = useToast()
-    const [dialog, setDialog] = useState<ConfirmDialogOptions | null>(null)
-    const [isLoading, setIsLoading] = useState(false)
+    const [state, setState] = useState<{ options: ConfirmDialogOptions; isLoading: boolean } | null>(null)
+    const activeRef = useRef<typeof state>(null)
 
-    const confirm = (options: ConfirmDialogOptions) => {
-        setDialog(options)
-    }
+    useEffect(() => () => { activeRef.current = null }, [])
+
+    const confirm = useCallback((options: ConfirmDialogOptions) => {
+        // Each opening owns its completion, even when callers reuse options.
+        const next = { options: { ...options }, isLoading: false }
+        activeRef.current = next
+        setState(next)
+    }, [])
 
     const handleConfirm = async () => {
-        setIsLoading(true)
+        if (!state || activeRef.current !== state || state.isLoading || state.options.confirmDisabled) return
+        const pending = { ...state, isLoading: true }
+        activeRef.current = pending
+        setState(pending)
         try {
-            const result = dialog?.onConfirm()
-            if (result instanceof Promise) {
-                await result
+            const result = state.options.onConfirm()
+            const outcome = result === undefined || result === false ? result : await result
+            // Validation refusal keeps the dialog open without reporting an error.
+            if (outcome === false && activeRef.current === pending) {
+                activeRef.current = state
+                setState(state)
             }
-            setDialog(null)
         } catch {
-            pushToast(t('common.error'), 'error')
-            setDialog(null)
+            if (activeRef.current === pending) pushToast(t('common.error'), 'error')
         } finally {
-            setIsLoading(false)
+            if (activeRef.current === pending) {
+                activeRef.current = null
+                setState(null)
+            }
         }
     }
 
     const handleCancel = () => {
-        dialog?.onCancel?.()
-        setDialog(null)
+        if (!state || activeRef.current?.options !== state.options) return
+        activeRef.current = null
+        setState(null)
+        state.options.onCancel?.()
     }
 
-    return { dialog, confirm, handleConfirm, handleCancel, isLoading }
+    return { dialog: state?.options ?? null, confirm, handleConfirm, handleCancel, isLoading: state?.isLoading ?? false }
 }
 
 export function ConfirmDialog({
@@ -61,59 +94,17 @@ export function ConfirmDialog({
     isLoading = false,
     onConfirm,
     onCancel,
-}: ConfirmDialogOptions & { isLoading?: boolean; onConfirm: () => void; onCancel: () => void }) {
+}: ConfirmDialogProps) {
     const { t } = useTranslation()
-    const stackId = useModalStack()
     const titleId = useId()
-    const dialogRef = useRef<HTMLDivElement>(null)
-    const restoreRef = useRef<HTMLElement | null>(null)
-    const onCancelRef = useRef(onCancel)
-    useEffect(() => {
-        onCancelRef.current = onCancel
-    }, [onCancel])
-    // Top-most only: Escape/Tab belong to this dialog while it sits above
-    // other modals (e.g. overwrite confirmation over the import wizard).
-    // Auto-focus keeps keyboard users inside the confirmation.
-    useEffect(() => {
-        // StrictMode replays effects while the dialog already has focus.
-        // Preserve the original opener instead of remembering the dialog itself.
-        if (document.activeElement instanceof HTMLElement && !dialogRef.current?.contains(document.activeElement)) {
-            restoreRef.current = document.activeElement
-        }
-        dialogRef.current?.focus()
-        const onKeyDown = (event: KeyboardEvent) => {
-            if (!isTopModal(stackId) || event.defaultPrevented) return
-            if (event.key === 'Escape') {
-                event.preventDefault()
-                onCancelRef.current()
-                return
-            }
-            if (event.key !== 'Tab' || !dialogRef.current) return
-            const items = focusables(dialogRef.current)
-            if (items.length === 0) return
-            const first = items[0]
-            const last = items[items.length - 1]
-            const active = document.activeElement as Node | null
-            const inside = active !== null && dialogRef.current.contains(active)
-            if (event.shiftKey && (!inside || document.activeElement === first)) {
-                event.preventDefault()
-                last.focus()
-            } else if (!event.shiftKey && (!inside || document.activeElement === last)) {
-                event.preventDefault()
-                first.focus()
-            }
-        }
-        document.addEventListener('keydown', onKeyDown)
-        return () => {
-            document.removeEventListener('keydown', onKeyDown)
-            const active = document.activeElement
-            if (active instanceof HTMLElement && active !== document.body && document.contains(active)) return
-            if (restoreRef.current && document.contains(restoreRef.current)) restoreRef.current.focus()
-        }
-    }, [stackId])
-    const depth = Math.max(0, modalDepth(stackId))
+    const { dialogRef, depth, isTop } = useDialogBehavior({ onClose: onCancel })
+
     return (
-        <div className="dialog-scrim" style={{ zIndex: Z_MODAL + depth }} onClick={onCancel}>
+        <div
+            className="dialog-scrim"
+            style={{ zIndex: Z_MODAL + depth }}
+            onClick={() => { if (isTop()) onCancel() }}
+        >
             <div
                 ref={dialogRef}
                 role="dialog"
@@ -125,15 +116,17 @@ export function ConfirmDialog({
             >
                 <h3 id={titleId} className="mb-1">{title}</h3>
                 <p className="confirm-dialog-message">{message}</p>
+                <p role="status" className={isLoading ? 'confirm-dialog-message' : 'visually-hidden'}>
+                    {isLoading ? t('common.actionContinues') : ''}
+                </p>
                 {children ? <div className="form-grid mb-15">{children}</div> : null}
-                <div className="dialog-actions">
+                <div className="actions-row actions-row-wrap actions-row-end actions-row-gap-lg">
                     <button
                         className="button button-secondary"
                         onClick={onCancel}
-                        disabled={isLoading}
                         type="button"
                     >
-                        {cancelText || t('common.cancel')}
+                        {isLoading ? t('common.close') : (cancelText || t('common.cancel'))}
                     </button>
                     <button
                         className={`button ${isDangerous ? 'danger' : ''}`}

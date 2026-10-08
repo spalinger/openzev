@@ -91,6 +91,35 @@ describe('FormModal accessibility', () => {
         expect(document.activeElement).toBe(buttons[0])
     })
 
+    it('restores an explicit opener after loading has moved focus elsewhere', () => {
+        const opener = document.createElement('button')
+        document.body.appendChild(opener)
+        const returnFocusRef = { current: opener }
+        const render = (isOpen: boolean) => act(() => root.render(createElement(StrictMode, null,
+            createElement(FormModal, { isOpen, title: 'Loaded', onClose: vi.fn(), returnFocusRef }, 'history'))))
+        opener.focus()
+        opener.disabled = true
+        opener.blur()
+        render(true)
+        expect(document.activeElement?.getAttribute('role')).toBe('dialog')
+        opener.disabled = false
+        render(false)
+        expect(document.activeElement).toBe(opener)
+        opener.remove()
+    })
+
+    it('keeps input focus across re-renders with a fresh returnFocusRef', () => {
+        const render = () => act(() => root.render(createElement(FormModal,
+            { isOpen: true, title: 'Title', onClose: vi.fn(), returnFocusRef: { current: null } },
+            createElement('input'),
+        )))
+        render()
+        const input = container.querySelector('input')!
+        input.focus()
+        render()
+        expect(document.activeElement).toBe(input)
+    })
+
     it('keeps input focus across re-renders with a fresh onClose', () => {
         renderModal(true, () => undefined)
         const dialog = container.querySelector('[role=dialog]') as HTMLElement

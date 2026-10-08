@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import type { ColumnDef, ColumnFiltersState } from '@tanstack/react-table'
-import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
+import { ConfirmDialog, consumeReportedError, useConfirmDialog } from '../components/ConfirmDialog'
 import { DataTable } from '../components/DataTable'
 import { formatShortDate, useAppSettings } from '../lib/appSettings'
 import { deleteInvoice, fetchInvoices } from '../lib/api/invoices'
@@ -61,9 +61,7 @@ export function AdminInvoicesContent() {
                 participant: invoice.participant_name,
             }),
             isDangerous: true,
-            onConfirm: async () => {
-                await deleteInvoiceAsync(invoice.id)
-            },
+            onConfirm: () => consumeReportedError(deleteInvoiceAsync(invoice.id)),
         })
     }, [confirm, deleteInvoiceAsync, t])
 

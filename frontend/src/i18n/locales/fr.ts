@@ -188,6 +188,7 @@ export const fr = {
         cancel: 'Annuler',
         confirm: 'Confirmer',
         processing: 'Traitement…',
+        actionContinues: 'Fermer cette boîte de dialogue n’arrête pas l’action.',
         save: 'Enregistrer',
         create: 'Créer',
         yes: 'Oui',
@@ -2217,6 +2218,8 @@ export const fr = {
             purgeMessage: "Ceci supprime définitivement « {{name}} » et tout ce qui s'y trouve — participants, points de mesure, relevés, tarifs et factures. Cette action est irréversible.",
             purgeConfirm: 'Supprimer définitivement',
             purgeConfirmLabel: 'Saisissez « {{name}} » pour confirmer.',
+            enableFailed: 'Impossible d’activer le RCP.',
+            disableFailed: 'Impossible de désactiver le RCP.',
             purgeFailed: 'Échec de la suppression du RCP.',
             wizard: {
                 titleStep: 'Créer un RCP · Étape {{step}} sur 4',

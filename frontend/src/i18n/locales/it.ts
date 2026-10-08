@@ -188,6 +188,7 @@ export const it = {
         cancel: 'Annulla',
         confirm: 'Conferma',
         processing: 'Elaborazione…',
+        actionContinues: 'La chiusura di questa finestra non interrompe l’azione.',
         save: 'Salva',
         create: 'Crea',
         yes: 'Sì',
@@ -2217,6 +2218,8 @@ export const it = {
             purgeMessage: 'Questa azione elimina definitivamente "{{name}}" e tutto ciò che contiene — partecipanti, punti di misura, letture, tariffe e fatture. Non può essere annullata.',
             purgeConfirm: 'Elimina definitivamente',
             purgeConfirmLabel: 'Digita "{{name}}" per confermare.',
+            enableFailed: 'Impossibile attivare il RCP.',
+            disableFailed: 'Impossibile disattivare il RCP.',
             purgeFailed: 'Impossibile eliminare il RCP.',
             wizard: {
                 titleStep: 'Crea RCP · Passaggio {{step}} di 4',

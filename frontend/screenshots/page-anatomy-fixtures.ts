@@ -75,6 +75,7 @@ export async function mockApi(page: Page, state: ApiState = {}) {
         const isParticipant = ['participant', 'former'].includes(zevRole)
         return {
           zev: zev.id, zev_name: zev.name, zev_disabled: !!zev.disabled_at,
+          zev_billing_interval: state.interval ?? 'monthly',
           access: isParticipant ? null : zevRole === 'viewer' ? 'viewer' : 'manager',
           participants: isParticipant
             ? [{ id: `p${zev.id}`, valid_from: '2026-01-01', valid_to: zevRole === 'former' ? '2026-09-30' : null, live: zevRole !== 'former' }]

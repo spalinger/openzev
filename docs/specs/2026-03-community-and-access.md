@@ -1032,6 +1032,9 @@ the account's role everywhere.
   *Delete*. *Delete* is disabled while the account belongs to any community
   (`canDeleteAccount`, mirroring the server's guard) and is not offered for
   the admin's own row.
+- **Activation:** follows the
+  [dialog contract](2026-04-frontend-management-page-design.md#dialog-behavior)
+  and leaves open edit forms unchanged.
 - **Removed from this page:** the participant-linking *Link existing*/*Create
   account*/*Unlink* actions and the participants-without-account rows — see
   §6.5. ("Create account" there created an account *for a specific
@@ -1052,6 +1055,12 @@ participants (`ParticipantCardsSection`, `useParticipantAccountLinking`,
   any non-admin account, also one already holding participant rows elsewhere,
   matching the server's rule since #761); *Unlink* when it has one, except on
   the owner's own participant, which the server refuses to detach.
+- Unlink failures produce one operation-owned error toast, including after
+  dismissing the pending confirmation. `onConfirm` uses `consumeReportedError`
+  to avoid a second generic dialog error; retry requires reopening the dialog.
+  `participant-account-linking.test.ts` covers failures with the dialog open
+  and dismissed; `confirmation-operations.spec.ts` exercises both through the
+  Participants page.
 - Owners keep the existing *Send/Copy/Revoke onboarding link* actions, which
   create the account. Nothing about the endpoints or permissions changed.
 
@@ -1165,6 +1174,10 @@ disabled. Records `zev.enable`.
 who disables their only community is not permanently locked out of creating a
 replacement through that endpoint.
 
+The ZEV list awaits enable/disable requests, reports failures through the
+operation's mutation, and disables repeat actions while pending. Confirmations
+follow the [dialog contract](2026-04-frontend-management-page-design.md#dialog-behavior).
+
 ### 7.1b Purge (ZEV lifecycle, phase 4)
 
 The terminal transition (`active → disabled → gone`). Implemented in
@@ -1174,6 +1187,10 @@ owner cannot self-serve this either). Body: `{"confirm_name": "<exact ZEV
 name>"}`; a mismatch is `400` and nothing is touched. Refuses (`400`,
 `ZevPurgeError`) unless the ZEV is already disabled — purge is never a
 shortcut from active.
+
+The frontend validates and captures the ZEV id and typed confirmation at
+submission. Purge follows the
+[dialog contract](2026-04-frontend-management-page-design.md#dialog-behavior).
 
 **What is deleted.** Every model that hangs off a ZEV is `CASCADE` from
 `Zev` directly or from a row that is itself `CASCADE` from it —

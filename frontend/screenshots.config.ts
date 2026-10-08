@@ -64,9 +64,16 @@ export default defineConfig({
       use: { storageState: AUTH_STATE_PATH },
     },
     {
+      name: 'shot',
+      dependencies: ['setup'],
+      testMatch: /shot\.spec\.ts$/,
+      use: { storageState: AUTH_STATE_PATH },
+    },
+    {
       name: 'browser',
       dependencies: ['setup'],
-      testIgnore: /(auth|capture)\.setup\.ts|capture\.spec\.ts/,
+      testMatch: /\.spec\.ts$/,
+      testIgnore: /(capture|shot)\.spec\.ts$/,
       use: { storageState: AUTH_STATE_PATH },
     },
   ],

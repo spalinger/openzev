@@ -133,6 +133,33 @@ async function click(element: Element | undefined | null) {
 const labelled = (container: Element, key: string) =>
     Array.from(container.querySelectorAll('label')).find((l) => l.textContent?.includes(key))
 
+for (const kind of ['destination', 'file']) {
+    for (const dismiss of [false, true]) {
+        it(`reports one ${kind} deletion error with dismissal=${dismiss}`, async () => {
+            setup({ jobs: [completed()] })
+            let reject!: (error: unknown) => void
+            const operation = kind === 'destination' ? api.deleteBackupDestination : api.deleteBackupArtifact
+            operation.mockReturnValueOnce(new Promise((_, fail) => { reject = fail }))
+            const container = await render()
+            const trigger = button(container, kind === 'destination' ? 'common.delete' : 'pages.backups.jobs.deleteFile')!
+            await click(trigger)
+            await click(button(container.querySelector('[role="dialog"]')!, kind === 'destination' ? 'common.delete' : 'pages.backups.jobs.deleteFile'))
+            expect(operation).toHaveBeenCalledOnce()
+            if (dismiss) {
+                await click(button(container.querySelector('[role="dialog"]')!, 'common.close'))
+                expect(container.querySelector('[role="dialog"]')).toBeNull()
+            }
+            expect(trigger.disabled).toBe(true)
+            await act(async () => { reject({ isAxiosError: true, response: { data: { detail: 'Deletion failed' } } }) })
+            await waitForCondition(() => pushToast.mock.calls.some(([message]) => message === 'Deletion failed'), 'failure toast after dismissal')
+            await waitForCondition(() => container.querySelector('[role="dialog"]') === null, 'dialog completion')
+            expect(pushToast).toHaveBeenCalledWith('Deletion failed', 'error')
+            expect(pushToast).toHaveBeenCalledOnce()
+            await waitForCondition(() => !trigger.disabled, 'delete trigger re-enabled')
+        })
+    }
+}
+
 describe('encryption status banner', () => {
     it('keeps cached status and operations usable after a failed status refetch', async () => {
         setup()

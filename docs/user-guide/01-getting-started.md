@@ -383,6 +383,14 @@ into a **Total consumption** node. Disabled communities contribute no consumptio
 
 ![Account profile](screenshots/16-account-profile.png)
 
+## Dialogs and actions
+
+Use Tab or Shift+Tab to move between dialog controls, and Escape or **Close**
+to dismiss a dialog. Before submitting a confirmation, choose **Cancel** to
+leave without starting the action. While it is processing, **Close** dismisses
+the dialog and the action continues; failures are still reported. If an action
+fails, reopen its confirmation to retry.
+
 ## API Access
 
 OpenZEV provides a complete REST API for programmatic access:

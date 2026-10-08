@@ -1078,7 +1078,12 @@ fails, so cached-scope warnings and retry remain available.
 list with one local filter (`all`, `failed`, `pending`, `sent`). It is the
 canonical email-history surface: **View history** loads `fetchEmailLogs` on
 demand into `EmailLogsModal`; only the latest history request may update
-the modal. Changing account/community clears history and invalidates pending
+the modal. History uses `FormModal` for the shared
+[dialog behavior](2026-04-frontend-management-page-design.md#dialog-behavior).
+Closing returns focus to the history button; long recipients, subjects and
+errors wrap. Pending delivery badges match the table's info styling.
+
+Changing account/community clears history and invalidates pending
 history requests. Pending delivery retries keep their original invoice/log IDs;
 completion after an account/community change does not notify or invalidate the
 new view. This does not cancel a retry accepted by the server. The invoice table

@@ -17,7 +17,8 @@ import {
     faXmark,
 } from '@fortawesome/free-solid-svg-icons'
 import { useManagedZev } from '../lib/managedZev'
-import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
+import { useToast } from '../lib/toast'
+import { ConfirmDialog, consumeReportedError, useConfirmDialog } from '../components/ConfirmDialog'
 import { ZevEmailTemplateFields } from '../components/ZevEmailTemplateFields'
 import { ZevGeneralSettingsFields } from '../components/ZevGeneralSettingsFields'
 import { ZevImportModal } from '../features/zev/ZevImportModal'
@@ -119,6 +120,8 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
     const { setSelectedZevId } = useManagedZev()
     const queryClient = useQueryClient()
     const { dialog, confirm, handleConfirm, handleCancel, isLoading: dialogLoading } = useConfirmDialog()
+    const { dialog: purgeDialog, confirm: confirmPurge, handleConfirm: handlePurgeConfirm, handleCancel: handlePurgeCancel } = useConfirmDialog()
+    const { pushToast } = useToast()
 
     const { data, isLoading, isError, isFetching, refetch } = useQuery({ queryKey: queryKeys.zev.list(), queryFn: fetchZevs })
 
@@ -141,7 +144,8 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
     const createSubmittedRef = useRef(false)
     const [purgeTarget, setPurgeTarget] = useState<Zev | null>(null)
     const [purgeConfirmation, setPurgeConfirmation] = useState('')
-    const [purgeError, setPurgeError] = useState<string | null>(null)
+    // State controls the button; the ref supplies current input at dispatch.
+    const purgeConfirmationRef = useRef('')
 
     const createMutation = useMutation({
         mutationFn: createZevWithOwner,
@@ -172,6 +176,7 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: queryKeys.zev.list() })
         },
+        onError: (error) => pushToast(formatApiError(error, t('pages.zevs.disableFailed')), 'error'),
     })
 
     const enableMutation = useMutation({
@@ -179,23 +184,37 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: queryKeys.zev.list() })
         },
+        onError: (error) => pushToast(formatApiError(error, t('pages.zevs.enableFailed')), 'error'),
     })
 
     const purgeMutation = useMutation({
-        mutationFn: () => purgeZev(purgeTarget!.id, purgeConfirmation),
+        mutationFn: ({ id, confirmation }: { id: string; confirmation: string }) => purgeZev(id, confirmation),
         onSuccess: () => {
-            setPurgeTarget(null)
-            setPurgeConfirmation('')
-            setPurgeError(null)
             void queryClient.invalidateQueries({ queryKey: queryKeys.zev.list() })
         },
-        onError: (error) => setPurgeError(formatApiError(error, t('pages.zevs.purgeFailed'))),
+        onError: (error) => pushToast(formatApiError(error, t('pages.zevs.purgeFailed')), 'error'),
     })
 
-    function closePurgeDialog() {
-        setPurgeTarget(null)
+    function openPurgeDialog(zev: Zev) {
+        setPurgeTarget(zev)
         setPurgeConfirmation('')
-        setPurgeError(null)
+        purgeConfirmationRef.current = ''
+        confirmPurge({
+            title: t('pages.zevs.purgeTitle'),
+            message: t('pages.zevs.purgeMessage', { name: zev.name }),
+            confirmText: t('pages.zevs.purgeConfirm'),
+            isDangerous: true,
+            onConfirm: () => {
+                const confirmation = purgeConfirmationRef.current
+                if (confirmation.trim() !== zev.name.trim()) return false
+                return consumeReportedError(purgeMutation.mutateAsync({ id: zev.id, confirmation }))
+            },
+            onCancel: () => {
+                setPurgeTarget(null)
+                setPurgeConfirmation('')
+                purgeConfirmationRef.current = ''
+            },
+        })
     }
 
     function startEdit(zev: Zev) {
@@ -802,26 +821,25 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
                 />
             )}
 
-            {purgeTarget && (
+            {purgeDialog && purgeTarget && (
                 <ConfirmDialog
-                    title={t('pages.zevs.purgeTitle')}
-                    message={t('pages.zevs.purgeMessage', { name: purgeTarget.name })}
-                    confirmText={t('pages.zevs.purgeConfirm')}
-                    isDangerous
+                    {...purgeDialog}
                     isLoading={purgeMutation.isPending}
                     confirmDisabled={purgeConfirmation.trim() !== purgeTarget.name.trim()}
-                    onCancel={closePurgeDialog}
-                    onConfirm={() => purgeMutation.mutate()}
+                    onCancel={handlePurgeCancel}
+                    onConfirm={handlePurgeConfirm}
                 >
                     <label style={{ gridColumn: '1 / -1' }}>
                         <span>{t('pages.zevs.purgeConfirmLabel', { name: purgeTarget.name })}</span>
                         <input
                             value={purgeConfirmation}
-                            onChange={(event) => setPurgeConfirmation(event.target.value)}
+                            onChange={(event) => {
+                                purgeConfirmationRef.current = event.target.value
+                                setPurgeConfirmation(event.target.value)
+                            }}
                             required
                         />
                     </label>
-                    {purgeError && <div className="error-banner" style={{ gridColumn: '1 / -1' }}>{purgeError}</div>}
                 </ConfirmDialog>
             )}
 
@@ -902,7 +920,7 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
                                                     title: t('pages.zevs.enableTitle'),
                                                     message: t('pages.zevs.enableMessage', { name: zev.name }),
                                                     confirmText: t('pages.zevs.enableConfirm'),
-                                                    onConfirm: () => enableMutation.mutate(zev.id),
+                                                    onConfirm: () => consumeReportedError(enableMutation.mutateAsync(zev.id)),
                                                 })}
                                             >
                                                 <FontAwesomeIcon icon={faPlay} fixedWidth />
@@ -913,7 +931,8 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
                                             <button
                                                 className="button button-danger button-compact"
                                                 type="button"
-                                                onClick={() => { setPurgeTarget(zev); setPurgeConfirmation(''); setPurgeError(null) }}
+                                                disabled={purgeMutation.isPending}
+                                                onClick={() => openPurgeDialog(zev)}
                                             >
                                                 <FontAwesomeIcon icon={faSkullCrossbones} fixedWidth />
                                                 {t('pages.zevs.purge')}
@@ -929,7 +948,7 @@ export function ZevListPage({ embedded = false }: { embedded?: boolean }) {
                                                     message: t('pages.zevs.disableMessage', { name: zev.name }),
                                                     confirmText: t('pages.zevs.disableConfirm'),
                                                     isDangerous: true,
-                                                    onConfirm: () => disableMutation.mutate(zev.id),
+                                                    onConfirm: () => consumeReportedError(disableMutation.mutateAsync(zev.id)),
                                                 })}
                                             >
                                                 <FontAwesomeIcon icon={faBan} fixedWidth />

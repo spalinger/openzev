@@ -14,7 +14,7 @@ import {
 import { formatApiError } from '../../lib/api/errors'
 import { queryKeys } from '../../lib/api/queryKeys'
 import { useToast } from '../../lib/toast'
-import { ConfirmDialog, useConfirmDialog } from '../../components/ConfirmDialog'
+import { ConfirmDialog, consumeReportedError, useConfirmDialog } from '../../components/ConfirmDialog'
 import { FormModal } from '../../components/FormModal'
 import type { BackupDestination, BackupStatus } from '../../types/api'
 import {
@@ -114,7 +114,7 @@ export function BackupDestinationsSection({ status }: { status: BackupStatus | u
             message: t('pages.backups.destinations.deleteMessage', { name: destination.name }),
             confirmText: t('common.delete'),
             isDangerous: true,
-            onConfirm: () => deleteMutation.mutateAsync(destination.id),
+            onConfirm: () => consumeReportedError(deleteMutation.mutateAsync(destination.id)),
         })
     }
 
@@ -209,6 +209,7 @@ export function BackupDestinationsSection({ status }: { status: BackupStatus | u
                                             <button
                                                 type="button"
                                                 className="button button-danger button-compact"
+                                                disabled={deleteMutation.isPending}
                                                 onClick={() => confirmDelete(destination)}
                                             >
                                                 <FontAwesomeIcon icon={faTrash} fixedWidth />
