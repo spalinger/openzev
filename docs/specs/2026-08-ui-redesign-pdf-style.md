@@ -656,6 +656,7 @@ Existing suites stay green (contract: 59 tests in `test_contract_context.py`; te
 - `scripts/generate-tokens.mjs` idempotence test `design/tokens.test.mjs`: write→read→generate→diff → `0`; brand-ramp monotonicity negative test: inverted/tied ramp in a temp tree → non-zero exit in both generate and `--check` modes.
 - Playwright `npm run screenshots` captures the guide against seeded demo data with reduced motion, so charts render without animating. The `capture-data` project (`capture.setup.ts`) prepares the data the captures share (the 08b invoice PDF) before any of them runs.
 - Participant captures impersonate the seeded Anna (`anna@openzev.local`) and fail unless she is a plain user with a live participation in the flagship ZEV and no management access; the dynamic-source capture additionally requires the configured demo tariff described in `capture.spec.ts`.
+- `npm run test:pdf-helpers` (`screenshots/pdf-helpers.spec.ts`) covers native PDF loading, sidebar closing, and failure cases without the demo stack. `tests/screenshots-pdf.test.ts` covers transient-frame retries.
 - Preview editor: revision guard ignores out-of-order responses; superseded requests are aborted (`AbortController`).
 - `use-pdf-object-url.test.ts`, `participant-documents.test.ts`, `pdf-preview.test.ts`, `api-reports.test.ts`, and `invoice-pdf-preview.test.ts` cover blob lifecycle, participant tabs, actions, routing, and invoice embeds. Existing report and export tests remain separate.
 - Date-picker cutover matrix: each of the five converted pickers displays and submits the same plain civil-date format as before (no local-time shift, ADR 0007).
@@ -746,9 +747,10 @@ Existing suites stay green (contract: 59 tests in `test_contract_context.py`; te
 - **Screenshot regeneration** — `docs/user-guide/screenshots/*` re-captured
   against the redesigned UI (22/22 Playwright captures, de-CH, base viewport
   1440×900; `screenshots.config.ts` defaults to the full `chromium` channel
-  so embedded PDFs render, and the 08b/14 captures assert the PDF viewer
-  painted so a blank embed fails the run instead of being committed
-  silently). Every
+  so embedded PDFs render). The 08b/14/23b captures wait for a nonempty PDF
+  to finish loading, then close its thumbnail sidebar. Missing or invalid
+  viewer controls fail the capture. This verifies loading state, not rendered
+  pixels. Every
   capture goes through `screenshotFull` (`capture.spec.ts`): the viewport is
   grown to the content height instead of using `fullPage`, which captures
   beyond the viewport without re-resolving `100dvh` — the sticky sidebar

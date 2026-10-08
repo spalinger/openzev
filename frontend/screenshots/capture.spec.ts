@@ -16,7 +16,7 @@ import { test, expect, type Page } from '@playwright/test'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import {
-  assertPdfPainted,
+  assertPdfLoaded,
   closePdfSidebar,
   findDemoInvoice,
   getAdminToken,
@@ -329,8 +329,7 @@ test.describe('User Guide Screenshots', () => {
     await navigateTo(page, `/billing/invoices/${invoice.id}`)
     await page.waitForSelector('.grid-4', { timeout: 10_000 })
     await page.waitForSelector('iframe[title]', { timeout: 15_000 })
-    await page.waitForTimeout(3500)
-    await assertPdfPainted(page)
+    await assertPdfLoaded(page)
     await closePdfSidebar(page)
     await screenshotFull(page, '08b-invoice-detail')
   })
@@ -387,8 +386,7 @@ test.describe('User Guide Screenshots', () => {
     await navigateTo(page, '/admin/pdf-templates')
     await page.waitForSelector('.card, textarea', { timeout: 10_000 })
     await page.waitForSelector('iframe[title]', { timeout: 15_000 })
-    await page.waitForTimeout(1000)
-    await assertPdfPainted(page)
+    await assertPdfLoaded(page)
     await closePdfSidebar(page)
     await screenshotFull(page, '14-admin-pdf-templates')
   })
@@ -473,7 +471,7 @@ test.describe('User Guide Screenshots', () => {
     await navigateTo(page, '/me/statement')
     await page.getByRole('combobox', { name: 'Jahr', exact: true }).selectOption(String(new Date().getFullYear()))
     await page.waitForSelector('#yearly-documents-preview iframe[title]', { timeout: 30_000 })
-    await assertPdfPainted(page)
+    await assertPdfLoaded(page)
     await closePdfSidebar(page)
     await screenshotFull(page, '23b-participant-annual-statement')
   })

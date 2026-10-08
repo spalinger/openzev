@@ -294,20 +294,41 @@ export async function screenshotViewport(page: Page, dir: string, name: string) 
   })
 }
 
-/**
- * Fail loudly if the embedded PDF viewer didn't paint — the iframe element
- * exists even when blank, so assert Chromium's PDF-viewer frame appears.
- */
-export async function assertPdfPainted(page: Page) {
+export const PDF_VIEWER_URL = 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/'
+
+/** Wait for the native PDF plugin to finish loading a nonempty document. */
+export async function assertPdfLoaded(page: Page, timeout = 15_000) {
   await expect
     .poll(
-      () => page.frames().some(f => f.url().startsWith('chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai')),
+      async () => {
+        const viewer = page.frames().find(f => f.url().startsWith(PDF_VIEWER_URL))
+        if (!viewer) return { loaded: false, state: 'no viewer' }
+        try {
+          return await viewer.evaluate(() => {
+            const toolbar = document.querySelector('pdf-viewer')?.shadowRoot
+              ?.querySelector('viewer-toolbar') as (HTMLElement & {
+                loadProgress: number
+                docLength: number
+              }) | null
+            return {
+              loaded: toolbar?.loadProgress === 100 && toolbar.docLength > 0,
+              loadProgress: toolbar?.loadProgress,
+              docLength: toolbar?.docLength,
+            }
+          })
+        } catch (error) {
+          if (error instanceof Error && /Execution context was destroyed|Frame was detached/.test(error.message)) {
+            return { loaded: false, state: 'frame not ready' }
+          }
+          throw error
+        }
+      },
       {
-        message: 'PDF viewer did not paint — re-run with SCREENSHOT_CHANNEL=chromium (default in screenshots.config.ts)',
-        timeout: 15_000,
+        message: 'PDF viewer did not load a nonempty document — use SCREENSHOT_CHANNEL=chromium and check the PDF response',
+        timeout,
       }
     )
-    .toBe(true)
+    .toEqual(expect.objectContaining({ loaded: true }))
 }
 
 /**
@@ -315,33 +336,15 @@ export async function assertPdfPainted(page: Page) {
  * `#navpanes=0` doesn't reach the viewer on blob URLs, so click the toolbar
  * toggle (`#sidenavToggle`, via `aria-expanded`) instead.
  */
-export async function closePdfSidebar(page: Page) {
-  const viewer = page.frames().find(f => f.url().startsWith('chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai'))
-  if (!viewer) return
+export async function closePdfSidebar(page: Page, timeout = 5_000) {
+  const viewer = page.frames().find(f => f.url().startsWith(PDF_VIEWER_URL))
+  if (!viewer) throw new Error('PDF viewer missing — call assertPdfLoaded before closing its sidebar')
   const toggle = viewer.locator('#sidenavToggle')
-  if (!(await toggle.count())) return
-  const wasExpanded = await viewer.evaluate(() => {
-    const btn = document.querySelector('pdf-viewer')?.shadowRoot
-      ?.querySelector('viewer-toolbar')?.shadowRoot?.querySelector('#sidenavToggle') as HTMLElement | null
-    if (!btn) return null
-    const expanded = btn.getAttribute('aria-expanded')
-    if (expanded === 'true') btn.click()
-    return expanded
-  })
-  if (wasExpanded !== 'true') return // already closed, or no toggle
-  // Wait until it actually closed; fail loudly if a Chromium update renames
-  // the toggle, instead of committing a screenshot with the strip back.
-  await expect
-    .poll(
-      () => viewer.evaluate(() =>
-        document.querySelector('pdf-viewer')?.shadowRoot
-          ?.querySelector('viewer-toolbar')?.shadowRoot
-          ?.querySelector('#sidenavToggle')?.getAttribute('aria-expanded') ?? 'missing'
-      ),
-      {
-        message: 'PDF viewer sidebar did not close — Chromium viewer DOM changed?',
-        timeout: 5_000,
-      }
-    )
-    .toBe('false')
+  await expect(toggle, 'PDF viewer sidebar toggle missing or invalid — Chromium viewer DOM changed?')
+    .toHaveAttribute('aria-expanded', /^(true|false)$/, { timeout })
+  if (await toggle.getAttribute('aria-expanded') === 'false') return
+  // Chromium hides the sidebar control in narrow embeds; click it directly.
+  await toggle.evaluate(button => (button as HTMLElement).click())
+  await expect(toggle, 'PDF viewer sidebar did not close — Chromium viewer DOM changed?')
+    .toHaveAttribute('aria-expanded', 'false', { timeout })
 }
