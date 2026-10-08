@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchHourlyProfile, fetchMeteringDashboardSummary } from '../../lib/api/metering'
 import { queryKeys } from '../../lib/api/queryKeys'
 import { formatKwh, formatPercent } from '../../lib/numbers'
-import { dashboardKwhStat, hourlyKwhTick, hourlyKwhTooltipValue, fromZevRate, kwhTick } from '../../lib/dashboardFormatting'
+import { dashboardKwhStat, fromZevRate, kwhTick } from '../../lib/dashboardFormatting'
 import { useAuth } from '../../lib/auth'
 import { useManagedZev } from '../../lib/managedZev'
 import { useEnergyDataEligibility } from '../../lib/supplementary'
@@ -15,7 +15,7 @@ import { PeriodSelector } from '../../components/PeriodSelector'
 import { GrossEnergyCallToAction, GrossEnergyCard } from '../../components/dashboard/GrossEnergyCard'
 import { BalanceChart } from '../../components/dashboard/BalanceChart'
 import { EnergyFlowCard } from '../../components/dashboard/EnergyFlowCard'
-import { HourlyProfileCard } from '../../components/dashboard/HourlyProfileCard'
+import { HourlyProfileSection } from '../../components/dashboard/HourlyProfileSection'
 import { ParticipantTableCard } from '../../components/dashboard/ParticipantTableCard'
 import { type DashboardBodyProps, type DashboardBucket, useBucketLabelFormatters, useHourlyProfileRows } from './dashboardShared'
 import { ResolutionSelect } from './ResolutionSelect'
@@ -27,13 +27,12 @@ export function ManagementDashboardBody({ interval, period, onPeriodChange, peri
     const energyData = useEnergyDataEligibility()
 
     const [bucket, setBucket] = useState<DashboardBucket>('day')
-    const [participantSelection, setParticipantSelection] = useState({ scopeId: selectedZevId, id: '' })
+    const [participantSelection, setParticipantSelection] = useState({ scopeId: selectedZevId, id: '', name: '' })
     if (participantSelection.scopeId !== selectedZevId) {
-        setParticipantSelection({ scopeId: selectedZevId, id: '' })
+        setParticipantSelection({ scopeId: selectedZevId, id: '', name: '' })
     }
     // Derive before queries run, so a community switch cannot request the old participant.
     const selectedParticipantId = participantSelection.scopeId === selectedZevId ? participantSelection.id : ''
-    const setSelectedParticipantId = (id: string) => setParticipantSelection({ scopeId: selectedZevId, id })
     const { formatBucketLabel, formatBucketTooltipLabel } = useBucketLabelFormatters(bucket)
 
     const summaryQuery = useQuery({
@@ -85,7 +84,15 @@ export function ManagementDashboardBody({ interval, period, onPeriodChange, peri
         [selectedParticipantId],
     )
     const selectedZevName = selectedZev?.name
-    const selectedParticipantName = summary?.summary_kind === 'zev' ? summary.selected_participant_name : undefined
+    const participantStats = summary?.summary_kind === 'zev' ? summary.participant_stats : []
+    const selectedParticipantName = selectedParticipantId
+        ? (summary?.summary_kind === 'zev' ? summary.selected_participant_name : null) || participantSelection.name || selectedParticipantId
+        : undefined
+    const setSelectedParticipantId = (id: string) => setParticipantSelection({
+        scopeId: selectedZevId,
+        id,
+        name: participantStats.find((participant) => participant.participant_id === id)?.participant_name || id,
+    })
     // Behind-meter generation makes the selected participant's from-ZEV rate misleading (spec §7.2).
     const selectedParticipantHasGeneration =
         summary?.summary_kind === 'zev' &&
@@ -123,13 +130,18 @@ export function ManagementDashboardBody({ interval, period, onPeriodChange, peri
                             <span>{t('pages.dashboard.participant')}</span>
                             <select value={selectedParticipantId} onChange={(e) => setSelectedParticipantId(e.target.value)}>
                                 <option value="">{t('pages.dashboard.allParticipants')}</option>
-                                {summary?.summary_kind === 'zev' &&
-                                    summary.participant_stats.map((participant) => (
-                                        <option key={participant.participant_id} value={participant.participant_id}>
-                                            {participant.participant_name || participant.participant_id}
-                                            {ownParticipantIds.includes(participant.participant_id) ? ` (${t('pages.dashboard.youBadge')})` : ''}
-                                        </option>
-                                    ))}
+                                {selectedParticipantId && !participantStats.some((participant) => participant.participant_id === selectedParticipantId) && (
+                                    <option value={selectedParticipantId}>
+                                        {selectedParticipantName}
+                                        {ownParticipantIds.includes(selectedParticipantId) ? ` (${t('pages.dashboard.youBadge')})` : ''}
+                                    </option>
+                                )}
+                                {participantStats.map((participant) => (
+                                    <option key={participant.participant_id} value={participant.participant_id}>
+                                        {participant.participant_name || participant.participant_id}
+                                        {ownParticipantIds.includes(participant.participant_id) ? ` (${t('pages.dashboard.youBadge')})` : ''}
+                                    </option>
+                                ))}
                             </select>
                         </label>
                         <ResolutionSelect value={bucket} onChange={setBucket} />
@@ -186,7 +198,7 @@ export function ManagementDashboardBody({ interval, period, onPeriodChange, peri
                     <BalanceChart
                         data={ownerChartData}
                         zevName={selectedZevName}
-                        participantName={selectedParticipantName ?? undefined}
+                        participantName={selectedParticipantName}
                         formatBucketLabel={formatBucketLabel}
                         formatBucketTooltipLabel={formatBucketTooltipLabel}
                         kwhTick={kwhTick}
@@ -206,15 +218,14 @@ export function ManagementDashboardBody({ interval, period, onPeriodChange, peri
                         onSelect={setSelectedParticipantId}
                         ownParticipantIds={ownParticipantIds}
                     />
-                    {selectedParticipantId && hourlyProfileData.length > 0 && (
-                        <HourlyProfileCard
-                            data={hourlyProfileData}
-                            hourlyKwhTick={hourlyKwhTick}
-                            hourlyKwhTooltipValue={hourlyKwhTooltipValue}
-                            participantName={selectedParticipantName ?? undefined}
-                        />
-                    )}
                 </>
+            )}
+            {selectedParticipantId && (
+                <HourlyProfileSection
+                    query={hourlyProfileQuery}
+                    data={hourlyProfileData}
+                    participantName={selectedParticipantName}
+                />
             )}
         </>
     )

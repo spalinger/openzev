@@ -5,7 +5,17 @@ import { act } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import { MantineProvider } from '@mantine/core'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { MembershipParticipant } from '../src/types/api'
+import type { HourlyProfileEntry, Invoice, MembershipParticipant } from '../src/types/api'
+import { waitForCondition } from './helpers/waitForCondition'
+
+type ProfileData = HourlyProfileEntry[] | null
+type ProfileMock = ProfileData | Promise<ProfileData> | ((args: Record<string, unknown>) => ProfileData | Promise<ProfileData>)
+
+function deferred<T>() {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise })
+    return { promise, resolve }
+}
 
 const eligibility = vi.hoisted(() => ({
     eligible: [] as Array<{ metering_point: string; meter_id: string; zev: string; zev_name: string; participant: string; source: string | null }>,
@@ -20,7 +30,7 @@ const mockState = vi.hoisted(() => ({
     secondMembershipSelectable: true,
     summary: null as unknown,
     summaryCalls: [] as Array<Record<string, unknown>>,
-    hourlyProfile: null as unknown,
+    hourlyProfile: null as ProfileMock,
     hourlyCalls: [] as Array<Record<string, unknown>>,
     invoices: [] as Invoice[],
     invoiceCalls: [] as Array<unknown>,
@@ -98,7 +108,10 @@ vi.mock('../src/lib/api/metering', () => ({
     },
     fetchHourlyProfile: (args: Record<string, unknown>) => {
         mockState.hourlyCalls.push(args)
-        return Promise.resolve({ hourly_profile: mockState.hourlyProfile })
+        const value = typeof mockState.hourlyProfile === 'function'
+            ? mockState.hourlyProfile(args)
+            : mockState.hourlyProfile
+        return Promise.resolve(value).then((hourly_profile) => ({ hourly_profile }))
     },
 }))
 
@@ -111,11 +124,16 @@ vi.mock('../src/lib/api/invoices', () => ({
     openInvoicePdf: vi.fn(),
 }))
 
+vi.mock('../src/components/dashboard/HourlyProfileCard', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../src/components/dashboard/HourlyProfileCard')>()
+    return { ...actual, HourlyProfileCard: vi.fn(actual.HourlyProfileCard) }
+})
+
 import { DashboardPage } from '../src/pages/DashboardPage'
 import { ParticipantDashboardBody } from '../src/features/dashboard/ParticipantDashboardBody'
 import { ParticipantInvoicesCard } from '../src/components/dashboard/ParticipantInvoicesCard'
+import { HourlyProfileCard } from '../src/components/dashboard/HourlyProfileCard'
 import { openInvoicePdf } from '../src/lib/api/invoices'
-import type { Invoice } from '../src/types/api'
 
 const cleanups: Array<() => void> = []
 afterEach(() => {
@@ -194,8 +212,7 @@ function participantSummary(currentParticipantId: string | null) {
 // Re-renders the last mounted dashboard, as a community switch in the provider would.
 let rerenderDashboard: () => Promise<void> = async () => {}
 
-async function renderDashboard(page?: ReactElement) {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+async function renderDashboard(page?: ReactElement, client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
     const container = document.createElement('div')
     document.body.appendChild(container)
     const root = createRoot(container)
@@ -234,6 +251,64 @@ async function flush() {
         if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(20)
         await settled
     })
+}
+
+function participantSelect(container: HTMLElement) {
+    const label = Array.from(container.querySelectorAll('label')).find((label) =>
+        label.querySelector('span')?.textContent === 'pages.dashboard.participant',
+    )
+    const select = label?.querySelector('select')
+    expect(select).toBeTruthy()
+    return select as HTMLSelectElement
+}
+
+function profileHeading(container: HTMLElement) {
+    return Array.from(container.querySelectorAll('h3')).find((heading) =>
+        heading.textContent?.includes('pages.dashboard.hourlyProfile.title'),
+    )
+}
+
+function profileNotice(container: HTMLElement, key = 'failed') {
+    return Array.from(container.querySelectorAll('[role="alert"]')).find((notice) =>
+        notice.textContent?.includes(`pages.dashboard.hourlyProfile.${key}`),
+    )
+}
+
+async function changeParticipant(container: HTMLElement, id: string) {
+    await act(async () => {
+        const select = participantSelect(container)
+        select.value = id
+        select.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+}
+
+async function previousPeriod(container: HTMLElement) {
+    const button = Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('pages.invoices.prevPeriod'),
+    )
+    expect(button).toBeTruthy()
+    await act(async () => button!.click())
+}
+
+async function renderProfile(relation: 'participant' | 'manager', client?: QueryClient) {
+    mockState.relation = relation
+    mockState.summaryCalls = []
+    mockState.hourlyCalls = []
+    mockState.invoices = []
+    mockState.summary = relation === 'manager'
+        ? (args: Record<string, unknown>) => ({
+            ...managerSummary(),
+            selected_participant_name: args.participantId === 'p1' ? 'Alice' : null,
+        })
+        : participantSummary('me')
+    const container = await renderDashboard(undefined, client)
+    if (relation === 'manager') {
+        expect(mockState.hourlyCalls).toHaveLength(0)
+        await waitForCondition(() => participantSelect(container).querySelector('option[value="p1"]') !== null, 'participant options')
+        await changeParticipant(container, 'p1')
+        await waitForCondition(() => mockState.hourlyCalls.length === 1, 'selected participant profile request')
+    }
+    return container
 }
 
 describe('dashboard behavior preservation', () => {
@@ -312,18 +387,14 @@ describe('dashboard behavior preservation', () => {
         await act(async () => {
             rows[0].dispatchEvent(new MouseEvent('click', { bubbles: true }))
         })
-        for (let i = 0; i < 15 && !container.textContent?.includes('pages.dashboard.hourlyProfile.title'); i++) {
-            await flush()
-        }
+        await waitForCondition(() => profileHeading(container) !== undefined, 'selected participant profile')
 
         expect(mockState.hourlyCalls.some((call) => call.participantId === 'p1')).toBe(true)
         expect(mockState.summaryCalls.some((call) => call.participantId === 'p1')).toBe(true)
         expect(container.textContent).toContain('pages.dashboard.hourlyProfile.title')
 
         // Dropdown reflects the selection.
-        const selects = container.querySelectorAll('select')
-        expect(selects.length).toBeGreaterThan(0)
-        expect((selects[0] as HTMLSelectElement).value).toBe('p1')
+        expect(participantSelect(container).value).toBe('p1')
 
         // Selected row is highlighted (re-query after re-render).
         const updatedRows = container.querySelectorAll('tbody tr')
@@ -372,6 +443,7 @@ describe('dashboard behavior preservation', () => {
         await flush()
         expect(mockState.summaryCalls.some((call) => call.zevId === 'z1' && call.participantId === 'p1')).toBe(true)
 
+        mockState.summary = new Promise(() => {})
         mockState.selectedZevId = 'z2'
         await rerenderDashboard()
         await flush()
@@ -380,7 +452,8 @@ describe('dashboard behavior preservation', () => {
         expect(z2Summaries.length).toBeGreaterThan(0)
         expect(z2Summaries.every((call) => call.participantId === undefined)).toBe(true)
         expect(mockState.hourlyCalls.some((call) => call.zevId === 'z2')).toBe(false)
-        expect((container.querySelector('select') as HTMLSelectElement).value).toBe('')
+        expect(participantSelect(container).value).toBe('')
+        expect(participantSelect(container).textContent).not.toContain('Alice')
     })
 
     it('manager participant buttons and numeric cells select their rows', async () => {
@@ -401,24 +474,22 @@ describe('dashboard behavior preservation', () => {
             button.click()
         })
         // jsdom cannot synthesize native Enter/Space button activation; the real browser check covers it.
-        for (let i = 0; i < 20; i++) {
-            await flush()
+        await waitForCondition(() => {
             const settledRows = container.querySelectorAll('.participant-table tbody tr')
-            const profileLoaded = mockState.hourlyCalls.some((call) => call.participantId === 'p2')
-            if (settledRows.length === 2 && settledRows[1].classList.contains('is-selected') && profileLoaded) break
-        }
+            return settledRows.length === 2 && settledRows[1].classList.contains('is-selected') &&
+                mockState.hourlyCalls.some((call) => call.participantId === 'p2')
+        }, 'Bob selection')
         expect(mockState.hourlyCalls.filter((call) => call.participantId === 'p2').length).toBe(1)
 
         const numericCell = container.querySelector('.participant-table tbody tr:first-child td.numeric')
         await act(async () => {
             numericCell?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
         })
-        for (let i = 0; i < 20; i++) {
-            await flush()
+        await waitForCondition(() => {
             const settledRows = container.querySelectorAll('.participant-table tbody tr')
-            const profileLoaded = mockState.hourlyCalls.some((call) => call.participantId === 'p1')
-            if (settledRows.length === 2 && settledRows[0].classList.contains('is-selected') && profileLoaded) break
-        }
+            return settledRows.length === 2 && settledRows[0].classList.contains('is-selected') &&
+                mockState.hourlyCalls.some((call) => call.participantId === 'p1')
+        }, 'Alice selection')
         expect(mockState.hourlyCalls.some((call) => call.participantId === 'p1')).toBe(true)
         expect(container.querySelector('.participant-table tbody tr:first-child')?.classList.contains('is-selected')).toBe(true)
     })
@@ -691,7 +762,7 @@ describe('dashboard behavior preservation', () => {
         expect(titles).toContain('pages.dashboard.energyFlow.gridImport → pages.dashboard.participantStats.totalConsumption: 25 kWh')
     })
 
-    it('participant invoices list sent/paid rows with details actions, with or without a PDF', async () => {
+    it.each(['loaded', 'loading', 'error'] as const)('participant invoices remain usable with a %s summary', async (summaryState) => {
         mockState.relation = 'participant'
         mockState.hourlyProfile = null
         mockState.hourlyCalls = []
@@ -708,18 +779,18 @@ describe('dashboard behavior preservation', () => {
             // Another participant's invoice.
             makeInvoice({ id: '7', invoice_number: 'INV-7', participant: 'other', pdf_url: 'http://x/7', pdf_status: 'ready', total_chf: '40.00' }),
         ]
-        // Defer the summary so the test proves invoices start loading independently.
-        let resolveSummary!: (value: unknown) => void
-        mockState.summary = new Promise((resolve) => {
-            resolveSummary = resolve
-        }) as unknown
+        mockState.summary = summaryState === 'loading'
+            ? new Promise(() => {})
+            : summaryState === 'error'
+              ? () => Promise.reject(new Error('Summary unavailable'))
+              : participantSummary('me')
         const container = await renderDashboard()
         expect(mockState.invoiceCalls.length).toBeGreaterThan(0)
-        await act(async () => {
-            resolveSummary(participantSummary('me'))
-        })
-        for (let i = 0; i < 15 && !container.textContent?.includes('INV-5'); i++) {
-            await flush()
+        await waitForCondition(() => container.textContent?.includes('INV-5') === true, 'participant invoices')
+        if (summaryState === 'error') {
+            await waitForCondition(() => container.textContent?.includes('pages.dashboard.failedAnalytics') === true, 'summary error')
+        } else if (summaryState === 'loading') {
+            expect(container.textContent).not.toContain('pages.dashboard.participantStats.totalConsumption')
         }
         expect(container.textContent).not.toContain('INV-1')
         expect(container.textContent).toContain('INV-3')
@@ -757,7 +828,8 @@ describe('dashboard behavior preservation', () => {
             makeInvoice({ pdf_url: 'http://x/3', pdf_status: 'ready' }),
         ]
         const container = await renderDashboard()
-        await flush()
+        await waitForCondition(() => container.textContent?.includes('pages.dashboard.failedAnalytics') === true &&
+            container.textContent?.includes('INV-3') === true, 'invoices and summary error')
         expect(container.textContent).toContain('pages.dashboard.failedAnalytics')
         expect(container.textContent).toContain('INV-3')
     })
@@ -775,6 +847,169 @@ describe('dashboard behavior preservation', () => {
         expect(empty.querySelector('table')).toBeNull()
         empty.querySelector<HTMLButtonElement>('.error-banner button')?.click()
         expect(onRetry).toHaveBeenCalledOnce()
+    })
+
+    it.each(['loading', 'error'] as const)('participant hourly profile remains available while the summary is %s', async (summaryState) => {
+        mockState.relation = 'participant'
+        mockState.summary = summaryState === 'loading'
+            ? new Promise(() => {})
+            : () => Promise.reject(new Error('Summary unavailable'))
+        mockState.hourlyProfile = [{ hour: 10, from_zev_kwh: 1.5, from_grid_kwh: 0.5 }]
+        mockState.invoices = []
+        const container = await renderDashboard()
+
+        await waitForCondition(() => profileHeading(container) !== undefined, 'participant profile')
+        if (summaryState === 'error') {
+            await waitForCondition(() => container.textContent?.includes('pages.dashboard.failedAnalytics') === true, 'summary error')
+        }
+        expect(container.textContent).toContain('pages.dashboard.hourlyProfile.title')
+        expect(container.textContent).toContain('pages.dashboard.invoicesSection')
+        expect(container.textContent).not.toContain('pages.dashboard.participantStats.totalConsumption')
+    })
+
+    it('participant profile retry refetches only the profile when both queries fail', async () => {
+        mockState.relation = 'participant'
+        mockState.summaryCalls = []
+        mockState.hourlyCalls = []
+        mockState.summary = () => Promise.reject(new Error('Summary unavailable'))
+        mockState.hourlyProfile = () => Promise.reject(new Error('Profile unavailable'))
+        mockState.invoices = []
+        const container = await renderDashboard()
+        await waitForCondition(() => profileNotice(container) !== undefined &&
+            container.textContent?.includes('pages.dashboard.failedAnalytics') === true, 'summary and profile errors')
+        expect(container.querySelectorAll('[role="alert"]')).toHaveLength(2)
+        expect(profileHeading(container)).toBeUndefined()
+        expect(container.textContent).toContain('pages.dashboard.invoicesSection')
+
+        const profile = deferred<ProfileData>()
+        mockState.hourlyProfile = profile.promise
+        const summaryCallsBeforeRetry = mockState.summaryCalls.length
+        const retry = profileNotice(container)!.querySelector<HTMLButtonElement>('button')!
+        expect(retry.textContent).toContain('common.retry')
+        retry.focus()
+        await act(async () => retry.click())
+        await waitForCondition(() => container.querySelector('[role="status"][aria-label="pages.dashboard.hourlyProfile.loading"]') !== null, 'profile loading feedback')
+        const section = container.querySelector('[role="group"][aria-label="pages.dashboard.hourlyProfile.title"]')
+        expect(document.activeElement).toBe(section)
+        expect(container.querySelector('[role="status"]')?.textContent).toContain('pages.dashboard.hourlyProfile.loading')
+        expect(profileNotice(container)).toBeUndefined()
+        expect(mockState.hourlyCalls).toHaveLength(2)
+        expect(mockState.hourlyCalls[1].participantId).toBeUndefined()
+
+        await act(async () => profile.resolve([{ hour: 10, from_zev_kwh: 1.5, from_grid_kwh: 0.5 }]))
+        await waitForCondition(() => profileHeading(container) !== undefined, 'retried profile')
+        expect(document.activeElement).toBe(section)
+        expect(profileNotice(container)).toBeUndefined()
+        expect(container.querySelector('[role="status"][aria-label="pages.dashboard.hourlyProfile.loading"]')).toBeNull()
+        expect(container.querySelector('[role="alert"]')?.textContent).toContain('pages.dashboard.failedAnalytics')
+        expect(mockState.summaryCalls).toHaveLength(summaryCallsBeforeRetry)
+    })
+
+    it.each(['loading', 'error'] as const)('manager profile stays identifiable with an uncached %s summary', async (summaryState) => {
+        mockState.hourlyProfile = [{ hour: 10, from_zev_kwh: 1.5, from_grid_kwh: 0.5 }]
+        const container = await renderProfile('manager')
+        await waitForCondition(() => profileHeading(container) !== undefined, 'initial profile')
+        const initialDate = mockState.summaryCalls.at(-1)?.dateFrom
+        mockState.summary = summaryState === 'loading'
+            ? new Promise(() => {})
+            : () => Promise.reject(new Error('Summary unavailable'))
+        const profile = deferred<ProfileData>()
+        mockState.hourlyProfile = profile.promise
+        await previousPeriod(container)
+        await waitForCondition(() => mockState.hourlyCalls.length === 2, 'new period profile request')
+        expect(mockState.summaryCalls.at(-1)?.dateFrom).not.toBe(initialDate)
+        expect(container.querySelector('.participant-table')).toBeNull()
+        expect(participantSelect(container).value).toBe('p1')
+        expect(participantSelect(container).selectedOptions[0].textContent).toBe('Alice')
+
+        await act(async () => profile.resolve([{ hour: 10, from_zev_kwh: 1.5, from_grid_kwh: 0.5 }]))
+        await waitForCondition(() => profileHeading(container) !== undefined, 'new period profile')
+        if (summaryState === 'error') {
+            await waitForCondition(() => container.textContent?.includes('pages.dashboard.failedAnalytics') === true, 'new period summary error')
+        }
+        expect(profileHeading(container)?.textContent).toContain('Alice')
+        expect(mockState.hourlyCalls.at(-1)?.participantId).toBe('p1')
+        expect(container.querySelectorAll('[role="alert"]')).toHaveLength(summaryState === 'error' ? 1 : 0)
+        await changeParticipant(container, '')
+        expect(profileHeading(container)).toBeUndefined()
+        expect(participantSelect(container).value).toBe('')
+        expect(mockState.hourlyCalls).toHaveLength(2)
+        expect(mockState.summaryCalls.at(-1)?.participantId).toBeUndefined()
+    })
+
+    it('manager profile retry refetches only the selected profile when both queries fail', async () => {
+        mockState.hourlyProfile = [{ hour: 10, from_zev_kwh: 1.5, from_grid_kwh: 0.5 }]
+        const container = await renderProfile('manager')
+        await waitForCondition(() => profileHeading(container) !== undefined, 'initial profile')
+        mockState.summary = () => Promise.reject(new Error('Summary unavailable'))
+        mockState.hourlyProfile = () => Promise.reject(new Error('Profile unavailable'))
+        await previousPeriod(container)
+        await waitForCondition(() => container.querySelectorAll('[role="alert"]').length === 2, 'summary and profile errors')
+        const summaryCallsBeforeRetry = mockState.summaryCalls.length
+        const profile = deferred<ProfileData>()
+        mockState.hourlyProfile = profile.promise
+        const retry = profileNotice(container)!.querySelector<HTMLButtonElement>('button')!
+        retry.focus()
+        await act(async () => retry.click())
+        await waitForCondition(() => container.querySelector('[role="status"][aria-label="pages.dashboard.hourlyProfile.loading"]') !== null, 'selected profile loading feedback')
+        const section = container.querySelector('[role="group"][aria-label="pages.dashboard.hourlyProfile.title"]')
+        expect(document.activeElement).toBe(section)
+        expect(container.querySelector('[role="status"]')?.textContent).toContain('pages.dashboard.hourlyProfile.loading')
+        await act(async () => profile.resolve([{ hour: 10, from_zev_kwh: 1.5, from_grid_kwh: 0.5 }]))
+        await waitForCondition(() => profileHeading(container) !== undefined, 'retried selected profile')
+        expect(document.activeElement).toBe(section)
+        expect(profileHeading(container)?.textContent).toContain('Alice')
+        expect(profileNotice(container)).toBeUndefined()
+        expect(mockState.hourlyCalls.at(-1)?.participantId).toBe('p1')
+        expect(mockState.summaryCalls).toHaveLength(summaryCallsBeforeRetry)
+        expect(container.querySelector('[role="alert"]')?.textContent).toContain('pages.dashboard.failedAnalytics')
+    })
+
+    it.each(['participant', 'manager'] as const)('%s profile stays visible after a failed refresh', async (relation) => {
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        mockState.hourlyProfile = [{ hour: 10, from_zev_kwh: 1.5, from_grid_kwh: 0.5 }]
+        const container = await renderProfile(relation, client)
+        await waitForCondition(() => profileHeading(container) !== undefined, 'initial profile')
+        const summaryCallsBeforeRefresh = mockState.summaryCalls.length
+        mockState.hourlyProfile = () => Promise.reject(new Error('Profile unavailable'))
+        await act(async () => { await client.invalidateQueries({ queryKey: ['metering', 'hourly-profile'] }) })
+        await waitForCondition(() => profileNotice(container, 'refreshFailed') !== undefined, 'profile refresh error')
+        expect(profileHeading(container)).toBeDefined()
+        expect(vi.mocked(HourlyProfileCard).mock.lastCall?.[0].data).toEqual([
+            { hour: 10, from_zev_kwh: 1.5, from_grid_kwh: 0.5, label: '10:00' },
+        ])
+        expect(profileNotice(container)).toBeUndefined()
+
+        const profile = deferred<ProfileData>()
+        mockState.hourlyProfile = profile.promise
+        await act(async () => profileNotice(container, 'refreshFailed')!.querySelector<HTMLButtonElement>('button')!.click())
+        await waitForCondition(() => profileNotice(container, 'refreshFailed')?.querySelector('button')?.disabled === true, 'busy profile retry')
+        expect(profileHeading(container)).toBeDefined()
+        expect(profileNotice(container, 'refreshFailed')?.textContent).toContain('common.loading')
+        expect(profileNotice(container, 'refreshFailed')?.querySelector('button')?.getAttribute('aria-busy')).toBe('true')
+        await act(async () => profile.resolve([{ hour: 11, from_zev_kwh: 2, from_grid_kwh: 1 }]))
+        await waitForCondition(() => profileNotice(container, 'refreshFailed') === undefined, 'successful profile retry')
+        expect(profileHeading(container)).toBeDefined()
+        expect(vi.mocked(HourlyProfileCard).mock.lastCall?.[0].data).toEqual([
+            { hour: 11, from_zev_kwh: 2, from_grid_kwh: 1, label: '11:00' },
+        ])
+        expect(mockState.hourlyCalls).toHaveLength(3)
+        expect(mockState.summaryCalls).toHaveLength(summaryCallsBeforeRefresh)
+    })
+
+    it.each<{ relation: 'participant' | 'manager'; case: string; profile: ProfileData }>([
+        { relation: 'participant', case: 'null', profile: null },
+        { relation: 'participant', case: 'empty', profile: [] },
+        { relation: 'manager', case: 'null', profile: null },
+        { relation: 'manager', case: 'empty', profile: [] },
+    ])('$relation hides a successful $case profile', async ({ relation, profile }) => {
+        mockState.hourlyProfile = profile
+        const container = await renderProfile(relation)
+        await waitForCondition(() => container.querySelector('[role="status"][aria-label="pages.dashboard.hourlyProfile.loading"]') === null, 'empty profile response')
+        expect(mockState.hourlyCalls).toHaveLength(1)
+        expect(profileHeading(container)).toBeUndefined()
+        expect(profileNotice(container)).toBeUndefined()
+        expect(profileNotice(container, 'refreshFailed')).toBeUndefined()
     })
 })
 
@@ -811,6 +1046,15 @@ describe('manager dashboard: the manager as a participant', () => {
         const options = Array.from(container.querySelectorAll('select option')).map((option) => option.textContent)
         expect(options.some((text) => text?.includes('Bob') && text.includes('pages.dashboard.youBadge'))).toBe(true)
         expect(options.some((text) => text?.includes('Alice') && text.includes('pages.dashboard.youBadge'))).toBe(false)
+
+        mockState.summary = new Promise(() => {})
+        await changeParticipant(container, 'p2')
+        await flush()
+        const selectedOption = participantSelect(container).selectedOptions[0]
+        expect(selectedOption.value).toBe('p2')
+        expect(selectedOption.textContent).toContain('Bob')
+        expect(selectedOption.textContent).toContain('pages.dashboard.youBadge')
+        expect(participantSelect(container).textContent).not.toContain('Alice')
     })
 
     it('shows the manager\'s own figures when nobody is selected and when they select themselves, not for someone else', async () => {

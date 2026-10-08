@@ -2681,6 +2681,9 @@ export const it = {
             },
             consumptionSplit: 'Ripartizione consumo',
             hourlyProfile: {
+                failed: 'Impossibile caricare il profilo di consumo giornaliero medio.',
+                loading: 'Caricamento del profilo di consumo',
+                refreshFailed: 'Impossibile aggiornare il profilo di consumo. Sono visualizzati gli ultimi dati caricati.',
                 title: 'Profilo medio di consumo giornaliero (24 h)',
                 description: 'Consumo orario medio nel periodo di fatturazione — suddiviso tra energia locale CEE e importazione dalla rete.',
             },

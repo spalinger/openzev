@@ -400,9 +400,16 @@ requests wait; invoice loading remains independent. Inside a
 `ScopeGuard` with the `kpiRow` skeleton, it renders `ManagementDashboardBody` for
 ZEV-scoped roles or `ParticipantDashboardBody` for participants. Each body
 starts with the period selector and a resolution select (hour / day / month,
-default day) and shows a retryable notice when the summary fails. The page is
-read-only: report exports live on Reports; participant invoice PDF actions
-remain on the dashboard.
+default day) and shows a retryable notice when the summary fails. Summary KPIs
+and charts depend on the summary query. Hourly profiles and participant invoices
+render independently of summary loading or failure; manager profiles require a
+participant selection. Both bodies use `HourlyProfileSection` in
+`frontend/src/components/dashboard/` for profile loading, errors and retry.
+Profile loading uses a card skeleton and a live status.
+Profile Retry refetches only the profile and retains keyboard focus in its
+section. Failed refreshes keep cached data visible with a refresh-specific
+notice. Empty/null profiles are hidden. The page is read-only: report exports
+live on Reports; participant invoice PDF actions remain on the dashboard.
 
 - **Header.** The title is the Energy balance title for ZEV-scoped roles and the
   dashboard title for participants. The description is
@@ -413,9 +420,10 @@ remain on the dashboard.
   blank when no community is selected. Viewers get the `nav.relation.viewer`
   note after it (`useScopeNote()` → `PageHeader` `scopeNote`). The
   participant body's energy-flow card takes the same name.
-- **Manager body.** A participant filter (default all participants; reset when
-  the selected community changes) sits next to the resolution select. Cards, in
-  order:
+- **Manager body.** A participant filter (default all participants) sits next
+  to the resolution select. Selection resets on community changes. The selected
+  participant remains named in the filter and profile when summary data is
+  unavailable. Other participant options come from the summary. Cards, in order:
   1. KPI row: five `StatCard`s from `zev_totals`, ZEV-wide whatever the
      participant filter: self-consumption rate (accent; (produced − exported) ÷
      produced, with both kWh as hint), produced, consumed, imported from grid,

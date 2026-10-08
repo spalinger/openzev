@@ -5,7 +5,7 @@ import { fetchHourlyProfile, fetchMeteringDashboardSummary } from '../../lib/api
 import { fetchInvoices } from '../../lib/api/invoices'
 import { queryKeys } from '../../lib/api/queryKeys'
 import { formatKwh, formatPercent } from '../../lib/numbers'
-import { dashboardKwhStat, hourlyKwhTick, hourlyKwhTooltipValue, fromZevRate, kwhTick } from '../../lib/dashboardFormatting'
+import { dashboardKwhStat, fromZevRate, kwhTick } from '../../lib/dashboardFormatting'
 import { useAuth } from '../../lib/auth'
 import { personalInvoiceFilter, selectedCommunityName } from '../../lib/membership'
 import { useManagedZev } from '../../lib/managedZev'
@@ -17,7 +17,7 @@ import { PeriodSelector } from '../../components/PeriodSelector'
 import { ConsumptionSplitCard } from '../../components/dashboard/ConsumptionSplitCard'
 import { GrossEnergyCallToAction, GrossEnergyCard } from '../../components/dashboard/GrossEnergyCard'
 import { EnergyFlowCard } from '../../components/dashboard/EnergyFlowCard'
-import { HourlyProfileCard } from '../../components/dashboard/HourlyProfileCard'
+import { HourlyProfileSection } from '../../components/dashboard/HourlyProfileSection'
 import { ParticipantInvoicesCard } from '../../components/dashboard/ParticipantInvoicesCard'
 import { type DashboardBodyProps, type DashboardBucket, useBucketLabelFormatters, useHourlyProfileRows } from './dashboardShared'
 import { ResolutionSelect } from './ResolutionSelect'
@@ -168,15 +168,9 @@ export function ParticipantDashboardBody({ interval, period, onPeriodChange, per
                         formatBucketTooltipLabel={formatBucketTooltipLabel}
                         kwhTick={kwhTick}
                     />
-                    {hourlyProfileData.length > 0 && (
-                        <HourlyProfileCard
-                            data={hourlyProfileData}
-                            hourlyKwhTick={hourlyKwhTick}
-                            hourlyKwhTooltipValue={hourlyKwhTooltipValue}
-                        />
-                    )}
                 </>
             )}
+            <HourlyProfileSection query={hourlyProfileQuery} data={hourlyProfileData} />
             <ParticipantInvoicesCard
                 showCommunity={(user?.memberships?.length ?? 0) > 1}
                 invoices={participantInvoices}
