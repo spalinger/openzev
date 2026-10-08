@@ -1396,7 +1396,8 @@ export const it = {
                 allocationWeightHint: 'Un peso relativo per ripartire i costi di un contatore comunitario, non una percentuale o un permille. Lascia vuoto per il valore predefinito (1).',
             },
             weightShare: '{{percent}} % — {{weight}} di {{total}} pesi',
-            weightShareHint: 'La quota di questo partecipante nei costi dei contatori comunitari, in base al suo peso di allocazione rispetto al totale dello ZEV.',
+            weightShareHint: 'Quota odierna del peso di allocazione tra i partecipanti attuali.',
+            weightShareUnavailableHint: 'Nessuna quota oggi: la partecipazione è terminata o non è iniziata.',
             validation: {
                 nameRequired: 'Inserisci nome e cognome.',
                 organisationNameRequired: 'Un\'organizzazione ha bisogno di un nome.',

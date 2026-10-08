@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next'
 import { EmptyState } from '../../components/EmptyState'
 import { ActionMenu, type ActionMenuItem } from '../../components/ActionMenu'
 import { formatShortDate } from '../../lib/appSettings'
+import { formatNumber } from '../../lib/numbers'
 import type { AppSettings, Participant, PartyRoleName } from '../../types/api'
 import type { ParticipantValidityState } from './types'
 
@@ -92,11 +93,11 @@ export function ParticipantCardsSection({
 }: ParticipantCardsSectionProps) {
     const { t } = useTranslation()
 
-    // Community-wide weight total: an informational indicator only, computed
-    // from every card in the section (not the filtered/searched subset) so a
-    // search or filter never changes the denominator participants see.
-    const totalWeight = participantCards.reduce(
-        (sum, { participant }) => sum + Number(participant.allocation_weight || '1'),
+    // Use all current memberships, not just the visible cards.
+    const currentTotalWeight = participantCards.reduce(
+        (sum, { participant, validityState }) => validityState === 'current'
+            ? sum + Number(participant.allocation_weight || '1')
+            : sum,
         0,
     )
 
@@ -131,8 +132,10 @@ export function ParticipantCardsSection({
     return (
         <div className="table-card participant-card-list">
             {filteredParticipants.map(({ participant, warnings, roles, validityState, displayName, address }) => {
+                const isCurrent = validityState === 'current'
                 const weight = Number(participant.allocation_weight || '1')
-                const weightSharePercent = totalWeight > 0 ? (weight / totalWeight) * 100 : 0
+                const formattedWeight = formatNumber(weight, { maxDecimals: 4 })
+                const weightSharePercent = currentTotalWeight > 0 ? (weight / currentTotalWeight) * 100 : 0
                 const menuItems: ActionMenuItem[] = []
 
                 if (!readOnly) {
@@ -277,12 +280,16 @@ export function ParticipantCardsSection({
                                 </div>
                                 <div className="participant-card-section">
                                     <div className="participant-card-label">{t('pages.participants.form.allocationWeight')}</div>
-                                    <div title={t('pages.participants.weightShareHint')}>
-                                        {t('pages.participants.weightShare', {
-                                            percent: weightSharePercent.toFixed(4),
-                                            weight: weight.toFixed(4),
-                                            total: totalWeight.toFixed(4),
-                                        })}
+                                    <div data-testid="participant-weight" title={t(isCurrent
+                                        ? 'pages.participants.weightShareHint'
+                                        : 'pages.participants.weightShareUnavailableHint')}>
+                                        {isCurrent
+                                            ? t('pages.participants.weightShare', {
+                                                percent: formatNumber(weightSharePercent, { maxDecimals: 2 }),
+                                                weight: formattedWeight,
+                                                total: formatNumber(currentTotalWeight, { maxDecimals: 4 }),
+                                            })
+                                            : formattedWeight}
                                     </div>
                                 </div>
                             </div>

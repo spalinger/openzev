@@ -190,8 +190,9 @@ three ways because Dave was there; February and March are divided three ways
 because Carol has replaced him.
 
 If the amount does not divide evenly, each invoice rounds to the centime on its
-own, so the community may end up a centime or two short: CHF 100 across 3
-participants bills 33.33 each and collects CHF 99.99. See
+own, so the community may collect a few centimes less or more: CHF 100 across 3
+participants bills 33.33 each and collects CHF 99.99; across 6 it bills 16.67
+each and collects CHF 100.02. See
 [Rounding and VAT](#rounding-and-vat) below.
 
 A shared fee can also be divided by **allocation weight** instead of per head —

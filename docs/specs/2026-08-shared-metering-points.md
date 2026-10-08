@@ -175,7 +175,7 @@ inherit that protection with no extra work. No new views.
 
 Existing validation is unchanged: `clean()` enforces same-ZEV participant,
 `valid_to >= valid_from`, participant-validity containment, and
-`_validate_no_overlap()` — a metering point still has exactly one assignment at
+`_validate_no_overlap()` — a metering point still has at most one assignment at
 any time, regardless of allocation mode. Since #390 that overlap check runs from
 `save()` as well as `clean()`, so a programmatic write cannot create the
 overlapping windows the allocation runtime refuses to resolve.
@@ -475,15 +475,15 @@ allocate the participant's share:
   by a `COMMUNITY`-mode window. The two counts are therefore disjoint by
   construction: a mid-month mode switch or holder change bills the month
   exactly once, on the side of the owning window — the same per-window care
-  as §7.3, not a blanket join exclusion. Both keep their
-  `metering_point__is_active=True` filter, and both must fetch every window
-  of the metering point so a superseding window can take ownership.
-- New: for each per-metering-point tariff, each month, each **active**
+  as §7.3, not a blanket join exclusion. Both ignore `MeteringPoint.is_active`
+  (an inventory status) and fetch every window of the metering point so a
+  superseding window can take ownership. Assignment validity determines which
+  months are billable; deactivation does not rewrite historical fees.
+- For each per-metering-point tariff, each month, each
   community-owned metering point contributes
   `unit_price * allocation_weight_i / weight_sum(month)` to the participant's
-  `bucket="shared"` line of that tariff (inactive community meters bill
-  nobody). Meter fees are month-granular: the fee is a monthly charge, so a
-  participant active any part of the month shares it.
+  `bucket="shared"` line of that tariff. Meter fees are month-granular: a
+  participant active any part of the month shares the monthly charge.
 - `split_key` plays no part here. It is read only by the two `SHARED_*` billing
   modes (§5.3); `PER_METERING_POINT_*` tariffs have no split key, and the cost
   being divided belongs to a community *meter*, which always allocates by
@@ -558,12 +558,21 @@ edit.
   input `allocation_weight` (zod: `.positive()`), shown as a plain decimal
   weight — the input is **never** a percentage, per-mille or "/1000" — with a
   hint; default empty → backend default `1`.
-- Participants list: informational indicator showing the computed share of the
-  current allocation key, e.g. `"25.0000 % — 1.0000 of 4.0000 weights"`. The
-  derived share may be displayed as a percentage; only the weight *input* is
-  restricted to a plain decimal. Not a sum constraint.
+- Participant cards (`ParticipantCardsSection.tsx`) show today's allocation-weight
+  share, e.g. `"25 % — 1 of 4 weights"` for current weights `1`, `1`, `2`.
+  `ParticipantsPage.tsx` uses `todayBusinessIso()` (Europe/Zurich): membership is
+  current when `valid_from <= today` and `valid_to` is null or `>= today`.
+  The total includes all current memberships in the selected community;
+  search and readiness filters do not affect it.
+- Current cards show weight / current total × 100, weight and total;
+  ended/upcoming memberships show only their weight. Tooltips describe the
+  allocation-weight share or explain its absence. `formatNumber` uses up to
+  two decimals for percentages and four for weights/totals, without trailing zeros.
+- This is a current-membership preview. Energy uses eligibility on each
+  reading's date (§7.4); shared fixed fees use each billed month's eligibility (§7.2, §7.5).
 - i18n under `pages.participants`: `form.allocationWeight`,
-  `form.allocationWeightHint`, `weightShare`, `weightShareHint`.
+  `form.allocationWeightHint`, `weightShare`, `weightShareHint`,
+  `weightShareUnavailableHint`.
 
 ### 8.3 Tariffs: split-key selector
 
@@ -617,7 +626,7 @@ the extended input types:
 | Risk | Impact | Mitigation |
 |---|---|---|
 | A meter whose mode changes mid-period is double-billed or silently unbilled | High | §7.3: the decision is per timestamp via `assignment_at`, never a queryset filter; asserted from both sides by `test_mixed_window_meter_bills_personally_then_shares` |
-| Rounding does not conserve exactly (N-way rappen division) | Medium | Existing documented convention: each participant's share is quantized per line item at line build, rounded half-up, and the sub-rappen remainder is dropped ("shared fees already collect 99.99 of 100.00"). The conservation test asserts Σ shares vs. source < 1 rappen per line; cumulative drift is bounded by lines × 1 rappen per invoice. Exact conservation via a batch allocator stays an ADR 0013 follow-up |
+| Rounding does not conserve exactly (N-way rappen division) | Medium | Existing documented convention: each participant's share is quantized per line item at line build, rounded half-up, so each share is off by at most half a rappen in either direction: CHF 100 split three ways collects 99.99, six ways 100.02. Across N participants the sum may miss the source by up to N/2 rappen. `test_shared_energy_conservation_within_rounding` asserts a two-way split within one rappen. Exact conservation via a batch allocator stays an ADR 0013 follow-up |
 | Editing a weight retroactively changes regenerated periods | Medium | Documented (§3) + UI hint on the regeneration confirmation; drafts regenerate freely, finalized invoices are protected by existing engine guards. Blast radius is bounded by `split_key`: community meters and `weight`-keyed fees only — an `equal`-keyed shared fee never moves |
 | A `SHARED_*` tariff is switched to `weight` without anyone noticing the fees move | Low | The selector appears only for the two shared modes and defaults to `equal` (§8.3); the change is an ordinary audited tariff mutation (`AuditedUpdateMixin` on `TariffViewSet`), so the before/after shows in the audit log with the rest of the tariff diff |
 | N-fold refetch of community readings per participant in `generate_invoices_for_zev` | Low | Consistent with existing ZEV-total behaviour; memoize per (zev, period) if trivial; query-count pins live in §7.7 |
@@ -740,6 +749,10 @@ invoice language.
 
 - Build and type checks: `npm run build`
 - Unit tests: `npm run test:unit` — includes `locale-parity.test.ts` (§8.4)
+- `participant-weight-share.test.ts` (5 tests): current-only totals, visible-subset
+  stability, ended/upcoming weights, four-decimal precision and members without meters.
+- `participant-write-scope.test.ts`: inclusive Swiss-date membership boundaries
+  before UTC midnight.
 - Manual: create community assignment → badge visible; invoice PDF shows
   marker; participant weight edit → regenerated draft shares change.
 

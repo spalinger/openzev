@@ -1396,7 +1396,8 @@ export const fr = {
                 allocationWeightHint: "Une pondération relative pour répartir les coûts d'un compteur communautaire, pas un pourcentage ni un pour-mille. Laissez vide pour la valeur par défaut (1).",
             },
             weightShare: '{{percent}} % — {{weight}} sur {{total}} pondérations',
-            weightShareHint: "La part de ce participant dans les coûts des compteurs communautaires, basée sur sa pondération d'attribution relative au total du ZEV.",
+            weightShareHint: "Part d'aujourd'hui dans la pondération d'attribution totale des participants actuels.",
+            weightShareUnavailableHint: "Aucune part aujourd'hui : cette participation est terminée ou n'a pas commencé.",
             validation: {
                 nameRequired: 'Saisir le prénom et le nom.',
                 organisationNameRequired: 'Une organisation a besoin d\'un nom.',
