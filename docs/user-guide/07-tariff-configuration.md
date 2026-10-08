@@ -19,6 +19,11 @@ Each tariff has:
 
 ![Tariffs page](screenshots/07-tariffs.png)
 
+The tabs above the list count the tariffs: **Valid** (the default) shows the
+tariffs with a version in force today, **All** adds the ones with none in force
+(only superseded or future versions). The tabs show only when there are such
+tariffs.
+
 The list waits for the selected community to load. If loading fails, use **Retry**;
 a failed community refresh keeps the loaded scope and your open draft available.
 
@@ -827,9 +832,10 @@ Metering) — the same grouping and order as an invoice's line items.
   explicit note says the prices shown are net and that VAT is added on the
   invoice — the number on this document is deliberately not the number a
   participant is billed.
-- Switch the page's own **Valid now / All versions** filter before
-  downloading to include superseded and future tariff versions, shown
-  greyed out with their full validity span instead of "from …".
+- When the community has superseded or future tariff versions, the button
+  opens a choice: **Valid tariffs**, or **All versions, including superseded
+  and future ones**, shown greyed out with their full validity span instead
+  of "from …".
 
 There is no date picker (yet) — the overview always reflects today. Only the
 community's managers and viewers, and admins, can download it; there is nothing on this document a
