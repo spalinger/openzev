@@ -355,6 +355,9 @@ If logged in as a community's manager:
 Energy-flow cards name the selected community in both Energy balance and the
 participant dashboard.
 
+Consumption and production charts in **Energy balance** stack when the panel
+is narrow.
+
 The **Energy balance** and participant dashboard date selectors update the
 page URL. Bookmark or share a link with `period_start` and `period_end` to
 return to that exact range, including a custom range, after reload or browser

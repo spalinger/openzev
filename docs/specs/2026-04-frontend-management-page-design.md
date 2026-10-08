@@ -252,6 +252,7 @@ language and should be reused instead of ad hoc page-local CSS when possible:
 | `.participant-*`, `.metering-*`, `.tariff-*`, `.invoice-*` | Page-family-specific structural patterns that are already in active use |
 | `.dialog-scrim`, `.form-modal`, `.card.confirm-dialog` | Shared fixed scrim and opaque scrollable panels (90% width, 90dvh maximum height); FormModal defaults to 600px maximum width and confirmation to 400px. Panels use 2rem padding above 768px and 1rem at/below 768px. Runtime maximum widths and stack z-index remain component-owned. |
 | `.email-log*` | Delivery history cards with wrapping text and status rows. |
+| `.balance-chart-grid` | Dashboard consumption/production pair, independent of form layout. Auto-fit columns require 24rem each plus a 2rem gap; panels with less space stack, and the minimum track width is capped at 100% of the panel. |
 
 **Inline styles.** Put static presentation in `index.css`, reusing existing
 classes where practical. Keep `style` props for runtime values,

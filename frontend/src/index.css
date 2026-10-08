@@ -1761,8 +1761,15 @@ button.badge-button:focus-visible {
   font-size: 0.875rem;
 }
 
-.form-grid.balance-chart-grid {
+/* Fit the paired charts to their panel, including the desktop sidebar. */
+.balance-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
   gap: 2rem;
+}
+
+.balance-chart-grid > div {
+  min-width: 0;
 }
 
 .balance-chart-label {
