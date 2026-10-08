@@ -325,23 +325,22 @@ class MeterReadingViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
     def dashboard_summary(self, request):
         """Role-based metering dashboard summary for ZEV owners and participants."""
         user = request.user
-        date_from = request.query_params.get("date_from")
-        date_to = request.query_params.get("date_to")
+        date_from = _validated_date(request.query_params.get("date_from"), "date_from")
+        date_to = _validated_date(request.query_params.get("date_to"), "date_to")
         bucket = request.query_params.get("bucket", "day")
-        zev_id = request.query_params.get("zev_id")
-        selected_participant_id = request.query_params.get("participant_id")
+        zev_id = _validated_uuid(request.query_params.get("zev_id"), "zev_id")
+        selected_participant_id = _validated_uuid(request.query_params.get("participant_id"), "participant_id")
         trunc_fn = _bucket_trunc(bucket)
-
-        qs = self.get_queryset()
-        if date_from:
-            qs = qs.filter(timestamp__gte=period_start_dt(date_type.fromisoformat(date_from)))
-        if date_to:
-            qs = qs.filter(timestamp__lt=period_end_exclusive_dt(date_type.fromisoformat(date_to)))
 
         kind, scope, error = _resolve_dashboard_scope(user, zev_id)
         if error is not None:
             return error
         if kind == "zev":
+            qs = self.get_queryset()
+            if date_from:
+                qs = qs.filter(timestamp__gte=period_start_dt(date_from))
+            if date_to:
+                qs = qs.filter(timestamp__lt=period_end_exclusive_dt(date_to))
             selected_zev_id = scope
             qs = qs.filter(metering_point__zev_id=selected_zev_id)
             if selected_participant_id and selected_zev_id and not Participant.objects.filter(
@@ -355,20 +354,17 @@ class MeterReadingViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
             return Response(result)
 
         # participant path
-        # Derived from the participant's own membership, not from qs: a
-        # participant whose only stake in a ZEV is a community-allocated
-        # share (no personally held metering point) has an empty qs, which
-        # would otherwise make the whole ZEV invisible to them here — the
-        # zev-wide section below is unscoped by literal holdership on
-        # purpose (shared metering points, #387).
-        zev_ids = scope
+        # Membership scopes the analytics pool. Personal totals are resolved
+        # from its assignment windows and community weights, so they include
+        # shares of meters held by other participants (or no personal meter).
+        zev_ids = Zev.objects.filter(pk__in=scope, disabled_at__isnull=True).values_list("id", flat=True)
         zev_qs = MeterReading.objects.filter(metering_point__zev_id__in=zev_ids)
         if date_from:
-            zev_qs = zev_qs.filter(timestamp__gte=period_start_dt(date_type.fromisoformat(date_from)))
+            zev_qs = zev_qs.filter(timestamp__gte=period_start_dt(date_from))
         if date_to:
-            zev_qs = zev_qs.filter(timestamp__lt=period_end_exclusive_dt(date_type.fromisoformat(date_to)))
+            zev_qs = zev_qs.filter(timestamp__lt=period_end_exclusive_dt(date_to))
 
-        result = participant_dashboard_summary(qs, zev_qs, trunc_fn, user, zev_ids)
+        result = participant_dashboard_summary(zev_qs, trunc_fn, user, zev_ids)
         result["bucket"] = bucket
         return Response(result)
 
@@ -390,18 +386,21 @@ class MeterReadingViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
         if not date_from or not date_to:
             return Response({"error": "date_from and date_to are required."}, status=400)
 
-        ps = date_type.fromisoformat(date_from)
-        pe = date_type.fromisoformat(date_to)
+        ps = _validated_date(date_from, "date_from")
+        pe = _validated_date(date_to, "date_to")
         start_dt, end_dt = period_window(ps, pe)
 
-        zev_id = request.query_params.get("zev_id")
-        participant_id = request.query_params.get("participant_id")
+        zev_id = _validated_uuid(request.query_params.get("zev_id"), "zev_id")
+        participant_id = _validated_uuid(request.query_params.get("participant_id"), "participant_id")
 
         kind, scope, error = _resolve_dashboard_scope(user, zev_id)
         if error is not None:
             return error
         if kind == "participant":
-            zev_ids = list(scope)
+            zev_ids = list(
+                Zev.objects.filter(pk__in=scope, disabled_at__isnull=True)
+                .order_by("id").values_list("id", flat=True)
+            )
             if not zev_ids:
                 return Response({"hourly_profile": None})
             participant_ids = list(

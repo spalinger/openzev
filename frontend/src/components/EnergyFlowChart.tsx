@@ -19,8 +19,8 @@ interface EnergyFlowChartProps {
         from_zev_kwh: number
         from_grid_kwh: number
     }>
-    /** When set, show this participant individually and aggregate all others into "Others" */
-    highlightParticipantId?: string
+    /** Combine these current participant records into one consumption node. */
+    highlightParticipantIds?: string[]
 }
 
 const VIEW_W = 960
@@ -115,7 +115,7 @@ function sankeyPath(x1: number, sy: number, x2: number, ty: number, thickness: n
 }
 
 
-export function EnergyFlowChart({ totals, participantStats, highlightParticipantId }: EnergyFlowChartProps) {
+export function EnergyFlowChart({ totals, participantStats, highlightParticipantIds }: EnergyFlowChartProps) {
     const { t } = useTranslation()
     const [hoverNode, setHoverNode] = useState<string | null>(null)
     const [hoverLink, setHoverLink] = useState<string | null>(null)
@@ -125,13 +125,25 @@ export function EnergyFlowChart({ totals, participantStats, highlightParticipant
         const producers = participantStats.filter(p => p.total_produced_kwh > 0)
         const allConsumers = participantStats.filter(p => p.total_consumed_kwh > 0)
 
-        // When highlighting a specific participant, aggregate others
+        // An account can hold several participant records (e.g. flat + parking).
+        // Its consumption node covers every highlighted record, like its cards.
         let consumers: typeof allConsumers
-        if (highlightParticipantId) {
-            const highlighted = allConsumers.find(c => c.participant_id === highlightParticipantId)
-            const others = allConsumers.filter(c => c.participant_id !== highlightParticipantId)
+        const highlightIds = new Set(highlightParticipantIds)
+        if (highlightIds.size > 0) {
+            const highlighted = allConsumers.filter(c => highlightIds.has(c.participant_id))
+            const others = allConsumers.filter(c => !highlightIds.has(c.participant_id))
             consumers = []
-            if (highlighted) consumers.push(highlighted)
+            if (highlighted.length === 1) consumers.push(highlighted[0])
+            else if (highlighted.length > 1) {
+                consumers.push({
+                    participant_id: '__account__',
+                    participant_name: t('pages.dashboard.participantStats.totalConsumption'),
+                    total_consumed_kwh: highlighted.reduce((s, p) => s + p.total_consumed_kwh, 0),
+                    total_produced_kwh: highlighted.reduce((s, p) => s + p.total_produced_kwh, 0),
+                    from_zev_kwh: highlighted.reduce((s, p) => s + p.from_zev_kwh, 0),
+                    from_grid_kwh: highlighted.reduce((s, p) => s + p.from_grid_kwh, 0),
+                })
+            }
             if (others.length > 0) {
                 consumers.push({
                     participant_id: '__others__',
@@ -358,7 +370,7 @@ export function EnergyFlowChart({ totals, participantStats, highlightParticipant
         })
 
         return { nodes, links, viewH, colX }
-    }, [totals, participantStats, highlightParticipantId, t])
+    }, [totals, participantStats, highlightParticipantIds, t])
 
     if (!data) return <p className="muted">{t('pages.dashboard.noData')}</p>
 

@@ -1,5 +1,6 @@
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from django.test import TestCase
@@ -66,6 +67,23 @@ class DashboardSummaryAlignmentTests(TestCase):
 			direction=ReadingDirection.OUT,
 			resolution=ReadingResolution.FIFTEEN_MIN,
 		)
+
+	def test_dashboard_endpoints_reject_malformed_query_parameters(self):
+		admin = make_user("dash_admin", UserRole.ADMIN)
+		for user in (self.participant_user, self.owner, admin):
+			auth(self.client, user)
+			for endpoint in ("dashboard-summary", "hourly-profile"):
+				for field in ("zev_id", "participant_id", "date_from", "date_to"):
+					with self.subTest(user=user.email, endpoint=endpoint, field=field):
+						response = self.client.get(
+							f"/api/v1/metering/readings/{endpoint}/",
+							{
+								"zev_id": str(self.zev.id), "date_from": "2026-01-01",
+								"date_to": "2026-01-01", field: "malformed",
+							},
+						)
+						self.assertEqual(response.status_code, 400)
+						self.assertIn(field, response.data)
 
 	def test_participant_dashboard_uses_timestamp_level_local_grid_split(self):
 		auth(self.client, self.participant_user)
@@ -1383,17 +1401,10 @@ class SharedMeteringDashboardTests(TestCase):
 		# (Alice) gets her weighted share, not the whole reading.
 		self.assertAlmostEqual(by_id[str(self.alice.id)]["total_consumed_kwh"], 6.0)
 		self.assertAlmostEqual(by_id[str(self.bob.id)]["total_consumed_kwh"], 2.0)
+		self.assertEqual(by_id[str(self.bob.id)]["participant_name"], "Bob Beispiel")
 
 	def test_participant_dashboard_zev_wide_stats_show_a_community_only_participant(self):
-		"""Bob holds no metering point of his own — his only stake in the ZEV
-		is a community share — so ``totals`` (his own literal readings) stays
-		0 by design; the ZEV-wide breakdown must still carry his weighted
-		share rather than being empty or omitting him entirely.
-
-		Before the fix, zev_ids for this section was derived from the
-		participant's own (holder-scoped) readings queryset, which is empty
-		for a community-only participant — making the whole ZEV invisible to
-		them here, not just their own row."""
+		"""A member without a personal meter still consumes their community share."""
 		bob_user = make_user("sm_dash_bob", UserRole.USER)
 		self.bob.user = bob_user
 		self.bob.save(update_fields=["user"])
@@ -1405,11 +1416,312 @@ class SharedMeteringDashboardTests(TestCase):
 		)
 
 		self.assertEqual(resp.status_code, 200)
-		self.assertAlmostEqual(resp.data["totals"]["total_consumed_kwh"], 0.0)
+		self.assertAlmostEqual(resp.data["totals"]["total_consumed_kwh"], 2.0)
+		self.assertAlmostEqual(resp.data["totals"]["imported_from_grid_kwh"], 2.0)
+		self.assertAlmostEqual(resp.data["timeline"][0]["total_consumed_kwh"], 2.0)
 		by_id = {s["participant_id"]: s for s in resp.data["zev_participant_stats"]}
 		self.assertEqual(set(by_id), {str(self.alice.id), str(self.bob.id)})
 		self.assertAlmostEqual(by_id[str(self.alice.id)]["total_consumed_kwh"], 6.0)
 		self.assertAlmostEqual(by_id[str(self.bob.id)]["total_consumed_kwh"], 2.0)
+		self.assertEqual(by_id[str(self.bob.id)]["participant_name"], "Bob Beispiel")
+		self._assert_participant_totals_match_flow(resp.data)
+
+	def _summary(self, user, **params):
+		auth(self.client, user)
+		resp = self.client.get(
+			"/api/v1/metering/readings/dashboard-summary/",
+			{
+				"zev_id": str(self.zev.id), "date_from": "2026-01-01",
+				"date_to": "2026-01-01", "bucket": "day", **params,
+			},
+		)
+		self.assertEqual(resp.status_code, 200)
+		return resp.data
+
+	def _assert_participant_totals_match_flow(self, summary, participant_ids=None):
+		participant_ids = (
+			{str(pid) for pid in participant_ids}
+			if participant_ids is not None else {summary["current_participant_id"]}
+		)
+		own_rows = [
+			row for row in summary["zev_participant_stats"]
+			if row["participant_id"] in participant_ids
+		]
+		self.assertEqual({row["participant_id"] for row in own_rows}, participant_ids)
+		for total_key, flow_key in (
+			("total_consumed_kwh", "total_consumed_kwh"),
+			("consumed_from_zev_kwh", "from_zev_kwh"),
+			("imported_from_grid_kwh", "from_grid_kwh"),
+		):
+			expected = sum(row[flow_key] for row in own_rows)
+			self.assertAlmostEqual(summary["totals"][total_key], expected)
+			self.assertAlmostEqual(
+				sum(row[total_key] for row in summary["timeline"]), expected,
+			)
+
+	def _read(self, meter, ts, energy, direction=ReadingDirection.IN):
+		MeterReading.objects.create(
+			metering_point=meter, timestamp=ts, energy_kwh=Decimal(energy),
+			direction=direction, resolution=ReadingResolution.FIFTEEN_MIN,
+		)
+
+	def test_disabled_zev_is_excluded_from_participant_cards_timeline_and_flow(self):
+		self.zev.disabled_at = datetime(2026, 1, 2, tzinfo=ZURICH)
+		self.zev.save(update_fields=["disabled_at"])
+		for params in ({}, {"zev_id": str(self.zev.id)}):
+			with self.subTest(params=params):
+				auth(self.client, self.alice_user)
+				response = self.client.get(
+					"/api/v1/metering/readings/dashboard-summary/",
+					{"date_from": "2026-01-01", "date_to": "2026-01-01", **params},
+				)
+				self.assertEqual(response.status_code, 200)
+				summary = response.data
+				self.assertTrue(all(value == 0 for value in summary["totals"].values()))
+				self.assertTrue(all(value == 0 for value in summary["zev_totals"].values()))
+				self.assertEqual(summary["timeline"], [])
+				self.assertEqual(summary["zev_participant_stats"], [])
+				self.assertIsNone(summary["current_participant_id"])
+				self.assertFalse(summary["has_behind_meter_generation"])
+				self.assertFalse(summary["zev_has_behind_meter_generation"])
+
+	def test_disabled_zev_is_excluded_from_participant_hourly_profile(self):
+		self.zev.disabled_at = datetime(2026, 1, 2, tzinfo=ZURICH)
+		self.zev.save(update_fields=["disabled_at"])
+		auth(self.client, self.alice_user)
+		for params in ({}, {"zev_id": str(self.zev.id)}):
+			with self.subTest(params=params):
+				response = self.client.get(
+					"/api/v1/metering/readings/hourly-profile/",
+					{"date_from": "2026-01-01", "date_to": "2026-01-01", **params},
+				)
+				self.assertEqual(response.status_code, 200)
+				self.assertIsNone(response.data["hourly_profile"])
+
+	def test_disabled_membership_does_not_hide_active_zev_consumption(self):
+		self.zev.disabled_at = datetime(2026, 1, 2, tzinfo=ZURICH)
+		self.zev.save(update_fields=["disabled_at"])
+		active_zev = create_managed_zev(name="Active Dash ZEV", owner=self.owner, invoice_prefix="AD")
+		participant = Participant.objects.create(
+			zev=active_zev, user=self.alice_user, first_name="Alice", last_name="Active",
+			email="sm.active@example.com", valid_from=date(2026, 1, 1),
+		)
+		meter = MeteringPoint.objects.create(
+			zev=active_zev, meter_id="CH-SD-ACTIVE", meter_type=MeteringPointType.CONSUMPTION,
+		)
+		MeteringPointAssignment.objects.create(
+			metering_point=meter, participant=participant, valid_from=date(2026, 1, 1),
+		)
+		self._read(meter, datetime(2026, 1, 1, 12, tzinfo=ZURICH), "4")
+		auth(self.client, self.alice_user)
+		response = self.client.get(
+			"/api/v1/metering/readings/dashboard-summary/",
+			{"date_from": "2026-01-01", "date_to": "2026-01-01"},
+		)
+		self.assertEqual(response.status_code, 200)
+		summary = response.data
+		self.assertEqual(summary["totals"]["total_consumed_kwh"], 4.0)
+		self.assertEqual(summary["zev_totals"]["consumed_kwh"], 4.0)
+		self.assertEqual(summary["current_participant_id"], str(participant.id))
+		self.assertEqual(len(summary["zev_participant_stats"]), 1)
+		self._assert_participant_totals_match_flow(summary)
+		profile_response = self.client.get(
+			"/api/v1/metering/readings/hourly-profile/",
+			{"date_from": "2026-01-01", "date_to": "2026-01-01"},
+		)
+		self.assertEqual(profile_response.status_code, 200)
+		hour = next(row for row in profile_response.data["hourly_profile"] if row["hour"] == 12)
+		self.assertEqual(hour["from_zev_kwh"], 0.0)
+		self.assertEqual(hour["from_grid_kwh"], 4.0)
+
+	def test_enabled_zevs_have_separate_energy_pools(self):
+		MeterReading.objects.all().delete()
+		MeteringPointAssignment.objects.filter(metering_point=self.community_mp).update(allocation_mode=AllocationMode.PERSONAL)
+		other_zev = create_managed_zev(name="Other Dash ZEV", owner=self.owner, invoice_prefix="OD")
+		producer = Participant.objects.create(
+			zev=other_zev, user=self.alice_user, first_name="Alice", last_name="Producer",
+			email="sm.producer@example.com", valid_from=date(2026, 1, 1),
+		)
+		production = MeteringPoint.objects.create(
+			zev=other_zev, meter_id="CH-SD-OTHER-PV", meter_type=MeteringPointType.PRODUCTION,
+		)
+		MeteringPointAssignment.objects.create(
+			metering_point=production, participant=producer, valid_from=date(2026, 1, 1),
+		)
+		ts = datetime(2026, 1, 1, 12, tzinfo=ZURICH)
+		self._read(self.community_mp, ts, "10")
+		self._read(production, ts, "10", ReadingDirection.OUT)
+		auth(self.client, self.alice_user)
+		for params, expected_consumption, expected_export, expected_ids in (
+			({}, 10.0, 10.0, {self.alice.id, producer.id}),
+			({"zev_id": str(self.zev.id)}, 10.0, 0.0, {self.alice.id}),
+			({"zev_id": str(other_zev.id)}, 0.0, 10.0, {producer.id}),
+		):
+			with self.subTest(params=params):
+				response = self.client.get(
+					"/api/v1/metering/readings/dashboard-summary/",
+					{"date_from": "2026-01-01", "date_to": "2026-01-01", **params},
+				)
+				self.assertEqual(response.status_code, 200)
+				summary = response.data
+				self.assertEqual(summary["totals"]["total_consumed_kwh"], expected_consumption)
+				self.assertEqual(summary["totals"]["consumed_from_zev_kwh"], 0.0)
+				self.assertEqual(summary["totals"]["imported_from_grid_kwh"], expected_consumption)
+				self.assertEqual(summary["zev_totals"]["consumed_kwh"], expected_consumption)
+				self.assertEqual(summary["zev_totals"]["produced_kwh"], expected_export)
+				self.assertEqual(summary["zev_totals"]["imported_kwh"], expected_consumption)
+				self.assertEqual(summary["zev_totals"]["exported_kwh"], expected_export)
+				self._assert_participant_totals_match_flow(summary, expected_ids)
+
+	def test_personal_and_community_consumption_reconciles_for_participants_and_manager(self):
+		"""Cards, timeline and flow all include personal energy plus weighted shares."""
+		bob_user = make_user("sm_dash_bob", UserRole.USER)
+		self.bob.user = bob_user
+		self.bob.save(update_fields=["user"])
+		ts = datetime(2026, 1, 1, 12, tzinfo=ZURICH)
+		for participant, energy in ((self.alice, "4"), (self.bob, "12")):
+			meter = MeteringPoint.objects.create(
+				zev=self.zev, meter_id=f"CH-SD-{participant.first_name}",
+				meter_type=MeteringPointType.CONSUMPTION,
+			)
+			MeteringPointAssignment.objects.create(
+				metering_point=meter, participant=participant, valid_from=date(2026, 1, 1),
+			)
+			self._read(meter, ts, energy)
+		production = MeteringPoint.objects.create(
+			zev=self.zev, meter_id="CH-SD-PV", meter_type=MeteringPointType.PRODUCTION,
+		)
+		MeteringPointAssignment.objects.create(
+			metering_point=production, participant=self.alice, valid_from=date(2026, 1, 1),
+		)
+		self._read(production, ts, "12", ReadingDirection.OUT)
+
+		manager = self._summary(self.owner)
+		self.assertAlmostEqual(manager["totals"]["consumed_kwh"], 24.0)
+		self.assertAlmostEqual(manager["totals"]["produced_kwh"], 12.0)
+		self.assertAlmostEqual(manager["totals"]["exported_kwh"], 0.0)
+		for total_key, flow_key in (
+			("consumed_kwh", "total_consumed_kwh"),
+			("produced_kwh", "total_produced_kwh"),
+			("imported_kwh", "from_grid_kwh"),
+		):
+			self.assertAlmostEqual(
+				manager["totals"][total_key],
+				sum(row[flow_key] for row in manager["participant_stats"]),
+			)
+		self.assertAlmostEqual(sum(row["from_zev_kwh"] for row in manager["participant_stats"]), 12.0)
+
+		for participant, user, expected in (
+			(self.alice, self.alice_user, 10.0), (self.bob, bob_user, 14.0),
+		):
+			with self.subTest(participant=participant.first_name):
+				summary = self._summary(user)
+				self.assertAlmostEqual(summary["totals"]["total_consumed_kwh"], expected)
+				self.assertAlmostEqual(summary["totals"]["consumed_from_zev_kwh"], expected / 2)
+				self.assertAlmostEqual(summary["totals"]["imported_from_grid_kwh"], expected / 2)
+				self._assert_participant_totals_match_flow(summary)
+				selected = self._summary(self.owner, participant_id=str(participant.id))
+				self.assertAlmostEqual(selected["totals"]["consumed_kwh"], expected)
+				self.assertAlmostEqual(selected["totals"]["imported_kwh"], expected / 2)
+				self.assertEqual(selected["zev_totals"], manager["totals"])
+
+	def test_community_share_uses_membership_on_each_reading_day(self):
+		Participant.objects.create(
+			zev=self.zev, first_name="Carol", last_name="Joiner", email="sm.carol@example.com",
+			valid_from=date(2026, 1, 2), allocation_weight=Decimal("4"),
+		)
+		self._read(self.community_mp, datetime(2026, 1, 2, 12, tzinfo=ZURICH), "8")
+		summary = self._summary(self.alice_user, date_to="2026-01-02")
+		self.assertAlmostEqual(summary["totals"]["total_consumed_kwh"], 9.0)
+		self.assertEqual([row["total_consumed_kwh"] for row in summary["timeline"]], [6.0, 3.0])
+		self._assert_participant_totals_match_flow(summary)
+
+	def test_personal_totals_sum_all_current_records_for_the_account(self):
+		parking = Participant.objects.create(
+			zev=self.zev, user=self.alice_user, party=self.alice.party,
+			valid_from=date(2026, 1, 1), allocation_weight=Decimal("4"),
+		)
+		meter = MeteringPoint.objects.create(
+			zev=self.zev, meter_id="CH-SD-PARKING", meter_type=MeteringPointType.CONSUMPTION,
+		)
+		MeteringPointAssignment.objects.create(
+			metering_point=meter, participant=parking, valid_from=date(2026, 1, 1),
+		)
+		self._read(meter, datetime(2026, 1, 1, 12, tzinfo=ZURICH), "12")
+		production = MeteringPoint.objects.create(
+			zev=self.zev, meter_id="CH-SD-ACCOUNT-PV", meter_type=MeteringPointType.PRODUCTION,
+		)
+		MeteringPointAssignment.objects.create(
+			metering_point=production, participant=self.alice, valid_from=date(2026, 1, 1),
+		)
+		self._read(production, datetime(2026, 1, 1, 12, tzinfo=ZURICH), "10", ReadingDirection.OUT)
+		self._read(self.community_mp, datetime(2026, 1, 2, 12, tzinfo=ZURICH), "8")
+		self._read(production, datetime(2026, 1, 2, 12, tzinfo=ZURICH), "2", ReadingDirection.OUT)
+		summary = self._summary(self.alice_user, date_to="2026-01-02")
+		self.assertAlmostEqual(summary["totals"]["total_consumed_kwh"], 26.0)
+		self.assertAlmostEqual(summary["totals"]["consumed_from_zev_kwh"], 11.25)
+		self.assertAlmostEqual(summary["totals"]["imported_from_grid_kwh"], 14.75)
+		self.assertEqual([row["total_consumed_kwh"] for row in summary["timeline"]], [19.0, 7.0])
+		self.assertEqual(summary["current_participant_id"], str(min(self.alice.id, parking.id)))
+		self._assert_participant_totals_match_flow(summary, {self.alice.id, parking.id})
+
+	def test_community_assignment_gap_and_personal_transfer_are_not_double_counted(self):
+		assignment = MeteringPointAssignment.objects.get(metering_point=self.community_mp)
+		assignment.valid_to = date(2026, 1, 1)
+		assignment.save(update_fields=["valid_to"])
+		MeteringPointAssignment.objects.create(
+			metering_point=self.community_mp, participant=self.bob, valid_from=date(2026, 1, 3),
+		)
+		for day in (2, 3):
+			self._read(self.community_mp, datetime(2026, 1, day, 12, tzinfo=ZURICH), "8")
+		summary = self._summary(self.alice_user, date_to="2026-01-03")
+		self.assertAlmostEqual(summary["totals"]["total_consumed_kwh"], 6.0)
+		self.assertAlmostEqual(summary["zev_totals"]["consumed_kwh"], 24.0)
+		self.assertEqual(len(summary["timeline"]), 1)
+		self._assert_participant_totals_match_flow(summary)
+		manager = self._summary(self.owner, date_to="2026-01-03")
+		by_id = {row["participant_id"]: row for row in manager["participant_stats"]}
+		self.assertAlmostEqual(by_id[str(self.bob.id)]["total_consumed_kwh"], 10.0)
+
+	def test_ended_participant_record_does_not_widen_personal_totals(self):
+		"""A current membership does not restore access through an ended record."""
+		former = Participant.objects.create(
+			zev=self.zev, user=self.alice_user, first_name="Alice", last_name="Former",
+			email="sm.former@example.com", valid_from=date(2026, 1, 1),
+			valid_to=date(2026, 1, 31), allocation_weight=Decimal("4"),
+		)
+		meter = MeteringPoint.objects.create(
+			zev=self.zev, meter_id="CH-SD-FORMER", meter_type=MeteringPointType.CONSUMPTION,
+		)
+		MeteringPointAssignment.objects.create(
+			metering_point=meter, participant=former, valid_from=date(2026, 1, 1),
+			valid_to=date(2026, 1, 31),
+		)
+		self._read(meter, datetime(2026, 1, 1, 12, tzinfo=ZURICH), "40")
+		with patch("zev.access._today", return_value=date(2026, 2, 1)):
+			summary = self._summary(self.alice_user)
+		self.assertEqual(summary["current_participant_id"], str(self.alice.id))
+		# The former record still participates in the historical community split.
+		self.assertAlmostEqual(summary["totals"]["total_consumed_kwh"], 3.0)
+		self._assert_participant_totals_match_flow(summary)
+
+	def test_community_share_at_swiss_midnight_uses_the_civil_assignment_day(self):
+		MeterReading.objects.all().delete()
+		self._read(self.community_mp, datetime(2026, 1, 1, 0, tzinfo=ZURICH), "8")
+		summary = self._summary(self.alice_user)
+		self.assertAlmostEqual(summary["totals"]["total_consumed_kwh"], 6.0)
+		self.assertTrue(summary["timeline"][0]["bucket"].startswith("2026-01-01"))
+		self._assert_participant_totals_match_flow(summary)
+		manager = self._summary(self.owner)
+		self.assertAlmostEqual(manager["participant_stats"][0]["total_consumed_kwh"], 6.0)
+
+	def test_community_consumption_respects_inclusive_swiss_period_end(self):
+		self._read(self.community_mp, datetime(2026, 1, 1, 23, 45, tzinfo=ZURICH), "4")
+		self._read(self.community_mp, datetime(2026, 1, 2, 0, tzinfo=ZURICH), "400")
+		summary = self._summary(self.alice_user)
+		self.assertAlmostEqual(summary["totals"]["total_consumed_kwh"], 9.0)
+		self.assertAlmostEqual(summary["zev_totals"]["consumed_kwh"], 12.0)
+		self._assert_participant_totals_match_flow(summary)
 
 	def test_hourly_profile_distributes_community_energy_by_weight(self):
 		auth(self.client, self.owner)

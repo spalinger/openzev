@@ -68,6 +68,13 @@ export function ParticipantDashboardBody({ interval, period, onPeriodChange, per
     })
 
     const summary = summaryQuery.data
+    const currentParticipantId = summary?.summary_kind === 'participant' ? summary.current_participant_id : null
+    const highlightParticipantIds = useMemo(() => {
+        const ids = (user?.memberships ?? []).flatMap(membership =>
+            membership.participants.filter(participant => participant.live).map(participant => participant.id),
+        )
+        return ids.length ? ids : currentParticipantId ? [currentParticipantId] : []
+    }, [user?.memberships, currentParticipantId])
     const scopeName = selectedCommunityName({ selectedZev, entries, selectedZevId })
     const participantTimeline = useMemo(
         () =>
@@ -137,7 +144,7 @@ export function ParticipantDashboardBody({ interval, period, onPeriodChange, per
                         <EnergyFlowCard
                             totals={summary.zev_totals}
                             participantStats={summary.zev_participant_stats}
-                            highlightParticipantId={summary.current_participant_id}
+                            highlightParticipantIds={highlightParticipantIds}
                             zevName={scopeName}
                         />
                     )}

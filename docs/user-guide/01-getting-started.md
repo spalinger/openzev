@@ -374,6 +374,11 @@ Anna's demo account includes invoice PDFs; Ben's invoices show without PDFs.
 
 ![Participant Dashboard](screenshots/02b-participant-dashboard.png)
 
+Your consumption cards, chart and energy flow include personal-meter
+consumption and your weighted community-meter share, even without a personal
+meter. When several current records have consumption, the flow combines them
+into a **Total consumption** node. Disabled communities contribute no consumption.
+
 ![Account profile](screenshots/16-account-profile.png)
 
 ## API Access

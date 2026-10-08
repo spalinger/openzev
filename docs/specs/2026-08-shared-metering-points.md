@@ -515,7 +515,7 @@ instead of attributing them to the holder.
 |---|---|
 | `allocation/read_model.py` | `AllocatedReading` gains the allocation mode; holder resolution switches from `participant_at` to `assignment_at` |
 | `invoices/pdf_stats.py` | Both `iter_allocated_readings` loops currently skip `holder_id is None`; community-marked readings get distributed into each participant's totals by weight |
-| `metering/analytics.py` | The six `participant_at` sites switch to `assignment_at` and distribute community readings by date-granular weight share (one extra query: participant validity + weights). The `participant_on` data-quality site keeps literal-holder semantics — a community meter is not unassigned (§5.4) |
+| `metering/analytics.py` | Attribute readings by assignment window and date-granular community weight share; dashboard contract: [metering §5.4](2026-03-metering-import-and-quality.md#54-dashboard-summary). Data quality keeps literal-holder semantics — a community meter is not unassigned (§5.4) |
 | `invoices/annual_statement.py` | Monthly tables include the participant's share (two `is_held_by` sites + a community loop) |
 | `invoices/pdf_charts.py` | Hourly profile includes weighted community energy (one `is_held_by` site) |
 

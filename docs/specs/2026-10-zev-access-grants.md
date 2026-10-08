@@ -413,6 +413,10 @@ means admin, or a manager or viewer grant anywhere:
   `zev_id query parameter is required.`; any other account gets its
   participant summary across all its current rows.
 
+Both endpoints validate UUID/date parameters before resolving scope and exclude
+disabled ZEVs from participant analytics. Management access is unchanged;
+response and aggregation details are in the [metering baseline §5.4](2026-03-metering-import-and-quality.md#54-dashboard-summary).
+
 The response says which summary it is in `summary_kind`: `"zev"` (the
 community summary) or `"participant"`. (Until PR 7 the key was `role`, with
 `"zev_owner"` / `"participant"`.)

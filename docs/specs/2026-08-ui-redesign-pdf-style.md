@@ -442,9 +442,16 @@ remain on the dashboard.
   1. Four `StatCard`s: consumed from ZEV, imported from grid, total consumption,
      and the from-ZEV share `consumed_from_zev_kwh / total_consumed_kwh` (— with
      a behind-meter hint when the participant has behind-meter generation). The
-     same behind-meter ZEV note follows.
-  2. `EnergyFlowCard`, highlighting `current_participant_id` (shown only when
-     the summary carries it).
+     same behind-meter ZEV note follows. Cards and the consumption timeline
+     include personal readings and weighted community shares.
+  2. `EnergyFlowCard` (shown only when the summary carries
+     `current_participant_id`), combining consumption rows for all live
+     participant records in `user.memberships` into one node. It uses the
+     participant name for one consuming row and the total-consumption label
+     for several; its total matches the cards and timeline. If membership IDs
+     are unavailable, it highlights `current_participant_id` instead.
+     Zero-consumption records have no consumption node; if none of the
+     account's records consume, consuming records appear as Others.
   3. `ConsumptionSplitCard`: stacked from-ZEV / from-grid kWh bars plus a
      right-hand 0–100 % axis with the `from_zev_rate` line.
   4. `HourlyProfileCard` when the profile has data.

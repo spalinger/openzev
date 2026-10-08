@@ -20,6 +20,7 @@ from allocation.read_model import (
 from allocation.validity import active_during, civil_date, period_window, wall_clock
 from allocation.split import split_consumption, split_production
 from allocation.windows import AssignmentWindows
+from zev import access
 from zev.models import (
     AllocationMode,
     Participant,
@@ -267,7 +268,6 @@ def owner_dashboard_summary(qs, trunc_fn, selected_participant_id):
     # the reading's timestamp (ADR 0013), not to whoever holds it today.
     window_start, window_end = _qs_bounds(qs, today)
     windows = _assignment_windows_for_readings(qs, window_start, window_end)
-    names = _participant_names(windows.participant_ids)
     mp_to_zev, shares_by_zev = _community_shares_by_zev(
         qs.values_list("metering_point_id", flat=True).distinct(), window_start, window_end,
     )
@@ -315,7 +315,6 @@ def owner_dashboard_summary(qs, trunc_fn, selected_participant_id):
             if pid not in participant_map:
                 participant_map[pid] = {
                     "participant_id": pid,
-                    "participant_name": names.get(pid, ""),
                     "total_consumed_kwh": Decimal("0"),
                     "total_produced_kwh": Decimal("0"),
                     "from_zev_kwh": Decimal("0"),
@@ -360,7 +359,6 @@ def owner_dashboard_summary(qs, trunc_fn, selected_participant_id):
             if pid not in participant_map:
                 participant_map[pid] = {
                     "participant_id": pid,
-                    "participant_name": names.get(pid, ""),
                     "total_consumed_kwh": Decimal("0"),
                     "total_produced_kwh": Decimal("0"),
                     "from_zev_kwh": Decimal("0"),
@@ -381,6 +379,10 @@ def owner_dashboard_summary(qs, trunc_fn, selected_participant_id):
                 }
             participant_map[pid]["timeline_map"][bucket_key]["produced_kwh"] += produced * share
             participant_map[pid]["timeline_map"][bucket_key]["exported_kwh"] += exported * share
+
+    names = _participant_names(participant_map)
+    for pid, item in participant_map.items():
+        item["participant_name"] = names.get(pid, "")
 
     participant_stats = sorted(
         [
@@ -440,52 +442,50 @@ def owner_dashboard_summary(qs, trunc_fn, selected_participant_id):
 # Participant dashboard
 # ---------------------------------------------------------------------------
 
-def participant_dashboard_summary(participant_qs, zev_qs, trunc_fn, user, zev_ids):
+def participant_dashboard_summary(zev_qs, trunc_fn, user, zev_ids):
     """
     Compute participant dashboard summary.
 
-    participant_qs  – MeterReading queryset filtered to the participant's own
-                      readings, already date-filtered.
-    zev_qs          – MeterReading queryset for all ZEV readings, date-filtered.
+    zev_qs          – Readings of enabled membership ZEVs, date-filtered.
     trunc_fn        – Django ORM truncation class.
     user            – request.user (used to find current_participant_ids).
-    zev_ids         – queryset / list of ZEV UUIDs the participant belongs to.
+    zev_ids         – queryset / list of enabled membership ZEV UUIDs.
 
     Returns a dict matching the existing API response shape.  The caller
     should add the ``"bucket"`` key before returning to the client.
     """
     today = date_type.today()
-    base = participant_qs.annotate(bucket=trunc_fn("timestamp"))
+    base = zev_qs.annotate(bucket=trunc_fn("timestamp"))
 
-    # Attribution windows for the participant's own metering points.
-    window_start, window_end = _qs_bounds(participant_qs, today)
-    windows = _assignment_windows_for_readings(participant_qs, window_start, window_end)
+    # Cards, timeline and flow use the same readings and attribution windows.
+    # A community share belongs to an eligible member even when they hold no
+    # assignment on that meter; raw-reading visibility cannot define this set.
+    window_start, window_end = _qs_bounds(zev_qs, today)
+    windows = _assignment_windows_for_readings(zev_qs, window_start, window_end)
     current_participant_ids = set(
-        Participant.objects.filter(user=user, zev_id__in=zev_ids)
-        .order_by("id")
+        Participant.objects.filter(access.live_participant_q(), user=user, zev_id__in=zev_ids)
         .values_list("id", flat=True)
     )
     mp_to_zev, shares_by_zev = _community_shares_by_zev(
-        participant_qs.values_list("metering_point_id", flat=True).distinct(), window_start, window_end,
+        zev_qs.values_list("metering_point_id", flat=True).distinct(), window_start, window_end,
     )
 
-    participant_rows = (
+    consumption_rows = (
         base.filter(direction="in")
         .values("metering_point_id", "bucket", "timestamp")
         .annotate(consumed_kwh=Sum("energy_kwh"))
-        .order_by("timestamp")
+        .order_by("metering_point_id", "timestamp")
     )
 
     zev_rows = (
-        zev_qs.annotate(bucket=trunc_fn("timestamp"))
-        .values("bucket", "timestamp", "direction")
+        base.values("metering_point__zev_id", "bucket", "timestamp", "direction")
         .annotate(total_kwh=Sum("energy_kwh"))
         .order_by("timestamp")
     )
 
     zev_pivot = {}
     for row in zev_rows:
-        key = row["timestamp"]
+        key = (row["metering_point__zev_id"], row["timestamp"])
         if key not in zev_pivot:
             zev_pivot[key] = {"consumed": Decimal("0"), "produced": Decimal("0")}
         if row["direction"] == "in":
@@ -499,53 +499,6 @@ def participant_dashboard_summary(participant_qs, zev_qs, trunc_fn, user, zev_id
         "imported_from_grid_kwh": Decimal("0"),
         "total_consumed_kwh": Decimal("0"),
     }
-
-    for row in participant_rows:
-        ts = row["timestamp"]
-        # This participant's own share of the reading: 1 for a personal
-        # assignment they hold, their normalized weight share for a
-        # community assignment (0 if they aren't eligible on this date), 0
-        # for a gap or somebody else's meter.
-        my_share = sum(
-            share for raw_pid, share in _distribute_reading(
-                windows, mp_to_zev, shares_by_zev, row["metering_point_id"], ts,
-            )
-            if raw_pid in current_participant_ids
-        )
-        if my_share == 0:
-            continue
-        bucket_key = row["bucket"].isoformat()
-        participant_consumed = (row["consumed_kwh"] or Decimal("0")) * my_share
-        zev_consumed = zev_pivot.get(ts, {}).get("consumed", Decimal("0"))
-        zev_produced = zev_pivot.get(ts, {}).get("produced", Decimal("0"))
-        consumed_from_zev, imported_from_grid = split_consumption(
-            participant_consumed, zev_consumed, zev_produced
-        )
-
-        totals["consumed_from_zev_kwh"] += consumed_from_zev
-        totals["imported_from_grid_kwh"] += imported_from_grid
-        totals["total_consumed_kwh"] += participant_consumed
-
-        if bucket_key not in timeline_map:
-            timeline_map[bucket_key] = {
-                "bucket": bucket_key,
-                "consumed_from_zev_kwh": Decimal("0"),
-                "imported_from_grid_kwh": Decimal("0"),
-                "total_consumed_kwh": Decimal("0"),
-            }
-        timeline_map[bucket_key]["consumed_from_zev_kwh"] += consumed_from_zev
-        timeline_map[bucket_key]["imported_from_grid_kwh"] += imported_from_grid
-        timeline_map[bucket_key]["total_consumed_kwh"] += participant_consumed
-
-    timeline = [
-        {
-            "bucket": item["bucket"],
-            "consumed_from_zev_kwh": float(item["consumed_from_zev_kwh"]),
-            "imported_from_grid_kwh": float(item["imported_from_grid_kwh"]),
-            "total_consumed_kwh": float(item["total_consumed_kwh"]),
-        }
-        for _, item in sorted(timeline_map.items(), key=lambda entry: entry[0])
-    ]
 
     # ZEV-wide totals & per-participant stats (Sankey data)
     zev_totals = {
@@ -563,32 +516,15 @@ def participant_dashboard_summary(participant_qs, zev_qs, trunc_fn, user, zev_id
         zev_totals["exported_kwh"] += max(produced - consumed, Decimal("0"))
 
     # ZEV-wide per-participant stats (Sankey data), attributed per timestamp.
-    zev_window_start, zev_window_end = _qs_bounds(zev_qs, today)
-    zev_windows = _assignment_windows_for_readings(zev_qs, zev_window_start, zev_window_end)
-    zev_names = _participant_names(zev_windows.participant_ids)
-    zev_mp_to_zev, zev_shares_by_zev = _community_shares_by_zev(
-        zev_qs.values_list("metering_point_id", flat=True).distinct(), zev_window_start, zev_window_end,
-    )
     zev_flagged_mp_ids = _flagged_metering_point_ids(zev_qs)
     zev_has_behind_meter_generation = bool(zev_flagged_mp_ids)
-    zev_net_metered_ids = net_metered_participant_ids(zev_windows, zev_qs, zev_flagged_mp_ids)
+    zev_net_metered_ids = net_metered_participant_ids(windows, zev_qs, zev_flagged_mp_ids)
     has_behind_meter_generation = bool(
         {str(pid) for pid in current_participant_ids} & zev_net_metered_ids
     )
 
-    all_consumption_rows = (
-        zev_qs.annotate(bucket=trunc_fn("timestamp"))
-        .filter(direction="in")
-        .values(
-            "metering_point_id",
-            "timestamp",
-        )
-        .annotate(consumed_kwh=Sum("energy_kwh"))
-        .order_by("metering_point_id", "timestamp")
-    )
     all_production_rows = (
-        zev_qs.annotate(bucket=trunc_fn("timestamp"))
-        .filter(direction="out")
+        base.filter(direction="out")
         .values(
             "metering_point_id",
             "timestamp",
@@ -597,61 +533,84 @@ def participant_dashboard_summary(participant_qs, zev_qs, trunc_fn, user, zev_id
         .order_by("metering_point_id", "timestamp")
     )
 
-    all_p_map = {}
-    for row in all_consumption_rows:
+    participant_map = {}
+    for row in consumption_rows:
         ts = row["timestamp"]
         consumed = row["consumed_kwh"] or Decimal("0")
-        zev_at_ts = zev_pivot.get(ts, {})
+        zev_at_ts = zev_pivot.get((mp_to_zev[row["metering_point_id"]], ts), {})
         total_consumed = zev_at_ts.get("consumed", Decimal("0"))
         total_produced = zev_at_ts.get("produced", Decimal("0"))
         from_zev, from_grid = split_consumption(consumed, total_consumed, total_produced)
         for raw_pid, share in _distribute_reading(
-            zev_windows, zev_mp_to_zev, zev_shares_by_zev, row["metering_point_id"], ts,
+            windows, mp_to_zev, shares_by_zev, row["metering_point_id"], ts,
         ):
             pid = str(raw_pid)
-            if pid not in all_p_map:
-                all_p_map[pid] = {
+            if pid not in participant_map:
+                participant_map[pid] = {
                     "participant_id": pid,
-                    "participant_name": zev_names.get(pid, ""),
                     "total_consumed_kwh": Decimal("0"),
                     "total_produced_kwh": Decimal("0"),
                     "from_zev_kwh": Decimal("0"),
                     "from_grid_kwh": Decimal("0"),
                 }
-            all_p_map[pid]["total_consumed_kwh"] += consumed * share
-            all_p_map[pid]["from_zev_kwh"] += from_zev * share
-            all_p_map[pid]["from_grid_kwh"] += from_grid * share
+            participant_map[pid]["total_consumed_kwh"] += consumed * share
+            participant_map[pid]["from_zev_kwh"] += from_zev * share
+            participant_map[pid]["from_grid_kwh"] += from_grid * share
+
+            if raw_pid in current_participant_ids:
+                bucket_key = row["bucket"].isoformat()
+                if bucket_key not in timeline_map:
+                    timeline_map[bucket_key] = {
+                        "bucket": bucket_key, **dict.fromkeys(totals, Decimal("0")),
+                    }
+                for total_key, value in (
+                    ("total_consumed_kwh", consumed * share),
+                    ("consumed_from_zev_kwh", from_zev * share),
+                    ("imported_from_grid_kwh", from_grid * share),
+                ):
+                    totals[total_key] += value
+                    timeline_map[bucket_key][total_key] += value
 
     for row in all_production_rows:
         ts = row["timestamp"]
         produced = row["produced_kwh"] or Decimal("0")
         for raw_pid, share in _distribute_reading(
-            zev_windows, zev_mp_to_zev, zev_shares_by_zev, row["metering_point_id"], ts,
+            windows, mp_to_zev, shares_by_zev, row["metering_point_id"], ts,
         ):
             pid = str(raw_pid)
-            if pid not in all_p_map:
-                all_p_map[pid] = {
+            if pid not in participant_map:
+                participant_map[pid] = {
                     "participant_id": pid,
-                    "participant_name": zev_names.get(pid, ""),
                     "total_consumed_kwh": Decimal("0"),
                     "total_produced_kwh": Decimal("0"),
                     "from_zev_kwh": Decimal("0"),
                     "from_grid_kwh": Decimal("0"),
                 }
-            all_p_map[pid]["total_produced_kwh"] += produced * share
+            participant_map[pid]["total_produced_kwh"] += produced * share
 
+    timeline = [
+        {
+            "bucket": item["bucket"],
+            "consumed_from_zev_kwh": float(item["consumed_from_zev_kwh"]),
+            "imported_from_grid_kwh": float(item["imported_from_grid_kwh"]),
+            "total_consumed_kwh": float(item["total_consumed_kwh"]),
+        }
+        for _, item in sorted(timeline_map.items(), key=lambda entry: entry[0])
+    ]
+
+    zev_names = _participant_names(participant_map)
     zev_participant_stats = sorted(
         [
             {
                 "participant_id": item["participant_id"],
-                "participant_name": item["participant_name"],
+                "participant_name": zev_names.get(item["participant_id"], ""),
                 "total_consumed_kwh": float(item["total_consumed_kwh"]),
                 "total_produced_kwh": float(item["total_produced_kwh"]),
                 "from_zev_kwh": float(item["from_zev_kwh"]),
                 "from_grid_kwh": float(item["from_grid_kwh"]),
                 "has_behind_meter_generation": item["participant_id"] in zev_net_metered_ids,
             }
-            for item in all_p_map.values()
+            for item in participant_map.values()
         ],
         key=lambda x: x["total_consumed_kwh"],
         reverse=True,
@@ -664,7 +623,7 @@ def participant_dashboard_summary(participant_qs, zev_qs, trunc_fn, user, zev_id
         "zev_totals": {k: float(v) for k, v in zev_totals.items()},
         "zev_participant_stats": zev_participant_stats,
         "current_participant_id": (
-            str(next(iter(current_participant_ids))) if current_participant_ids else None
+            str(min(current_participant_ids)) if current_participant_ids else None
         ),
         "has_behind_meter_generation": has_behind_meter_generation,
         "zev_has_behind_meter_generation": zev_has_behind_meter_generation,
