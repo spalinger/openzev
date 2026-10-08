@@ -553,6 +553,7 @@ cannot be impersonated."`, audited `DENIED` with metadata `is_admin`,
     "zev": "<uuid>",
     "zev_name": "Sonnenhof",
     "zev_disabled": false,
+    "zev_billing_interval": "quarterly",
     "access": "manager" | "viewer" | null,
     "participants": [{"id": "<uuid>", "valid_from": "2025-01-01", "valid_to": null, "live": true}]
   }
@@ -671,6 +672,7 @@ export interface Membership {
     zev: string
     zev_name: string
     zev_disabled: boolean
+    zev_billing_interval: 'monthly' | 'quarterly' | 'semi_annual' | 'annual'
     access: ZevAccessRole | null
     participants: MembershipParticipant[]
 }

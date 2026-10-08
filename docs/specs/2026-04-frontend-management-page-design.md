@@ -140,6 +140,7 @@ Usage rules:
 
 `frontend/src/lib/useBillingPeriodParams.ts` derives `{ period: { from, to },
 setPeriod, isReady }` from the URL and explicit consumer policy. `ready: false`
+or an unresolved `interval` (`undefined`)
 returns empty dates and makes selector edits inert until necessary scope and
 interval data exists. Canonical parameters are `period_start`/`period_end`;
 `legacyParams: true` also reads `from`/`to` only if neither canonical key is

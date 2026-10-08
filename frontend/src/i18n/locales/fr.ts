@@ -164,6 +164,7 @@ export const fr = {
     dashboard: {
         title: 'Tableau de bord',
         description: 'Commencez avec votre flux de facturation RCP ou RCPv suisse.',
+        participantDescription: 'Votre consommation, votre part issue du RCP et vos factures.',
     },
     common: {
         loading: 'Chargement...',
@@ -2755,6 +2756,8 @@ export const fr = {
                 invoice: 'Facture',
                 period: 'Période',
                 total: 'Total',
+                status: 'Statut',
+                community: 'Communauté',
                 actions: 'Actions',
             },
             viewDetails: 'Voir les détails',

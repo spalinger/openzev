@@ -335,7 +335,7 @@ class UserListCreateView(generics.ListCreateAPIView):
                 Prefetch(
                     "participations",
                     queryset=Participant.objects.select_related(None).select_related("zev")
-                    .only("id", "user_id", "zev_id", "valid_from", "valid_to", "zev__name", "zev__disabled_at")
+                    .only("id", "user_id", "zev_id", "valid_from", "valid_to", "zev__name", "zev__disabled_at", "zev__billing_interval")
                     .order_by("valid_from", "id"),
                 ),
                 "webauthn_credentials",

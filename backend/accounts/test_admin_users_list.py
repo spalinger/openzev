@@ -61,7 +61,8 @@ class AdminUserListTests(TestCase):
         self.assertEqual(
             self._rows()["ual_tenant"]["memberships"],
             [{
-                "zev": str(zev.pk), "zev_name": "Sonnenberg", "zev_disabled": False, "access": None,
+                "zev": str(zev.pk), "zev_name": "Sonnenberg", "zev_disabled": False,
+                "zev_billing_interval": "monthly", "access": None,
                 "roles": [],
                 "participants": [{"id": str(participant.pk), "valid_from": "2026-01-01", "valid_to": None, "live": True}],
             }],
@@ -77,7 +78,8 @@ class AdminUserListTests(TestCase):
         self.assertEqual(
             self._rows()["ual_owner2"]["memberships"],
             [{
-                "zev": str(zev.pk), "zev_name": "Alpenblick", "zev_disabled": False, "access": "manager",
+                "zev": str(zev.pk), "zev_name": "Alpenblick", "zev_disabled": False,
+                "zev_billing_interval": "monthly", "access": "manager",
                 "roles": [],
                 "participants": [{"id": str(participant.pk), "valid_from": "2026-01-01", "valid_to": None, "live": True}],
             }],

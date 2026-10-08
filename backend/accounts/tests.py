@@ -18,7 +18,7 @@ from .models import (
 )
 from audit.models import AuditActionCategory, AuditEvent, AuditEventStatus
 from invoices.models import EmailTemplate, Invoice, InvoiceStatus
-from zev.models import MeteringPoint, MeteringPointAssignment, MeteringPointType, Participant
+from zev.models import BillingInterval, MeteringPoint, MeteringPointAssignment, MeteringPointType, Participant
 from datetime import date, timedelta
 from django.utils import timezone
 
@@ -536,6 +536,29 @@ class MeEndpointParticipantContextTests(TestCase):
 		# The single-community name and count gave way to memberships (#761).
 		self.assertNotIn("zev_name", resp.data)
 		self.assertNotIn("zev_count", resp.data)
+
+	def test_participant_me_carries_its_communitys_billing_interval(self):
+		client = APIClient()
+		owner = User.objects.create_user(username="owner_interval", password="pass1234", role=UserRole.USER)
+		zev = create_managed_zev(
+			name="Quarterly ZEV", owner=owner, zev_type="vzev", invoice_prefix="Q",
+			billing_interval=BillingInterval.QUARTERLY,
+		)
+		participant_user = User.objects.create_user(username="p_interval", password="pass1234", role=UserRole.USER)
+		Participant.objects.create(
+			zev=zev,
+			user=participant_user,
+			first_name="Anna",
+			last_name="Consumer",
+			email="anna.q@example.com",
+			valid_from=date(2026, 1, 1),
+		)
+
+		self._auth(client, participant_user)
+		resp = client.get("/api/v1/auth/me/")
+
+		self.assertEqual(resp.status_code, 200)
+		self.assertEqual([m["zev_billing_interval"] for m in resp.data["memberships"]], ["quarterly"])
 
 	def test_admin_me_has_no_community_name(self):
 		client = APIClient()

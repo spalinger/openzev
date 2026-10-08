@@ -7,7 +7,7 @@ import { queryKeys } from '../../lib/api/queryKeys'
 import { formatKwh, formatPercent } from '../../lib/numbers'
 import { dashboardKwhStat, hourlyKwhTick, hourlyKwhTooltipValue, fromZevRate, kwhTick } from '../../lib/dashboardFormatting'
 import { useAuth } from '../../lib/auth'
-import { ownParticipantIds, selectedCommunityName } from '../../lib/membership'
+import { personalInvoiceFilter, selectedCommunityName } from '../../lib/membership'
 import { useManagedZev } from '../../lib/managedZev'
 import { PageSkeleton } from '../../components/PageSkeleton'
 import { Notice } from '../../components/Notice'
@@ -48,9 +48,13 @@ export function ParticipantDashboardBody({ interval, period, onPeriodChange, per
             }),
         enabled: periodReady,
     })
+    const isPersonalInvoice = personalInvoiceFilter(user)
     const invoicesQuery = useQuery({
-        queryKey: queryKeys.invoices.list(),
-        queryFn: () => fetchInvoices(),
+        queryKey: queryKeys.invoices.mine(),
+        queryFn: () => fetchInvoices(undefined),
+        refetchInterval: (query) => query.state.data?.some(
+            (invoice) => isPersonalInvoice(invoice) && invoice.pdf_status === 'pending',
+        ) ? 15000 : false,
     })
     const hourlyProfileQuery = useQuery({
         queryKey: queryKeys.metering.hourlyProfile(period.from, period.to, selectedZevId || undefined),
@@ -84,22 +88,13 @@ export function ParticipantDashboardBody({ interval, period, onPeriodChange, per
         return pct === null ? null : { pct, zevKwh: consumed_from_zev_kwh, totalKwh: total_consumed_kwh }
     }, [summary])
     const hourlyProfileData = useHourlyProfileRows(hourlyProfileQuery.data?.hourly_profile)
-    // The list also holds invoices of communities the account manages; keep its own.
-    const participantInvoicesWithPdf = useMemo(
-        () => {
-            const ownIds = ownParticipantIds(user)
-            return (invoicesQuery.data ?? []).filter(
-                (invoice) => ownIds.has(invoice.participant) && ['sent', 'paid'].includes(invoice.status) && !!invoice.pdf_url,
-            )
-        },
-        [invoicesQuery.data, user],
-    )
+    const participantInvoices = invoicesQuery.data?.filter(isPersonalInvoice)
 
     return (
         <>
             <section className="card">
                 <div className="grid">
-                    <PeriodSelector interval={interval} from={period.from} to={period.to} onChange={onPeriodChange} />
+                    {interval && <PeriodSelector interval={interval} from={period.from} to={period.to} onChange={onPeriodChange} />}
                     <div className="inline-form inline-form--narrow">
                         <ResolutionSelect value={bucket} onChange={setBucket} />
                     </div>
@@ -159,14 +154,15 @@ export function ParticipantDashboardBody({ interval, period, onPeriodChange, per
                             hourlyKwhTooltipValue={hourlyKwhTooltipValue}
                         />
                     )}
-                    <ParticipantInvoicesCard
-                        allCommunities={hasMultipleCommunities}
-                        invoices={participantInvoicesWithPdf}
-                        isLoading={invoicesQuery.isLoading}
-                        isError={invoicesQuery.isError}
-                    />
                 </>
             )}
+            <ParticipantInvoicesCard
+                showCommunity={(user?.memberships?.length ?? 0) > 1}
+                invoices={participantInvoices}
+                isError={invoicesQuery.isError}
+                isRetrying={invoicesQuery.isFetching}
+                onRetry={() => void invoicesQuery.refetch()}
+            />
         </>
     )
 }

@@ -898,12 +898,14 @@ request per row:
 
 - `memberships` — one entry per community the account relates to, sorted by
   community name (case-insensitive) then id:
-  `{ zev, zev_name, zev_disabled, access: "manager" | "viewer" | null,
-  participants: [{ id, valid_from, valid_to, live }] }` — its active grant
+  `{ zev, zev_name, zev_disabled, zev_billing_interval, access: "manager" | "viewer" | null,
+  roles, participants: [{ id, valid_from, valid_to, live }] }` — its active grant
   there (if any) and every participant row it holds there, current or ended
-  (#761, SPEC-2026-10-zev-access-grants §7.7). Built by
-  `zev.access.build_memberships` from prefetched rows (active grants via
-  `zev.access.active_grants_prefetch()`, participations with their ZEV), so the
+  (#761, SPEC-2026-10-zev-access-grants §7.7). `zev_billing_interval` is the
+  community's `Zev.billing_interval`, which sets a participant's dashboard
+  periods. Built by `zev.access.build_memberships` from prefetched rows (active
+  grants via `zev.access.active_grants_prefetch()`, participations with their
+  ZEV), so the
   list stays a fixed number of queries. `/auth/me` returns the same shape for
   the caller.
 - `mfa_methods` — `"totp"` (a *confirmed* authenticator device; an abandoned
@@ -1944,7 +1946,7 @@ lists the test classes per module (test counts are the `test_*` methods).
 | `FeatureFlagsApiTests` | 5 | Anonymous 401 and non-admin 403 on list; admin can list and toggle; defaults sync on read |
 | `ImpersonationTests` | 4 | Admin can impersonate participant/owner; non-admin blocked; admin cannot impersonate admin |
 | `LinkedAccountSafetyTests` | 8 | Admin can edit linked account; cannot delete linked; can delete unlinked; cannot delete last admin (with audit-denied assertion); can delete self when other admin exists (with audit actor SET_NULL assertion); can delete other admin when multiple exist; cannot change own role (via both detail and me endpoints) |
-| `MeEndpointParticipantContextTests` | 4 | `GET /auth/me/` lists a participant's community in `memberships` and carries no `zev_name` / `zev_count`; an admin and an account without a community get `[]`; two memberships are both listed, by name |
+| `MeEndpointParticipantContextTests` | 5 | `GET /auth/me/` lists a participant's community in `memberships` and carries no `zev_name` / `zev_count`; the membership carries the community's `zev_billing_interval`; an admin and an account without a community get `[]`; two memberships are both listed, by name |
 | `AppSettingsTests` | 5 | Authenticated user reads settings; non-admin read omits the MFA policy, admin read includes it; admin updates; non-admin cannot update |
 | `VatRateSettingsTests` | 4 | Admin CRUD; non-admin blocked; overlap rejection; valid_to validation |
 | `OAuthProviderConfigTests` | 5 | Admin creates provider (internal host URLs, scheme-less URLs, default redirect URL); non-admin blocked; login initiate uses provider redirect URL |
@@ -2009,7 +2011,7 @@ lists the test classes per module (test counts are the `test_*` methods).
 | `SeedDemoLegacyNameCollisionTests` | 5 | Legacy row next to an already-migrated row dropped; duplicate legacy rows keep the newest; a duplicate legacy row with invoices is cleared; current-name upsert does not take over another owner's community; only the demo owner is affected |
 | `SeedDemoWindowShiftTests` | 1 | Shifted seed window leaves no readings outside it |
 | `SeedDemoAuditResetTests` | 1 | Audit reset clears demo trails but keeps events on other communities |
-| `SeedDemoEndToEndTests` | 3 | Seed runs end to end on a small fixed window and re-seeding is identical; the flagship community gains a representative and a contact; the access personas survive a re-seed |
+| `SeedDemoEndToEndTests` | 11 | Deterministic reseeding, access personas and dynamic tariff rollover; Anna's invoice PDFs generated after commit; rollback preserves invoice rows/files; cleanup preserves referenced PDFs; rendering/database and deletion failures are isolated within and between commit callbacks |
 | `ZevVatModeTests` | 5 | ZEV VAT mode: default `not_registered`; `clean()` requires a number for `registered` and forbids one otherwise; a PATCH to `inclusive` is accepted and to `registered` without a number rejected |
 | `SeedDemoFeatureFlagTests` | 3 | Demo seed enables the features that ship off by default (#691): enables the feasibility-calculator flag, re-enables a flag an admin turned off, and is idempotent |
 | `MeteringPointCascadeInfoTests` | 3 | Metering-point list/retrieve/create responses report cascade counts (`reading_count`, `assignment_count`) and the first/last reading span |

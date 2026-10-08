@@ -98,7 +98,7 @@ export function ManagementDashboardBody({ interval, period, onPeriodChange, peri
         <>
             <section className="card">
                 <div className="grid">
-                    <PeriodSelector interval={interval} from={period.from} to={period.to} onChange={onPeriodChange} />
+                    {interval && <PeriodSelector interval={interval} from={period.from} to={period.to} onChange={onPeriodChange} />}
                     <div className="inline-form grid grid-2">
                         <label>
                             <span>{t('pages.dashboard.participant')}</span>

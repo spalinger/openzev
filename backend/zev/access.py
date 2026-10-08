@@ -323,6 +323,7 @@ def build_memberships(grants, participants, *, roles=(), today: date | None = No
             "zev": str(zev.pk),
             "zev_name": zev.name,
             "zev_disabled": zev.disabled_at is not None,
+            "zev_billing_interval": zev.billing_interval,
             "access": None,
             "roles": [],
             "participants": [],

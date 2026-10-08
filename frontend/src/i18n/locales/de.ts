@@ -164,6 +164,7 @@ export const de = {
     dashboard: {
         title: 'Dashboard',
         description: 'Starten Sie mit Ihrem Schweizer ZEV oder vZEV-Abrechnungsworkflow.',
+        participantDescription: 'Ihr Verbrauch, Ihr Anteil aus dem ZEV und Ihre Rechnungen.',
     },
     common: {
         loading: 'Wird geladen...',
@@ -2755,6 +2756,8 @@ export const de = {
                 invoice: 'Rechnung',
                 period: 'Zeitraum',
                 total: 'Gesamt',
+                status: 'Status',
+                community: 'Gemeinschaft',
                 actions: 'Aktionen',
             },
             viewDetails: 'Details anzeigen',

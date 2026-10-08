@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { createElement } from 'react'
+import { createElement, type ReactElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react'
 import { MemoryRouter } from 'react-router-dom'
@@ -10,12 +10,16 @@ const mockState = vi.hoisted(() => ({
     // The account's relation to the selected community (#761).
     relation: 'manager',
     selectedZevId: 'z1',
+    membershipInterval: 'monthly' as string | undefined,
+    secondMembershipInterval: null as string | null,
+    secondMembershipSelectable: true,
     summary: null as unknown,
     summaryCalls: [] as Array<Record<string, unknown>>,
     hourlyProfile: null as unknown,
     hourlyCalls: [] as Array<Record<string, unknown>>,
-    invoices: [] as Array<Record<string, unknown>>,
+    invoices: [] as Invoice[],
     invoiceCalls: [] as Array<unknown>,
+    invoiceError: null as Error | null,
 }))
 
 vi.mock('react-i18next', () => ({
@@ -27,7 +31,13 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('../src/lib/auth', () => ({
     useAuth: () => ({
-        user: { role: 'user', memberships: [{ zev: 'z1', participants: [{ id: 'me', valid_from: '2026-01-01', valid_to: null, live: true }] }] },
+        user: {
+            role: 'user',
+            memberships: [
+                { zev: 'z1', zev_billing_interval: mockState.membershipInterval, participants: [{ id: 'me', valid_from: '2026-01-01', valid_to: null, live: true }] },
+                ...(mockState.secondMembershipInterval ? [{ zev: 'z2', zev_billing_interval: mockState.secondMembershipInterval, participants: [{ id: 'me-z2', valid_from: '2026-01-01', valid_to: null, live: true }] }] : []),
+            ],
+        },
     }),
 }))
 
@@ -41,7 +51,9 @@ vi.mock('../src/lib/managedZev', () => {
                     ? null
                     : { id: mockState.selectedZevId, name: mockState.selectedZevId.toUpperCase(), billing_interval: 'monthly' },
             relation: mockState.relation,
-            entries: [{ id: mockState.selectedZevId, name: mockState.selectedZevId.toUpperCase(), relation: mockState.relation }],
+            entries: (mockState.secondMembershipInterval && mockState.secondMembershipSelectable ? ['z1', 'z2'] : [mockState.selectedZevId]).map((id) => ({
+                id, name: id.toUpperCase(), relation: mockState.relation,
+            })),
             isLoading: false,
         }),
     }
@@ -71,20 +83,38 @@ vi.mock('../src/lib/api/metering', () => ({
 vi.mock('../src/lib/api/invoices', () => ({
     fetchInvoices: (...args: unknown[]) => {
         mockState.invoiceCalls.push(args)
+        if (mockState.invoiceError) return Promise.reject(mockState.invoiceError)
         return Promise.resolve(mockState.invoices)
     },
     openInvoicePdf: vi.fn(),
 }))
 
 import { DashboardPage } from '../src/pages/DashboardPage'
+import { ParticipantInvoicesCard } from '../src/components/dashboard/ParticipantInvoicesCard'
 import { openInvoicePdf } from '../src/lib/api/invoices'
+import type { Invoice } from '../src/types/api'
 
 const cleanups: Array<() => void> = []
 afterEach(() => {
     cleanups.splice(0).forEach((cleanup) => cleanup())
     mockState.selectedZevId = 'z1'
     vi.clearAllMocks()
+    vi.useRealTimers()
+    mockState.membershipInterval = 'monthly'
+    mockState.secondMembershipInterval = null
+    mockState.secondMembershipSelectable = true
+    mockState.invoiceError = null
+    mockState.invoiceCalls = []
 })
+
+function makeInvoice(overrides: Partial<Invoice> = {}): Invoice {
+    return {
+        id: '3', invoice_number: 'INV-3', zev: 'z1', zev_name: 'Z1',
+        participant: 'me', participant_name: 'Me', status: 'sent',
+        period_start: '2026-01-01', period_end: '2026-01-31', total_chf: '75.00',
+        pdf_url: null, pdf_status: 'none', ...overrides,
+    }
+}
 
 function managerSummary() {
     return {
@@ -138,7 +168,7 @@ function participantSummary(currentParticipantId: string | null) {
 // Re-renders the last mounted dashboard, as a community switch in the provider would.
 let rerenderDashboard: () => Promise<void> = async () => {}
 
-async function renderDashboard() {
+async function renderDashboard(page?: ReactElement) {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const container = document.createElement('div')
     document.body.appendChild(container)
@@ -151,7 +181,7 @@ async function renderDashboard() {
                 createElement(
                     QueryClientProvider,
                     { client },
-                    createElement(MemoryRouter, null, createElement(DashboardPage)),
+                    createElement(MemoryRouter, null, page ?? createElement(DashboardPage)),
                 ),
             ),
         )
@@ -163,11 +193,10 @@ async function renderDashboard() {
             render()
         })
     }
-    await act(async () => {
-        await new Promise((r) => setTimeout(r, 20))
-    })
+    await flush()
     cleanups.push(() => {
         act(() => root.unmount())
+        client.clear()
         container.remove()
     })
     return container
@@ -175,7 +204,9 @@ async function renderDashboard() {
 
 async function flush() {
     await act(async () => {
-        await new Promise((r) => setTimeout(r, 20))
+        const settled = new Promise<void>((resolve) => setTimeout(resolve, 20))
+        if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(20)
+        await settled
     })
 }
 
@@ -387,18 +418,188 @@ describe('dashboard behavior preservation', () => {
         expect(withId.textContent).toContain('70\u00a0%')
     })
 
-    it('participant invoices keep the sent/paid pdf filter with details actions', async () => {
+    it('a participant uses its membership interval and subtitle', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] })
+        vi.setSystemTime(new Date(2026, 10, 15, 12))
+        mockState.relation = 'participant'
+        mockState.membershipInterval = 'quarterly'
+        mockState.summary = participantSummary('me')
+        mockState.summaryCalls = []
+        mockState.invoices = []
+        const container = await renderDashboard()
+        expect(container.textContent).toContain('pages.zevs.billingIntervals.quarterly')
+        expect(container.textContent).toContain('dashboard.participantDescription')
+        expect(container.textContent).not.toContain('dashboard.description')
+        expect(mockState.summaryCalls[0]).toMatchObject({ dateFrom: '2026-10-01', dateTo: '2026-12-31' })
+    })
+
+    it('a manager uses the ZEV record interval and energy balance subtitle', async () => {
+        mockState.relation = 'manager'
+        mockState.membershipInterval = 'quarterly'
+        mockState.summary = managerSummary()
+        mockState.invoices = []
+        const container = await renderDashboard()
+        expect(container.textContent).toContain('pages.zevs.billingIntervals.monthly')
+        expect(container.textContent).toContain('pages.energyBalancePage.description')
+    })
+
+    it('waits for a missing participant interval while still showing invoices', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] })
+        vi.setSystemTime(new Date(2026, 10, 15, 12))
+        mockState.relation = 'participant'
+        mockState.membershipInterval = undefined
+        mockState.summary = participantSummary('me')
+        mockState.summaryCalls = []
+        mockState.hourlyCalls = []
+        mockState.invoices = [makeInvoice()]
+        const container = await renderDashboard()
+        expect(mockState.summaryCalls).toHaveLength(0)
+        expect(mockState.hourlyCalls).toHaveLength(0)
+        expect(container.querySelector('.period-selector-trigger')).toBeNull()
+        expect(container.textContent).toContain('INV-3')
+        mockState.membershipInterval = 'quarterly'
+        await rerenderDashboard()
+        await flush()
+        expect(mockState.summaryCalls[0]).toMatchObject({ dateFrom: '2026-10-01', dateTo: '2026-12-31' })
+        expect(container.textContent).toContain('pages.zevs.billingIntervals.quarterly')
+    })
+
+    it('shows community names for invoices from a membership absent from the switcher', async () => {
+        mockState.relation = 'participant'
+        mockState.secondMembershipInterval = 'monthly'
+        mockState.secondMembershipSelectable = false
+        mockState.summary = participantSummary('me')
+        mockState.invoices = [makeInvoice(), makeInvoice({ id: '8', participant: 'me-z2', zev: 'z2', zev_name: 'Z2' })]
+        const container = await renderDashboard()
+        expect(container.textContent).toContain('pages.dashboard.invoicesAllCommunitiesSection')
+        expect(container.querySelector('thead')?.textContent).toContain('pages.dashboard.invoiceCol.community')
+        expect(container.querySelector('tbody')?.textContent).toContain('Z2')
+    })
+
+    it.each([
+        ['quarterly', '2026-10-01', '2026-12-31'],
+        ['semi_annual', '2026-07-01', '2026-12-31'],
+        ['annual', '2026-01-01', '2026-12-31'],
+    ])('switching a participant to a %s community resets the selected period', async (interval, dateFrom, dateTo) => {
+        vi.useFakeTimers({ toFake: ['Date'] })
+        vi.setSystemTime(new Date(2026, 10, 15, 12))
+        mockState.relation = 'participant'
+        mockState.secondMembershipInterval = interval
+        mockState.summary = participantSummary('me')
+        mockState.summaryCalls = []
+        mockState.invoices = []
+        const container = await renderDashboard()
+        expect(mockState.summaryCalls[0]).toMatchObject({ zevId: 'z1', dateFrom: '2026-11-01', dateTo: '2026-11-30' })
+        const previous = Array.from(container.querySelectorAll('button')).find((button) =>
+            button.textContent?.includes('pages.invoices.prevPeriod'),
+        )
+        expect(previous).toBeDefined()
+        await act(async () => previous?.click())
+        await flush()
+        expect(mockState.summaryCalls.at(-1)).toMatchObject({ dateFrom: '2026-10-01', dateTo: '2026-10-31' })
+
+        mockState.selectedZevId = 'z2'
+        await rerenderDashboard()
+        await flush()
+        expect(container.textContent).toContain(`pages.zevs.billingIntervals.${interval}`)
+        expect(container.querySelector('.period-selector-trigger')?.textContent).toContain(`${dateFrom} → ${dateTo}`)
+        const requests = mockState.summaryCalls.filter((call) => call.zevId === 'z2')
+        expect(requests.length).toBeGreaterThan(0)
+        expect(requests.every((call) => call.dateFrom === dateFrom && call.dateTo === dateTo)).toBe(true)
+    })
+
+    it.each(['ready', 'failed'] as const)('polls a pending personal PDF after 15 seconds and stops when %s', async (status) => {
+        vi.useFakeTimers()
+        mockState.relation = 'participant'
+        mockState.summary = participantSummary('me')
+        mockState.invoices = [makeInvoice({ pdf_status: 'pending' })]
+        const container = await renderDashboard()
+        expect(mockState.invoiceCalls).toHaveLength(1)
+        expect(container.textContent).toContain('pages.invoices.pdfGenerating')
+        mockState.invoices = [makeInvoice({ pdf_status: status, pdf_url: status === 'ready' ? '/new.pdf' : null })]
+        await act(async () => { await vi.advanceTimersByTimeAsync(14900) })
+        expect(mockState.invoiceCalls).toHaveLength(1)
+        await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+        await flush()
+        expect(mockState.invoiceCalls).toHaveLength(2)
+        expect(container.textContent).not.toContain('pages.invoices.pdfGenerating')
+        if (status === 'ready') {
+            const button = container.querySelector<HTMLButtonElement>('tbody button')
+            expect(button?.textContent).toContain('common.openPdf')
+            await act(async () => button?.click())
+            expect(openInvoicePdf).toHaveBeenCalledWith('3')
+        } else expect(container.textContent).toContain('pages.invoices.pdfFailed')
+        await act(async () => { await vi.advanceTimersByTimeAsync(30000) })
+        expect(mockState.invoiceCalls).toHaveLength(2)
+    })
+
+    it.each([
+        { participant: 'other', status: 'sent' },
+        { participant: 'me', status: 'draft' },
+    ])('does not poll a hidden pending invoice ($participant, $status)', async (overrides) => {
+        vi.useFakeTimers()
+        mockState.relation = 'participant'
+        mockState.summary = participantSummary('me')
+        mockState.invoices = [makeInvoice({ ...overrides, pdf_status: 'pending' })]
+        const container = await renderDashboard()
+        expect(container.textContent).not.toContain('INV-3')
+        await act(async () => { await vi.advanceTimersByTimeAsync(30000) })
+        expect(mockState.invoiceCalls).toHaveLength(1)
+    })
+
+    it('keeps an existing PDF usable while polling a replacement', async () => {
+        vi.useFakeTimers()
+        mockState.relation = 'participant'
+        mockState.summary = participantSummary('me')
+        mockState.invoices = [makeInvoice({ pdf_url: '/existing.pdf', pdf_status: 'pending' })]
+        const container = await renderDashboard()
+        const button = container.querySelector<HTMLButtonElement>('tbody button')
+        expect(button?.textContent).toContain('common.openPdf')
+        await act(async () => button?.click())
+        expect(openInvoicePdf).toHaveBeenCalledWith('3')
+        await act(async () => { await vi.advanceTimersByTimeAsync(15000) })
+        expect(mockState.invoiceCalls).toHaveLength(2)
+        expect(container.querySelector('tbody button')?.textContent).toContain('common.openPdf')
+    })
+
+    it('keeps cached invoices after a failed query refetch and retries successfully', async () => {
+        vi.useFakeTimers()
+        mockState.relation = 'participant'
+        mockState.summary = participantSummary('me')
+        mockState.invoices = [makeInvoice({ pdf_status: 'pending' })]
+        const container = await renderDashboard()
+        mockState.invoiceError = new Error('invoices down')
+        await act(async () => { await vi.advanceTimersByTimeAsync(15000) })
+        await flush()
+        expect(mockState.invoiceCalls).toHaveLength(2)
+        expect(container.querySelector('tbody')?.textContent).toContain('INV-3')
+        expect(container.querySelector('.warning-banner')?.textContent).toContain('pages.dashboard.failedInvoices')
+        mockState.invoiceError = null
+        mockState.invoices = [makeInvoice({ pdf_status: 'ready', pdf_url: '/new.pdf' })]
+        await act(async () => container.querySelector<HTMLButtonElement>('.warning-banner button')?.click())
+        await flush()
+        expect(container.querySelector('.warning-banner')).toBeNull()
+        expect(container.querySelector('tbody button')?.textContent).toContain('common.openPdf')
+        await act(async () => { await vi.advanceTimersByTimeAsync(30000) })
+        expect(mockState.invoiceCalls).toHaveLength(3)
+    })
+
+    it('participant invoices list sent/paid rows with details actions, with or without a PDF', async () => {
         mockState.relation = 'participant'
         mockState.hourlyProfile = null
         mockState.hourlyCalls = []
         mockState.summaryCalls = []
         mockState.invoiceCalls = []
         mockState.invoices = [
-            { id: '1', invoice_number: 'INV-1', participant: 'me', status: 'approved', pdf_url: 'http://x/1', period_start: '2026-01-01', period_end: '2026-01-31', total_chf: '100.00' },
-            { id: '2', invoice_number: 'INV-2', participant: 'me', status: 'draft', pdf_url: 'http://x/2', period_start: '2026-01-01', period_end: '2026-01-31', total_chf: '50.00' },
-            { id: '3', invoice_number: 'INV-3', participant: 'me', status: 'sent', pdf_url: 'http://x/3', period_start: '2026-01-01', period_end: '2026-01-31', total_chf: '75.00' },
-            { id: '4', invoice_number: 'INV-4', participant: 'me', status: 'paid', pdf_url: null, period_start: '2026-01-01', period_end: '2026-01-31', total_chf: '20.00' },
-            { id: '5', invoice_number: 'INV-5', participant: 'me', status: 'paid', pdf_url: 'http://x/5', period_start: '2026-01-01', period_end: '2026-01-31', total_chf: '30.00' },
+            makeInvoice({ id: '1', invoice_number: 'INV-1', status: 'approved', pdf_url: 'http://x/1', pdf_status: 'ready', total_chf: '100.00' }),
+            makeInvoice({ id: '2', invoice_number: 'INV-2', status: 'draft', pdf_url: 'http://x/2', pdf_status: 'ready', total_chf: '50.00' }),
+            makeInvoice({ pdf_url: 'http://x/3', pdf_status: 'ready' }),
+            makeInvoice({ id: '4', invoice_number: 'INV-4', status: 'paid', total_chf: '20.00' }),
+            makeInvoice({ id: '5', invoice_number: 'INV-5', status: 'paid', pdf_url: 'http://x/5', pdf_status: 'ready', total_chf: '30.00' }),
+            // Sent, then cancelled: still listed, as on "My invoices".
+            makeInvoice({ id: '6', invoice_number: 'INV-6', status: 'cancelled', sent_at: '2026-02-01T08:00:00Z', total_chf: '10.00' }),
+            // Another participant's invoice.
+            makeInvoice({ id: '7', invoice_number: 'INV-7', participant: 'other', pdf_url: 'http://x/7', pdf_status: 'ready', total_chf: '40.00' }),
         ]
         // Defer the summary so the test proves invoices start loading independently.
         let resolveSummary!: (value: unknown) => void
@@ -417,7 +618,14 @@ describe('dashboard behavior preservation', () => {
         expect(container.textContent).toContain('INV-3')
         expect(container.textContent).toContain('INV-5')
         expect(container.textContent).not.toContain('INV-2')
-        expect(container.textContent).not.toContain('INV-4')
+        expect(container.textContent).toContain('INV-6')
+        expect(container.textContent).not.toContain('INV-7')
+        // A missing PDF does not hide the invoice; the row says the PDF is missing.
+        const unrenderedRow = Array.from(container.querySelectorAll('tbody tr')).find((row) =>
+            row.textContent?.includes('INV-4'),
+        )
+        expect(unrenderedRow?.textContent).toContain('pages.invoices.pdfMissing')
+        expect(unrenderedRow?.querySelector('button')).toBeNull()
         expect(container.querySelector('a[href="/billing/invoices/3"]')).not.toBeNull()
         expect(container.querySelector('a[href="/billing/invoices/5"]')).not.toBeNull()
 
@@ -431,5 +639,34 @@ describe('dashboard behavior preservation', () => {
             pdfButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
         })
         expect(openInvoicePdf).toHaveBeenCalledWith('5')
+    })
+
+    it('participant invoices show even when the analytics request fails', async () => {
+        mockState.relation = 'participant'
+        mockState.summary = () => {
+            throw new Error('analytics down')
+        }
+        mockState.invoices = [
+            makeInvoice({ pdf_url: 'http://x/3', pdf_status: 'ready' }),
+        ]
+        const container = await renderDashboard()
+        await flush()
+        expect(container.textContent).toContain('pages.dashboard.failedAnalytics')
+        expect(container.textContent).toContain('INV-3')
+    })
+
+    it('shows an error with retry when invoices have never loaded', async () => {
+        const onRetry = vi.fn()
+        const empty = await renderDashboard(createElement(ParticipantInvoicesCard, {
+            invoices: undefined,
+            isError: true,
+            isRetrying: false,
+            onRetry,
+            showCommunity: false,
+        }))
+        expect(empty.querySelector('.error-banner')?.textContent).toContain('pages.dashboard.failedInvoices')
+        expect(empty.querySelector('table')).toBeNull()
+        empty.querySelector<HTMLButtonElement>('.error-banner button')?.click()
+        expect(onRetry).toHaveBeenCalledOnce()
     })
 })

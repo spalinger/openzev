@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import { useAuth } from '../lib/auth'
 import { useCommunityAccess, useScopeNote } from '../lib/communityAccess'
 import { selectedCommunityName } from '../lib/membership'
 import { useManagedZev } from '../lib/managedZev'
@@ -11,11 +12,14 @@ import { useBillingPeriodParams } from '../lib/useBillingPeriodParams'
 
 export function DashboardPage() {
     const { t } = useTranslation()
+    const { user } = useAuth()
     const scopeNote = useScopeNote()
     const { entries, selectedZevId, selectedZev } = useManagedZev()
     const { isZevScope: isZevScopedRole, isParticipantScope } = useCommunityAccess()
 
-    const interval: BillingInterval = (selectedZev?.billing_interval as BillingInterval) ?? 'monthly'
+    const selectedMembership = user?.memberships?.find((membership) => membership.zev === selectedZevId)
+    const interval =
+        (selectedZev?.billing_interval as BillingInterval | undefined) ?? selectedMembership?.zev_billing_interval
     const { period, setPeriod, isReady: periodReady } = useBillingPeriodParams({
         interval,
         ready: isZevScopedRole ? !!selectedZev : isParticipantScope,
@@ -26,6 +30,9 @@ export function DashboardPage() {
     const periodProps = { interval, period, onPeriodChange: setPeriod, periodReady }
 
     const scopeName = selectedCommunityName({ selectedZev, entries, selectedZevId })
+    let descriptionKey = 'dashboard.description'
+    if (isZevScopedRole) descriptionKey = 'pages.energyBalancePage.description'
+    else if (isParticipantScope) descriptionKey = 'dashboard.participantDescription'
 
     return (
         <div className="page-stack">
@@ -33,7 +40,7 @@ export function DashboardPage() {
                 eyebrow={scopeName}
                 scopeNote={scopeNote}
                 title={t(isZevScopedRole ? 'pages.energyBalancePage.title' : 'dashboard.title')}
-                description={t(isZevScopedRole ? 'pages.energyBalancePage.description' : 'dashboard.description')}
+                description={t(descriptionKey)}
             />
 
             <ScopeGuard skeleton="kpiRow">

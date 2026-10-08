@@ -75,6 +75,8 @@ export interface Membership {
     zev: string
     zev_name: string
     zev_disabled: boolean
+    /** The community's billing interval, for views that read no ZEV record. */
+    zev_billing_interval: 'monthly' | 'quarterly' | 'semi_annual' | 'annual'
     access: ZevAccessRole | null
     /** Roles that make the account a manager here today (issuer, representative). */
     roles?: Array<'issuer' | 'representative'>

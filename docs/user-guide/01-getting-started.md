@@ -366,9 +366,11 @@ charts; swipe the table horizontally on narrow screens to see every column.
 ### 4. View as Participant
 
 Login as a participant (Anna or Ben):
-- **Dashboard** shows your selected community's energy overview; its invoice card includes invoices from all your communities
-- **My invoices** lists the invoices issued to you (details + PDF)
+- **Dashboard** shows your selected community's energy overview and your invoices from all communities
+- **My invoices** lists your invoices with details and any available PDFs
 - **Annual statement** shows your yearly statement and financial summary
+
+Anna's demo account includes invoice PDFs; Ben's invoices show without PDFs.
 
 ![Participant Dashboard](screenshots/02b-participant-dashboard.png)
 

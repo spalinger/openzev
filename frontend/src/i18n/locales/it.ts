@@ -164,6 +164,7 @@ export const it = {
     dashboard: {
         title: 'Pannello di controllo',
         description: 'Inizia il tuo flusso di fatturazione RCP o RCPv svizzero.',
+        participantDescription: 'Il tuo consumo, la tua quota dal RCP e le tue fatture.',
     },
     common: {
         loading: 'Caricamento...',
@@ -2755,6 +2756,8 @@ export const it = {
                 invoice: 'Fattura',
                 period: 'Periodo',
                 total: 'Totale',
+                status: 'Stato',
+                community: 'Comunità',
                 actions: 'Azioni',
             },
             viewDetails: 'Vedi dettagli',

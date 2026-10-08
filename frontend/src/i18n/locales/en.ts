@@ -173,6 +173,7 @@ export const en = {
     dashboard: {
         title: 'Dashboard',
         description: 'Start building your Swiss ZEV or vZEV billing workflow.',
+        participantDescription: 'Your consumption, your share from the ZEV, and your invoices.',
     },
     common: {
         loading: 'Loading...',
@@ -2766,6 +2767,8 @@ export const en = {
                 invoice: 'Invoice',
                 period: 'Period',
                 total: 'Total',
+                status: 'Status',
+                community: 'Community',
                 actions: 'Actions',
             },
             viewDetails: 'View details',
