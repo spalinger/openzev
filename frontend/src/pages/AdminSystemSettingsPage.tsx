@@ -357,7 +357,7 @@ export function AdminSystemSettingsPage() {
                                 <tr>
                                     <th>{t('features.name')}</th>
                                     <th>{t('features.descriptionCol')}</th>
-                                    <th style={{ width: 80, textAlign: 'center' }}>{t('features.enabled')}</th>
+                                    <th className="feature-toggle-col">{t('features.enabled')}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -365,25 +365,15 @@ export function AdminSystemSettingsPage() {
                                     <tr key={flag.id}>
                                         <td><code>{flag.name}</code></td>
                                         <td>{flag.description || <span className="muted">—</span>}</td>
-                                        <td className="feature-toggle-cell">
-                                            <div className="feature-toggle-wrap">
-                                                <button
-                                                    type="button"
-                                                    className={`feature-toggle${flag.enabled ? ' is-on' : ''}`}
-                                                    role="switch"
-                                                    aria-checked={flag.enabled}
-                                                    aria-label={`${flag.name}: ${flag.enabled ? t('features.on') : t('features.off')}`}
-                                                    disabled={featureToggleMutation.isPending}
-                                                    onClick={() => featureToggleMutation.mutate({ id: flag.id, enabled: !flag.enabled })}
-                                                >
-                                                    <span className="feature-toggle-track" aria-hidden="true">
-                                                        <span className="feature-toggle-thumb" />
-                                                    </span>
-                                                </button>
-                                                <span className={`feature-toggle-state ${flag.enabled ? 'is-on' : 'is-off'}`}>
-                                                    {flag.enabled ? t('features.on') : t('features.off')}
-                                                </span>
-                                            </div>
+                                        <td>
+                                            {/* The app's one switch (Mantine), as in every other settings form. */}
+                                            <Switch
+                                                checked={flag.enabled}
+                                                disabled={featureToggleMutation.isPending}
+                                                onChange={() => featureToggleMutation.mutate({ id: flag.id, enabled: !flag.enabled })}
+                                                label={flag.enabled ? t('features.on') : t('features.off')}
+                                                aria-label={`${flag.name}: ${flag.enabled ? t('features.on') : t('features.off')}`}
+                                            />
                                         </td>
                                     </tr>
                                 ))}
