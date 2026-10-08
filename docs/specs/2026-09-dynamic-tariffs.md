@@ -813,8 +813,8 @@ accepts version 1 static archives and legacy adapter-based dynamic descriptors.
 | `tariffs/test_dynamic_source_management_api.py` | Discovery (components carry the versioned expansion), served `aggregated_tariff_types` on the source list, probed creation/reuse (and the probe's dropped-unit warnings reaching the response and audit metadata), API-version validation, admin editing, scoped history/stats/limits, queue audit, permissions, guarded clear (label only, mistyped label refused), guarded delete (unused source removed with its points and audited, still-linked source refused with 409, mistyped/absent label refused, owner refused, refused while the fetch lock is held), and capability re-checking (corrects a wrongly-detected `supports_range`, reports dropped units, admin-only, refused while the fetch lock is held, a fetch failure leaves identity untouched) |
 | `tariffs/test_dynamic_source_link_api.py` | Historical percentage-base parity on detail/series; linking through the ordinary tariff API: create with a source, mismatched-energy-type 400, fee-tariff-cannot-link 400, existing-band refusal, dynamic source on duplicated/new versions, `dynamic_source` on the series endpoint, and the evidence-preservation guard (deleting/repointing/clearing a billed dynamic tariff's source refused; unbilled ones unaffected; setting a source for the first time unaffected) |
 
-PostgreSQL CI runs evidence/rollback barriers, storage/fetch and transfer tests
-in addition to the full SQLite suite. SQLite cannot verify row-lock behavior.
+CI runs the whole suite on both SQLite and PostgreSQL. The evidence/rollback
+barrier tests run on PostgreSQL only: SQLite cannot verify row-lock behavior.
 
 ### 12.2 Fixtures
 

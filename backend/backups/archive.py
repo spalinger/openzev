@@ -330,7 +330,8 @@ def build_archive(fileobj: BinaryIO, *, scope: str, zev=None, encryption_fingerp
     of a state that never existed, with counts disagreeing with the rows. The
     ``durable=True`` guard makes this the outermost transaction, so the isolation
     level can be set — called inside another it fails loudly rather than
-    silently degrading to a savepoint.
+    silently degrading to a savepoint. Only Django's ``TestCase`` may nest it;
+    its transaction has already run queries, so the level is left alone there.
     """
     if scope not in SCOPES:
         raise ValueError(f"Unknown backup scope {scope!r}.")
@@ -339,8 +340,11 @@ def build_archive(fileobj: BinaryIO, *, scope: str, zev=None, encryption_fingerp
     if scope == SCOPE_INSTANCE and zev is not None:
         raise ValueError("An instance backup does not take a ZEV.")
 
+    # Same guard as the ZEV transfer export: set the level only when this
+    # block opens the transaction.
+    starts_transaction = not connection.in_atomic_block
     with transaction.atomic(durable=True):
-        if connection.vendor == "postgresql":
+        if connection.vendor == "postgresql" and starts_transaction:
             with connection.cursor() as cursor:
                 cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         return _build(fileobj, scope=scope, zev=zev, encryption_fingerprint=encryption_fingerprint)

@@ -653,7 +653,10 @@ directly by `manage.py openzev_backup`, which must work with no broker.
    `atomic(durable=True)` block, with `SET TRANSACTION ISOLATION LEVEL REPEATABLE
    READ` on PostgreSQL: sections are read over minutes, and READ COMMITTED would
    produce an archive of a state that never existed. `durable=True` makes it the
-   outermost transaction, so called inside another it fails loudly.
+   outermost transaction, so called inside another it fails loudly. The level is
+   set only when the block opens the transaction (`not connection.in_atomic_block`
+   beforehand, the same guard as the ZEV transfer export): Django's `TestCase`
+   may nest a durable block, and its transaction has already run queries.
 4. When a key is set, encrypt to a second file and delete the plaintext (the
    peak-disk moment), then digest the stored file (SHA-256 and size).
 5. `storage.store_archive` — local: copy to a `.partial` name, `chmod 0600`, atomic
@@ -1137,12 +1140,12 @@ only for weekly), `scheduleChanged`, `scheduleToForm`, `parseRetention`,
 
 ## 9. Test plan
 
-### Backend — `backend/backups/` (549 tests, phases 1–4 plus fail-closed encryption policy)
+### Backend — `backend/backups/` (550 tests, phases 1–4 plus fail-closed encryption policy)
 
 | Module | Tests | Covers |
 |---|---|---|
 | `test_crypto.py` | 34 | Envelope round trip (multi-chunk, exact multiple, empty); **truncation, reordered chunk, flipped bit and edited header each fail authentication**; wrong key names the required fingerprint; rotation; short-key rejection; domain separation between archive and secret keys; destination-secret round trip and rotation. **Creation policy** (`ensure_backup_creation_allowed`): the four-row table (valid keys allowed under either flag, empty refused only when required, rejected always refused including while optional, valid-first-then-rejected still refuses, no key material in errors). **Settings default** in isolated processes: required with `DEBUG=False`, permissive with `DEBUG=True`, explicit env wins either way |
-| `test_archive.py` | 55 | `ArchiveShapeTests` — manifest, every section present, **timestamps keep their microseconds**, every line a serialized row, **primary keys preserved** (UUID and integer), FKs are real keys, a ZEV holds only its own rows, PDFs travel byte-exact under their own ZEV, contract PDFs base64 in-row, **rows whose ZEV was deleted are in the instance scope**, account refs, credentials travel, M2M excluded, no row of an excluded model, counts match rows, **no key material in the archive**. `ZevScopeTests`. `MediaTests` — missing PDF recorded not fatal, `..` and absolute names refused, a shared file stored once. `CoverageTests` — the registry closure. `DurabilityTests`. `VerifyTests` — tampered member, missing member, injected member, disagreeing count, **transfer archive refused by kind**, unknown version, malformed manifest, not a zip, failure cap. `EncryptedArchiveTests`. `RoundTripTests` — deserializing the sections reproduces the rows with their keys |
+| `test_archive.py` | 56 | `ArchiveShapeTests` — manifest, every section present, **timestamps keep their microseconds**, every line a serialized row, **primary keys preserved** (UUID and integer), FKs are real keys, a ZEV holds only its own rows, PDFs travel byte-exact under their own ZEV, contract PDFs base64 in-row, **rows whose ZEV was deleted are in the instance scope**, account refs, credentials travel, M2M excluded, no row of an excluded model, counts match rows, **no key material in the archive**. `ZevScopeTests`. `MediaTests` — missing PDF recorded not fatal, `..` and absolute names refused, a shared file stored once. `CoverageTests` — the registry closure. `DurabilityTests`. `SnapshotIsolationTests` (PostgreSQL only, a `TransactionTestCase`) — the build runs at REPEATABLE READ, and an import log a second connection renames mid-backup keeps its old name in the archive. `VerifyTests` — tampered member, missing member, injected member, disagreeing count, **transfer archive refused by kind**, unknown version, malformed manifest, not a zip, failure cap. `EncryptedArchiveTests`. `RoundTripTests` — deserializing the sections reproduces the rows with their keys |
 | `test_destinations.py` | 45 | Local and S3 validation (**path inside `MEDIA_ROOT` refused**, `..` resolved first, half a credential pair); credential precedence; boto client construction (custom endpoint → path-style and relaxed checksums; instance role passes no keys); local storage (0600, no partial file on failure, atomic); S3 upload key/SSE/location; **provider errors become safe messages that never echo the response, and an unrecognised error code is named only if it is shaped like one**; persistence |
 | `test_runner.py` | 35 | Completed job records location/size/checksum/manifest; stored archive verifies; encryption on/off; a rejected key fails the job with the reason; **required policy refuses a directly created job and one queued while valid without building or storing an archive** (failed status, timestamp, safe message, `backup.failed` audit, zero build/store calls); a valid key still succeeds when required; failures (missing destination, unwritable, **unexpected error is generic on the row and detailed only in the log**, soft time limit); **a job runs once if delivered twice; a late completion does not resurrect a failed job**; audit events; **a broken audit write does not fail a completed backup**; S3 runner; the builder is handed a file, not a buffer; the work directory is empty afterwards |
 | `test_api.py` | 53 | (phase 4: **a destination that still holds a backup file, or a running backup, cannot be deleted**; failed backups do not hold one; a safety or community backup does not make the instance look backed up.) **Every endpoint refuses anonymous, owner and participant callers**; destination CRUD; **the secret is never returned, never in the audit log**; absent/empty/new secret semantics; 202 with enqueue after commit; **broker outage → 503 and a failed job**; validation matrix; **creation refused by policy → 409** (`backup_encryption_required` for a missing required key, `backup_encryption_invalid` for a rejected key, both with useful detail and no job, enqueue or `backup.created`; valid key + required → 202; explicit optional plaintext → 202); list filters and limit; download streams, 409/410 cases, **a location outside the destination is never served**; status (including `encryption_required`) |
@@ -1186,9 +1189,12 @@ check removed.
 
 #### Verification notes (phase 2, real PostgreSQL)
 
-The test suite runs on SQLite, which has no sequences to reset, and PostgreSQL
-refuses the archive writer's `SET TRANSACTION ISOLATION LEVEL` inside a `TestCase`
-transaction. The parts that only PostgreSQL can show were verified end to end on two scratch
+When phase 2 was built, the test suite ran on SQLite only, which has no sequences to
+reset, and PostgreSQL refused the archive writer's `SET TRANSACTION ISOLATION LEVEL`
+inside a `TestCase` transaction. CI now runs the whole suite on PostgreSQL too: the
+writer leaves the level alone inside a `TestCase` (§6.3 step 3), and
+`SnapshotIsolationTests` covers the snapshot. The parts that only PostgreSQL could show
+were verified end to end on two scratch
 databases in the dev stack: `seed_demo` (2 communities, 84,000 readings, 21 invoices,
 5 PDFs attached), an **encrypted** `openzev_backup` (3.0 MB), then `migrate` on an
 empty database and `openzev_restore`.

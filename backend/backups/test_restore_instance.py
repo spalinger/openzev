@@ -52,9 +52,15 @@ def snapshot() -> dict[str, list[dict]]:
             # A restore records itself in the trail; that is tested on its own.
             queryset = queryset.exclude(action_type=restore.ACTION_RESTORED)
         for obj in queryset:
-            rows.append({"pk": obj.pk, **{name: getattr(obj, model._meta.get_field(name).attname) for name in fields}})
+            rows.append({"pk": obj.pk, **{name: plain_value(getattr(obj, model._meta.get_field(name).attname)) for name in fields}})
         result[label] = rows
     return result
+
+
+def plain_value(value):
+    # PostgreSQL returns binary columns as memoryview, which setUpTestData cannot
+    # deep-copy per test; bytes compare the same.
+    return bytes(value) if isinstance(value, memoryview) else value
 
 
 def wipe():

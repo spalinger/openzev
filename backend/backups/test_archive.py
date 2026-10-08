@@ -10,14 +10,16 @@ import datetime
 import io
 import json
 import tempfile
+import threading
 import uuid
 import zipfile
+from unittest import mock, skipUnless
 
 from django.apps import apps
 from django.core import serializers
 from django.core.files.storage import default_storage
-from django.db import models, transaction
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.db import connection, models, transaction
+from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
 
 from accounts.models import EmailVerificationToken, User
 from audit.models import AuditEvent
@@ -374,6 +376,47 @@ class DurabilityTests(TestCase):
         zev = build_world().alpha
         with transaction.atomic(), self.assertRaises(RuntimeError):
             archive.build_archive(io.BytesIO(), scope="zev", zev=zev)
+
+
+def rename_import_logs(zev, filename):
+    """Commit an edit from this thread's own connection, then release it."""
+    try:
+        ImportLog.objects.filter(zev=zev).update(filename=filename)
+    finally:
+        connection.close()
+
+
+class SnapshotIsolationTests(TransactionTestCase):
+    """A real backup reads one snapshot. ``TestCase`` cannot show this: its
+    transaction is already open, so the archive leaves the level alone there."""
+
+    @skipUnless(connection.vendor == "postgresql", "REPEATABLE READ is PostgreSQL-only")
+    def test_an_edit_committed_while_the_backup_runs_is_not_in_it(self):
+        world = build_world()
+        seen = {}
+        write_zev = archive._write_zev
+
+        def edit_before_the_first_zev(writer, zev):
+            if not seen:
+                # The instance sections and the ZEV list are read by now, so the
+                # snapshot is taken; a second connection commits an edit.
+                with connection.cursor() as cursor:
+                    cursor.execute("SHOW transaction_isolation")
+                    seen["isolation"] = cursor.fetchone()[0]
+                editor = threading.Thread(target=rename_import_logs, args=(world.alpha, "edited.csv"))
+                editor.start()
+                editor.join(timeout=30)
+                seen["edit_finished"] = not editor.is_alive()
+            return write_zev(writer, zev)
+
+        with mock.patch.object(archive, "_write_zev", side_effect=edit_before_the_first_zev):
+            raw, _ = build()
+
+        self.assertEqual(seen["isolation"], "repeatable read")
+        self.assertTrue(seen["edit_finished"], "the concurrent edit hung")
+        self.assertEqual(ImportLog.objects.get(zev=world.alpha).filename, "edited.csv")
+        archived = read_jsonl(raw, f"zevs/{world.alpha.pk}/import_logs.jsonl")
+        self.assertEqual([row["fields"]["filename"] for row in archived], ["alpha.csv"])
 
 
 class VerifyTests(TestCase):
