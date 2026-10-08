@@ -9,7 +9,8 @@ test.afterEach(async ({ page }, testInfo) => {
   expect(errors).toEqual([])
 })
 
-const healthPeriod: [string, string] = ['2026-09-02', '2026-10-02']
+// The clock reads 2 October; meter health looks at complete days, so it ends the day before.
+const healthPeriod: [string, string] = ['2026-09-02', '2026-10-01']
 
 async function refetchOnFocus(page: Page) {
   await page.evaluate(() => {

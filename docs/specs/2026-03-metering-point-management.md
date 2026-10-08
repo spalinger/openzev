@@ -440,7 +440,10 @@ The data-quality-status endpoint (see `SPEC-2026-metering-import-quality`)
 resolves current participant assignment to display participant names alongside
 gap detection results.
 
-The metering-point health indicators query today minus 30 days through today.
+The metering-point health indicators query today minus 30 days through
+yesterday (`getMeteringPointHealthWindow`): today's readings only arrive with
+the next import, so a window ending today would flag every meter with a
+one-day gap.
 Management views wait for a selected community and send its `zev_id`;
 participant views leave scoping to the endpoint.
 

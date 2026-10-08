@@ -126,16 +126,16 @@ describe('metering point form helpers', () => {
   })
 
   describe('getMeteringPointHealthWindow', () => {
-    it('spans 30 days ending today by default', () => {
-      expect(getMeteringPointHealthWindow('2026-05-08')).toEqual({ from: '2026-04-08', to: '2026-05-08' })
+    it('spans the 30 complete days ending yesterday by default', () => {
+      expect(getMeteringPointHealthWindow('2026-05-08')).toEqual({ from: '2026-04-08', to: '2026-05-07' })
     })
 
     it('crosses a year boundary', () => {
-      expect(getMeteringPointHealthWindow('2026-01-05')).toEqual({ from: '2025-12-06', to: '2026-01-05' })
+      expect(getMeteringPointHealthWindow('2026-01-05')).toEqual({ from: '2025-12-06', to: '2026-01-04' })
     })
 
     it('accepts a custom window length', () => {
-      expect(getMeteringPointHealthWindow('2026-05-08', 7)).toEqual({ from: '2026-05-01', to: '2026-05-08' })
+      expect(getMeteringPointHealthWindow('2026-05-08', 7)).toEqual({ from: '2026-05-01', to: '2026-05-07' })
     })
   })
 

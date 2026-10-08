@@ -114,9 +114,9 @@ export function getNextAssignmentGuidance(assignments: MeteringPointAssignment[]
 
 const HEALTH_WINDOW_DAYS = 30
 
-/** The rolling window the health check inspects — mirrors the data-quality-status endpoint's own default (today − 30 days to today), so the two stay in sync without either hard-coding the other's default. */
+/** The rolling window the health check inspects: the last `days` complete days, ending yesterday. Today's readings arrive with the next import, so a window ending today would read every meter as having a one-day gap. */
 export function getMeteringPointHealthWindow(todayIso: string, days = HEALTH_WINDOW_DAYS): { from: string; to: string } {
-  return { from: addDaysIso(todayIso, -days), to: todayIso }
+  return { from: addDaysIso(todayIso, -days), to: addDaysIso(todayIso, -1) }
 }
 
 export type MeteringPointHealth = 'green' | 'yellow' | 'red' | 'no_data'

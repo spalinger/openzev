@@ -455,7 +455,7 @@ A participant's average day: 24 hourly averages split into ZEV (local) energy an
 Which metering points have missing readings.
 
 - Input: `zev_id` (uuid, required); `date_from`, `date_to` (date, optional, defaults as the
-  endpoint: last 30 days); `only_incomplete` (bool, default true).
+  endpoint: the 30 days ending yesterday); `only_incomplete` (bool, default true).
 - Sub-request: `GET /api/v1/metering/readings/data-quality-status/?zev_id&date_from&date_to`.
 - Output: `{"metering_points": [{"id", "meter_id", "participant"?, "completeness_pct", "missing_days", "gaps": [{"from", "to"}]}], "truncated"?}` — cap 50 points and 10 gaps each.
   `completeness_pct` is the endpoint's `data_completeness`; `missing_days = total_days - days_with_data`;

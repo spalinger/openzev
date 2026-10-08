@@ -255,7 +255,7 @@ Each card on the **Metering Points** page shows, at a glance:
   metering** badge when [Generation behind the meter](#generation-behind-the-meter)
   is ticked
 - A **data-health badge** — `Healthy`, `Data gaps`, `Data at risk`, or `No
-  data yet`, based on the last 30 days of readings; click it to open the
+  data yet`, based on the last 30 complete days (up to yesterday); click it to open the
   metering point's data-quality view
 - **Last reading** date, or "No readings received yet"
 - A **No current holder** warning if the meter has readings but no
