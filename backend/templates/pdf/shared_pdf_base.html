@@ -85,12 +85,10 @@ How to use:
         margin-bottom: 2mm;
     }
 
+    /* The issuer's name stands alone. Stored template overrides may still
+       carry the former disc's markup; it no longer renders. */
     .brand-mark {
-        width: 6mm;
-        height: 6mm;
-        background: var(--brand-deep);
-        border-radius: 50%;
-        flex-shrink: 0;
+        display: none;
     }
 
     .company-name {
@@ -253,18 +251,6 @@ How to use:
         border-bottom: 0.5pt solid var(--line);
     }
 
-    .page-meta .meta-left::before {
-        content: "";
-        display: inline-block;
-        width: 2.5mm;
-        height: 2.5mm;
-        background: var(--brand-mid);
-        border-radius: 50%;
-        margin-right: 2mm;
-        vertical-align: middle;
-        position: relative;
-        top: -0.2mm;
-    }
     .page-meta .meta-center { text-align: center; flex: 0 0 auto; }
     .page-meta .meta-left { text-align: left; flex: 1; }
     .page-meta .meta-right { text-align: right; flex: 1; }
@@ -378,19 +364,6 @@ How to use:
         font-weight: 700;
         margin-bottom: 1.5mm;
         letter-spacing: -0.01em;
-    }
-
-    .chart-section h3::before {
-        content: "";
-        display: inline-block;
-        width: 2.2mm;
-        height: 2.2mm;
-        background: var(--brand-mid);
-        border-radius: 50%;
-        margin-right: 2mm;
-        vertical-align: middle;
-        position: relative;
-        top: -0.3mm;
     }
 
     .chart-description {

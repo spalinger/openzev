@@ -43,9 +43,12 @@ read as relatives rather than as one product:
    app's elements, and the remaining documents adopt them too:
    - *Header signature* — page headers (and dialog headers) end in a hairline
      with a short forest rule at its start, the documents' `.document-header`
-     rule; the scope kicker carries the brand dot.
-   - *Section heading* — sheet titles carry the forest dot of the invoice's
-     section headings.
+     rule; the scope kicker is set in forest.
+   - *Section heading* — sheet titles are set like the invoice's section
+     headings: forest, bold, without decoration. (The first iteration put a
+     forest dot before every title, kicker and document name; review dropped
+     it — repeated everywhere, it carried no meaning — in the app and in the
+     documents alike.)
    - *Figure tiles* — KPI tiles use the documents' tile: uppercase kicker
      label, the figure with its unit set small and muted, an optional hint,
      at most one dark accent tile per view. Tiles in a row share label/figure/
@@ -60,7 +63,7 @@ read as relatives rather than as one product:
      (no teal, violet or blue ramps).
    - The annual statement and the tax overview move onto
      `pdf/shared_pdf_base.html`, which now also holds the summary band
-     (recipient + facts), figure tiles, dotted sections, dark-header
+     (recipient + facts), figure tiles, sections, dark-header
      `doc-table`, `summary-box` and the running footer used by all documents.
 3. **A quieter shell.** The sidebar is a white sheet with a hairline beside
    the paper workspace: a horizontal logo lockup, compact navigation that fits
