@@ -26,6 +26,70 @@ afterEach(() => {
 })
 
 describe('FormModal stacking', () => {
+    it('restores background inertness without clearing existing inert attributes', () => {
+        const background = document.createElement('button')
+        const alreadyInert = document.createElement('div')
+        alreadyInert.setAttribute('inert', '')
+        document.body.append(background, alreadyInert)
+        act(() => root.render(createElement(FormModal, { isOpen: true, title: 'Form', onClose: vi.fn() }, 'form')))
+        expect(background.hasAttribute('inert')).toBe(true)
+        expect(container.querySelector('[role=dialog]')!.closest('[inert]')).toBeNull()
+        act(() => root.render(null))
+        expect(background.hasAttribute('inert')).toBe(false)
+        expect(alreadyInert.hasAttribute('inert')).toBe(true)
+        background.remove()
+        alreadyInert.remove()
+    })
+
+    for (const strict of [false, true]) {
+        it(`keeps a simultaneous nested child above its parent, StrictMode=${strict}`, () => {
+            const closeParent = vi.fn(), closeChild = vi.fn()
+            const parent = createElement(FormModal, { isOpen: true, title: 'Parent', onClose: closeParent },
+                createElement(ConfirmDialog, { title: 'Child', message: 'Confirm', onConfirm: vi.fn(), onCancel: closeChild }))
+            act(() => root.render(strict ? createElement(StrictMode, null, parent) : parent))
+            const [outer, inner] = container.querySelectorAll<HTMLElement>('[role=dialog]')
+            expect(inner.getAttribute('aria-modal')).toBe('true')
+            expect(outer.getAttribute('aria-modal')).toBeNull()
+            expect(document.activeElement).toBe(inner)
+            expect(inner.closest('[inert]')).toBeNull()
+            expect(outer.querySelector('.form-modal-close')!.closest('[inert]')).not.toBeNull()
+            act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+            expect(closeChild).toHaveBeenCalledOnce()
+            expect(closeParent).not.toHaveBeenCalled()
+        })
+    }
+
+    it('rejects linked popup roots that contain the active dialog', () => {
+        container.id = 'fixture-ancestor'
+        act(() => root.render(createElement('div', null,
+            createElement('button', { id: 'background' }, 'Background'),
+            createElement(FormModal, { isOpen: true, title: 'Form', onClose: vi.fn() },
+                createElement('button', { 'aria-controls': container.id }, 'Control')))))
+        expect(container.querySelector('#background')!.closest('[inert]')).not.toBeNull()
+    })
+
+    it('leaves retained inert branches untouched when dialog content changes', async () => {
+        const background = document.createElement('button')
+        document.body.append(background)
+        const writes = vi.fn()
+        const observer = new MutationObserver(writes)
+        try {
+            act(() => root.render(createElement(FormModal, { isOpen: true, title: 'Form', onClose: vi.fn() }, 'form')))
+            observer.observe(background, { attributes: true, attributeFilter: ['inert'] })
+            await act(async () => {
+                container.querySelector('[role=dialog]')!.append(document.createElement('span'))
+            })
+            expect(background.hasAttribute('inert')).toBe(true)
+            expect(writes).not.toHaveBeenCalled()
+            const late = document.createElement('button')
+            await act(async () => { container.append(late) })
+            expect(late.hasAttribute('inert')).toBe(true)
+        } finally {
+            observer.disconnect()
+            background.remove()
+        }
+    })
+
     for (const kind of ['form', 'confirm']) {
         it(`${kind} wraps Shift+Tab from the initially focused root to its last control`, () => {
             act(() => root.render(kind === 'form'
@@ -215,11 +279,8 @@ describe('FormModal stacking', () => {
         const dialogs = container.querySelectorAll('[role=dialog]')
         const outerBtn = dialogs[0].querySelector('button') as HTMLButtonElement
         const innerBtn = dialogs[1].querySelector('button') as HTMLButtonElement
-        // Focus sits in the background dialog (e.g. wizard input kept focus
-        // when the overwrite confirmation opened). Tab must pull it into the
-        // top dialog instead of cycling behind the confirmation.
         outerBtn.focus()
-        expect(document.activeElement).toBe(outerBtn)
+        expect(document.activeElement).toBe(dialogs[1])
         act(() => {
             document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))
         })

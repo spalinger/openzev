@@ -111,14 +111,21 @@ defined by shared frontend primitives and CSS contracts.
 
 Usage rules:
 
-- `ConfirmDialog` and `FormModal` provide accessible labelling and focus their
-  root on opening. Closing restores a usable opener, the remaining top dialog,
-  or the page heading, unless focus has moved to a live control. Stacking,
-  Escape, scrim dismissal and Tab containment follow opening order, including
-  earlier DOM siblings. Shift+Tab from the root wraps to the last tabbable control;
-  hidden, inert, disabled and negative-tabindex controls are excluded.
-  `returnFocusRef` can supply an explicit opener without restarting focus
-  management on rerender.
+- `ConfirmDialog` and `FormModal` label dialogs and focus the active root on opening.
+  Closing restores a usable opener, the remaining top dialog, or the page
+  heading, unless focus has moved to a live control. Stacking and dismissal
+  follow opening order; a simultaneously opened child stays above its parent.
+  Tab cycles through dialog controls, then linked popup controls; do not use
+  positive `tabindex`. Linked widgets must handle Escape to close their popup
+  before the dialog; cover new popup families with browser tests.
+  Hidden, inert, disabled and negative-tabindex controls are
+  excluded. `returnFocusRef` supplies an explicit opener without restarting
+  focus management on rerender.
+  Only the top dialog is modal. Background branches are inert; toast feedback
+  remains available for announcements. The dialog manager exclusively owns
+  the inert attributes it changes while a branch is inactive and restores its
+  prior value when releasing that branch. Other components must not change
+  those attributes until the manager releases them.
 - Each `useConfirmDialog` opening has independent async state. Duplicate
   submissions and stale handlers are ignored. Dismissal clears the dialog
   before `onCancel`, which may open a replacement. Stale completions cannot
@@ -250,7 +257,7 @@ language and should be reused instead of ad hoc page-local CSS when possible:
 | `.data-table-footer`, `.data-table-page-size` | Pagination footer and rows-per-page control of `DataTable` / `RawMeteringTable` |
 | `.visually-hidden` | Text for assistive technology only (clipped 1px box), e.g. per-step state text in icon rows |
 | `.participant-*`, `.metering-*`, `.tariff-*`, `.invoice-*` | Page-family-specific structural patterns that are already in active use |
-| `.dialog-scrim`, `.form-modal`, `.card.confirm-dialog` | Shared fixed scrim and opaque scrollable panels (90% width, 90dvh maximum height); FormModal defaults to 600px maximum width and confirmation to 400px. Panels use 2rem padding above 768px and 1rem at/below 768px. Runtime maximum widths and stack z-index remain component-owned. |
+| `.dialog-scrim`, `.form-modal`, `.card.confirm-dialog` | Shared fixed scrim and opaque scrollable panels (90% width, 90dvh maximum height); FormModal defaults to 600px maximum width and confirmation to 400px. Panels use 2rem padding above 768px and 1rem at/below 768px. Components set maximum widths and stack z-index. |
 | `.email-log*` | Delivery history cards with wrapping text and status rows. |
 | `.balance-chart-grid` | Dashboard consumption/production pair, independent of form layout. Auto-fit columns require 24rem each plus a 2rem gap; panels with less space stack, and the minimum track width is capped at 100% of the panel. |
 
@@ -610,11 +617,7 @@ These pages define the current management-page reference set.
 - Browser behavior: `frontend/screenshots/page-anatomy.spec.ts`, via `npm run test:browser`, covers page states, scope transitions, retained drafts, keyboard filtering and narrow layouts. Fixtures validate scoped requests; removal scenarios explicitly allow old-scope requests during reconciliation, then require the remaining scope. Captured images are manual-review artifacts, not baseline comparisons.
 - Meter drafts: `frontend/tests/metering-draft-scope.test.ts` — dialog retention/reset, original-community cache invalidation after remount or navigation, and suppression after account/session cache resets.
 - Email history/retry: `frontend/tests/billing-email-history.test.ts` — request ordering, close/reopen, and obsolete read/write completions across account/community changes.
-- Dialogs: `tests/confirm-dialog.test.ts`, `tests/modal-stack.test.ts` and
-  `tests/form-modal.test.ts` cover async ownership and focus behavior.
-  `screenshots/dialog-behavior.spec.ts` checks rendered ordering, tabbability,
-  translated layouts and chart sizing; `screenshots/confirmation-operations.spec.ts`
-  checks operation feedback and resubmission guards after dismissal.
+- Dialogs and paired charts: unit tests cover ownership and focus; browser tests cover inertness, popups, operation feedback, and chart sizing (`confirm-dialog`, `modal-stack`, `form-modal`, `typed-confirmation`, `dialog-behavior`, `dialog-modality`, `confirmation-operations`, `balance-chart-layout`).
 - Write lifetime: `frontend/tests/write-scope.test.ts` covers stable identity, StrictMode replay, account/community/capability changes and return transitions, unmount and explicit all-community writes. Consumer tests retain coverage for dialog resets and delayed completions; `imports-wizard.test.ts` also rejects queued upload/single-delete/bulk-delete dispatch after scope replacement.
 - Shared behavior: `billing-period-params.test.ts` covers calendar validation, canonical/legacy precedence, page defaults/minima, readiness, scope/interval reconciliation (including `align`: a carried-over range becomes the new community's whole period, a deep link within one community stays, a rejected link is replaced by the period shown), reload/back navigation, query/hash preservation and history policy. `invoice-presentation.test.ts` covers PDF states, missing-invoice rows, delivery annotation precedence, read-only rows, return context, cached failures and admin sorting/filtering/pagination. `screenshots/shared-page-behavior.spec.ts` checks period deep links, reload/back navigation, delayed interval data, routed tabs, Participants/Tariffs scope loading/failure/empty and cached-refresh states, console errors and desktop/400px layouts through the real app.
 - Invoice states: `frontend/tests/invoices-page.test.ts` — standalone titles during scope loading/error/empty states, embedded heading ownership, and a skeleton before initial period/query resolution.

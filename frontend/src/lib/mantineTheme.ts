@@ -1,5 +1,6 @@
 import type { InputFactory, InputProps, MantineTheme, MantineThemeOverride } from '@mantine/core'
 import { generatedTheme } from '../styles/generatedTheme'
+import { closePopupOnEscape } from './popupKeyboard'
 import { Z_POPOVER } from './zLayers'
 
 /**
@@ -72,7 +73,7 @@ export const mantineTheme: MantineThemeOverride = {
     Autocomplete: { defaultProps: { comboboxProps: overlay } },
     Select: { defaultProps: { comboboxProps: overlay } },
     MultiSelect: { defaultProps: { comboboxProps: overlay } },
-    DatePickerInput: { defaultProps: { popoverProps: overlay } },
+    DatePickerInput: { defaultProps: { popoverProps: { ...overlay, returnFocus: true }, onKeyDown: closePopupOnEscape } },
     Input: {
       vars: fieldInputVars,
       styles: (_theme: MantineTheme, props: InputProps) => props.multiline || props.__staticSelector === 'Textarea'

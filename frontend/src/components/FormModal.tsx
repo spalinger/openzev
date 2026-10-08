@@ -28,7 +28,7 @@ export function FormModal({ isOpen, title, children, onClose, maxWidth = '600px'
             <div
                 ref={dialogRef}
                 role="dialog"
-                aria-modal="true"
+                aria-modal={isTop() || undefined}
                 aria-labelledby={titleId}
                 tabIndex={-1}
                 className="form-modal"

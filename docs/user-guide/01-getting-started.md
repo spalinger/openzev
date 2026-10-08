@@ -388,8 +388,9 @@ into a **Total consumption** node. Disabled communities contribute no consumptio
 
 ## Dialogs and actions
 
-Use Tab or Shift+Tab to move between dialog controls, and Escape or **Close**
-to dismiss a dialog. Before submitting a confirmation, choose **Cancel** to
+Use Tab or Shift+Tab to move between dialog controls. Escape closes an open
+dropdown or calendar first; otherwise Escape or **Close** dismisses the dialog. Background controls are unavailable until the top dialog
+closes. Before submitting a confirmation, choose **Cancel** to
 leave without starting the action. While it is processing, **Close** dismisses
 the dialog and the action continues; failures are still reported. If an action
 fails, reopen its confirmation to retry.
