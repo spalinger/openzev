@@ -967,16 +967,23 @@ contracts are unchanged.
   page: `--sidebar-active` row, `--text-heading` `600` text and a 3px
   `--sidebar-indicator` mark at its start (`.nav-link.active::before`). Focus
   uses the global ring. The whole platform group fits a 1440×900 viewport.
-- Community switcher: a white card row (`--border-default` border, hover
-  `--surface-sunken`); its inline list is a white inset with the same
-  current-row treatment.
-- Account: the trigger (`.sidebar-footer .sidebar-user .user-menu-trigger`:
-  avatar, name, email, selector chevron) sits at the foot of the sidebar; its
-  panel (`#user-menu-list`: Account, Language, Log out) opens upwards over the
-  navigation. Collapsed, the trigger shows the avatar with the account name as
-  `title` and expands the sidebar before opening (like the switcher). Focus,
-  Escape, outside-click and "opening one disclosure closes the other" behave as
-  before. The source link stays the sidebar's last control.
+- The sidebar names no scope: no community switcher, no platform chip. The
+  community is named and chosen in the page's scope line (§15.3).
+- Account: the trigger (`.sidebar-footer .sidebar-user .user-menu-trigger`)
+  is the sidebar's last control, a plain row on the sheet below the footer's
+  hairline (`--border-default`, `0.75rem` above): no border or card fill,
+  `--radius-md`, padding `0.5rem`; hover/open `--surface-sunken`; on
+  `/account` `.is-current` (`--sidebar-active`). It holds a `2rem` round
+  avatar in deep forest with the documents' top-right light (the button's
+  recipe), the name (`0.8125rem/600`, `--text-heading`) over the email
+  (`0.75rem`, muted), both ellipsized, and the muted up/down selector mark
+  (`.user-menu-caret`, `SelectorIcon`). Its panel (`#user-menu-list`:
+  Account, Language, Log out) opens upwards over the navigation and ends with
+  the source link (`.user-menu-about`: hairline above, GitHub mark,
+  "OpenZEV" and the version, `0.75rem` muted, darker on hover). Collapsed, the
+  trigger shows the avatar alone, centred, with the account name as `title`,
+  and expands the sidebar before opening. Focus, Escape and outside-click
+  behave as before.
 - `header.top-nav` (outside `main`) holds `.mobile-bar` and the impersonation
   banner. On phones (≤768px) `.mobile-bar` is a sticky white app bar with a
   hairline, the menu button and the lockup; on desktop it is hidden, so an ordinary session
@@ -988,8 +995,8 @@ contracts are unchanged.
 
 ### 15.3 Page anatomy
 
-- `PageHeader` (markup unchanged): `.page-header > .eyebrow` is the scope
-  kicker in `--accent-rule`; `h1` per §7.3;
+- `PageHeader`: `.page-header > .eyebrow` is the scope kicker in
+  `--accent-rule`; `h1` per §7.3;
   description `p.muted`; actions bottom-aligned. The header closes with the
   documents' rule: `border-bottom: 1px var(--border-default)` and a
   `3.5rem × 2px` `--accent-rule` segment (`::after`). On a tabbed page — any
@@ -997,6 +1004,18 @@ contracts are unchanged.
   or `.template-tabs-rows` — the header draws neither, so the page shows one
   line: the tab strip's hairline with the active tab's `--accent-rule`
   underline. The templates hub keeps its two tab rows.
+- Scope line as community switch: with `communitySwitch`, `PageHeader`
+  renders the eyebrow through `CommunitySwitcher`. With more than one
+  community it is a button (`.community-switch`) in the kicker's own type
+  (font, tracking and uppercase inherited) with a `0.875rem` down caret,
+  `--radius-xs`, a `0.25rem 0.4rem` hit area pulled back by negative margins
+  so the text stays aligned with the title, and `--brand-pale` on hover/open;
+  the name ellipsizes. Its menu (`.community-menu`, Mantine `Menu`,
+  bottom-start, `min-width 16rem`, at most `min(22rem, 60dvh)` high and
+  scrolling) lists the communities: name, the relation below for non-admins
+  (`.community-menu-relation`, `0.75rem` muted), and on the current one
+  `--text-heading` `600` plus an `--interactive` check. Otherwise the eyebrow
+  is plain text (behaviour: `2026-03-community-and-access.md` §9.3).
 - Sheets (`.card`, `.table-card`): white, hairline, `--radius-lg`,
   `--shadow-sheet`, padding `1.25rem 1.5rem`. Sheet titles — the first `h2/h3`
   of a sheet, the `h2/h3` of a sheet-leading unclassed `div` title block or of a
@@ -1085,9 +1104,21 @@ contracts are unchanged.
 ### 15.6 Tests and verification
 
 - `tests/layout-nav.test.ts`: account-menu selectors point at
-  `.sidebar-user`; new: "expands the collapsed sidebar before opening the
-  account panel at its foot" and "keeps the source link the last control of
-  the sidebar, after the account".
+  `.sidebar-user`; "expands the collapsed sidebar before opening the account
+  panel at its foot", "ends the sidebar with the account, and the account
+  panel with the source link", "marks the account card as the current place
+  on the account page only" and "names no scope in the sidebar" (community
+  and platform routes). The sidebar-switcher cases moved to
+  `tests/community-switcher.test.ts` (10: list and current mark, switching,
+  relation labels, plain text with one or no community and without the
+  provider or the prop, title and description intact, the dirty-draft
+  confirm/cancel flow with the dialog outside the paragraph, no prompt for the
+  current community, fixed selection).
+- `screenshots/layout-overflow.spec.ts`: "a long community list scrolls
+  inside its menu and stays on screen" (1440×600 to 390×600) replaces the
+  sidebar-eviction case; focus recovery across the breakpoint lands on the
+  collapse button. `page-anatomy` and `shared-page-behavior` switch
+  communities through `main .community-switch` and its menu items.
 - `tests/page-primitives.test.ts`: `StatCard` sets the unit apart for
   `439.55 kWh`, `35.4 %`, `CHF 1066.94`, `CHF −548.31`, `1066.94 CHF` (text
   content unchanged) and keeps `—`, `05.10.2026`, `1 von 8`, `8` whole.
