@@ -68,11 +68,13 @@ read as relatives rather than as one product:
      `pdf/shared_pdf_base.html`, which now also holds the summary band
      (recipient + facts), figure tiles, sections, dark-header
      `doc-table`, `summary-box` and the running footer used by all documents.
-3. **A quieter shell.** The sidebar is a white sheet with a hairline beside
-   the paper workspace: a horizontal logo lockup, compact navigation that fits
-   a 900px viewport, the current page as a pale forest row with a short forest
-   mark, and the signed-in account at its foot (account, language, log out,
-   and the source link as the panel's last line) instead of a top bar. The
+3. **A quieter shell.** The sidebar is deep forest beside the paper
+   workspace, like the documents' dark header band: a horizontal logo lockup,
+   compact navigation that fits a 900px viewport, the current page as a
+   lighter forest row with a short gold mark (gold only on the dark, as on
+   the invoice's savings card), and the signed-in account at its foot
+   (account, language, log out, and the source link as the panel's last line)
+   instead of a top bar. The
    sidebar names no scope: the community is named — and chosen — in each
    page's scope line, the kicker above the title, which opens the list of the
    account's communities when there is more than one (the documents, too,
@@ -125,11 +127,11 @@ Trade-offs:
 3. **Ship the font inside the templates as a `data:` URI.** Rejected: every
    render would carry ~300 KB of base64, and stored overrides would have to copy
    it; a system font keeps templates small and the fetcher policy unchanged.
-4. **Keep a forest sidebar.** The first iteration of this decision made the
-   sidebar the app's one dark surface. Rejected in review: the large dark
-   area outweighed the content and competed with the forest accents that carry
-   meaning (current page, primary action, accent figure); the documents, too,
-   are white paper with forest accents.
+4. **A white sidebar.** Shipped for a while, out of concern that the large
+   dark area would outweigh the content and compete with the forest accents
+   that carry meaning (current page, primary action, accent figure). Replaced
+   in review by the deep-forest sidebar, which matches the documents' dark
+   header band as the table headers do.
 5. **A pale forest table header (the dark band at screen weight).** Shipped
    first, out of concern that a dark band on every table would outweigh the
    content and the primary action. Replaced in review: with the darker page
@@ -153,5 +155,5 @@ Trade-offs:
 
 - Tokens: `design/tokens.json` (`--line-strong`; semantics `--text-heading`,
   `--border-strong`, `--surface-sunken`, `--accent-rule`, `--sidebar-text`,
-  `--sidebar-indicator`; field tokens 14px/500 labels, 8px radius).
+  `--sidebar-hover`, `--sidebar-line`; field tokens 14px/500 labels, 8px radius).
 - Specs: `2026-08-ui-redesign-pdf-style.md` §15, `2026-04-frontend-management-page-design.md`.
