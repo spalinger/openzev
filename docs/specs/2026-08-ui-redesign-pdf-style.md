@@ -931,8 +931,9 @@ contracts are unchanged.
   `--sidebar-text`, `--sidebar-hover`,
   `--sidebar-line` (§4.1); field tokens
   `--field-radius 0.5rem`, `--field-label-size 0.875rem`,
-  `--field-label-weight 500`, `--field-help-size 0.8125rem` (height stays
-  `2.75rem`); `type.fontFamily.print` leads with `Inter`.
+  `--field-label-weight 500`, `--field-help-size 0.8125rem`, `--field-height
+  2.5rem` (the buttons' `min-height`, so a field and a button on one line
+  align); `type.fontFamily.print` leads with `Inter`.
 - Page tone: primitive `--canvas #f2f5f0` (screen only) and `--app-bg` →
   `var(--canvas)`. The page sits one step darker than the documents' paper
   (`--surface`, which stays for row hover and inset panels), so white sheets,
@@ -1045,6 +1046,11 @@ contracts are unchanged.
   buttons show only their arrow in both variants; the label is a
   visually-hidden span (non-compact) or `aria-label` (compact), plus `title`.
   The group never wraps; the range text ellipsizes first.
+  From 769px the non-compact trigger sets the range and its interval on one
+  line at the shared control height; the interval shows only its name
+  (`Vierteljährlich`), its label (`.period-selector-interval-label`,
+  "Abrechnungsintervall:") stays for screen readers. Phones stack the
+  trigger's two lines with the label.
 - Management toolbars (`.participant-toolbar`, `.metering-toolbar`,
   `.tariff-toolbar`) lose their sheet: summary chips, the page's primary
   action (right-aligned, also when wrapped) and filters sit on the page.
@@ -1136,6 +1142,6 @@ contracts are unchanged.
   `439.55 kWh`, `35.4 %`, `CHF 1066.94`, `CHF −548.31`, `1066.94 CHF` (text
   content unchanged) and keeps `—`, `05.10.2026`, `1 von 8`, `8` whole.
 - `screenshots/field-geometry.spec.ts`: the field contract is now 16px values,
-  14px/500 labels, 13px helpers, 8px radius (height still 44px).
+  14px/500 labels, 13px helpers, 8px radius, 40px height (the buttons').
 - Backend: the full suite passes against PostgreSQL with Inter installed
   (PDF layout, PDF/A, template-admin and field-catalog tests included).
