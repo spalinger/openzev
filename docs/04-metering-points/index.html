@@ -1007,6 +1007,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../20-energy-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Your Own Energy Data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../07-tariff-configuration/" class="md-nav__link">
         
   
@@ -1955,9 +1983,10 @@ for <code>Consumption</code> meters, since a consumption-only meter cannot have
 generation behind it). Once ticked:</p>
 <ul>
 <li>The participant who personally holds that meter no longer sees a
-  self-sufficiency rate anywhere — <strong>Energy balance</strong>, their own dashboard,
-  the <strong>annual report</strong>, and their <strong>annual statement</strong> PDF all show <strong>—</strong>
-  with a short explanation instead.</li>
+  meter-based self-sufficiency rate anywhere — <strong>Energy balance</strong>, their own
+  dashboard, the <strong>annual report</strong>, and their <strong>annual statement</strong> PDF all show
+  <strong>—</strong> with a short explanation instead, unless they connect their own system
+  (see below).</li>
 <li>The ZEV's own kWh totals and rates are <strong>not</strong> changed or excluded — the
   energy is real, and billing depends on it. Instead, wherever the ZEV has a
   flagged meter, an explanatory note appears next to the ZEV-wide figures.</li>
@@ -1966,8 +1995,15 @@ generation behind it). Once ticked:</p>
 </ul>
 <p>If you later add a true production meter (measuring everything the PV system
 generates, not just the surplus), leave this box unticked on that separate
-meter and consult the OpenZEV team about importing gross production data —
-that is a planned follow-up, not yet supported.</p>
+meter.</p>
+<p>To show the real self-sufficiency of such a participant, they can connect the
+system behind their meter (Solar Manager, or their own data by push or file).
+The figures are used for statistics only, never for billing, and are shown as
+reported by the participant's own system. See
+<a href="../20-energy-data/">Your Own Energy Data</a>. A flagged metering point then also
+shows the connection's status next to the badge; you open it to see the status
+and, as a manager, to switch it off, delete its data or remove it. You never see
+or enter the participant's key.</p>
 <h2 id="assignment-validity-periods">Assignment Validity Periods<a class="headerlink" href="#assignment-validity-periods" title="Permanent link">&para;</a></h2>
 <p>Metering points themselves do not have <code>valid_from</code>/<code>valid_to</code> fields.
 Date validity is defined on the <strong>metering point assignment</strong> to a participant:</p>

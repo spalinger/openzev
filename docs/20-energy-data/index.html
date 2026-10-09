@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://www.openzev.ch/docs/10-email-configuration/">
+        <link rel="canonical" href="https://www.openzev.ch/docs/20-energy-data/">
       
       
-        <link rel="prev" href="../09-invoice-management/">
+        <link rel="prev" href="../06-metering-analysis/">
       
       
-        <link rel="next" href="../14-admin-console/">
+        <link rel="next" href="../07-tariff-configuration/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Email Configuration - OpenZEV Documentation</title>
+        <title>Your Own Energy Data - OpenZEV Documentation</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#email-configuration" class="md-skip">
+        <a href="#your-own-energy-data" class="md-skip">
           Skip to content
         </a>
       
@@ -115,7 +115,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Email Configuration
+              Your Own Energy Data
             
           </span>
         </div>
@@ -631,8 +631,10 @@
       
   
   
+    
   
   
+  
     
     
     
@@ -643,11 +645,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
         
           
           <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
@@ -668,7 +670,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -739,10 +741,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../20-energy-data/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Your Own Energy Data
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -758,6 +787,198 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#who-can-connect-what" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Who can connect what
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#connect-solar-manager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connect Solar Manager
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Connect Solar Manager">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-is-stored" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is stored
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#send-the-data-yourself-push-or-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Send the data yourself (push or file)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Send the data yourself (push or file)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#home-assistant-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Home Assistant example
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upload-a-csv-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upload a CSV file
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-you-see" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What you see
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What you see">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#your-dashboard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Your dashboard
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gaps-are-shown-as-dashes-not-as-low-rates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gaps are shown as dashes, not as low rates
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#owners-reports-and-statements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Owners, reports and statements
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#does-it-match-the-meter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Does it match the meter?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#disconnect-delete-remove" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disconnect, delete, remove
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next Steps
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -802,8 +1023,6 @@
       
   
   
-    
-  
   
   
     
@@ -816,11 +1035,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
         
           
           <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
@@ -841,7 +1060,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
@@ -912,37 +1131,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Email Configuration
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../10-email-configuration/" class="md-nav__link">
         
   
   
@@ -958,265 +1150,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#email-overview" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Email Overview
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#smtp-configuration-environment-variables" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SMTP Configuration (Environment Variables)
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="SMTP Configuration (Environment Variables)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#required-variables" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Required Variables
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#development-vs-production" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Development vs. Production
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#email-templates" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Email Templates
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Email Templates">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#template-fields" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Template Fields
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#template-variables" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Template Variables
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#default-template" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Default Template
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#sending-invoices" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Sending Invoices
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Sending Invoices">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#delivery-process" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Delivery Process
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#email-delivery-status" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Email Delivery Status
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Email Delivery Status">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#email-history" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Email History
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#handling-email-failures" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Handling Email Failures
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Handling Email Failures">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#email-failed-or-not-received" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Email Failed or Not Received
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#common-issues" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Common Issues
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#retry-behavior" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Retry Behavior
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#archiving-and-compliance" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Archiving and Compliance
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#best-practices" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Best Practices
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#next-steps" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Next Steps
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1629,10 +1562,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#email-overview" class="md-nav__link">
+  <a href="#who-can-connect-what" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Email Overview
+        Who can connect what
       
     </span>
   </a>
@@ -1640,33 +1573,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#smtp-configuration-environment-variables" class="md-nav__link">
+  <a href="#connect-solar-manager" class="md-nav__link">
     <span class="md-ellipsis">
       
-        SMTP Configuration (Environment Variables)
+        Connect Solar Manager
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="SMTP Configuration (Environment Variables)">
+    <nav class="md-nav" aria-label="Connect Solar Manager">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#required-variables" class="md-nav__link">
+  <a href="#what-is-stored" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Required Variables
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#development-vs-production" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Development vs. Production
+        What is stored
       
     </span>
   </a>
@@ -1679,22 +1601,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#email-templates" class="md-nav__link">
+  <a href="#send-the-data-yourself-push-or-file" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Email Templates
+        Send the data yourself (push or file)
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Email Templates">
+    <nav class="md-nav" aria-label="Send the data yourself (push or file)">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#template-fields" class="md-nav__link">
+  <a href="#home-assistant-example" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Template Fields
+        Home Assistant example
       
     </span>
   </a>
@@ -1702,21 +1624,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#template-variables" class="md-nav__link">
+  <a href="#upload-a-csv-file" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Template Variables
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#default-template" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Default Template
+        Upload a CSV file
       
     </span>
   </a>
@@ -1729,22 +1640,44 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#sending-invoices" class="md-nav__link">
+  <a href="#what-you-see" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Sending Invoices
+        What you see
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Sending Invoices">
+    <nav class="md-nav" aria-label="What you see">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#delivery-process" class="md-nav__link">
+  <a href="#your-dashboard" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Delivery Process
+        Your dashboard
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gaps-are-shown-as-dashes-not-as-low-rates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gaps are shown as dashes, not as low rates
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#owners-reports-and-statements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Owners, reports and statements
       
     </span>
   </a>
@@ -1757,77 +1690,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#email-delivery-status" class="md-nav__link">
+  <a href="#does-it-match-the-meter" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Email Delivery Status
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Email Delivery Status">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#email-history" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Email History
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#handling-email-failures" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Handling Email Failures
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Handling Email Failures">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#email-failed-or-not-received" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Email Failed or Not Received
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#common-issues" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Common Issues
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#retry-behavior" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Retry Behavior
+        Does it match the meter?
       
     </span>
   </a>
@@ -1835,10 +1701,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#archiving-and-compliance" class="md-nav__link">
+  <a href="#disconnect-delete-remove" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Archiving and Compliance
+        Disconnect, delete, remove
       
     </span>
   </a>
@@ -1846,10 +1712,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#best-practices" class="md-nav__link">
+  <a href="#troubleshooting" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Best Practices
+        Troubleshooting
       
     </span>
   </a>
@@ -1884,7 +1750,7 @@
 
 
   
-    <a href="https://github.com/splattner/openzev/edit/main/docs/user-guide/10-email-configuration.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+    <a href="https://github.com/splattner/openzev/edit/main/docs/user-guide/20-energy-data.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -1892,364 +1758,267 @@
   
 
 
-<h1 id="email-configuration">Email Configuration<a class="headerlink" href="#email-configuration" title="Permanent link">&para;</a></h1>
-<p>This guide covers setting up and managing email notifications for invoices.</p>
-<h2 id="email-overview">Email Overview<a class="headerlink" href="#email-overview" title="Permanent link">&para;</a></h2>
-<p>OpenZEV sends emails asynchronously for reliable delivery:</p>
-<ul>
-<li><strong>Invoice notifications:</strong> When invoices are sent to participants</li>
-<li><strong>Delivery tracking:</strong> System logs all sends and failures via <code>EmailLog</code></li>
-<li><strong>Retry behavior:</strong> Failed sends are retried automatically (up to 3 retries)</li>
-<li><strong>Customization:</strong> Email subject and body can be tailored per ZEV</li>
-</ul>
-<h2 id="smtp-configuration-environment-variables">SMTP Configuration (Environment Variables)<a class="headerlink" href="#smtp-configuration-environment-variables" title="Permanent link">&para;</a></h2>
-<p>Email delivery is configured entirely through environment variables in your <code>.env</code> file (or Docker environment). There is no admin UI for SMTP settings.</p>
-<h3 id="required-variables">Required Variables<a class="headerlink" href="#required-variables" title="Permanent link">&para;</a></h3>
+<h1 id="your-own-energy-data">Your Own Energy Data<a class="headerlink" href="#your-own-energy-data" title="Permanent link">&para;</a></h1>
+<p>If your PV system sits <strong>behind</strong> your grid connection meter, the meter only
+sees the surplus you feed in and the power you still draw from the grid (see
+<a href="../04-metering-points/#generation-behind-the-meter">Generation behind the meter</a>).
+What you produce and use yourself never reaches it, so OpenZEV cannot tell how
+self-sufficient you really are.</p>
+<p><strong>Energy data</strong> closes that gap. You connect the system that does measure it —
+Solar Manager today, or any system that can send or export a file — and OpenZEV
+adds your real production, consumption, self-consumption and self-sufficiency to
+the statistics.</p>
+<div class="admonition note">
+<p class="admonition-title">Statistics only, never billing</p>
+<p>This data is <strong>never</strong> used for invoices. Billing keeps using the grid
+operator's meter data alone, exactly as before. A wrong or missing value in
+your own system can at worst make a statistic wrong or empty; it cannot change
+an amount.</p>
+</div>
+<p>The feature is switched on by an administrator (<strong>Platform → Settings →
+Functions → Supplementary energy data</strong>). Until then none of what follows is
+visible.</p>
+<h2 id="who-can-connect-what">Who can connect what<a class="headerlink" href="#who-can-connect-what" title="Permanent link">&para;</a></h2>
+<p>Only the <strong>participant who personally holds</strong> the metering point can connect a
+source for it. It is their account and their household, so a ZEV manager cannot
+connect it for them, cannot see the key and cannot change it. The metering point
+must be marked <strong>Generation behind the meter</strong>, and you must hold it yourself
+(not through a shared community allocation).</p>
 <table>
 <thead>
 <tr>
-<th>Variable</th>
-<th>Purpose</th>
-<th>Example</th>
+<th></th>
+<th>You (holder)</th>
+<th>ZEV manager</th>
+<th>ZEV viewer</th>
+<th>Other participants</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>EMAIL_BACKEND</code></td>
-<td>Django email backend class</td>
-<td><code>django.core.mail.backends.smtp.EmailBackend</code></td>
+<td>Connect, test, sync, replace the key, import</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td>no</td>
 </tr>
 <tr>
-<td><code>EMAIL_HOST</code></td>
-<td>SMTP server hostname</td>
-<td><code>smtp.gmail.com</code></td>
+<td>See the status and your figures</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes (read-only)</td>
+<td>no</td>
 </tr>
 <tr>
-<td><code>EMAIL_PORT</code></td>
-<td>SMTP server port</td>
-<td><code>587</code></td>
-</tr>
-<tr>
-<td><code>EMAIL_USE_TLS</code></td>
-<td>Enable TLS encryption</td>
-<td><code>True</code></td>
-</tr>
-<tr>
-<td><code>EMAIL_HOST_USER</code></td>
-<td>SMTP authentication username</td>
-<td><code>your-email@gmail.com</code></td>
-</tr>
-<tr>
-<td><code>EMAIL_HOST_PASSWORD</code></td>
-<td>SMTP authentication password or app token</td>
-<td><code>app-specific-password</code></td>
-</tr>
-<tr>
-<td><code>DEFAULT_FROM_EMAIL</code></td>
-<td>Sender address for all outgoing emails</td>
-<td><code>openzev@example.com</code></td>
-</tr>
-<tr>
-<td><code>EMAIL_TIMEOUT</code></td>
-<td>Seconds to wait for the SMTP server (optional)</td>
-<td><code>20</code></td>
+<td>Switch off, disconnect, delete data, remove</td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
 </tr>
 </tbody>
 </table>
-<h3 id="development-vs-production">Development vs. Production<a class="headerlink" href="#development-vs-production" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Environment</th>
-<th><code>EMAIL_BACKEND</code> value</th>
-<th>Effect</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Development</td>
-<td><code>django.core.mail.backends.console.EmailBackend</code></td>
-<td>Prints emails to console/logs (no actual delivery)</td>
-</tr>
-<tr>
-<td>Production</td>
-<td><code>django.core.mail.backends.smtp.EmailBackend</code></td>
-<td>Sends emails via configured SMTP server</td>
-</tr>
-</tbody>
-</table>
-<p>Example <code>.env</code> for production:</p>
-<div class="highlight"><pre><span></span><code>EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
-EMAIL_HOST=smtp.gmail.com
-EMAIL_PORT=587
-EMAIL_USE_TLS=True
-EMAIL_HOST_USER=your-email@gmail.com
-EMAIL_HOST_PASSWORD=your-app-password
-DEFAULT_FROM_EMAIL=openzev@example.com
-</code></pre></div>
-<p>When <code>DEBUG=False</code>, <code>manage.py check</code> rejects the console backend and an SMTP
-configuration without <code>EMAIL_HOST</code> or <code>DEFAULT_FROM_EMAIL</code>. The production
-template includes these variables so mail delivery cannot silently fall back to
-container logs.</p>
-<p>After changing email settings, restart the backend and Celery worker:</p>
-<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>restart<span class="w"> </span>backend<span class="w"> </span>worker
-</code></pre></div>
-<h2 id="email-templates">Email Templates<a class="headerlink" href="#email-templates" title="Permanent link">&para;</a></h2>
-<p><strong>Managers</strong> customize email templates in <strong>ZEV Settings → Documents &amp; emails</strong>.</p>
-<p>The sections below describe the <strong>invoice</strong> email, which is the one managers
-customize per ZEV. Five further templates are system-wide and edited by admins
-in <strong>Platform → Templates → Email templates</strong>: onboarding, address verification,
-the <strong>sign-in link</strong> email sent when a participant requests
-one from the QR code on their invoice, and the two <strong>community access</strong> emails
-(an invitation for someone without an account, a notice for an existing one). See
-<a href="../14-admin-console/#email-templates">Platform Administration → Email Templates</a> for those,
-including their placeholders.</p>
-<h3 id="template-fields">Template Fields<a class="headerlink" href="#template-fields" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Field</th>
-<th>Purpose</th>
-<th>Default</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>Subject</strong></td>
-<td>Email subject line</td>
-<td><code>Invoice {invoice_number} – {zev_name}</code></td>
-</tr>
-<tr>
-<td><strong>Body</strong></td>
-<td>Email message body</td>
-<td>See default template below</td>
-</tr>
-</tbody>
-</table>
-<p>Subject and body can be customized independently. <strong>Customize</strong> starts from the
-platform text; <strong>Use platform default</strong> stages a reset of that field. The badge
-shows its saved source, while <strong>Unsaved changes</strong> marks a staged edit. Click
-<strong>Save changes</strong> to apply it. Later platform edits reach inherited fields; a
-saved ZEV override takes precedence even when its text matches the platform text.
-You can clear the editor and type replacement text without reopening it.
-<strong>Discard changes</strong> restores the saved text or inherited preview.</p>
-<h3 id="template-variables">Template Variables<a class="headerlink" href="#template-variables" title="Permanent link">&para;</a></h3>
-<p>Use placeholders to personalize emails:</p>
-<table>
-<thead>
-<tr>
-<th>Placeholder</th>
-<th>Replaced With</th>
-<th>Example</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>{invoice_number}</code></td>
-<td>Invoice number</td>
-<td><code>INV-2026-001</code></td>
-</tr>
-<tr>
-<td><code>{zev_name}</code></td>
-<td>ZEV community name</td>
-<td><code>Solar Cooperative</code></td>
-</tr>
-<tr>
-<td><code>{participant_name}</code></td>
-<td>Participant full name</td>
-<td><code>Alice Mueller</code></td>
-</tr>
-<tr>
-<td><code>{period_start}</code></td>
-<td>Billing period start date (formatted per regional settings)</td>
-<td><code>01.01.2026</code></td>
-</tr>
-<tr>
-<td><code>{period_end}</code></td>
-<td>Billing period end date (formatted per regional settings)</td>
-<td><code>31.01.2026</code></td>
-</tr>
-<tr>
-<td><code>{due_date}</code></td>
-<td>Payment due date (formatted per regional settings; empty when unset)</td>
-<td><code>14.02.2026</code></td>
-</tr>
-<tr>
-<td><code>{total_chf}</code></td>
-<td>Invoice total in CHF</td>
-<td><code>123.45</code></td>
-</tr>
-</tbody>
-</table>
-<h3 id="default-template">Default Template<a class="headerlink" href="#default-template" title="Permanent link">&para;</a></h3>
-<p><strong>Subject:</strong>
-<div class="highlight"><pre><span></span><code>Invoice {invoice_number} – {zev_name}
-</code></pre></div></p>
-<p><strong>Body:</strong>
-<div class="highlight"><pre><span></span><code>Dear {participant_name},
-
-Please find your energy invoice for the period {period_start} to {period_end} attached.
-
-Total: CHF {total_chf}
-
-Kind regards,
-{zev_name}
-</code></pre></div></p>
-<p>If a template contains an invalid placeholder (typo or unsupported variable), the system logs a warning and falls back to the default template above.</p>
-<p>Use plain named placeholders; attribute/item expressions are refused. Templates
-may contain up to 20,000 characters. Format widths and precision may contain at
-most four digits and have a value no greater than 1,000; larger values also fall
-back to the default. Subject and body fall back independently. These limits do
-not cap total rendered output; repeating a variable can amplify it.</p>
-<h2 id="sending-invoices">Sending Invoices<a class="headerlink" href="#sending-invoices" title="Permanent link">&para;</a></h2>
-<p>When you <a href="../09-invoice-management/#sending-invoices-by-email">send approved invoices</a>:</p>
+<p>When you no longer hold the metering point (the assignment ends), the connection
+is switched off by itself, the key is deleted, and nothing new is collected. The
+data already collected is kept until you or a manager deletes it.</p>
+<h2 id="connect-solar-manager">Connect Solar Manager<a class="headerlink" href="#connect-solar-manager" title="Permanent link">&para;</a></h2>
+<p><img alt="Account Energy data tab" src="../screenshots/24-energy-data-account.png" /></p>
 <ol>
-<li>OpenZEV generates the PDF (if not already generated)</li>
-<li>Email is created using the ZEV template, then the global admin invoice-email override, then the shipped default</li>
-<li>A Celery task is queued for asynchronous delivery</li>
-<li>The PDF is attached as <code>invoice_&lt;number&gt;.pdf</code></li>
-<li>On success, invoice status changes to <code>Sent</code> and <code>sent_at</code> is recorded</li>
+<li>Create an <strong>API key</strong> in your Solar Manager account.</li>
+<li>In OpenZEV open <strong>Account → Energy data</strong>. The tab appears when you hold a
+   metering point with generation behind it.</li>
+<li>Choose <strong>Connect</strong> next to the metering point.</li>
+<li>Pick <strong>Solar Manager</strong>, enter your <strong>Solar Manager ID</strong> (3 to 24 letters or
+   digits) and the <strong>API key</strong>, and read what you agree to.</li>
+<li>Tick the consent box and choose <strong>Connect</strong>.</li>
 </ol>
-<h3 id="delivery-process">Delivery Process<a class="headerlink" href="#delivery-process" title="Permanent link">&para;</a></h3>
-<p>Behind the scenes:</p>
-<ol>
-<li><strong>Email task queued</strong> — <code>EmailLog</code> created with status <code>pending</code></li>
-<li><strong>Celery worker processes</strong> the task</li>
-<li><strong>Email sent</strong> via configured SMTP — <code>EmailLog</code> status becomes <code>sent</code>, <code>sent_at</code> recorded</li>
-<li><strong>Invoice updated</strong> — status transitions from <code>Approved</code> to <code>Sent</code></li>
-</ol>
-<p>If email fails:</p>
+<p>OpenZEV checks the key with Solar Manager <strong>before</strong> anything is saved, so a
+wrong key never leaves a half-connected source behind. The key is stored
+encrypted, only used to fetch your data, and never shown again. The first data
+arrives within a few minutes; after that OpenZEV fetches new data every hour and
+re-reads the last two days to pick up late corrections.</p>
+<p>Solar Manager replaces your key with a fresh one every time it is used, and
+OpenZEV keeps the fresh one. If the connection ever shows <strong>Reconnect needed</strong>,
+the key no longer works (for example because you revoked it): choose
+<strong>Reconnect</strong> and enter a new key.</p>
+<h3 id="what-is-stored">What is stored<a class="headerlink" href="#what-is-stored" title="Permanent link">&para;</a></h3>
+<p>Four values per quarter hour: <strong>consumption</strong>, <strong>production</strong>, <strong>grid import</strong>
+and <strong>grid export</strong>, in kWh. Nothing else from your Solar Manager account is
+read. Only the time you held the metering point is stored.</p>
+<h2 id="send-the-data-yourself-push-or-file">Send the data yourself (push or file)<a class="headerlink" href="#send-the-data-yourself-push-or-file" title="Permanent link">&para;</a></h2>
+<p>If you do not use Solar Manager — for instance with Home Assistant, n8n or a
+script — choose <strong>Push / file</strong> when you connect. You get a <strong>push token</strong>
+shown <strong>once</strong>; copy it right away. OpenZEV stores only a hash, so if you lose
+it you issue a new one (<strong>New push token</strong>), which stops the old one at once.</p>
+<p>Send readings with an HTTP <code>POST</code>:</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s2">"https://your-openzev.example.com/api/v1/metering/supplementary/ingest/"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer ozs_abcd1234_yourtoken"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"Content-Type: application/json"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"readings": [</span>
+<span class="s1">        {"timestamp": "2026-07-01T10:00:00+02:00",</span>
+<span class="s1">         "consumption_kwh": 0.42, "production_kwh": 1.31,</span>
+<span class="s1">         "import_kwh": 0.05, "export_kwh": 0.94}</span>
+<span class="s1">      ]}'</span>
+</code></pre></div>
+<p>The rules, so that nothing is silently wrong:</p>
 <ul>
-<li><strong>EmailLog status:</strong> <code>failed</code>, error message recorded</li>
-<li><strong>Automatic retry:</strong> retried after ~60 seconds, up to 3 retries (4 attempts in total); each attempt gets its own log entry</li>
-<li><strong>After the last failure:</strong> no more automatic retries; use <strong>Retry</strong> in <strong>Billing → Emails</strong></li>
+<li><strong>One reading per quarter hour</strong>, with the timestamp of the interval's
+  <strong>start</strong> (<code>10:00</code> means 10:00 to 10:15) on a quarter-hour boundary
+  (<code>:00</code>, <code>:15</code>, <code>:30</code>, <code>:45</code>) and a UTC offset.</li>
+<li><strong>kWh used in that quarter hour</strong>, not a running total and not watts. If your
+  system reports a meter reading that only ever grows, send the difference.</li>
+<li>No negative values, no future timestamps, at most 2000 readings per request
+  and about 120 requests per hour.</li>
+<li>Sending the same timestamp again replaces the earlier value, so a retry is
+  harmless.</li>
+<li>A bad reading is rejected on its own, with its position and the reason; the
+  good ones in the same request are still stored.</li>
 </ul>
-<h2 id="email-delivery-status">Email Delivery Status<a class="headerlink" href="#email-delivery-status" title="Permanent link">&para;</a></h2>
-<p>Each invoice tracks email delivery via <code>EmailLog</code> entries:</p>
+<h3 id="home-assistant-example">Home Assistant example<a class="headerlink" href="#home-assistant-example" title="Permanent link">&para;</a></h3>
+<p>With a <code>utility_meter</code> per value (cycle <code>quarter-hourly</code>), an automation can send
+the previous quarter hour shortly after each boundary. The entity names below are
+placeholders for your own sensors:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">rest_command</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">openzev_push</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="s">"https://your-openzev.example.com/api/v1/metering/supplementary/ingest/"</span>
+<span class="w">    </span><span class="nt">method</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">POST</span>
+<span class="w">    </span><span class="nt">headers</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">Authorization</span><span class="p">:</span><span class="w"> </span><span class="s">"Bearer</span><span class="nv"> </span><span class="s">ozs_abcd1234_yourtoken"</span>
+<span class="w">      </span><span class="nt">Content-Type</span><span class="p">:</span><span class="w"> </span><span class="s">"application/json"</span>
+<span class="w">    </span><span class="nt">payload</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">&gt;</span>
+<span class="w">      </span><span class="no">{"readings": [{</span>
+<span class="w">        </span><span class="no">"timestamp": "{{ timestamp }}",</span>
+<span class="w">        </span><span class="no">"consumption_kwh": {{ consumption }}, "production_kwh": {{ production }},</span>
+<span class="w">        </span><span class="no">"import_kwh": {{ import_kwh }}, "export_kwh": {{ export }}</span>
+<span class="w">      </span><span class="no">}]}</span>
+
+<span class="nt">automation</span><span class="p">:</span>
+
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">alias</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Send energy data to OpenZEV</span>
+<span class="w">    </span><span class="nt">trigger</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">platform</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">time_pattern</span>
+<span class="w">        </span><span class="nt">minutes</span><span class="p">:</span><span class="w"> </span><span class="s">"/15"</span>
+<span class="w">        </span><span class="nt">seconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">service</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">rest_command.openzev_push</span>
+<span class="w">        </span><span class="nt">data</span><span class="p">:</span>
+<span class="w">          </span><span class="nt">timestamp</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">&gt;</span>
+<span class="w">            </span><span class="no">{{ (now().replace(second=0, microsecond=0, minute=(now().minute // 15) * 15) - timedelta(minutes=15)).isoformat() }}</span>
+<span class="w">          </span><span class="nt">consumption</span><span class="p">:</span><span class="w"> </span><span class="s">"{{</span><span class="nv"> </span><span class="s">state_attr('sensor.house_consumption_quarter_hour',</span><span class="nv"> </span><span class="s">'last_period')</span><span class="nv"> </span><span class="s">|</span><span class="nv"> </span><span class="s">float(0)</span><span class="nv"> </span><span class="s">}}"</span>
+<span class="w">          </span><span class="nt">production</span><span class="p">:</span><span class="w"> </span><span class="s">"{{</span><span class="nv"> </span><span class="s">state_attr('sensor.pv_production_quarter_hour',</span><span class="nv"> </span><span class="s">'last_period')</span><span class="nv"> </span><span class="s">|</span><span class="nv"> </span><span class="s">float(0)</span><span class="nv"> </span><span class="s">}}"</span>
+<span class="w">          </span><span class="nt">import_kwh</span><span class="p">:</span><span class="w"> </span><span class="s">"{{</span><span class="nv"> </span><span class="s">state_attr('sensor.grid_import_quarter_hour',</span><span class="nv"> </span><span class="s">'last_period')</span><span class="nv"> </span><span class="s">|</span><span class="nv"> </span><span class="s">float(0)</span><span class="nv"> </span><span class="s">}}"</span>
+<span class="w">          </span><span class="nt">export</span><span class="p">:</span><span class="w"> </span><span class="s">"{{</span><span class="nv"> </span><span class="s">state_attr('sensor.grid_export_quarter_hour',</span><span class="nv"> </span><span class="s">'last_period')</span><span class="nv"> </span><span class="s">|</span><span class="nv"> </span><span class="s">float(0)</span><span class="nv"> </span><span class="s">}}"</span>
+</code></pre></div>
+<h3 id="upload-a-csv-file">Upload a CSV file<a class="headerlink" href="#upload-a-csv-file" title="Permanent link">&para;</a></h3>
+<p>For a one-off import or to fill a gap, choose <strong>Import CSV</strong> on the source. The
+columns are:</p>
+<div class="highlight"><pre><span></span><code>timestamp,consumption_kwh,production_kwh,import_kwh,export_kwh
+2026-07-01T10:00:00+02:00,0.42,1.31,0.05,0.94
+</code></pre></div>
+<p>Semicolons and decimal commas (as in a Swiss Excel export) are accepted. Choose
+<strong>Check file</strong> first: it reports the problems row by row and imports nothing.
+<strong>Import</strong> stores the file only if <strong>every</strong> row is valid.</p>
+<h2 id="what-you-see">What you see<a class="headerlink" href="#what-you-see" title="Permanent link">&para;</a></h2>
+<h3 id="your-dashboard">Your dashboard<a class="headerlink" href="#your-dashboard" title="Permanent link">&para;</a></h3>
+<p><img alt="Participant dashboard with own-system figures" src="../screenshots/24-energy-data-dashboard.png" /></p>
+<p>With a connected source, your dashboard shows a card <strong>Your own system</strong> with
+production, consumption, self-consumption, grid import and export, your
+<strong>self-sufficiency</strong> and <strong>self-consumption</strong> rates, and a chart. It always says
+the figures are <strong>reported by your own system</strong>, not read from the meter, and
+which period they cover.</p>
+<ul>
+<li><strong>Self-sufficiency</strong> — the share of what you consume that did not come from the
+  grid: one minus grid import divided by consumption.</li>
+<li><strong>Self-consumption</strong> — the share of what you produce that you used directly.</li>
+</ul>
+<p>Both are computed from your own system's numbers alone, so numerator and
+denominator are measured the same way. The meter is only used to <em>check</em> them.</p>
+<h3 id="gaps-are-shown-as-dashes-not-as-low-rates">Gaps are shown as dashes, not as low rates<a class="headerlink" href="#gaps-are-shown-as-dashes-not-as-low-rates" title="Permanent link">&para;</a></h3>
+<p>A rate is only shown when at least <strong>95 %</strong> of the quarter hours in the period
+are present. With less, the rate is <strong>—</strong> and a short reason says so
+("not enough data in this period"). A missing hour never turns into a low
+self-sufficiency. The energy sums are still shown.</p>
+<h3 id="owners-reports-and-statements">Owners, reports and statements<a class="headerlink" href="#owners-reports-and-statements" title="Permanent link">&para;</a></h3>
+<ul>
+<li>The ZEV manager's <strong>Energy balance</strong> shows the same rate in the participant
+  table, marked with an info icon, and the full card when that participant is
+  selected. A manager who is also a participant with a connected source sees their own
+  <strong>Your own system</strong> card there while nobody, or they themselves, are selected
+  (not while another participant is); their own row is marked <strong>You</strong>. Without a source, the same place offers to connect one.
+  Selecting a row in the table again clears the selection.</li>
+<li>The <strong>annual report</strong> shows it per participant.</li>
+<li>The <strong>annual statement</strong> PDF shows your self-sufficiency for every month with
+  enough data, <strong>—</strong> for the others, and a note saying the figures come from your
+  own system.</li>
+<li>The <a href="../19-ai-assistants/">AI assistant tools</a> report it as
+  <code>gross_self_sufficiency_pct</code> and <code>gross_self_consumption_pct</code>.</li>
+</ul>
+<h2 id="does-it-match-the-meter">Does it match the meter?<a class="headerlink" href="#does-it-match-the-meter" title="Permanent link">&para;</a></h2>
+<p><img alt="Source status with the meter comparison" src="../screenshots/24-energy-data-status.png" /></p>
+<p>After every sync OpenZEV compares your export and import with the grid
+operator's meter for the newest days present in both. This is only a check — the
+meter always wins and nothing is corrected. The result shows on the source:</p>
+<ul>
+<li><strong>Matches the meter</strong> — the difference is below 10 %.</li>
+<li><strong>Differs from the meter</strong> — more than that. A typical cause is the wrong unit
+  (Wh sent as kWh) in a push client.</li>
+<li><strong>The timestamps look shifted</strong> — your values fit the meter better one or two
+  quarter hours earlier or later, which usually means the interval start and end
+  were mixed up.</li>
+<li><strong>Not enough to compare</strong> — there are fewer than two days present in both, for
+  example because the meter data has not been imported yet.</li>
+</ul>
+<h2 id="disconnect-delete-remove">Disconnect, delete, remove<a class="headerlink" href="#disconnect-delete-remove" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Status</th>
-<th>Meaning</th>
 <th>Action</th>
+<th>Stops new data</th>
+<th>Deletes data</th>
+<th>Keeps the connection</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>pending</strong></td>
-<td>Queued, not yet processed</td>
-<td>Wait a few seconds, refresh page</td>
+<td><strong>Disconnect</strong></td>
+<td>yes</td>
+<td>no (and it is still used for statistics)</td>
+<td>no (key and token are deleted)</td>
 </tr>
 <tr>
-<td><strong>sent</strong></td>
-<td>Successfully delivered to SMTP server</td>
-<td>Complete</td>
+<td><strong>Delete data</strong></td>
+<td>no</td>
+<td>yes, all readings</td>
+<td>yes</td>
 </tr>
 <tr>
-<td><strong>failed</strong></td>
-<td>Delivery error occurred</td>
-<td>Check error, retry or fix recipient email</td>
+<td><strong>Remove source</strong></td>
+<td>yes</td>
+<td>yes, all readings</td>
+<td>no</td>
 </tr>
 </tbody>
 </table>
-<h3 id="email-history">Email History<a class="headerlink" href="#email-history" title="Permanent link">&para;</a></h3>
-<p>The invoice list shows only the latest delivery status. Open <strong>Billing →
-Emails</strong> (<code>/billing/emails</code>) for every invoice's delivery state, and
-<strong>View history</strong> on a row for all attempts:</p>
-<ul>
-<li><strong>Recipient</strong> email address</li>
-<li><strong>Subject</strong> line</li>
-<li><strong>Status</strong> with color indicator (amber/green/red)</li>
-<li><strong>Timestamp</strong> of each attempt</li>
-<li><strong>Error message</strong> (for failed attempts)</li>
-<li><strong>Retry</strong> — shown when the latest attempt failed; queues a new delivery attempt</li>
-</ul>
-<h2 id="handling-email-failures">Handling Email Failures<a class="headerlink" href="#handling-email-failures" title="Permanent link">&para;</a></h2>
-<h3 id="email-failed-or-not-received">Email Failed or Not Received<a class="headerlink" href="#email-failed-or-not-received" title="Permanent link">&para;</a></h3>
-<p><strong>Step 1: Check email history</strong></p>
-<ol>
-<li>Open <strong>Billing → Emails</strong></li>
-<li>Click <strong>View history</strong> on the invoice's row</li>
-<li>Review the error message</li>
-</ol>
-<p><strong>Step 2: Verify recipient email</strong></p>
-<ol>
-<li>Go to <a href="../03-participant-management/">Participants</a></li>
-<li>Find participant</li>
-<li>Check email address is correct</li>
-<li>Correct if needed</li>
-</ol>
-<p><strong>Step 3: Retry delivery</strong></p>
-<ol>
-<li>In <strong>Billing → Emails</strong>, find the invoice</li>
-<li>Click <strong>Retry</strong></li>
-<li>A new delivery attempt is queued</li>
-<li>Check status after a few seconds</li>
-</ol>
-<p><strong>Step 4: Manual delivery (if retries fail)</strong></p>
-<ol>
-<li>Download the invoice PDF from OpenZEV</li>
-<li>Send to participant manually via your own email</li>
-<li>Mark the invoice as sent with <strong>More → Mark as Sent</strong> (only while it is still <code>Approved</code>)</li>
-</ol>
-<h3 id="common-issues">Common Issues<a class="headerlink" href="#common-issues" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Problem</th>
-<th>Likely Cause</th>
-<th>Fix</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>All emails stuck on <code>pending</code></td>
-<td>Celery worker not running</td>
-<td><code>docker compose restart worker</code></td>
-</tr>
-<tr>
-<td>All emails failing</td>
-<td>SMTP misconfigured or credentials wrong</td>
-<td>Check <code>.env</code> email variables, restart backend + worker</td>
-</tr>
-<tr>
-<td>Emails failing for specific participant</td>
-<td>Invalid email address</td>
-<td>Update email in <a href="../03-participant-management/">Participants</a></td>
-</tr>
-<tr>
-<td>Emails failing for a whole domain</td>
-<td>Provider blocking/rate-limiting</td>
-<td>Contact provider, check SPF/DKIM/DMARC records</td>
-</tr>
-</tbody>
-</table>
-<h2 id="retry-behavior">Retry Behavior<a class="headerlink" href="#retry-behavior" title="Permanent link">&para;</a></h2>
-<p>Failed emails are automatically retried by Celery:</p>
-<ul>
-<li><strong>Max retries:</strong> 3 (4 attempts in total)</li>
-<li><strong>Retry delay:</strong> ~60 seconds between attempts</li>
-<li><strong>After the last failure:</strong> no more automatic retries; use <strong>Retry</strong> in <strong>Billing → Emails</strong></li>
-</ul>
-<h2 id="archiving-and-compliance">Archiving and Compliance<a class="headerlink" href="#archiving-and-compliance" title="Permanent link">&para;</a></h2>
-<p>Email delivery logs are kept for compliance and audit:</p>
-<ul>
-<li>All email attempts (successful and failed) are recorded in <code>EmailLog</code></li>
-<li>Timestamps, recipients, subjects, and error messages preserved</li>
-<li>Linked to invoices via foreign key for traceability</li>
-<li>Logs are ordered by most recent first</li>
-</ul>
-<h2 id="best-practices">Best Practices<a class="headerlink" href="#best-practices" title="Permanent link">&para;</a></h2>
-<p><strong>Personalize templates:</strong> Use <code>{participant_name}</code> and <code>{zev_name}</code> for a personal touch.</p>
-<p><strong>Test with console backend:</strong> During setup, use <code>EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend</code> to verify email content in logs before enabling real SMTP delivery.</p>
-<p><strong>Monitor delivery:</strong> Check <strong>Billing → Emails</strong> regularly for persistent failures; failed deliveries also appear on <strong>Overview</strong>.</p>
-<p><strong>Use app-specific passwords:</strong> For Gmail and similar providers, generate an app-specific password instead of using your main account password.</p>
-<p><strong>Keep contact info current:</strong> Ensure participant email addresses are up to date in <a href="../03-participant-management/">Participants</a>.</p>
+<p>A ZEV manager sees the same buttons for a participant's source, except for the
+ones that touch the key. Deleting a participant or a metering point deletes their
+sources and readings with them.</p>
+<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
+<p><strong>The Energy data tab is missing.</strong> The feature is off, or you do not personally
+hold a metering point marked <em>Generation behind the meter</em>. Ask your ZEV manager.</p>
+<p><strong>"Not accepted" when connecting.</strong> The key or the Solar Manager ID is wrong. The
+ID is the one of your installation, not your login name.</p>
+<p><strong>The server says the key cannot be stored.</strong> The platform administrator has not
+set up the encryption key for integrations (<code>INTEGRATION_ENCRYPTION_KEYS</code>). Push
+and file import still work without it.</p>
+<p><strong>The rate stays a dash.</strong> Less than 95 % of the period is covered. Look at
+<em>Data covers</em> on the source, and use <strong>Sync now</strong> or <strong>Import CSV</strong> to fill a gap.</p>
+<p><strong>Sync now says to wait.</strong> One manual sync every five minutes is allowed; the
+hourly one runs anyway.</p>
 <h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Send invoices:</strong> <a href="../09-invoice-management/#sending-invoices-by-email">Invoice Management</a></li>
-<li><strong>Manage participants:</strong> <a href="../03-participant-management/">Participant Management</a></li>
-<li><strong>ZEV setup:</strong> <a href="../02-zev-setup/">ZEV Setup</a></li>
+<li><a href="../04-metering-points/">Metering points</a> — mark generation behind the meter</li>
+<li><a href="../06-metering-analysis/">Metering analysis</a> — the charts and the data quality view</li>
+<li><a href="../11-roles-and-permissions/">Roles and permissions</a></li>
 </ul>
 
 
@@ -2286,7 +2055,7 @@ Emails</strong> (<code>/billing/emails</code>) for every invoice's delivery stat
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../09-invoice-management/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Invoice Management">
+          <a href="../06-metering-analysis/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Metering Analysis">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -2296,20 +2065,20 @@ Emails</strong> (<code>/billing/emails</code>) for every invoice's delivery stat
                 Previous
               </span>
               <div class="md-ellipsis">
-                Invoice Management
+                Metering Analysis
               </div>
             </div>
           </a>
         
         
           
-          <a href="../14-admin-console/" class="md-footer__link md-footer__link--next" aria-label="Next: Platform Administration">
+          <a href="../07-tariff-configuration/" class="md-footer__link md-footer__link--next" aria-label="Next: Tariff Configuration">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Platform Administration
+                Tariff Configuration
               </div>
             </div>
             <div class="md-footer__button md-icon">
