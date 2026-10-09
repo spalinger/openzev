@@ -27,7 +27,7 @@ import {
 } from '../lib/appSettings'
 import { useToast } from '../lib/toast'
 import type { DateTimeFormat, LongDateFormat, OAuthProviderConfig, OAuthProviderConfigInput, ShortDateFormat } from '../types/api'
-import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
+import { ConfirmDialog, consumeReportedError, useConfirmDialog } from '../components/ConfirmDialog'
 import { FormModal } from '../components/FormModal'
 import { BackupSettingsSection } from '../features/backups/BackupSettingsSection'
 import { MfaPolicySection } from '../features/settings/MfaPolicySection'
@@ -223,9 +223,7 @@ export function AdminSystemSettingsPage() {
             confirmText: t('common.delete'),
             cancelText: t('common.cancel'),
             isDangerous: true,
-            onConfirm: async () => {
-                await deleteOAuthMutation.mutateAsync(provider.id)
-            },
+            onConfirm: () => consumeReportedError(deleteOAuthMutation.mutateAsync(provider.id)),
         })
     }
 

@@ -355,6 +355,9 @@ If logged in as a community's manager:
 Energy-flow cards name the selected community in both Energy balance and the
 participant dashboard.
 
+Consumption and production charts in **Energy balance** stack when the panel
+is narrow.
+
 The **Energy balance** and participant dashboard date selectors update the
 page URL. Bookmark or share a link with `period_start` and `period_end` to
 return to that exact range, including a custom range, after reload or browser
@@ -382,6 +385,15 @@ meter. When several current records have consumption, the flow combines them
 into a **Total consumption** node. Disabled communities contribute no consumption.
 
 ![Account profile](screenshots/16-account-profile.png)
+
+## Dialogs and actions
+
+Use Tab or Shift+Tab to move between dialog controls. Escape closes an open
+dropdown or calendar first; otherwise Escape or **Close** dismisses the dialog. Background controls are unavailable until the top dialog
+closes. Before submitting a confirmation, choose **Cancel** to
+leave without starting the action. While it is processing, **Close** dismisses
+the dialog and the action continues; failures are still reported. If an action
+fails, reopen its confirmation to retry.
 
 ## API Access
 

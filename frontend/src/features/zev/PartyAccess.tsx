@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faEnvelope, faKey, faUserMinus } from '@fortawesome/free-solid-svg-icons'
 import { CivilDateInput } from '../../components/CivilDateInput'
-import { ConfirmDialog, useConfirmDialog } from '../../components/ConfirmDialog'
+import { ConfirmDialog, consumeReportedError, useConfirmDialog } from '../../components/ConfirmDialog'
 import { createZevAccess, resendZevInvitation, revokeZevAccess, updateZevAccess } from '../../lib/api/zev'
 import { formatApiError } from '../../lib/api/errors'
 import { formatShortDate, useAppSettings } from '../../lib/appSettings'
@@ -83,7 +83,7 @@ export function useAccessActions(zevId: string) {
             title: t('pages.zevSettings.access.downgradeTitle'),
             message: t('pages.zevSettings.access.downgradeMessage', { name: accountName(grant) }),
             confirmText: t('pages.zevSettings.access.makeViewer'),
-            onConfirm: () => changeRole.mutateAsync({ grant, next }).then(() => undefined, () => undefined),
+            onConfirm: () => consumeReportedError(changeRole.mutateAsync({ grant, next })),
         })
     }
 
@@ -93,7 +93,7 @@ export function useAccessActions(zevId: string) {
             message: t('pages.zevSettings.access.revokeMessage', { name: accountName(grant) }),
             confirmText: t('pages.zevSettings.access.revoke'),
             isDangerous: true,
-            onConfirm: () => revoke.mutateAsync(grant).then(() => undefined, () => undefined),
+            onConfirm: () => consumeReportedError(revoke.mutateAsync(grant)),
         })
     }
 

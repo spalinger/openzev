@@ -1761,8 +1761,15 @@ button.badge-button:focus-visible {
   font-size: 0.875rem;
 }
 
-.form-grid.balance-chart-grid {
+/* Fit the paired charts to their panel, including the desktop sidebar. */
+.balance-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
   gap: 2rem;
+}
+
+.balance-chart-grid > div {
+  min-width: 0;
 }
 
 .balance-chart-label {
@@ -3320,6 +3327,138 @@ input.recurrence-chip-input {
   max-width: 220px;
 }
 
+/* z-index is set inline from lib/zLayers.ts, which owns the stacking order. */
+.dialog-scrim {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dialog-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: flex-end;
+}
+
+.form-modal,
+.card.confirm-dialog {
+  width: 90%;
+  max-height: 90dvh;
+  overflow: auto;
+  padding: 2rem;
+  outline: none;
+  background-color: var(--surface-card);
+}
+
+.form-modal {
+  border-radius: 0.5rem;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+}
+
+.form-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.form-modal-header h2 {
+  overflow-wrap: anywhere;
+  margin: 0;
+  min-width: 0;
+}
+
+.form-modal-close {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0;
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.card.confirm-dialog {
+  max-width: 400px;
+}
+
+.confirm-dialog-message {
+  overflow-wrap: anywhere;
+  margin-bottom: 1.5rem;
+  color: var(--text-body);
+  line-height: 1.5;
+}
+
+.email-logs-empty {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 2rem 0;
+}
+
+.email-logs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.email-log {
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border-default);
+  border-radius: 0.4rem;
+  padding: 1rem;
+  background-color: var(--surface);
+}
+
+.email-log-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.email-log-recipient {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.email-log-subject {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
+.email-log-meta {
+  font-size: 0.85rem;
+  color: var(--text-body);
+  margin-bottom: 0.5rem;
+}
+
+.email-log-error {
+  background-color: var(--danger-100);
+  border: 1px solid var(--danger-300);
+  border-radius: 0.3rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--danger-700);
+  margin-bottom: 0.5rem;
+  font-family: monospace;
+}
+
+.email-logs-footer {
+  margin-top: 2rem;
+}
+
 /* Responsive form grids — inline 2-col grids that collapse on mobile */
 .form-grid {
   display: grid;
@@ -3491,6 +3630,11 @@ fieldset.form-grid {
 }
 
 @media (max-width: 768px) {
+  .form-modal,
+  .card.confirm-dialog {
+    padding: 1rem;
+  }
+
   /* Keep in sync with Layout.tsx's mobile media query. */
   /* Switch shell to single-column — sidebar becomes an overlay */
   .shell,
@@ -3883,151 +4027,6 @@ fieldset.form-grid {
   justify-content: flex-end;
   gap: 0.75rem;
   margin-top: 0.5rem;
-}
-
-/* z-index is set inline from lib/zLayers.ts, which owns the stacking order. */
-.dialog-scrim {
-  position: fixed;
-  inset: 0;
-  background-color: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.dialog-actions {
-  display: flex;
-  gap: 1rem;
-  justify-content: flex-end;
-}
-
-.form-modal {
-  background-color: var(--surface-card);
-  border-radius: 0.5rem;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
-  width: 90%;
-  max-height: 90vh;
-  overflow: auto;
-  padding: 2rem;
-  outline: none;
-}
-
-.form-modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
-}
-
-.form-modal-close {
-  background: none;
-  border: none;
-  font-size: 1.5rem;
-  cursor: pointer;
-  color: var(--text-muted);
-  padding: 0;
-  width: 2rem;
-  height: 2rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* Out-rank .card's padding in the narrow-viewport media query. */
-.card.confirm-dialog {
-  max-width: 400px;
-  padding: 2rem;
-  outline: none;
-}
-
-.confirm-dialog-message {
-  margin-bottom: 1.5rem;
-  color: var(--text-body);
-  line-height: 1.5;
-}
-
-.card.email-logs-dialog {
-  max-width: 600px;
-  max-height: 80vh;
-  overflow: auto;
-  padding: 2rem;
-}
-
-.email-logs-empty {
-  color: var(--text-muted);
-  text-align: center;
-  padding: 2rem 0;
-}
-
-.email-logs-list {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.email-log {
-  border: 1px solid var(--border-default);
-  border-radius: 0.4rem;
-  padding: 1rem;
-  background-color: var(--surface);
-}
-
-.email-log-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 0.5rem;
-}
-
-.email-log-subject {
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  margin-top: 0.25rem;
-}
-
-.email-log-status {
-  display: inline-block;
-  padding: 0.35rem 0.8rem;
-  border-radius: 0.3rem;
-  background-color: var(--text-muted);
-  color: var(--white);
-  font-size: 0.8rem;
-  font-weight: 600;
-  text-align: center;
-  min-width: 80px;
-}
-
-.email-log-status--pending {
-  background-color: var(--warning-800);
-}
-
-.email-log-status--sent {
-  background-color: var(--success-600);
-}
-
-.email-log-status--failed {
-  background-color: var(--danger-600);
-}
-
-.email-log-meta {
-  font-size: 0.85rem;
-  color: var(--text-body);
-  margin-bottom: 0.5rem;
-}
-
-.email-log-error {
-  background-color: var(--danger-100);
-  border: 1px solid var(--danger-300);
-  border-radius: 0.3rem;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.85rem;
-  color: var(--danger-700);
-  margin-bottom: 0.5rem;
-  font-family: monospace;
-}
-
-.email-logs-footer {
-  margin-top: 2rem;
 }
 
 /* Verify email page card */

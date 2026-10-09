@@ -91,8 +91,9 @@ defined by shared frontend primitives and CSS contracts.
 | File | Export | Contract |
 |---|---|---|
 | `frontend/src/components/ActionMenu.tsx` | `ActionMenu` | Overflow action trigger for lower-priority row/card actions. Uses labelled menu items, optional icons, section headers, and danger styling. Default button class: `button button-secondary button-compact`. Passing an icon retains visible text by default; `iconOnly` explicitly opts in to an accessible icon-only trigger. |
-| `frontend/src/components/ConfirmDialog.tsx` | `useConfirmDialog`, `ConfirmDialog` | Required wrapper for destructive or high-impact actions. Supports `title`, `message`, `isDangerous`, and async confirm handlers. `confirmText` and `cancelText` are optional and default to `common.confirm` / `common.cancel` i18n keys. Async errors surface via a toast (uses `useToast` internally). |
-| `frontend/src/components/FormModal.tsx` | `FormModal` | Generic modal shell for CRUD forms and small workflow dialogs. |
+| `frontend/src/components/ConfirmDialog.tsx` | `useConfirmDialog`, `ConfirmDialog` | Required wrapper for destructive or high-impact actions. Supports `title`, `message`, `isDangerous`, `confirmDisabled`, optional children, and async confirm handlers. `confirmText` and `cancelText` default to `common.confirm` / `common.cancel`. Uses the [dialog behavior](#dialog-behavior) below. |
+| `frontend/src/components/FormModal.tsx` | `FormModal` | Generic modal shell for CRUD forms and small workflow dialogs. Props: `isOpen`, `title`, `children`, `onClose`, optional `maxWidth` (default `600px`) and `returnFocusRef` (`RefObject<HTMLElement \| null>`). Uses the shared [dialog behavior](#dialog-behavior). |
+| `frontend/src/components/EmailLogsModal.tsx` | `EmailLogsModal` | Uses `FormModal` for delivery history with retry actions and semantic status badges. |
 | `frontend/src/components/PeriodSelector.tsx` | `PeriodSelector` | Billing-interval navigation and optional custom ranges. Callers own period URL state and the aligned navigation floor. `compact` (whole periods) renders labelled chevron buttons around a one-line trigger naming the period via `billingPeriodName` (`lib/billingPeriod.ts`), with the exact dates in its tooltip and menu; the year's other names sit invisibly in the same cell so the trigger keeps a stable width. A whole-period selector (`allowCustomRange={false}`) steps from any range to the nearest whole periods (`adjacentBillingPeriod`); in `compact` mode a range that is not a whole period keeps its dates under a warning badge (`common.periodSelector.notBillingPeriod`), elsewhere under the **Custom** info badge. |
 | `frontend/src/components/YearPicker.tsx` | `YearPicker` | Native year control with `years`, `value`, `onChange`, optional `disabled`, required translated `label`, optional `id`, `visibleLabel` (default true), and `className`. It generates an associated id when omitted; hidden labels use `aria-label`. Range/default/rollover policy stays with the caller. |
 | `frontend/src/components/InvoicePresentation.tsx` | `InvoiceLink`, `InvoiceStatusBadge`, `InvoiceAmount`, `InvoicePdfCell`, `InvoiceActionButton`, `InvoiceRowActions` | Typed invoice cells/actions shared by period rows, own invoices, and the admin DataTable. `InvoiceActionButton`/`InvoiceRowActions` take `variant` (`primary` default, `secondary` outlined where a page-level primary action leads). `InvoiceAmount` takes `currency` (default true); `false` drops "CHF" for a column whose header names it. Callers own row models, eligibility and permission checks; no shared pagination layer. |
@@ -106,8 +107,38 @@ defined by shared frontend primitives and CSS contracts.
 | `frontend/src/components/PageSkeleton.tsx` | `PageSkeleton` | Loading placeholder using Mantine `Skeleton`. Variants: `page` (eyebrow + title + KPI row + 2 cards for full-page `isLoading`), `kpiRow` (4 stat blocks for stats/fact rows), `table` (5 fading rows inside `.card` for `DataTable` pages), `tableRows` (same rows without outer `.card` for nested contexts), `cardList` (3 card blocks for card-list pages), `card` (single `.card` for inline sections). Every `isLoading` return must render a skeleton — no `t('common.loading')` text cards. Preserves page `header` on loading where possible (e.g. `AdminDashboardPage` pattern). Wraps Mantine shimmer via `useReducedMotion() → animate={false}` + `@media (prefers-reduced-motion: reduce) → .skeleton-block`. |
 | `frontend/src/components/EmptyState.tsx` | `EmptyState` | Factory for list empty states. Props `titleKey`, `descriptionKey`, `actions?: ({ labelKey, variant?: 'primary'\|'secondary', icon? } & ({ to: string } \| { onClick: () => void }))[]`. Renders `<section className="card empty-state" aria-labelledby aria-describedby>` with `h3`, muted `p`, `.actions-row.actions-row-wrap`. CRUD lists offer a next-step CTA when results are empty and an action is available. Read-only inventories, filtered results and missing-access guidance may omit a CTA. Thin wrappers `TariffEmptyState`, `InvoicesEmptyState`, `MeteringPointsEmptyState` (and participant no-results) delegate to it. |
 
+<a id="dialog-behavior"></a>
+
 Usage rules:
 
+- `ConfirmDialog` and `FormModal` label dialogs and focus the active root on opening.
+  Closing restores a usable opener, the remaining top dialog, or the page
+  heading, unless focus has moved to a live control. Stacking and dismissal
+  follow opening order; a simultaneously opened child stays above its parent.
+  Tab cycles through dialog controls, then linked popup controls; do not use
+  positive `tabindex`. Linked widgets must handle Escape to close their popup
+  before the dialog; cover new popup families with browser tests.
+  Hidden, inert, disabled and negative-tabindex controls are
+  excluded. `returnFocusRef` supplies an explicit opener without restarting
+  focus management on rerender.
+  Only the top dialog is modal. Background branches are inert; toast feedback
+  remains available for announcements. The dialog manager exclusively owns
+  the inert attributes it changes while a branch is inactive and restores its
+  prior value when releasing that branch. Other components must not change
+  those attributes until the manager releases them.
+- Each `useConfirmDialog` opening has independent async state. Duplicate
+  submissions and stale handlers are ignored. Dismissal clears the dialog
+  before `onCancel`, which may open a replacement. Stale completions cannot
+  alter a replacement or show the hook's error toast. While processing,
+  **Close** dismisses the dialog without stopping the action; the status region
+  explains this. Callers prevent repeat requests and consume rejections they
+  already report with `consumeReportedError`; otherwise the active hook shows
+  a generic error. After dismissal, the hook does not report failures: callers
+  must own error feedback for operations that can outlive their dialog (for
+  example, mutation-level `onError`). Failed actions require reopening the
+  confirmation to retry.
+  Validate current typed input in the submission callback as well as disabling
+  the button; returning `false` leaves the confirmation open without a request.
 - Keep page titles outside data/scope branches; embedded views use the host
   title. Render tab roots below the header.
 - Repeatable content-query failures on migrated state surfaces offer retry. Scope retries reload the
@@ -211,7 +242,7 @@ language and should be reused instead of ad hoc page-local CSS when possible:
 | `.button`, `.button-secondary`, `.button-danger`, `.button-compact` | Shared button system (flat `var(--interactive)` fill; see SPEC-2026-08-ui-redesign-pdf-style; hover `var(--interactive-hover)`) |
 | `.badge`, `.badge-neutral`, `.badge-info`, `.badge-success`, `.badge-danger`, `.badge-warning` (+ invoice workflow variants `.badge-draft/.badge-approved/.badge-sent/.badge-paid/.badge-cancelled`) | Small semantic status/category labels — filled desaturated fills from the generated `--status-*` semantics, never gold-on-white |
 | `.error-banner`, `.warning-banner`, `.info-banner` | Error/warning surfaces used by `Notice`; `.info-banner` remains for existing information callouts. |
-| `.actions-row`, `.actions-row-wrap`, `.actions-row-end` | Inline action layouts |
+| `.actions-row`, `.actions-row-wrap`, `.actions-row-end`, `.actions-row-gap-lg` | Inline action layouts; the large gap preserves 1rem between confirmation buttons |
 | `.app-tabs`, `.app-tabs-list`, `.app-tabs-tab` | Token styling for Mantine `Tabs`: root grid rhythm (1.5rem gap), 1rem tab gap, muted labels with a 2px `--interactive` underline when active; applied via the `classNames` prop. |
 | `.empty-state` | Empty-state layout (`display:grid; gap:0.75rem` inside `.card`); retired inline-style version from `InvoicesEmptyState` |
 | `.skeleton-block` | Skeleton item radius/spacing bound to tokens, capped at `max-width: 100%` so fixed-width placeholders shrink with the page; `prefers-reduced-motion: reduce` disables Mantine shimmer via `useReducedMotion() → animate={false}` + `.skeleton-block` CSS |
@@ -222,10 +253,13 @@ language and should be reused instead of ad hoc page-local CSS when possible:
 | `.grid-span-full` | Full-width row inside `.form-grid` and other grids |
 | `.m-0`, `.mt-0`, `.mt-05`, `.mt-1`, `.mb-1`, `.mb-15` | Margin utilities; suffix is rem (`05` = 0.5, `15` = 1.5) |
 | `.flex-1` | Flexible spacer in a flex row |
-| `.dialog-scrim`, `.dialog-actions` | Shared modal backdrop and right-aligned dialog button row; the scrim's `z-index` stays inline (`lib/zLayers.ts`) |
+| `.dialog-actions` | Right-aligned form-footer buttons with a 1rem gap |
 | `.data-table-footer`, `.data-table-page-size` | Pagination footer and rows-per-page control of `DataTable` / `RawMeteringTable` |
 | `.visually-hidden` | Text for assistive technology only (clipped 1px box), e.g. per-step state text in icon rows |
 | `.participant-*`, `.metering-*`, `.tariff-*`, `.invoice-*` | Page-family-specific structural patterns that are already in active use |
+| `.dialog-scrim`, `.form-modal`, `.card.confirm-dialog` | Shared fixed scrim and opaque scrollable panels (90% width, 90dvh maximum height); FormModal defaults to 600px maximum width and confirmation to 400px. Panels use 2rem padding above 768px and 1rem at/below 768px. Components set maximum widths and stack z-index. |
+| `.email-log*` | Delivery history cards with wrapping text and status rows. |
+| `.balance-chart-grid` | Dashboard consumption/production pair, independent of form layout. Auto-fit columns require 24rem each plus a 2rem gap; panels with less space stack, and the minimum track width is capped at 100% of the panel. |
 
 **Inline styles.** Put static presentation in `index.css`, reusing existing
 classes where practical. Keep `style` props for runtime values,
@@ -583,6 +617,7 @@ These pages define the current management-page reference set.
 - Browser behavior: `frontend/screenshots/page-anatomy.spec.ts`, via `npm run test:browser`, covers page states, scope transitions, retained drafts, keyboard filtering and narrow layouts. Fixtures validate scoped requests; removal scenarios explicitly allow old-scope requests during reconciliation, then require the remaining scope. Captured images are manual-review artifacts, not baseline comparisons.
 - Meter drafts: `frontend/tests/metering-draft-scope.test.ts` — dialog retention/reset, original-community cache invalidation after remount or navigation, and suppression after account/session cache resets.
 - Email history/retry: `frontend/tests/billing-email-history.test.ts` — request ordering, close/reopen, and obsolete read/write completions across account/community changes.
+- Dialogs and paired charts: unit tests cover ownership and focus; browser tests cover inertness, popups, operation feedback, and chart sizing (`confirm-dialog`, `modal-stack`, `form-modal`, `typed-confirmation`, `dialog-behavior`, `dialog-modality`, `confirmation-operations`, `balance-chart-layout`).
 - Write lifetime: `frontend/tests/write-scope.test.ts` covers stable identity, StrictMode replay, account/community/capability changes and return transitions, unmount and explicit all-community writes. Consumer tests retain coverage for dialog resets and delayed completions; `imports-wizard.test.ts` also rejects queued upload/single-delete/bulk-delete dispatch after scope replacement.
 - Shared behavior: `billing-period-params.test.ts` covers calendar validation, canonical/legacy precedence, page defaults/minima, readiness, scope/interval reconciliation (including `align`: a carried-over range becomes the new community's whole period, a deep link within one community stays, a rejected link is replaced by the period shown), reload/back navigation, query/hash preservation and history policy. `invoice-presentation.test.ts` covers PDF states, missing-invoice rows, delivery annotation precedence, read-only rows, return context, cached failures and admin sorting/filtering/pagination. `screenshots/shared-page-behavior.spec.ts` checks period deep links, reload/back navigation, delayed interval data, routed tabs, Participants/Tariffs scope loading/failure/empty and cached-refresh states, console errors and desktop/400px layouts through the real app.
 - Invoice states: `frontend/tests/invoices-page.test.ts` — standalone titles during scope loading/error/empty states, embedded heading ownership, and a skeleton before initial period/query resolution.

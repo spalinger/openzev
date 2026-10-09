@@ -40,7 +40,7 @@ export function BalanceChart({
             {data.length === 0 ? (
                 <p className="muted">{t('pages.dashboard.noData')}</p>
             ) : (
-                <div className="form-grid balance-chart-grid">
+                <div className="balance-chart-grid">
                     <div>
                         <p className="balance-chart-label" style={{ color: CHART_LABEL }}>
                             {t('pages.dashboard.consumption')}

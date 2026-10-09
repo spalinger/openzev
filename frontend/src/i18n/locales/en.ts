@@ -197,6 +197,7 @@ export const en = {
         cancel: 'Cancel',
         confirm: 'Confirm',
         processing: 'Processing...',
+        actionContinues: 'Closing this dialog does not stop the action.',
         save: 'Save',
         create: 'Create',
         yes: 'Yes',
@@ -2230,6 +2231,8 @@ export const en = {
             purgeMessage: 'This permanently deletes "{{name}}" and everything under it — participants, metering points, readings, tariffs and invoices. This cannot be undone.',
             purgeConfirm: 'Permanently delete',
             purgeConfirmLabel: 'Type "{{name}}" to confirm.',
+            enableFailed: 'Failed to enable the ZEV.',
+            disableFailed: 'Failed to disable the ZEV.',
             purgeFailed: 'Failed to delete the ZEV.',
             wizard: {
                 titleStep: 'Create ZEV · Step {{step}} of 4',

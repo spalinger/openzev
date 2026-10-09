@@ -1,5 +1,6 @@
 import { Fragment, useMemo, type ReactNode } from 'react'
 import { Menu } from '@mantine/core'
+import { closePopupOnEscape } from '../lib/popupKeyboard'
 
 export interface ActionMenuItem {
     key: string
@@ -46,6 +47,7 @@ export function ActionMenu({ label, items, icon, iconOnly = false }: ActionMenuP
                     className="button button-secondary button-compact"
                     disabled={availableItems.length === 0}
                     aria-haspopup="menu"
+                    onKeyDown={closePopupOnEscape}
                     aria-label={iconOnly ? label : undefined}
                     title={iconOnly ? label : undefined}
                 >

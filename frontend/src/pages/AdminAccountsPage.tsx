@@ -6,7 +6,7 @@ import {
 import { useMemo, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ActionMenu } from '../components/ActionMenu'
-import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
+import { ConfirmDialog, consumeReportedError, useConfirmDialog } from '../components/ConfirmDialog'
 import { StatCard } from '../components/StatCard'
 import { FormModal } from '../components/FormModal'
 import { AccountCreatedNotice, type AccountCreatedNoticeData } from '../features/accounts/AccountCreatedNotice'
@@ -113,6 +113,15 @@ export function AdminAccountsPage({ embedded = false }: { embedded?: boolean }) 
         onError: (error) => setEditUserError(formatApiError(error, t('pages.accounts.feedback.updateFailed'))),
     })
 
+    const activationMutation = useMutation({
+        mutationFn: ({ userId, active }: { userId: number; active: boolean }) => updateUser(userId, { is_active: active }),
+        onSuccess: () => {
+            pushToast(t('pages.accounts.feedback.updateSuccess'), 'success')
+            void queryClient.invalidateQueries({ queryKey: queryKeys.auth.users() })
+        },
+        onError: (error) => pushToast(formatApiError(error, t('pages.accounts.feedback.updateFailed')), 'error'),
+    })
+
     const deleteUserMutation = useMutation({
         mutationFn: (userId: number) => deleteUser(userId),
         onSuccess: (_data, deletedUserId) => {
@@ -167,9 +176,7 @@ export function AdminAccountsPage({ embedded = false }: { embedded?: boolean }) 
             confirmText: t('pages.accounts.resetMfaConfirm'),
             cancelText: t('common.cancel'),
             isDangerous: true,
-            onConfirm: async () => {
-                await resetMfaMutation.mutateAsync(account.id)
-            },
+            onConfirm: () => consumeReportedError(resetMfaMutation.mutateAsync(account.id)),
         })
     }
 
@@ -180,9 +187,7 @@ export function AdminAccountsPage({ embedded = false }: { embedded?: boolean }) 
             confirmText: t('pages.accounts.signOutConfirm'),
             cancelText: t('common.cancel'),
             isDangerous: true,
-            onConfirm: async () => {
-                await revokeSessionsMutation.mutateAsync(account.id)
-            },
+            onConfirm: () => consumeReportedError(revokeSessionsMutation.mutateAsync(account.id)),
         })
     }
 
@@ -192,16 +197,14 @@ export function AdminAccountsPage({ embedded = false }: { embedded?: boolean }) 
             message: t('pages.accounts.impersonateMessage', { name: accountDisplayName(account) }),
             confirmText: t('pages.accounts.impersonateConfirm'),
             cancelText: t('common.cancel'),
-            onConfirm: async () => {
-                await impersonationMutation.mutateAsync(account.id)
-            },
+            onConfirm: () => consumeReportedError(impersonationMutation.mutateAsync(account.id)),
         })
     }
 
     function confirmSetActive(account: AdminUser, active: boolean) {
         if (active) {
             // Reactivating is reversible and expected — no confirmation needed.
-            updateUserMutation.mutate({ userId: account.id, payload: { is_active: true } })
+            activationMutation.mutate({ userId: account.id, active: true })
             return
         }
         confirm({
@@ -210,9 +213,7 @@ export function AdminAccountsPage({ embedded = false }: { embedded?: boolean }) 
             confirmText: t('pages.accounts.deactivateConfirm'),
             cancelText: t('common.cancel'),
             isDangerous: true,
-            onConfirm: async () => {
-                await updateUserMutation.mutateAsync({ userId: account.id, payload: { is_active: false } })
-            },
+            onConfirm: () => consumeReportedError(activationMutation.mutateAsync({ userId: account.id, active: false })),
         })
     }
 
@@ -231,9 +232,7 @@ export function AdminAccountsPage({ embedded = false }: { embedded?: boolean }) 
             confirmText: t('pages.accounts.deleteConfirm'),
             cancelText: t('common.cancel'),
             isDangerous: true,
-            onConfirm: async () => {
-                await deleteUserMutation.mutateAsync(account.id)
-            },
+            onConfirm: () => consumeReportedError(deleteUserMutation.mutateAsync(account.id)),
         })
     }
 
@@ -417,7 +416,7 @@ export function AdminAccountsPage({ embedded = false }: { embedded?: boolean }) 
                                         key: 'toggle-active',
                                         label: t(account.is_active ? 'pages.accounts.deactivate' : 'pages.accounts.activate'),
                                         icon: <FontAwesomeIcon icon={account.is_active ? faBan : faPlay} fixedWidth />,
-                                        disabled: updateUserMutation.isPending || dialogLoading,
+                                        disabled: activationMutation.isPending || dialogLoading,
                                         onClick: () => confirmSetActive(account, !account.is_active),
                                     }]),
                                 {

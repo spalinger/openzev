@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faKey, faPen, faPlus, faTrash } from '@fortawesome/free-solid-svg-icons'
 import { CivilDateInput } from '../../components/CivilDateInput'
-import { ConfirmDialog, useConfirmDialog } from '../../components/ConfirmDialog'
+import { ConfirmDialog, consumeReportedError, useConfirmDialog } from '../../components/ConfirmDialog'
 import {
     assignPartyRole,
     createParty,
@@ -176,7 +176,7 @@ export function ZevPartiesSection({ zevId, canManage }: Props) {
             message: t('pages.zevSettings.parties.deleteMessage', { name: party.display_name }),
             confirmText: t('common.delete'),
             isDangerous: true,
-            onConfirm: () => removeParty.mutateAsync(party).then(() => undefined),
+            onConfirm: () => consumeReportedError(removeParty.mutateAsync(party)),
         })
     }
 

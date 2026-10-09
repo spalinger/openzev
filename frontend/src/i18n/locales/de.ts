@@ -188,6 +188,7 @@ export const de = {
         cancel: 'Abbrechen',
         confirm: 'Bestätigen',
         processing: 'Wird verarbeitet…',
+        actionContinues: 'Das Schliessen dieses Dialogs stoppt die Aktion nicht.',
         save: 'Speichern',
         create: 'Erstellen',
         yes: 'Ja',
@@ -2219,6 +2220,8 @@ export const de = {
             purgeMessage: 'Dies löscht "{{name}}" und alles darunter endgültig — Teilnehmende, Zählpunkte, Zählerstände, Tarife und Rechnungen. Dies kann nicht rückgängig gemacht werden.',
             purgeConfirm: 'Endgültig löschen',
             purgeConfirmLabel: 'Geben Sie "{{name}}" ein, um zu bestätigen.',
+            enableFailed: 'ZEV konnte nicht aktiviert werden.',
+            disableFailed: 'ZEV konnte nicht deaktiviert werden.',
             purgeFailed: 'ZEV konnte nicht gelöscht werden.',
             wizard: {
                 titleStep: 'ZEV erstellen · Schritt {{step}} von 4',

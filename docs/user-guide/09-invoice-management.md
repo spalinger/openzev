@@ -392,6 +392,9 @@ The **Sent** step shows only the latest delivery status. Every attempt, with
 recipient, status and error, is in **Billing → Emails** under **View
 history**, where a failed latest attempt also has a **Retry** button.
 
+Use Tab or Shift+Tab to move between email-history controls, then Escape or
+**Close** to return to the history button.
+
 Email sending is asynchronous via Celery with automatic retries. For delivery mechanics, retry behavior, and troubleshooting failed emails, see [Email Configuration](10-email-configuration.md).
 
 ## Marking Invoices as Paid

@@ -18,7 +18,7 @@ import { formatDateTime, useAppSettings } from '../../lib/appSettings'
 import { downloadBlob } from '../../lib/downloadBlob'
 import { formatBytes } from '../../lib/numbers'
 import { useToast } from '../../lib/toast'
-import { ConfirmDialog, useConfirmDialog } from '../../components/ConfirmDialog'
+import { ConfirmDialog, consumeReportedError, useConfirmDialog } from '../../components/ConfirmDialog'
 import type { BackupJob, BackupJobScope, BackupJobStatus, BackupStatus } from '../../types/api'
 import { BackupJobDetailsModal } from './BackupJobDetailsModal'
 import {
@@ -125,7 +125,7 @@ export function BackupJobsSection({ status }: { status: BackupStatus | undefined
             message: t('pages.backups.jobs.deleteFileMessage', { name: job.archive_name }),
             confirmText: t('pages.backups.jobs.deleteFile'),
             isDangerous: true,
-            onConfirm: () => deleteFileMutation.mutateAsync(job),
+            onConfirm: () => consumeReportedError(deleteFileMutation.mutateAsync(job)),
         })
 
     const downloadMutation = useMutation({
@@ -317,6 +317,7 @@ export function BackupJobsSection({ status }: { status: BackupStatus | undefined
                                                 <button
                                                     type="button"
                                                     className="button button-secondary button-compact"
+                                                    disabled={deleteFileMutation.isPending}
                                                     onClick={() => askToDeleteFile(job)}
                                                 >
                                                     <FontAwesomeIcon icon={faTrash} fixedWidth />

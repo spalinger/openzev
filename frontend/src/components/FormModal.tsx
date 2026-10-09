@@ -1,6 +1,7 @@
-import { useEffect, useId, useRef, type ReactNode } from 'react'
+import { useId, type ReactNode, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Z_MODAL } from '../lib/zLayers'
+import { useDialogBehavior } from './useDialogBehavior'
 
 interface FormModalProps {
     isOpen: boolean
@@ -8,113 +9,26 @@ interface FormModalProps {
     children: ReactNode
     onClose: () => void
     maxWidth?: string
+    returnFocusRef?: RefObject<HTMLElement | null>
 }
 
-// Open-modal stack: with nested modals (e.g. the import wizard's overwrite
-// confirmation on top of the wizard) only the top-most dialog may claim
-// Escape, and closing it returns focus to the dialog below.
-// Module-level state is intentional: all modal instances share one Escape/focus stack.
-const modalStack: string[] = []
-const modalNodes = new Map<string, HTMLElement>()
-
-export function useModalStack(isOpen = true): string {
-    const id = useId()
-    useEffect(() => {
-        if (!isOpen) return
-        modalStack.push(id)
-        return () => {
-            const index = modalStack.indexOf(id)
-            if (index >= 0) modalStack.splice(index, 1)
-        }
-    }, [id, isOpen])
-    return id
-}
-
-export function isTopModal(id: string): boolean {
-    return modalStack.length > 0 && modalStack[modalStack.length - 1] === id
-}
-
-export function focusables(root: HTMLElement): HTMLElement[] {
-    return Array.from(
-        root.querySelectorAll<HTMLElement>(
-            'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-        ),
-    )
-}
-
-export function modalDepth(id: string): number {
-    return modalStack.indexOf(id)
-}
-
-export function FormModal({ isOpen, title, children, onClose, maxWidth = '600px' }: FormModalProps) {
+export function FormModal({ isOpen, title, children, onClose, maxWidth = '600px', returnFocusRef }: FormModalProps) {
     const { t } = useTranslation()
     const titleId = useId()
-    const stackId = useModalStack(isOpen)
-    const dialogRef = useRef<HTMLDivElement>(null)
-    const restoreRef = useRef<HTMLElement | null>(null)
-    const onCloseRef = useRef(onClose)
-
-    useEffect(() => {
-        onCloseRef.current = onClose
-    }, [onClose])
-
-    useEffect(() => {
-        if (!isOpen) return
-        if (document.activeElement instanceof HTMLElement && !dialogRef.current?.contains(document.activeElement)) {
-            restoreRef.current = document.activeElement
-        }
-        dialogRef.current?.focus()
-        const onKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                if (!isTopModal(stackId) || event.defaultPrevented) return
-                event.preventDefault()
-                onCloseRef.current()
-                return
-            }
-            // Only the top-most dialog traps Tab; background modals must not
-            // steal focus while a confirmation sits on top of the wizard.
-            if (event.key !== 'Tab' || !dialogRef.current) return
-            if (!isTopModal(stackId) || event.defaultPrevented) return
-            const items = focusables(dialogRef.current)
-            if (items.length === 0) return
-            const first = items[0]
-            const last = items[items.length - 1]
-            const active = document.activeElement as Node | null
-            const inside = active !== null && dialogRef.current.contains(active)
-            if (event.shiftKey && (!inside || document.activeElement === first)) {
-                event.preventDefault()
-                last.focus()
-            } else if (!event.shiftKey && (!inside || document.activeElement === last)) {
-                event.preventDefault()
-                first.focus()
-            }
-        }
-        document.addEventListener('keydown', onKeyDown)
-        if (dialogRef.current) modalNodes.set(stackId, dialogRef.current)
-        return () => {
-            document.removeEventListener('keydown', onKeyDown)
-            modalNodes.delete(stackId)
-            const active = document.activeElement
-            // Focus already moved to a live element (e.g. a child dialog
-            // took it): leave it alone. body means focus was lost with the
-            // removed dialog, so fall through to restore.
-            if (active instanceof HTMLElement && active !== document.body && document.contains(active)) return
-            // Otherwise return focus to the dialog below, or the opener.
-            const below = modalStack.filter((entry) => entry !== stackId)
-            const belowNode = below.length > 0 ? modalNodes.get(below[below.length - 1]) : undefined
-            if (belowNode && document.contains(belowNode)) belowNode.focus()
-            else restoreRef.current?.focus()
-        }
-    }, [isOpen, stackId])
+    const { dialogRef, depth, isTop } = useDialogBehavior({ isOpen, onClose, returnFocusRef })
 
     if (!isOpen) return null
 
     return (
-        <div className="dialog-scrim" style={{ zIndex: Z_MODAL }} onClick={onClose}>
+        <div
+            className="dialog-scrim"
+            style={{ zIndex: Z_MODAL + depth }}
+            onClick={() => { if (isTop()) onClose() }}
+        >
             <div
                 ref={dialogRef}
                 role="dialog"
-                aria-modal="true"
+                aria-modal={isTop() || undefined}
                 aria-labelledby={titleId}
                 tabIndex={-1}
                 className="form-modal"
@@ -124,6 +38,7 @@ export function FormModal({ isOpen, title, children, onClose, maxWidth = '600px'
                 <div className="form-modal-header">
                     <h2 id={titleId}>{title}</h2>
                     <button
+                        type="button"
                         onClick={onClose}
                         aria-label={t('common.close')}
                         className="form-modal-close"

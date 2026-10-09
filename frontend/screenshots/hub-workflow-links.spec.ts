@@ -366,11 +366,14 @@ test('annual-document aliases retain participant context and document access', a
   await page.goto('/billing/statements?year=2025&from=bookmark#documents')
   await expect(page).toHaveURL(/\/reports\?year=2025&from=bookmark#documents$/)
   await expect(page.getByRole('button', { name: /Download.*PDF/ }).first()).toBeVisible()
+  const obsoletePreview = await page.locator('main iframe').first().getAttribute('src')
+  expect(obsoletePreview).toMatch(/^blob:/)
   await page.goto('/me/statement')
   await expect(page.getByRole('button', { name: /Download.*PDF/ }).first()).toBeVisible()
   // Navigation can cancel an obsolete preview request or Chromium's PDF viewer.
   expect(errors.filter(error => !(error.endsWith('net::ERR_ABORTED')
     && (error.includes('/annual-statement/')
+      || error === `GET ${obsoletePreview}: net::ERR_ABORTED`
       || error.startsWith('GET chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/'))))).toEqual([])
 })
 
@@ -378,7 +381,8 @@ test('a failed source load offers retry without claiming there are zero sources'
   const state = { endpoint: '/tariffs/dynamic-sources/', failed: true }
   const errors = await mockApi(page, state)
   await page.goto('/admin/dynamic-sources?source=s1#prices')
-  await expect(page.locator('main').getByRole('alert')).toBeVisible()
+  // Allow the query client's automatic retry backoff to finish.
+  await expect(page.locator('main').getByRole('alert')).toBeVisible({ timeout: 20_000 })
   await expect(page.locator('main .stat-card')).toHaveCount(0)
   await expect(page.locator('main .empty-state')).toHaveCount(0)
   state.failed = false

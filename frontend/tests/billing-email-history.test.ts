@@ -54,7 +54,7 @@ function historyButtons() {
 }
 
 function modalTitle() {
-    return container.querySelector('h3')?.textContent
+    return container.querySelector('[role="dialog"] h2')?.textContent
 }
 
 beforeEach(async () => {
@@ -79,6 +79,22 @@ afterEach(() => {
 })
 
 describe('billing email history request ownership', () => {
+    it('labels history, moves focus inside, and restores its opener after Escape', async () => {
+        vi.mocked(fetchEmailLogs).mockResolvedValueOnce([])
+        const opener = historyButtons()[0]
+        opener.focus()
+        act(() => opener.click())
+        await waitForCondition(() => container.querySelector('[role="dialog"]') !== null, 'email history')
+        const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!
+        expect(dialog.getAttribute('aria-modal')).toBe('true')
+        expect(document.getElementById(dialog.getAttribute('aria-labelledby')!)?.textContent)
+            .toBe('pages.invoices.emailLogs.title:A')
+        expect(document.activeElement).toBe(dialog)
+        act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+        expect(container.querySelector('[role="dialog"]')).toBeNull()
+        expect(document.activeElement).toBe(opener)
+    })
+
     it('keeps the newer history when the older request finishes last', async () => {
         const a = deferred(), b = deferred()
         vi.mocked(fetchEmailLogs).mockImplementation(id => id === '1' ? a.promise : b.promise)

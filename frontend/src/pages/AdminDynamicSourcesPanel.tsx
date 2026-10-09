@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faArrowsRotate, faChartLine, faClockRotateLeft, faEllipsis, faEraser, faMagnifyingGlass, faPen, faPlus, faTrash } from '@fortawesome/free-solid-svg-icons'
@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { ActionMenu } from '../components/ActionMenu'
 import { Toolbar } from '../components/Toolbar'
 import { DataTable, type ColumnDef } from '../components/DataTable'
-import { ConfirmDialog } from '../components/ConfirmDialog'
+import { ConfirmDialog, consumeReportedError, useConfirmDialog } from '../components/ConfirmDialog'
 import { EmptyState } from '../components/EmptyState'
 import { FormModal } from '../components/FormModal'
 import { StatCard } from '../components/StatCard'
@@ -43,6 +43,7 @@ export function AdminDynamicSourcesPanel() {
   const { settings } = useAppSettings()
   const { pushToast } = useToast()
   const queryClient = useQueryClient()
+  const { dialog, confirm, handleConfirm, handleCancel } = useConfirmDialog()
   const [formSource, setFormSource] = useState<DynamicTariffSource | null | undefined>(undefined)
   const [historySource, setHistorySource] = useState<DynamicTariffSource | null>(null)
   const [activitySource, setActivitySource] = useState<DynamicTariffSource | null>(null)
@@ -55,19 +56,8 @@ export function AdminDynamicSourcesPanel() {
     { mode: 'clear' | 'delete'; source: DynamicTariffSource } | null
   >(null)
   const [confirmation, setConfirmation] = useState('')
-
-  const openDestructiveDialog = useCallback(
-    (mode: 'clear' | 'delete', source: DynamicTariffSource) => {
-      setConfirmation('')
-      setDestructive({ mode, source })
-    },
-    [setConfirmation, setDestructive],
-  )
-
-  const closeDestructiveDialog = useCallback(() => {
-    setDestructive(null)
-    setConfirmation('')
-  }, [setConfirmation, setDestructive])
+  // State controls the button; the ref supplies current input at dispatch.
+  const confirmationRef = useRef('')
 
   const sourcesQuery = useQuery({
     queryKey: queryKeys.tariffs.dynamicSources(),
@@ -100,10 +90,9 @@ export function AdminDynamicSourcesPanel() {
   })
 
   const clearMutation = useMutation({
-    mutationFn: (source: DynamicTariffSource) => clearDynamicSourcePrices(source.id, confirmation),
+    mutationFn: ({ source, confirmation }: { source: DynamicTariffSource; confirmation: string }) => clearDynamicSourcePrices(source.id, confirmation),
     onSuccess: async (result) => {
       pushToast(t('pages.dynamicSources.cleared', { count: result.deleted_points }), 'success')
-      closeDestructiveDialog()
       await queryClient.invalidateQueries({ queryKey: queryKeys.tariffs.dynamicSources() })
       await queryClient.invalidateQueries({ queryKey: ['admin', 'audit-events'] })
     },
@@ -111,10 +100,9 @@ export function AdminDynamicSourcesPanel() {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (source: DynamicTariffSource) => deleteDynamicTariffSource(source.id, confirmation),
+    mutationFn: ({ source, confirmation }: { source: DynamicTariffSource; confirmation: string }) => deleteDynamicTariffSource(source.id, confirmation),
     onSuccess: async () => {
       pushToast(t('pages.dynamicSources.deleted'), 'success')
-      closeDestructiveDialog()
       await queryClient.invalidateQueries({ queryKey: queryKeys.tariffs.dynamicSources() })
       await queryClient.invalidateQueries({ queryKey: ['admin', 'audit-events'] })
     },
@@ -129,6 +117,35 @@ export function AdminDynamicSourcesPanel() {
     }),
     enabled: Boolean(activitySource),
   })
+
+  const clearPrices = clearMutation.mutateAsync
+  const deleteSource = deleteMutation.mutateAsync
+  const queueFetch = fetchMutation.mutate
+  const recheckSource = recheckMutation.mutate
+  const openDestructiveDialog = useCallback(
+    (mode: 'clear' | 'delete', source: DynamicTariffSource) => {
+      setConfirmation('')
+      confirmationRef.current = ''
+      setDestructive({ mode, source })
+      confirm({
+        title: t(mode === 'delete' ? 'pages.dynamicSources.deleteTitle' : 'pages.dynamicSources.clearTitle'),
+        message: t(mode === 'delete' ? 'pages.dynamicSources.deleteWarning' : 'pages.dynamicSources.clearWarning'),
+        confirmText: t(mode === 'delete' ? 'pages.dynamicSources.deleteAction' : 'pages.dynamicSources.clearAction'),
+        isDangerous: true,
+        onConfirm: () => {
+          const submittedConfirmation = confirmationRef.current
+          if (submittedConfirmation.trim() !== source.label.trim()) return false
+          return consumeReportedError((mode === 'delete' ? deleteSource : clearPrices)({ source, confirmation: submittedConfirmation }))
+        },
+        onCancel: () => {
+          setDestructive(null)
+          setConfirmation('')
+          confirmationRef.current = ''
+        },
+      })
+    },
+    [clearPrices, confirm, deleteSource, setConfirmation, setDestructive, t],
+  )
 
   const columns = useMemo<ColumnDef<DynamicTariffSource, unknown>[]>(() => [
     {
@@ -206,13 +223,13 @@ export function AdminDynamicSourcesPanel() {
               {
                 key: 'fetch', label: t('pages.dynamicSources.fetchNow'), section: t('pages.dynamicSources.actions.fetch'),
                 icon: <FontAwesomeIcon icon={faArrowsRotate} fixedWidth />,
-                onClick: () => fetchMutation.mutate({ source, backfill: false }),
+                onClick: () => queueFetch({ source, backfill: false }),
               },
               {
                 key: 'backfill', label: t('pages.dynamicSources.fetchBackfill'),
                 icon: <FontAwesomeIcon icon={faClockRotateLeft} fixedWidth />,
                 disabled: !source.supports_backfill,
-                onClick: () => fetchMutation.mutate({ source, backfill: true }),
+                onClick: () => queueFetch({ source, backfill: true }),
               },
               {
                 key: 'edit', label: t('common.edit'), section: t('pages.dynamicSources.actions.manage'),
@@ -227,10 +244,11 @@ export function AdminDynamicSourcesPanel() {
                 // source.
                 key: 'recheck', label: t('pages.dynamicSources.recheckAction'),
                 icon: <FontAwesomeIcon icon={faMagnifyingGlass} fixedWidth />,
-                onClick: () => recheckMutation.mutate(source),
+                onClick: () => recheckSource(source),
               },
               {
                 key: 'clear', label: t('pages.dynamicSources.clearAction'), danger: true,
+                disabled: clearMutation.isPending || deleteMutation.isPending,
                 icon: <FontAwesomeIcon icon={faEraser} fixedWidth />,
                 onClick: () => openDestructiveDialog('clear', source),
               },
@@ -246,7 +264,7 @@ export function AdminDynamicSourcesPanel() {
                   : t('pages.dynamicSources.deleteAction'),
                 danger: true,
                 icon: <FontAwesomeIcon icon={faTrash} fixedWidth />,
-                disabled: source.linked_tariff_count > 0,
+                disabled: source.linked_tariff_count > 0 || clearMutation.isPending || deleteMutation.isPending,
                 onClick: () => openDestructiveDialog('delete', source),
               },
             ]}
@@ -254,7 +272,7 @@ export function AdminDynamicSourcesPanel() {
         )
       },
     },
-  ], [fetchMutation, openDestructiveDialog, recheckMutation, settings, t, setHistorySource, setActivitySource, setFormSource])
+  ], [clearMutation.isPending, deleteMutation.isPending, queueFetch, openDestructiveDialog, recheckSource, settings, t, setHistorySource, setActivitySource, setFormSource])
 
   const sources = sourcesQuery.data ?? []
   const visibleSources = sourceId ? sources.filter((source) => source.id === sourceId) : sources
@@ -373,27 +391,17 @@ export function AdminDynamicSourcesPanel() {
         </PageState>
       </FormModal>
 
-      {destructive && (
+      {dialog && destructive && (
         <ConfirmDialog
-          title={t(destructive.mode === 'delete'
-            ? 'pages.dynamicSources.deleteTitle'
-            : 'pages.dynamicSources.clearTitle')}
-          message={t(destructive.mode === 'delete'
-            ? 'pages.dynamicSources.deleteWarning'
-            : 'pages.dynamicSources.clearWarning')}
-          isDangerous
+          {...dialog}
           isLoading={clearMutation.isPending || deleteMutation.isPending}
-          confirmText={t(destructive.mode === 'delete'
-            ? 'pages.dynamicSources.deleteAction'
-            : 'pages.dynamicSources.clearAction')}
           confirmDisabled={confirmation.trim() !== destructive.source.label.trim()}
-          onCancel={closeDestructiveDialog}
-          onConfirm={() => (destructive.mode === 'delete' ? deleteMutation : clearMutation)
-            .mutate(destructive.source)}
+          onCancel={handleCancel}
+          onConfirm={handleConfirm}
         >
           <label style={{ gridColumn: '1 / -1' }}>
             <span>{t('pages.dynamicSources.confirmLabel', { label: destructive.source.label })}</span>
-            <input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} required />
+            <input value={confirmation} onChange={(event) => { confirmationRef.current = event.target.value; setConfirmation(event.target.value) }} required />
           </label>
         </ConfirmDialog>
       )}

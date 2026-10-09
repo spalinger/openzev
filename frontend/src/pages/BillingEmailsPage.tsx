@@ -55,6 +55,7 @@ function BillingEmailsContent() {
     const [historyLogs, setHistoryLogs] = useState<EmailLog[]>([])
     const [historyLoadingId, setHistoryLoadingId] = useState<string | null>(null)
     const historyRequest = useRef(0)
+    const historyOpener = useRef<HTMLButtonElement | null>(null)
     const mounted = useRef(false)
     useEffect(() => {
         mounted.current = true
@@ -113,7 +114,9 @@ function BillingEmailsContent() {
         },
     })
 
-    async function openHistory(invoice: Invoice) {
+    async function openHistory(invoice: Invoice, opener: HTMLButtonElement) {
+        // Capture the opener before disabling it so closing can restore focus.
+        historyOpener.current = opener
         const request = ++historyRequest.current
         setHistoryLoadingId(invoice.id)
         try {
@@ -185,7 +188,7 @@ function BillingEmailsContent() {
                                                 type="button"
                                                 className="button button-secondary button-compact"
                                                 disabled={historyLoadingId === invoice.id}
-                                                onClick={() => void openHistory(invoice)}
+                                                onClick={(event) => void openHistory(invoice, event.currentTarget)}
                                             >
                                                 <FontAwesomeIcon icon={faEnvelope} fixedWidth />
                                                 {historyLoadingId === invoice.id
@@ -229,6 +232,7 @@ function BillingEmailsContent() {
                     if (historyInvoice) retryMutation.mutate({ invoice: historyInvoice, emailLogId })
                 } : undefined}
                 isRetrying={retryMutation.isPending}
+                returnFocusRef={historyOpener}
             />
         </div>
     )

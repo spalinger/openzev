@@ -14,8 +14,8 @@
     "test:unit:watch": "vitest",
     "preview": "vite preview",
     "screenshots": "playwright test --config screenshots.config.ts screenshots/capture.spec.ts",
-    "shot": "playwright test --config screenshots.config.ts screenshots/shot.spec.ts",
-    "test:browser": "playwright test --config screenshots.config.ts screenshots/layout-overflow.spec.ts screenshots/field-geometry.spec.ts screenshots/page-anatomy.spec.ts screenshots/shared-page-behavior.spec.ts screenshots/hub-workflow-links.spec.ts screenshots/billing-presentation.spec.ts screenshots/defaults-accessibility.spec.ts screenshots/pdf-helpers.spec.ts",
+    "shot": "playwright test --config screenshots.config.ts --project=shot",
+    "test:browser": "playwright test --config screenshots.config.ts --project=browser",
     "test:pdf-helpers": "playwright test --config screenshots.config.ts screenshots/pdf-helpers.spec.ts --project=browser --no-deps",
     "lint:style": "stylelint \"src/**/*.css\""
   },
@@ -41,6 +41,7 @@
     "react-leaflet": "^5.0.0",
     "react-router-dom": "^7.13.1",
     "recharts": "^3.8.0",
+    "tabbable": "^6.5.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

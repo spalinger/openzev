@@ -765,7 +765,9 @@ positive coverage and maintenance-link permissions.
   destructive action — clearing the fetched prices, or deleting the source
   outright. Delete is disabled in the menu while `linked_tariff_count > 0`,
   so the 409 the server would return is visible before the round trip. The
-  source list refreshes every 30 seconds.
+  source list refreshes every 30 seconds. Both destructive actions validate
+  and capture submitted inputs, and follow the shared
+  [dialog contract](2026-04-frontend-management-page-design.md#dialog-behavior).
 
 ## 11. Transfer archive
 
