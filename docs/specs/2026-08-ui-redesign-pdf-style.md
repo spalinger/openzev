@@ -982,15 +982,15 @@ contracts are unchanged.
   is the sidebar's last control, a plain row below the footer's hairline
   (`--sidebar-line`, `0.75rem` above): no border or card fill,
   `--radius-md`, padding `0.5rem`; hover/open `--sidebar-hover`; on
-  `/account` `.is-current` (`--sidebar-active`). It holds a `2rem` round
-  avatar in `--brand-step-5` (lighter than the current row, so it stands off
-  every state), the name (`0.8125rem/600`, white) over the email
-  (`0.75rem`, sage), both ellipsized, and the sage up/down selector mark
-  (`.user-menu-caret`, `SelectorIcon`). Its panel (`#user-menu-list`:
-  Account, Language, Log out) opens upwards over the navigation and ends with
+  `/account` `.is-current` (`--sidebar-active`). It holds the name (`0.8125rem/600`, white,
+  ellipsized) and the sage up/down selector mark (`.user-menu-caret`,
+  `SelectorIcon`). Its panel (`#user-menu-list`) opens upwards over the
+  navigation, starts with the login's email (`.user-menu-email`: `0.75rem`
+  muted, ellipsized, hairline below), lists Account, Language, Log out and
+  ends with
   the source link (`.user-menu-about`: hairline above, GitHub mark,
   "OpenZEV" and the version, `0.75rem` muted, darker on hover). Collapsed, the
-  trigger shows the avatar alone, centred, with the account name as `title`,
+  trigger shows the selector mark alone, centred, with the account name as `title`,
   and expands the sidebar before opening. Focus, Escape and outside-click
   behave as before.
 - `header.top-nav` (outside `main`) holds `.mobile-bar` and the impersonation
