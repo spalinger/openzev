@@ -104,7 +104,7 @@ class InvoiceListPayloadTests(TestCase):
         self.assertNotIn("email_logs", row)
 
     def test_list_keeps_every_field_its_consumers_read(self):
-        """AdminInvoicesPage and DashboardPage columns — dropping any of these
+        """AdminInvoicesContent and DashboardPage columns — dropping any of these
         would blank a column rather than just shrink the payload."""
         resp = self._client().get("/api/v1/invoices/invoices/")
 

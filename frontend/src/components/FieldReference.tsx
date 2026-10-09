@@ -42,7 +42,7 @@ export function insertTemplateToken(
     }
 }
 
-export function applyTemplateTokenSelection(
+function applyTemplateTokenSelection(
     element: TemplateEditorElement,
     insertion: TemplateTokenInsertion,
 ): void {

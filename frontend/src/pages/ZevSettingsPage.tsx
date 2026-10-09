@@ -82,7 +82,7 @@ export function ZevSettingsTabRoute() {
     return <ZevSettingsPage tab={active} />
 }
 
-export function ZevSettingsPage({ tab = 'general' }: { tab?: ZevSettingsTab }) {
+function ZevSettingsPage({ tab = 'general' }: { tab?: ZevSettingsTab }) {
     const { t } = useTranslation()
     const scopeNote = useScopeNote()
     const { navigateTab } = usePageNavigation()

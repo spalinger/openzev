@@ -32,7 +32,7 @@ export const SECOND_DEMO_ZEV_NAME = 'ZEV Sonnenfirma AG'
 export const MISSING_DEMO_ZEV = 'Demo ZEV not found — run seed_demo before capturing screenshots'
 
 /** Seeded participant the participant-side captures show. */
-export const DEMO_PARTICIPANT_EMAIL = 'anna@openzev.local'
+const DEMO_PARTICIPANT_EMAIL = 'anna@openzev.local'
 
 // ---------------------------------------------------------------------------
 // Helpers

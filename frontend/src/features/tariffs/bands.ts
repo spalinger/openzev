@@ -20,7 +20,7 @@ type BandLike = {
 }
 
 /** `07:00` from either `07:00` or `07:00:00`. */
-export function hhmm(value: string): string {
+function hhmm(value: string): string {
     return value.slice(0, 5)
 }
 

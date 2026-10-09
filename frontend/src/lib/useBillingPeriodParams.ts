@@ -39,7 +39,7 @@ export function readBillingPeriodParams(params: URLSearchParams, legacyParams = 
 const UNRESOLVED_RANGE: BillingRange = { from: '', to: '' }
 
 /** URL rewrite needed for a scope change or a rejected billing link. */
-export function resolveBillingPeriodTarget({
+function resolveBillingPeriodTarget({
     scopeChanged, scopeChange, interval, validRange, hasRangeParams,
     fallbackRange, minimumRangeStart, minimumFallback,
 }: {

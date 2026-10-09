@@ -77,7 +77,6 @@ vi.mock('../src/pages/AdminApiKeysPage', () => ({ AdminApiKeysPage: marker('admi
 vi.mock('../src/pages/ZevListPage', () => ({ ZevListPage: marker('admin-zevs') }))
 vi.mock('../src/pages/ParticipantsPage', () => ({ ParticipantsPage: marker('participants') }))
 vi.mock('../src/pages/ZevSettingsPage', () => ({
-    ZevSettingsPage: marker('zev-settings'),
     ZevSettingsTabRoute: marker('zev-settings'),
 }))
 vi.mock('../src/pages/MeteringPointsPage', () => ({ MeteringPointsPage: marker('metering-points') }))

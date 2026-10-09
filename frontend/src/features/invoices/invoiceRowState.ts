@@ -9,7 +9,7 @@ export function liveInvoice(row: InvoicePeriodParticipantRow): Invoice | null {
 }
 
 /** Status of the newest email attempt, from the annotation or the logs. */
-export function latestDeliveryStatus(invoice: Invoice | null): 'pending' | 'sent' | 'failed' | null {
+function latestDeliveryStatus(invoice: Invoice | null): 'pending' | 'sent' | 'failed' | null {
     const status = invoice?.last_email_status ?? getLatestEmailLog(invoice)?.status
     return status === 'pending' || status === 'sent' || status === 'failed' ? status : null
 }
@@ -18,7 +18,7 @@ export function latestDeliveryStatus(invoice: Invoice | null): 'pending' | 'sent
 const DELIVERING = new Set(['approved', 'sent'])
 
 /** Problems an operator has to act on before the row can be billed cleanly. */
-export type InvoiceRowIssue = 'metering' | 'conflict' | 'pdf' | 'delivery' | 'noEmail'
+type InvoiceRowIssue = 'metering' | 'conflict' | 'pdf' | 'delivery' | 'noEmail'
 
 /** Locally pending invoice, PDF or email work the overview may not show yet. */
 export type InvoiceRowWork = { generating?: boolean; pdfPending?: boolean; sending?: boolean }

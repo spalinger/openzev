@@ -3557,8 +3557,6 @@ export const en = {
         },
     },
     adminInvoices: {
-        title: 'Invoice Management',
-        description: 'View and manage all invoices across all ZEVs.',
         loading: 'Loading invoices…',
         loadError: 'Failed to load invoices.',
         empty: 'No invoices found.',

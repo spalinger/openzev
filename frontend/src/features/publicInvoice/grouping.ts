@@ -1,7 +1,7 @@
 import type { PublicInvoiceItem } from '../../types/api'
 
 /** Same order the invoice PDF and the tariff overview group their lines in. */
-export const CATEGORY_ORDER: PublicInvoiceItem['category'][] = [
+const CATEGORY_ORDER: PublicInvoiceItem['category'][] = [
     'energy',
     'grid_fees',
     'levies',

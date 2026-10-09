@@ -11,24 +11,9 @@ import { queryKeys } from '../lib/api/queryKeys'
 import { useToast } from '../lib/toast'
 import { InvoiceActionButton, InvoiceLink, InvoiceStatusBadge } from '../components/InvoicePresentation'
 import type { Invoice } from '../types/api'
-import { PageHeader } from '../components/PageHeader'
 
 // Stable empty array so the useMemo below keeps a consistent dependency reference.
 const EMPTY_INVOICES: Invoice[] = []
-
-export function AdminInvoicesPage() {
-    const { t } = useTranslation()
-    return (
-        <div className="page-stack">
-            <PageHeader
-                eyebrow={t('nav.platformScope')}
-                title={t('adminInvoices.title')}
-                description={t('adminInvoices.description')}
-            />
-            <AdminInvoicesContent />
-        </div>
-    )
-}
 
 export function AdminInvoicesContent() {
     const { t } = useTranslation()

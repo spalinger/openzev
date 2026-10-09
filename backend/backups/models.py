@@ -7,7 +7,6 @@ is far too large to travel as ``bytes`` the way an export's result does.
 """
 
 import uuid
-from pathlib import Path
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -140,10 +139,6 @@ class BackupDestination(models.Model):
 
         if errors:
             raise ValidationError(errors)
-
-    @property
-    def local_path(self) -> Path:
-        return Path(self.path)
 
 
 class BackupJobScope(models.TextChoices):

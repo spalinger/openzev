@@ -3546,8 +3546,6 @@ export const fr = {
         },
     },
     adminInvoices: {
-        title: 'Gestion des factures',
-        description: 'Afficher et gérer toutes les factures de tous les RCP.',
         loading: 'Chargement des factures…',
         loadError: 'Erreur lors du chargement des factures.',
         empty: 'Aucune facture trouvée.',
