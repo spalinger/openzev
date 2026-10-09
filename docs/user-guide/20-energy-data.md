@@ -184,7 +184,10 @@ self-sufficiency. The energy sums are still shown.
 
 - The ZEV manager's **Energy balance** shows the same rate in the participant
   table, marked with an info icon, and the full card when that participant is
-  selected.
+  selected. A manager who is also a participant with a connected source sees their own
+  **Your own system** card there while nobody, or they themselves, are selected
+  (not while another participant is); their own row is marked **You**. Without a source, the same place offers to connect one.
+  Selecting a row in the table again clears the selection.
 - The **annual report** shows it per participant.
 - The **annual statement** PDF shows your self-sufficiency for every month with
   enough data, **—** for the others, and a note saying the figures come from your
