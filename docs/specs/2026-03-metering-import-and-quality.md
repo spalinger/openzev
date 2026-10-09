@@ -688,7 +688,7 @@ Management requests require a participant selection to compute a profile.
 
 | Method | URL | Permission | Query params |
 |---|---|---|---|
-| `GET` | `/readings/data-quality-status/` | `IsAuthenticated` | `date_from` (default: 30 days ago), `date_to` (default: today), `zev_id` (optional) |
+| `GET` | `/readings/data-quality-status/` | `IsAuthenticated` | `date_from` (default: 30 days ago), `date_to` (default: yesterday, or `date_from` if that is later — today's readings arrive with the next import), `zev_id` (optional) |
 
 **Response:**
 
@@ -1154,7 +1154,7 @@ type MeteringDashboardSummary =
 | `MeteringRawDataEndpointTests` | §5.3: owner gets daily-grouped raw rows with correct direction sums; participant can read own metering point's raw data |
 | `ChartDataEndpointTests` | §5.2: direction aggregates; Swiss day/month boundaries agree with raw data (`test_daily_bucket_uses_the_same_civil_day_as_raw_data`, `test_month_bucket_does_not_cross_the_civil_month_boundary`); hourly buckets stay distinct across both DST transitions |
 | `DashboardCivilDayBucketingTests` | §5.4: a 23:45 Swiss-time reading stays in its civil-day bucket (`+02:00`); 00:00 the next day is excluded |
-| `DataQualityStatusTests` | §5.5: owner sees gaps and severity; participant sees own meters; default 30-day range; fully assigned readings report no unassigned; holder-less meter flags every reading; assignment-gap readings flagged unassigned; overlapping windows flag only the corrupt meter (others still report) |
+| `DataQualityStatusTests` | §5.5: owner sees gaps and severity; participant sees own meters; default range is the 30 days ending yesterday, and a lone `date_from` of today still yields a one-day window; fully assigned readings report no unassigned; holder-less meter flags every reading; assignment-gap readings flagged unassigned; overlapping windows flag only the corrupt meter (others still report) |
 
 ### Backend (`metering/test_import_csv.py`, `metering/test_import_csv_characterization.py`, `metering/test_import_limits.py`)
 

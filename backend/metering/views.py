@@ -436,7 +436,7 @@ class MeterReadingViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
 
         Query params:
           date_from       – YYYY-MM-DD (default: 30 days ago)
-          date_to         – YYYY-MM-DD (default: today)
+          date_to         – YYYY-MM-DD (default: yesterday, never before date_from)
           zev_id          – UUID (optional, for filtering)
           metering_point  – UUID (optional, narrows to a single meter)
 
@@ -444,7 +444,9 @@ class MeterReadingViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
         """
         today = date_type.today()
         date_from = _validated_date(request.query_params.get("date_from"), "date_from") or today - timedelta(days=30)
-        date_to = _validated_date(request.query_params.get("date_to"), "date_to") or today
+        # Today's readings arrive with the next import, so the default window
+        # ends yesterday rather than flagging every meter with a one-day gap.
+        date_to = _validated_date(request.query_params.get("date_to"), "date_to") or max(today - timedelta(days=1), date_from)
 
         # Scoped from ``MeteringPoint`` directly (mirroring
         # ``MeteringPointViewSet``'s own role scoping) rather than from

@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
@@ -675,14 +675,26 @@ class DataQualityStatusTests(TestCase):
 		self.assertEqual(resp.status_code, 200)
 		self.assertGreater(len(resp.data["metering_points"]), 0)
 
-	def test_default_date_range_is_30_days(self):
-		"""Without date parameters, defaults to 30 days."""
+	def test_default_date_range_is_30_complete_days(self):
+		"""Without date parameters, defaults to the 30 days ending yesterday."""
 		auth(self.client, self.owner)
 
+		today = date.today()
 		resp = self.client.get("/api/v1/metering/readings/data-quality-status/")
 		self.assertEqual(resp.status_code, 200)
-		self.assertIn("date_from", resp.data)
-		self.assertIn("date_to", resp.data)
+		self.assertEqual(resp.data["date_from"], (today - timedelta(days=30)).isoformat())
+		self.assertEqual(resp.data["date_to"], (today - timedelta(days=1)).isoformat())
+		self.assertEqual(resp.data["metering_points"][0]["total_days"], 30)
+
+	def test_default_date_to_never_precedes_date_from(self):
+		"""A lone date_from of today still yields a one-day window."""
+		auth(self.client, self.owner)
+
+		today = date.today().isoformat()
+		resp = self.client.get("/api/v1/metering/readings/data-quality-status/", {"date_from": today})
+		self.assertEqual(resp.status_code, 200)
+		self.assertEqual(resp.data["date_to"], today)
+		self.assertEqual(resp.data["metering_points"][0]["total_days"], 1)
 
 	def test_fully_assigned_readings_report_no_unassigned(self):
 		"""Readings covered by an active assignment are not flagged."""
