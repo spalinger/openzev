@@ -2692,6 +2692,9 @@ export const en = {
             },
             consumptionSplit: 'Consumption Split',
             hourlyProfile: {
+                failed: 'Failed to load the average daily consumption profile.',
+                loading: 'Loading consumption profile',
+                refreshFailed: 'Could not refresh the consumption profile. Showing the last loaded data.',
                 title: 'Average Daily Consumption Profile (24 h)',
                 description: 'Average hourly energy draw over the billing period — split between local ZEV energy and grid import.',
             },

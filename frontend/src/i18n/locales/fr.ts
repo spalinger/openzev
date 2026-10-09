@@ -2681,6 +2681,9 @@ export const fr = {
             },
             consumptionSplit: 'Répartition de la consommation',
             hourlyProfile: {
+                failed: 'Impossible de charger le profil de consommation journalier moyen.',
+                loading: 'Chargement du profil de consommation',
+                refreshFailed: 'Impossible d’actualiser le profil de consommation. Les dernières données chargées sont affichées.',
                 title: 'Profil de consommation journalier moyen (24 h)',
                 description: 'Consommation horaire moyenne sur la période de facturation — répartie entre énergie locale CEL et importation réseau.',
             },

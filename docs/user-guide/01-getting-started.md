@@ -376,6 +376,8 @@ period. Switching community also clears any selected participant.
 
 In the participant table, Tab to a name and press Enter or Space to filter the
 charts; swipe the table horizontally on narrow screens to see every column.
+The selected participant’s name stays visible while the energy overview loads
+or cannot load. Use **Retry** if the consumption profile fails.
 
 ### 4. View as Participant
 
@@ -385,6 +387,9 @@ Login as a participant (Anna or Ben):
 - **Annual statement** shows your yearly statement and financial summary
 
 Anna's demo account includes invoice PDFs; Ben's invoices show without PDFs.
+Invoice details and available PDFs remain accessible while the energy overview
+loads or fails. The consumption profile loads separately; use **Retry** if it
+fails.
 
 ![Participant Dashboard](screenshots/02b-participant-dashboard.png)
 

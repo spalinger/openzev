@@ -2681,6 +2681,9 @@ export const de = {
             },
             consumptionSplit: 'Verbrauchsaufteilung',
             hourlyProfile: {
+                failed: 'Das durchschnittliche Tagesverbrauchsprofil konnte nicht geladen werden.',
+                loading: 'Verbrauchsprofil wird geladen',
+                refreshFailed: 'Das Verbrauchsprofil konnte nicht aktualisiert werden. Die zuletzt geladenen Daten werden angezeigt.',
                 title: 'Durchschnittliches Tagesverbrauchsprofil (24 h)',
                 description: 'Durchschnittlicher stündlicher Energiebezug über die Abrechnungsperiode — aufgeteilt in lokale ZEV-Energie und Netzbezug.',
             },
