@@ -3546,8 +3546,6 @@ export const de = {
         },
     },
     adminInvoices: {
-        title: 'Rechnungsverwaltung',
-        description: 'Alle Rechnungen über alle ZEVs anzeigen und verwalten.',
         loading: 'Rechnungen werden geladen…',
         loadError: 'Fehler beim Laden der Rechnungen.',
         empty: 'Keine Rechnungen gefunden.',

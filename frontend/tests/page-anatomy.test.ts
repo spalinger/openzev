@@ -9,6 +9,7 @@ const PAGES = join(SRC, 'pages')
 /** Embedded bodies whose parent owns the page header. */
 const EMBEDDED_PAGES = [
     'AdminDynamicSourcesPanel.tsx',
+    'AdminInvoicesPage.tsx',
     'AdminSystemHealthPanel.tsx',
     'BillingEmailsPage.tsx',
     'BillingPeriodsPage.tsx',
