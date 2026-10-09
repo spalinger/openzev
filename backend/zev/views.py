@@ -6,6 +6,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.db.models import Count, Max, Min, Prefetch, Q
 from django.http import FileResponse, HttpResponse
+from config.http import content_disposition, sanitize_filename
 from django.utils import timezone as dj_timezone
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
@@ -412,7 +413,7 @@ class ZevViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
             buffer,
             content_type="application/zip",
             as_attachment=True,
-            filename=archive_filename(zev, today=dj_timezone.localdate()),
+            filename=sanitize_filename(archive_filename(zev, today=dj_timezone.localdate())),
         )
         return response
 
@@ -575,7 +576,7 @@ class ParticipantViewSet(AuditedCreateDestroyMixin, AuditedUpdateMixin, ZevScope
     def _stream_contract_issue(participant, issue):
         filename = f"contract_{participant.last_name}_{participant.first_name}_v{issue.version}.pdf"
         response = HttpResponse(issue.pdf, content_type="application/pdf")
-        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        response["Content-Disposition"] = content_disposition("attachment", filename)
         return response
 
     def _audit_contract_download(self, request, participant, issue):

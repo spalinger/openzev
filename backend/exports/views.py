@@ -10,6 +10,7 @@ import logging
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import FileResponse
+from config.http import sanitize_filename
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -262,5 +263,5 @@ class ExportJobDownloadView(APIView):
             job.result_file.open("rb"),
             content_type="application/zip",
             as_attachment=True,
-            filename=filename,
+            filename=sanitize_filename(filename),
         )

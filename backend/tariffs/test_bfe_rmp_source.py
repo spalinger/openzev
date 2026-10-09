@@ -8,6 +8,7 @@ dance, and rejects a source with no technology selected.
 """
 
 from datetime import datetime, timezone
+from contextlib import contextmanager
 from decimal import Decimal
 from pathlib import Path
 from unittest import mock
@@ -44,11 +45,15 @@ def make_bfe_source(**overrides) -> DynamicTariffSource:
     return DynamicTariffSource.objects.create(**{**defaults, **overrides})
 
 
+@contextmanager
 def served_text(text):
-    return mock.patch(
-        "tariffs.dynamic.fetch.fetch_tariff_text",
-        side_effect=lambda url: (text, "digest"),
-    )
+    # The creation probe and refresh pipeline import the downloader in
+    # separate modules. Both must use this fixture rather than live BFE data.
+    with (
+        mock.patch("tariffs.dynamic.fetch.fetch_tariff_text", return_value=(text, "digest")),
+        mock.patch("tariffs.dynamic.discovery.fetch_tariff_text", return_value=(text, "digest")),
+    ):
+        yield
 
 
 class TestModelValidation:

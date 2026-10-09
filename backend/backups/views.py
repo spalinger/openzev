@@ -11,6 +11,7 @@ from pathlib import Path
 from django.conf import settings
 from django.db import models, transaction
 from django.http import FileResponse
+from config.http import sanitize_filename
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -287,7 +288,7 @@ class BackupJobDownloadView(APIView):
         except (FileNotFoundError, ValueError):
             return Response({"detail": "The archive file is no longer available."}, status=status.HTTP_410_GONE)
 
-        return FileResponse(resolved.open("rb"), as_attachment=True, filename=job.archive_name)
+        return FileResponse(resolved.open("rb"), as_attachment=True, filename=sanitize_filename(job.archive_name))
 
 
 class RestoreJobListCreateView(APIView):

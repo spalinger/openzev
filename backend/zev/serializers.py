@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.core.exceptions import ObjectDoesNotExist, ValidationError as DjangoValidationError
+from django.core.validators import RegexValidator
 from .geocoding import get_cached_building_footprint
 from .grid_operators import grid_operator_ids
 from django.utils import timezone
@@ -575,8 +576,25 @@ class GridOperatorSuggestionSerializer(serializers.Serializer):
     operators = GridOperatorSerializer(many=True)
 
 
+INVOICE_PREFIX_MESSAGE = "Invoice prefix must contain only A-Z, 0-9, or hyphens (1 to 10 characters)."
+INVOICE_PREFIX_VALIDATOR = RegexValidator(r"\A[A-Z0-9-]{1,10}\Z", INVOICE_PREFIX_MESSAGE)
+
+
 class ZevSerializer(BankIbanValidationMixin, serializers.ModelSerializer):
     issuer = serializers.SerializerMethodField()
+    # Preserve unchanged legacy values, including blanks and surrounding whitespace.
+    invoice_prefix = serializers.CharField(required=False, allow_blank=True, max_length=10, trim_whitespace=False)
+
+    def validate_invoice_prefix(self, value):
+        # The settings form PATCHes every field; a legacy prefix that predates
+        # the pattern must not block saving something unrelated.
+        if self.instance is not None and value == self.instance.invoice_prefix:
+            return value
+        try:
+            INVOICE_PREFIX_VALIDATOR(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages) from exc
+        return value
 
     def validate_grid_operator_elcom_id(self, value):
         """Only ids from the shipped ElCom list are accepted.
@@ -691,7 +709,10 @@ class ZevCreateWithOwnerSerializer(BankIbanValidationMixin, serializers.Serializ
     postal_code = serializers.CharField(required=False, allow_blank=True, max_length=10)
     grid_operator = serializers.CharField(required=False, allow_blank=True, max_length=200)
     grid_connection_point = serializers.CharField(required=False, allow_blank=True, max_length=200)
-    invoice_prefix = serializers.CharField(required=False, allow_blank=True, max_length=10)
+    # The wizard sends an empty prefix when the field is left alone; that means "use the default".
+    invoice_prefix = serializers.CharField(
+        required=False, allow_blank=True, max_length=10, validators=[INVOICE_PREFIX_VALIDATOR]
+    )
     bank_iban = serializers.CharField(required=False, allow_blank=True, max_length=34)
     bank_name = serializers.CharField(required=False, allow_blank=True, max_length=200)
     vat_mode = serializers.ChoiceField(
@@ -725,6 +746,8 @@ class ZevCreateWithOwnerSerializer(BankIbanValidationMixin, serializers.Serializ
     def create(self, validated_data):
         owner_data = validated_data.pop('owner')
         metering_points_data = validated_data.pop('metering_points')
+        if not validated_data.get('invoice_prefix'):
+            validated_data.pop('invoice_prefix', None)
         return create_zev_with_owner_setup(
             zev_data=validated_data,
             owner_data=owner_data,

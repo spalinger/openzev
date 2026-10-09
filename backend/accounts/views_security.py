@@ -105,10 +105,12 @@ class EmailChangeRequestView(APIView):
             emails.send_email_change_confirmation(new_email, confirm_url)
         except Exception:
             logger.exception("Could not send the email-change confirmation for user %s", user.pk)
-            return Response(
-                {"detail": "The confirmation email could not be sent. Try again later."},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            _audit(
+                request, "auth.email_change.failed", user,
+                "Could not send an email-change confirmation.",
+                actor=user, status_=AuditEventStatus.FAILED, metadata={"reason": "mail_failed"},
             )
+            return generic
 
         _audit(
             request, "auth.email_change.requested", user,

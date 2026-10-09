@@ -14,6 +14,7 @@ import logging
 
 from django.core.cache import cache
 from django.http import FileResponse
+from config.http import sanitize_filename
 from rest_framework import status
 from rest_framework.decorators import (
     api_view,
@@ -177,9 +178,10 @@ def public_invoice_pdf(request, prefix):
     if not invoice.pdf_file:
         return _not_found()
 
-    response = FileResponse(invoice.pdf_file.open("rb"), content_type="application/pdf")
-    response["Content-Disposition"] = f'inline; filename="{invoice.invoice_number}.pdf"'
-    return response
+    return FileResponse(
+        invoice.pdf_file.open("rb"), content_type="application/pdf",
+        filename=sanitize_filename(f"{invoice.invoice_number}.pdf"),
+    )
 
 
 @api_view(["POST"])

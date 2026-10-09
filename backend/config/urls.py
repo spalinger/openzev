@@ -5,7 +5,6 @@ from django.conf.urls.static import static
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
     # API v1
     path("api/v1/auth/", include("accounts.urls")),
     path("api/v1/zev/", include("zev.urls")),
@@ -26,6 +25,8 @@ urlpatterns = [
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
     path("api/redoc/", SpectacularRedocView.as_view(url_name="schema"), name="redoc"),
 ]
+if settings.ADMIN_ENABLED:
+    urlpatterns.insert(0, path("admin/", admin.site.urls))
 
 if settings.DEBUG:
     # Dev only: MEDIA_ROOT holds invoice PDFs under guessable names.

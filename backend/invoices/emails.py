@@ -11,6 +11,7 @@ from django.conf import settings
 from django.core.mail import EmailMessage
 
 from accounts.models import MAGIC_LINK_LIFETIME
+from config.safe_format import render_with_fallback
 
 from .email_context import build_magic_link_email_context
 
@@ -20,14 +21,9 @@ logger = logging.getLogger(__name__)
 def send_magic_link_email(participant, zev, link) -> None:
     """Send the sign-in link to the address on file.
 
-    The recipient is always ``participant.email`` and never anything the
-    requester supplied — that is the whole trust anchor of tier 2.
-
-    Sent in the ZEV's ``invoice_language`` unless an operator has saved a
-    custom template, which then applies to every language: ``EmailTemplate``
-    holds one row per key, and this does not change that contract. So a
-    customised sign-in mail opts out of translation, deliberately and visibly
-    (the admin console tab says so).
+    The recipient is always ``participant.email``; the requester cannot choose it.
+    Shipped defaults follow the ZEV's ``invoice_language``. A global template
+    override applies to every language and opts out of translation.
     """
     from .models import (
         MAGIC_LINK_EMAIL_DEFAULTS_BY_LANGUAGE,
@@ -50,27 +46,12 @@ def send_magic_link_email(participant, zev, link) -> None:
     )
 
     def _render(template: str, fallback: str) -> str:
-        """Fill ``template``, falling back to the shipped default on a bad edit.
-
-        An operator editing the template can mistype or invent a placeholder.
-        Sending the *raw* template would then deliver a mail whose body reads
-        ``{link_url}`` — a sign-in email with no way to sign in, which is worse
-        than one whose wording is not the operator's own. ``fallback`` is the
-        shipped default, whose placeholders are exactly this context, so it
-        always renders and always carries a working link.
-
-        Same policy as the invitation mail (``zev.services``); ``ValueError``
-        and ``IndexError`` cover malformed braces and positional fields, which
-        ``str.format`` raises instead of ``KeyError``.
-        """
-        try:
-            return template.format(**context)
-        except (KeyError, IndexError, ValueError):
-            logger.warning(
-                "Magic-link template has an unusable placeholder; "
-                "sending the default template instead."
-            )
-            return fallback.format(**context)
+        return render_with_fallback(
+            template,
+            fallback,
+            context,
+            on_error=lambda _exc: logger.warning("Invalid magic-link template; using default."),
+        )
 
     EmailMessage(
         subject=_render(subject_tpl, defaults["subject"]),

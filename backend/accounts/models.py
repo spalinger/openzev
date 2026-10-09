@@ -575,6 +575,10 @@ class OAuthProvider(models.Model):
         default=False,
         help_text="Refuse login unless the provider's userinfo response names an MFA method in its amr claim.",
     )
+    trust_missing_email_verified = models.BooleanField(
+        default=False,
+        help_text="Only for trusted providers that verify email ownership but omit email_verified.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

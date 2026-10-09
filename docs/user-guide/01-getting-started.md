@@ -71,6 +71,9 @@ gunicorn), a Celery worker, one Celery Beat scheduler, PostgreSQL and Redis on
 one host. Only the frontend port `8080` is published; nginx proxies `/api/` to
 the backend, and PostgreSQL and Redis are reachable only on the compose
 network. The images are built from your checkout of the repository.
+Keep the shared Redis cache supplied by Compose: registration reservations and
+throttles must be shared across backend workers; an in-memory cache is local to
+each process.
 
 ### 1. Get the code
 
@@ -92,6 +95,7 @@ Fill in every value. The examples below assume the instance is reached at
 | Setting | Example | Notes |
 |---|---|---|
 | `SECRET_KEY` | *(generated, see below)* | The backend refuses to start without it |
+| `DJANGO_ADMIN_ENABLED` | `False` | Keeps Django's separate `/admin/` login disabled. Use the platform pages for normal administration; enable Django admin only behind a private network or ingress/nginx allowlist. |
 | `ALLOWED_HOSTS` | `zev.example.ch` | Bare hostname(s), comma-separated, no scheme or port |
 | `CSRF_TRUSTED_ORIGINS` | `https://zev.example.ch` | Full public origin — set it even though CORS stays empty |
 | `CORS_ALLOWED_ORIGINS` | *(empty)* | Leave empty: nginx serves the UI and the API from the same origin |
@@ -102,6 +106,11 @@ Fill in every value. The examples below assume the instance is reached at
 | `MFA_ENCRYPTION_KEYS` | *(generated, see below)* | Encrypts two-factor secrets; without it nobody can enrol an authenticator app |
 | `BACKUP_ENCRYPTION_KEYS` | *(generated, see below)* | Encrypts backup archives; without it backups are written unencrypted — see [Backups](18-backups.md) |
 | `INTEGRATION_ENCRYPTION_KEYS` | *(optional, a Fernet key as for `MFA_ENCRYPTION_KEYS`)* | Encrypts the API keys participants enter to connect Solar Manager; without it only push and file sources work — see [Your Own Energy Data](20-energy-data.md) |
+
+**OAuth upgrades:** new accounts need `email_verified: true` unless an admin
+enables **Allow missing email-verification claim** for a trusted provider that
+omits it. Review the [OAuth upgrade requirements](14-admin-console.md#oauth)
+before upgrading an existing deployment.
 
 Generate the three keys with Python (any machine with Python 3; the
 `cryptography` package is only needed for the second line):

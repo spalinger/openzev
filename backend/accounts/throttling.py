@@ -1,4 +1,16 @@
+import logging
+
+from redis.exceptions import RedisError
+from rest_framework.exceptions import APIException
 from rest_framework.throttling import SimpleRateThrottle, UserRateThrottle
+
+logger = logging.getLogger(__name__)
+
+
+class RegistrationUnavailable(APIException):
+    status_code = 503
+    default_detail = "Registration is temporarily unavailable. Try again later."
+    default_code = "registration_unavailable"
 
 
 class ApiKeyRateThrottle(SimpleRateThrottle):
@@ -57,6 +69,13 @@ class AuthRefreshThrottle(AuthRateThrottle):
 
 class AuthRegisterThrottle(AuthRateThrottle):
     scope = "auth_register"
+
+    def allow_request(self, request, view):
+        try:
+            return super().allow_request(request, view)
+        except (RedisError, OSError):
+            logger.exception("Registration rate-limit cache is unavailable")
+            raise RegistrationUnavailable from None
 
 
 class AuthVerifyThrottle(AuthRateThrottle):

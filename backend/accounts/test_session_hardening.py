@@ -611,11 +611,16 @@ class EmailChangeTests(TestCase):
         client.credentials(HTTP_AUTHORIZATION=f"Api-Key {key}")
         self.assertEqual(self._request(client=client).status_code, 403)
 
-    def test_a_mail_failure_is_reported_and_nothing_is_recorded_as_requested(self):
+    def test_mail_failure_returns_the_same_status_and_body(self):
+        unavailable = self._request(new=make_user("taken_mail").email)
         with mock.patch("accounts.emails.EmailMessage.send", side_effect=OSError("smtp down")):
             response = self._request()
-        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json(), unavailable.json())
         self.assertFalse(AuditEvent.objects.filter(action_type="auth.email_change.requested").exists())
+        self.assertTrue(AuditEvent.objects.filter(
+            action_type="auth.email_change.failed", metadata_json__reason="mail_failed",
+        ).exists())
 
     def test_asking_is_rate_limited_per_account(self):
         cache.clear()

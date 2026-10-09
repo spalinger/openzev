@@ -133,7 +133,7 @@ The two-factor policy fields `mfa_required`, `mfa_grace_period_days` and `mfa_po
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `billing_interval` | CharField(20) | `monthly` | Choices: `monthly`, `quarterly`, `semi_annual`, `annual` (from `BillingInterval` TextChoices) |
-| `invoice_prefix` | CharField(10) | `INV` | Used in `next_invoice_number()` |
+| `invoice_prefix` | CharField(10) | `INV` | Prefix of `next_invoice_number()`. API writes must match `\A[A-Z0-9-]{1,10}\Z`; updates preserve unchanged raw legacy values (including blanks/whitespace), and a blank wizard value means the default. Newly assigned whitespace is refused on updates. Migration `0043` only reports invalid legacy values. |
 | `invoice_counter` | PositiveIntegerField | `1` | Auto-incremented atomically via `F()` expression |
 | `invoice_language` | CharField(2) | `de` | Choices: `de`, `fr`, `it`, `en` (from `InvoiceLanguage` TextChoices). Used for PDF + contract translation lookups. |
 | `payment_term_days` | PositiveIntegerField | `30` | Days after invoice generation (issue date) until payment is due. Validators: min 1, max 365. The engine uses it to set `Invoice.due_date` at generation. |
@@ -142,8 +142,8 @@ The two-factor policy fields `mfa_required`, `mfa_grace_period_days` and `mfa_po
 | `vat_mode` | CharField(20) | `not_registered` | Choices `not_registered`, `registered`, `inclusive` (from `VatMode` TextChoices). Drives VAT handling in the billing engine — see `2026-03-tariffs-and-billing-engine.md` §4.8. |
 | `vat_number` | CharField(50) | blank | Swiss UID. `Zev.clean()` requires it when `vat_mode = registered` and forbids it otherwise. Shown on invoice/contract PDFs only when set. |
 | `itemize_tariff_bands` | BooleanField | `False` | Bill each price band of a multi-band tariff as its own invoice line at its own rate, instead of one line at the blended average — see `2026-03-tariffs-and-billing-engine.md` §4.7a. Applies to invoices generated after the change. |
-| `email_subject_template` | CharField(500) | `""` (blank) | Per-ZEV `.format_map()` template. Resolution is ZEV value → global `EmailTemplate(template_key="invoice_email")` override → `DEFAULT_EMAIL_SUBJECT_TEMPLATE`. |
-| `email_body_template` | TextField | `""` (blank) | Per-ZEV `.format_map()` template. Resolution is ZEV value → global `EmailTemplate(template_key="invoice_email")` override → `DEFAULT_EMAIL_BODY_TEMPLATE`. |
+| `email_subject_template` | CharField(500) | `""` (blank) | Per-ZEV bare-placeholder template, rendered with `config.safe_format.safe_format`. Resolution is ZEV value → global `EmailTemplate(template_key="invoice_email")` override → `DEFAULT_EMAIL_SUBJECT_TEMPLATE`. |
+| `email_body_template` | TextField | `""` (blank) | Per-ZEV bare-placeholder template, rendered with `config.safe_format.safe_format`. Resolution is ZEV value → global `EmailTemplate(template_key="invoice_email")` override → `DEFAULT_EMAIL_BODY_TEMPLATE`. |
 | `local_tariff_notes` | TextField | blank | Free-text shown on contract PDF |
 | `additional_contract_notes` | TextField | blank | Additional agreements on contract PDF |
 | `notes` | TextField | blank | General notes |
@@ -320,7 +320,15 @@ Template variable resolution:
 | `{total_chf}` | `invoice.total_chf` |
 
 4. Resolves subject and body independently: nonblank per-ZEV template → global `invoice_email` override → hardcoded default.
-5. Calls `.format_map(template_ctx)`. On `KeyError`/`ValueError`, the task falls back to the shipped defaults and logs a warning.
+5. Calls `config.safe_format.safe_format(template, template_ctx)`. Only bare
+   named fields resolve; attribute (`.`) and item (`[`) traversal raise
+   `KeyError`. On `KeyError`/`IndexError`/`ValueError`, the task falls back to the
+   shipped defaults and logs a warning. Templates are limited to 20,000 characters;
+   numeric format width/precision components must have at most four digits and
+   a value no greater than 1,000, checked before formatting. Total rendered output
+   is not capped; repeated fields can amplify it. Magic-link, onboarding, verification
+   and ZEV-access invitation/notification mails use the same formatter and
+   fallback policy.
 6. Attaches the invoice PDF, sends via `EmailMessage`, and logs to `EmailLog`.
 
 ---
@@ -495,6 +503,30 @@ link the invoice breakdown to `/admin/invoices` and email statistics to
     - Uses `fetchOAuthProviderConfigs` with query key `['oauth-provider-configs']`.
     - Displays configured providers in a table with enabled badges and compact Edit/Delete actions.
     - Provider create/edit uses a shared modal form; delete uses `ConfirmDialog`.
+    - `require_mfa_claim` and `trust_missing_email_verified` are admin-editable,
+      audited switches. New accounts need `email_verified is True`, unless
+      `trust_missing_email_verified` is set and the claim is absent (false,
+      null and non-boolean values are always refused); matching an existing
+      account by email always needs `True`. Token and userinfo endpoints must
+      be HTTPS outside DEBUG (an unchanged stored URL may be re-saved), resolve
+      to public addresses unless `OAUTH_ALLOW_PRIVATE_HOSTS` is set (default
+      `DEBUG`, applies to every provider), and are final URLs: redirects are
+      refused. The public-address check is validation-time only (DNS
+      rebinding is not closed), and the client secret travels on this request.
+      Environment proxies may resolve the destination independently; deployments
+      must use trusted proxies/egress controls when this is a security boundary.
+      `_open_oauth_json` reads at most 1 MiB + 1 byte and rejects responses over
+      1 MiB or non-object JSON before callback processing.
+      The callback requires a nonblank string `access_token` before fetching
+      userinfo. `_parse_user_info` accepts a string `sub`, or a string/integer
+      `id` when `sub` is absent, null or empty (booleans are refused); identifiers
+      are limited to 500 characters and cannot be whitespace-only. Missing or
+      null email/names become empty strings; other values must be strings within
+      the model limits (`email`: 254, `given_name`/`family_name`: 150 each).
+      Nonempty email is trimmed, lowercased and syntax-validated. Malformed fields
+      redirect with `token_exchange_failed` before account/link writes; a missing
+      identifier redirects with `missing_uid`. Already-linked identities can
+      sign in without email.
     - `client_secret` is write-only: API responses never contain it (only
       `has_client_secret`), create without a secret is refused (400), and the
       edit form shows the secret field blank with a hint — a blank submit omits

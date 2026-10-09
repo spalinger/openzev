@@ -71,11 +71,19 @@ jobs:
             - name: Setup Helm
               uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
 
+            - name: Setup Python
+              uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+              with:
+                  python-version: "3.14"
+
+            - name: Install chart check dependency
+              run: python -m pip install PyYAML==6.0.3
+
             - name: Lint chart
               run: helm lint ./charts/openzev
 
-            - name: Render chart
-              run: helm template openzev ./charts/openzev > /tmp/openzev-helm-render.yaml
+            - name: Check rendered routing and security settings
+              run: python scripts/check-helm-render.py
 
     backend-check-test:
         name: Backend checks and tests (${{ matrix.database }})
@@ -94,7 +102,17 @@ jobs:
                       database-url: postgres://openzev:openzev@localhost:5432/openzev
         env:
             DATABASE_URL: ${{ matrix.database-url }}
+            TEST_REDIS_URL: redis://localhost:6379/15
         services:
+            redis:
+                image: redis:8-alpine
+                ports:
+                    - 6379:6379
+                options: >-
+                    --health-cmd "redis-cli ping"
+                    --health-interval 10s
+                    --health-timeout 5s
+                    --health-retries 5
             postgres:
                 image: postgres:18
                 env:
@@ -133,6 +151,9 @@ jobs:
 
             - name: Django system check
               run: python manage.py check
+
+            - name: Check migration consistency
+              run: python manage.py makemigrations --check --dry-run
 
             - name: Run tests with coverage
               run: python -m pytest --cov --cov-report=term-missing --cov-report=xml

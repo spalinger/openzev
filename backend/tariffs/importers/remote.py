@@ -10,13 +10,14 @@ and again on every redirect hop.
 """
 from __future__ import annotations
 
-import ipaddress
 import json
 import socket
 import urllib.error
 import urllib.parse
 import urllib.request
 from hashlib import sha256
+
+from config.net import PublicHostError, check_public_host
 
 #: Published documents are tens of kilobytes; the largest imaginable is a
 #: national operator listing every municipality it serves.
@@ -56,42 +57,30 @@ class TariffFetchError(Exception):
 
 
 def _check_public_host(url: str) -> None:
-    """Refuse URLs that resolve into the deployment's own network.
-
-    Without this, an authenticated user could aim the import at the metadata
-    service or an internal admin port and read the response back through the
-    preview. Resolution here and connection later is a small TOCTOU window —
-    closing it fully means connecting to a pinned address with a Host header,
-    which urllib does not make easy; the deployment's egress rules are the
-    second layer.
-    """
-    parsed = urllib.parse.urlsplit(url)
+    """Refuse URLs that resolve into the deployment's own network."""
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except ValueError as exc:
+        raise TariffFetchError("The URL is invalid.", log_detail=str(exc)) from exc
     if parsed.scheme not in ALLOWED_SCHEMES:
         raise TariffFetchError(
             f"Only http and https URLs can be imported, not {parsed.scheme or 'a URL without a scheme'}."
         )
-    host = parsed.hostname
-    if not host:
-        raise TariffFetchError("The URL has no host name.")
-
     try:
-        addresses = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80))
-    except socket.gaierror as exc:
-        raise TariffFetchError(
-            f"The host {host} could not be resolved. Check the address for a typo.",
-            log_detail=f"getaddrinfo({host!r}) failed: {exc}",
-        ) from exc
-
-    for family, _type, _proto, _canonname, sockaddr in addresses:
-        address = ipaddress.ip_address(sockaddr[0])
-        if not address.is_global or address.is_multicast:
-            # The resolved address stays out of the message on purpose: see
-            # TariffFetchError. The host is repeated because the user typed it.
+        check_public_host(url, allowed_schemes=ALLOWED_SCHEMES)
+    except PublicHostError as exc:
+        if exc.reason == "unresolved":
             raise TariffFetchError(
-                f"{host} does not resolve to a public address. Tariff documents must be "
-                "fetched from the operator's public website.",
-                log_detail=f"{host!r} resolved to {address}, which is not globally routable.",
-            )
+                f"The host {parsed.hostname} could not be resolved. Check the address for a typo.",
+                log_detail=exc.log_detail,
+            ) from exc
+        if exc.reason == "invalid_url":
+            raise TariffFetchError(str(exc), log_detail=exc.log_detail) from exc
+        host = parsed.hostname or "the host"
+        raise TariffFetchError(
+            f"{host} does not resolve to a public address. Tariff documents must be fetched from the operator's public website.",
+            log_detail=exc.log_detail,
+        ) from exc
 
 
 class _ValidatingRedirectHandler(urllib.request.HTTPRedirectHandler):

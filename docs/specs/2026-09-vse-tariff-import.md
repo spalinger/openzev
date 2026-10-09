@@ -465,7 +465,7 @@ fetch is a server-side request to an attacker-influenceable address.
 | Guard | Value |
 |---|---|
 | Schemes | `http`, `https` only. Several operators still publish over plain http; the document is public either way |
-| Address | The host is resolved and every address checked with `ipaddress`: not `is_global`, or multicast, is refused |
+| Address | Shared `config.net.check_public_host` resolves the host and checks every address. Anything not `is_global`, or multicast (some multicast scopes count as global), is refused. This includes shared `100.64.0.0/10` space. Empty DNS answers and malformed hosts/ports (including over-long DNS labels) fail closed. `_check_public_host` wraps these failures in `TariffFetchError` for API `400` handling. |
 | Redirects | `_ValidatingRedirectHandler` re-runs the address check on **every hop**, max 5. A public URL that 302s to `169.254.169.254` would otherwise walk straight past the first check |
 | Size | 5 MB, checked against `Content-Length` *and* against what actually arrived (`read(MAX + 1)`) |
 | Timeout | 20 s |

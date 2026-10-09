@@ -176,6 +176,37 @@ that is not a public HTTPS origin only warns (`accounts.W002`).
 Changing `rpId` later orphans every passkey registered under the old one.
 Passkeys need no encryption key — only TOTP does.
 
+## Django admin
+
+Django admin defaults to `DEBUG` (`DJANGO_ADMIN_ENABLED`); its separate session
+login bypasses the JWT MFA flow, so any production use needs a private backend
+hostname and an ingress allowlist. Keep public `/admin/...` routes pointed at
+the frontend for the platform pages.
+
+## OAuth upgrades
+
+After upgrading, new OAuth accounts require `email_verified: true`. For a trusted
+provider that verifies email ownership but omits the claim, an admin can enable
+**Allow missing email-verification claim** under **Platform → Settings → OAuth**.
+This exception applies only to new accounts with an absent claim; it never
+permits false/null/non-boolean claims or email-based matching to existing accounts.
+Already-linked identities do not need this provisioning exception.
+
+Production token/userinfo endpoints must use HTTPS and their final URLs because
+redirects are refused. Private endpoints need an explicit opt-in, available
+through the existing environment passthrough:
+
+```yaml
+backend:
+  extraEnv:
+    OAUTH_ALLOW_PRIVATE_HOSTS: "True"
+```
+
+This setting applies to every provider and still requires HTTPS. URL/DNS checks
+do not bind the connection to the checked address; environment proxies may also
+resolve the destination independently. Restrict egress and use only trusted
+proxies where this is a security boundary.
+
 ## Celery Beat
 
 The chart enables one Beat scheduler by default (`beat.enabled: true`) using
@@ -200,7 +231,7 @@ media:
 Default ingress routes:
 
 - `/` to frontend
-- `/api` and `/admin` to backend
+- `/api` to backend
 
 Configure hosts/paths in `values.yaml` under `ingress.hosts`.
 
@@ -305,6 +336,9 @@ redis:
   cacheUrl: redis://redis.example.svc.cluster.local:6379/1
 ```
 
+All backend replicas must share this cache for registration reservations and
+throttles; a process-local cache does not coordinate workers.
+
 ## Example values
 
 A complete production-oriented example covering the required Django host,
@@ -357,7 +391,6 @@ ingress:
         - /
       backendPaths:
         - /api
-        - /admin
 ```
 
 Apply a values file with:

@@ -524,6 +524,14 @@ The invoice, contract, and annual-statement PDF templates are editable via the a
 |---|---|---|---|
 | `GET` | `/invoices/invoices/{id}/pdf/` | `IsAuthenticated` + queryset ZEV scoping (owner sees own ZEV's invoices, participant own sent invoices — §6.1, admin all) | Serve stored PDF artifact via `FileResponse` (`application/pdf`); 404 when no `pdf_file` or out of scope |
 
+The filename is `{invoice_number}.pdf`, sanitized with
+`config.http.sanitize_filename` before constructing `FileResponse` to remove legacy controls and path separators
+from the download name; Django would otherwise percent-encode controls in its header. Public invoice
+PDFs use the same filename handling. Generated report/contract responses use
+`config.http.content_disposition`; Django handles quote escaping and UTF-8
+`filename*` encoding. ZIP/backup downloads sanitize names before `FileResponse`
+constructs attachment headers.
+
 
 #### Template preview
 
@@ -658,7 +666,16 @@ Email subjects and bodies resolve through a three-tier fallback chain:
 | `{due_date}` | Payment due date, formatted per `AppSettings.date_format_short`; empty string if the invoice has no `due_date` |
 | `{total_chf}` | Invoice total amount |
 
-If custom template rendering fails (e.g. `KeyError` or `ValueError` from `format_map`), the system falls back to the **hardcoded** defaults (tier 3) and logs a warning.
+Templates are rendered with `config.safe_format.safe_format`, which resolves
+bare named placeholders and rejects attribute/item traversal. If rendering
+raises `KeyError`, `IndexError`, or `ValueError`, the system falls back to the
+**hardcoded** defaults (tier 3) and logs a warning. The shipped default itself
+is never sent raw: a broken default raises instead (`render_with_fallback`).
+Normal format specifications and conversions are retained. Templates are limited
+to 20,000 characters; numeric width/precision components, including expanded
+nested specifications, are limited to four digits and a value of 1,000 before
+formatting allocates output. Exceeding either limit triggers the same fallback.
+Total rendered output is not capped; repeated fields can amplify it.
 
 ### 7.2 Celery task: `send_invoice_email_task`
 
@@ -1165,6 +1182,7 @@ the cockpit readiness and attention caches.
 | `test_field_catalog.py` | `PdfCatalogResolutionTests` (7), `EmailCatalogResolutionTests` (2), `CatalogPayloadShapeTests` (5) | §5.7/§7.4: sample-path resolution, default-template output coverage, unique/current catalog coverage, four shared production email contexts, payload shape, unknown keys, null SVG/translation examples, and representative preview/example parity |
 | `test_template_admin.py` | `TemplateAdminPermissionTests` (10), `EmailTemplateAdminTests` (4), `TemplateFieldCatalogEndpointTests` (5), plus PDF admin/preview/override/download coverage | §5.7/§7.4: declarative permissions and mutation audits; admin email reads, owner invoice-email read only; participant/unauthenticated read denials (`403`/`401`, no audit event); participant mutation denials (`403`, recorded as `DENIED`); CRUD validation; `fields` on single-template GET responses, and reduced PATCH/DELETE responses |
 | `test_public_invoice_access.py` | `MagicLinkTemplateTests` | §7.4: language-specific shipped magic-link defaults, one global override for every language, and invalid-placeholder fallback |
+| `test_public_invoice_access.py` | `PublicInvoicePdfTests` | Stored PDF access, missing artifact/invalid secret refusal, and sanitized legacy invoice filenames on public and authenticated PDF downloads |
 | `../zev/test_onboarding.py` | `OnboardingTokenServiceTests`, `SendOnboardingLinkServiceTests` | §7.4: participant-onboarding token/link generation and the send service contract |
 | `test_pdfa.py` | `RenderPdfVariantTests`, `InvoicePdfaTests` | §8.1: `render_pdf` emits PDF/A-3b (XMP `pdfaid` + OutputIntent); generated invoice PDFs are PDF/A |
 

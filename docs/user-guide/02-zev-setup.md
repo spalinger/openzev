@@ -32,7 +32,12 @@ New users can register themselves and create their ZEV without admin involvement
 1. Go to the login page
 2. In the **New to OpenZEV?** panel on the right, click **Create account**
 3. In the modal, enter your **Email address** — it is your sign-in name
-4. Click **Send verification email**
+4. Click **Request verification link**
+
+The page shows the same confirmation for every valid address. A registration
+that was never completed receives a new verification link (at most one mail per
+address every 15 minutes, with immediate retry after a failed send if the cache
+is available); established accounts receive no registration email.
 
 The panel is shown only while self-registration is enabled (an admin can turn
 it off under **Platform → Settings → Functions**).
@@ -230,7 +235,7 @@ address, after which the new login belongs to that party.
 
 | Setting | Purpose | Required |
 | --- | --- | --- |
-| **Invoice prefix** | Prefix for invoice numbers (default: `INV`) | No |
+| **Invoice prefix** | Prefix for invoice numbers (default: `INV`); 1–10 uppercase letters, digits or hyphens | No |
 | **Bank name** | Internal reference for the payment account | No |
 | **Bank IBAN** | Account participants pay into; without it invoices carry no payment details or QR payment slip | No |
 | **VAT treatment** | How VAT is applied when billing participants (see [below](#vat-configuration)) | No |

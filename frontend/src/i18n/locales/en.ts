@@ -108,7 +108,7 @@ export const en = {
                 title: 'Sign-in failed',
                 generic: 'OAuth error: {{code}}',
                 email_not_verified:
-                    "Your identity provider has not verified this email address, so it cannot be used to sign in to an existing account. Sign in with your password and link the provider from your account page.",
+                    "Your provider did not verify your email. Register or sign in first, then link the provider in Account.",
                 missingCode: 'Missing authorisation code.',
                 exchangeFailed: 'Failed to complete sign-in. Please try again.',
                 initFailed: 'Failed to initiate OAuth login. Please try again.',
@@ -121,8 +121,8 @@ export const en = {
             modalTitle: 'Create your account',
             email: 'Email address',
             emailPlaceholder: 'you@example.com',
-            submitModal: 'Send verification email',
-            success: 'Check your inbox! We sent a verification link to {{email}}.',
+            submitModal: 'Request verification link',
+            success: 'If this address can be used, check your inbox.',
         },
         emailChange: {
             confirming: 'Confirming your new email address…',
@@ -3600,5 +3600,7 @@ export const en = {
         fieldEnabled: 'Enabled',
         fieldRequireMfaClaim: 'Require provider MFA assertion',
         fieldRequireMfaClaimHint: 'Refuses sign-in unless the provider\'s userinfo response confirms the user completed a second factor. Leave off unless you have verified your provider sends this.',
+        fieldTrustMissingEmailVerified: 'Allow missing email-verification claim',
+        fieldTrustMissingEmailVerifiedHint: 'New accounts only. Enable only if the provider verifies email ownership but omits email_verified.',
     },
 } as const

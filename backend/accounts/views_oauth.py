@@ -13,13 +13,16 @@ import json
 import logging
 import re
 import secrets
+import urllib.error
 import urllib.request
 from urllib.parse import urlencode
 
 from django.conf import settings
+from django.core.validators import validate_email
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.utils.text import slugify
+from config.net import check_public_host
 from rest_framework import generics, status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -47,6 +50,7 @@ from .serializers import (
 )
 
 logger = logging.getLogger(__name__)
+MAX_OAUTH_RESPONSE_BYTES = 1024 * 1024
 
 #: Provider config fields worth diffing on update. ``client_secret`` is
 #: deliberately absent — ``redact_metadata`` would strip it from the diff
@@ -62,6 +66,7 @@ PROVIDER_TRACKED_FIELDS = (
     "scope",
     "enabled",
     "require_mfa_claim",
+    "trust_missing_email_verified",
 )
 
 
@@ -143,6 +148,36 @@ def _generate_username_from_email(email: str) -> str:
     return candidate
 
 
+def _claim_for_audit(value):
+    """Keep the audit trail small: a provider can send any JSON in ``email_verified``."""
+    return value if value is None or isinstance(value, bool) else str(value)[:32]
+
+
+class _NoOAuthRedirects(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(newurl or req.full_url, code, msg, headers, fp)
+
+
+def _open_oauth_json(req: urllib.request.Request) -> dict:
+    """Validate the endpoint, refuse redirects, and read a bounded JSON object."""
+    check_public_host(
+        req.full_url,
+        allowed_schemes={"https", "http"} if settings.DEBUG else {"https"},
+        allow_private=settings.OAUTH_ALLOW_PRIVATE_HOSTS,
+    )
+    opener = urllib.request.build_opener(_NoOAuthRedirects)
+    with opener.open(req, timeout=10) as resp:
+        payload = resp.read(MAX_OAUTH_RESPONSE_BYTES + 1)
+    if len(payload) > MAX_OAUTH_RESPONSE_BYTES:
+        raise ValueError("OAuth response exceeds the size limit.")
+    data = json.loads(payload)
+    if not isinstance(data, dict):
+        raise ValueError("OAuth response must be a JSON object.")
+    return data
+
+
 def _exchange_code_for_tokens(provider: OAuthProvider, code: str, redirect_uri: str) -> dict:
     """Call the provider's token endpoint and return the parsed JSON response."""
     body = urlencode({
@@ -152,7 +187,7 @@ def _exchange_code_for_tokens(provider: OAuthProvider, code: str, redirect_uri: 
         "client_id": provider.client_id,
         "client_secret": provider.client_secret,
     }).encode()
-    req = urllib.request.Request(
+    return _open_oauth_json(urllib.request.Request(
         provider.token_url,
         data=body,
         headers={
@@ -160,22 +195,47 @@ def _exchange_code_for_tokens(provider: OAuthProvider, code: str, redirect_uri: 
             "Accept": "application/json",
         },
         method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
-        return json.loads(resp.read())
+    ))
 
 
 def _fetch_user_info(provider: OAuthProvider, access_token: str) -> dict:
     """Fetch user profile from the provider's userinfo endpoint."""
-    req = urllib.request.Request(
+    return _open_oauth_json(urllib.request.Request(
         provider.userinfo_url,
         headers={
             "Authorization": f"Bearer {access_token}",
             "Accept": "application/json",
         },
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
-        return json.loads(resp.read())
+    ))
+
+
+def _parse_user_info(data: dict) -> tuple[str, str, str, str]:
+    """Validate the identity and profile fields used locally; retain raw extra_data."""
+    uid = data.get("sub")
+    if uid is None or uid == "":
+        uid = data.get("id")
+        if uid is not None and not isinstance(uid, str) and type(uid) is not int:
+            raise ValueError("OAuth id must be a string or integer.")
+    elif not isinstance(uid, str):
+        raise ValueError("OAuth sub must be a string.")
+    uid = "" if uid is None else str(uid)
+    if len(uid) > SocialAccount._meta.get_field("uid").max_length or (uid and not uid.strip()):
+        raise ValueError("Invalid OAuth identifier length.")
+
+    profile = []
+    for claim, field in (("email", "email"), ("given_name", "first_name"), ("family_name", "last_name")):
+        value = data.get(claim)
+        value = "" if value is None else value
+        if not isinstance(value, str) or len(value) > User._meta.get_field(field).max_length:
+            raise ValueError(f"Invalid OAuth {claim} type or length.")
+        if claim == "email":
+            value = value.strip().lower()
+            if len(value) > User._meta.get_field(field).max_length:
+                raise ValueError("Invalid OAuth email length.")
+            if value:
+                validate_email(value)
+        profile.append(value)
+    return uid, *profile
 
 
 # ── admin CRUD ────────────────────────────────────────────────────────────────
@@ -328,19 +388,19 @@ def oauth_callback(request, provider_slug: str):
     redirect_uri = provider.redirect_url
     try:
         token_data = _exchange_code_for_tokens(provider, code, redirect_uri)
-        user_info = _fetch_user_info(provider, token_data["access_token"])
+        access_token = token_data.get("access_token")
+        if not isinstance(access_token, str) or not access_token.strip():
+            raise ValueError("OAuth access_token must be a nonempty string.")
+        user_info = _fetch_user_info(provider, access_token)
+        provider_uid, email, first_name, last_name = _parse_user_info(user_info)
     except Exception:
         logger.exception("OAuth token exchange failed for provider %s", provider_slug)
         _record_login_failure(request, provider_slug, "token_exchange_failed")
         return HttpResponseRedirect(f"{frontend_url}/login?oauth_error=token_exchange_failed")
 
-    # Derive a stable identifier for the provider account
-    provider_uid = str(user_info.get("sub") or user_info.get("id") or "")
     if not provider_uid:
         _record_login_failure(request, provider_slug, "missing_uid")
         return HttpResponseRedirect(f"{frontend_url}/login?oauth_error=missing_uid")
-
-    email = (user_info.get("email") or "").strip().lower()
 
     if linking_user is not None:
         # ── Link flow: attach to the (already authenticated) user ────────
@@ -387,14 +447,23 @@ def oauth_callback(request, provider_slug: str):
         try:
             user = User.objects.get(email__iexact=email)
         except User.DoesNotExist:
-            # Auto-provision a new account for this OAuth identity. This grants
-            # nothing that did not already exist, and lands on the lowest role.
+            trusted_missing_claim = provider.trust_missing_email_verified and "email_verified" not in user_info
+            if not trusted_missing_claim and user_info.get("email_verified") is not True:
+                _record_auth_event(
+                    request,
+                    action_type="oauth.provision_refused",
+                    summary="Refused to provision an OAuth account because the provider did not verify the email.",
+                    event_status=AuditEventStatus.DENIED,
+                    metadata={"provider": provider_slug, "reason": "email_not_verified", "email_verified": _claim_for_audit(user_info.get("email_verified"))},
+                )
+                return HttpResponseRedirect(f"{frontend_url}/login?oauth_error=email_not_verified")
+            # Verified or explicitly trusted new accounts land on the lowest role.
             username = _generate_username_from_email(email)
             user = User.objects.create_user(
                 username=username,
                 email=email,
-                first_name=user_info.get("given_name", ""),
-                last_name=user_info.get("family_name", ""),
+                first_name=first_name,
+                last_name=last_name,
                 password=None,
                 is_active=True,
                 role=UserRole.USER,
@@ -420,7 +489,7 @@ def oauth_callback(request, provider_slug: str):
                     metadata={
                         "provider": provider_slug,
                         "reason": "email_not_verified",
-                        "email_verified": user_info.get("email_verified"),
+                        "email_verified": _claim_for_audit(user_info.get("email_verified")),
                     },
                 )
                 return HttpResponseRedirect(f"{frontend_url}/login?oauth_error=email_not_verified")

@@ -99,7 +99,7 @@ export const fr = {
                 title: 'Échec de la connexion',
                 generic: 'Erreur OAuth : {{code}}',
                 email_not_verified:
-                    "Votre fournisseur d'identité n'a pas vérifié cette adresse e-mail ; elle ne peut donc pas servir à se connecter à un compte existant. Connectez-vous avec votre mot de passe, puis liez le fournisseur depuis votre page de compte.",
+                    "Votre fournisseur n'a pas vérifié votre e-mail. Inscrivez-vous ou connectez-vous d'abord, puis liez le fournisseur dans Compte.",
                 missingCode: 'Code d\'autorisation manquant.',
                 exchangeFailed: 'La connexion n\'a pas pu être complétée. Veuillez réessayer.',
                 initFailed: 'Impossible de lancer la connexion OAuth. Veuillez réessayer.',
@@ -112,8 +112,8 @@ export const fr = {
             modalTitle: 'Créer votre compte',
             email: 'Adresse e-mail',
             emailPlaceholder: 'vous@exemple.ch',
-            submitModal: 'Envoyer le lien de vérification',
-            success: 'Vérifiez votre boîte de réception! Nous avons envoyé un lien à {{email}}.',
+            submitModal: 'Demander le lien de vérification',
+            success: 'Si cette adresse peut être utilisée, consultez votre boîte de réception.',
         },
         emailChange: {
             confirming: 'Confirmation de votre nouvelle adresse e-mail…',
@@ -3589,5 +3589,7 @@ export const fr = {
         fieldEnabled: 'Activé',
         fieldRequireMfaClaim: 'Exiger l\'assertion MFA du fournisseur',
         fieldRequireMfaClaimHint: 'Refuse la connexion si la réponse userinfo du fournisseur ne confirme pas une authentification à deux facteurs. À activer uniquement si vous avez vérifié que le fournisseur l\'envoie.',
+        fieldTrustMissingEmailVerified: 'Autoriser l’absence d’indication de vérification e-mail',
+        fieldTrustMissingEmailVerifiedHint: 'Nouveaux comptes uniquement. À activer seulement si le fournisseur vérifie que l’adresse e-mail appartient à l’utilisateur, mais omet email_verified.',
     },
 } as const
