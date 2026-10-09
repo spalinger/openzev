@@ -5,7 +5,7 @@ import { getLatestEmailLog } from './emailLogs'
 import type { InvoicePeriodParticipantRow } from '../../types/api'
 
 const POLL_MS = 2_500
-export const EMAIL_DELIVERY_TIMEOUT_MS = 90_000
+const EMAIL_DELIVERY_TIMEOUT_MS = 90_000
 
 /** An invoice whose queued email is awaited; `announce` toasts its delivery. */
 export type EmailTarget = { invoiceId: string; previousLogId: string | null; announce?: boolean }

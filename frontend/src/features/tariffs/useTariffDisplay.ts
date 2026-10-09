@@ -8,7 +8,7 @@ import { validityState, type ValidityState } from './validity'
 
 // Amber rather than blue for scheduled: blue is already the billing-mode badge
 // sitting right next to it, and two adjacent blue badges read as one group.
-export const VALIDITY_BADGE_CLASS: Record<ValidityState, string> = {
+const VALIDITY_BADGE_CLASS: Record<ValidityState, string> = {
     active: 'badge badge-success',
     scheduled: 'badge badge-warning',
     expired: 'badge badge-neutral',

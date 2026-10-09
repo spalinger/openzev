@@ -19,7 +19,7 @@ type BuildingHeaderProps = {
 }
 
 /** One-line address of a building: street lines, then postal code and city. */
-export function buildingAddress(building: Building): string {
+function buildingAddress(building: Building): string {
   return [building.address_line1, building.address_line2, [building.postal_code, building.city].filter(Boolean).join(' ')]
     .filter((part) => part.trim())
     .join(', ')

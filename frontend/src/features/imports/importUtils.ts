@@ -8,7 +8,7 @@ export type CsvColumnMap = {
     energy_start: string
 }
 
-export const defaultColumnMap: CsvColumnMap = {
+const defaultColumnMap: CsvColumnMap = {
     meter_id: 'meter_id',
     timestamp: 'timestamp',
     energy_kwh: 'energy_kwh',
@@ -16,7 +16,7 @@ export const defaultColumnMap: CsvColumnMap = {
     energy_start: '4',
 }
 
-export const standardHeaderlessColumnMap: CsvColumnMap = {
+const standardHeaderlessColumnMap: CsvColumnMap = {
     meter_id: '0',
     timestamp: '1',
     energy_kwh: '2',
@@ -24,7 +24,7 @@ export const standardHeaderlessColumnMap: CsvColumnMap = {
     energy_start: '',
 }
 
-export const dailyHeadedColumnMap: CsvColumnMap = {
+const dailyHeadedColumnMap: CsvColumnMap = {
     meter_id: 'meter_id',
     timestamp: 'date',
     energy_kwh: '',
@@ -32,7 +32,7 @@ export const dailyHeadedColumnMap: CsvColumnMap = {
     energy_start: '00:00',
 }
 
-export const dailyHeaderlessColumnMap: CsvColumnMap = {
+const dailyHeaderlessColumnMap: CsvColumnMap = {
     meter_id: '0',
     timestamp: '1',
     energy_kwh: '',
@@ -101,7 +101,7 @@ export function csvConfigFor(
         : { delimiter: ';', columnMap: { ...standardHeaderlessColumnMap } }
 }
 
-export type StampFile = { name: string; size: number; lastModified: number }
+type StampFile = { name: string; size: number; lastModified: number }
 
 export type PreviewStamp = {
     files: StampFile[]

@@ -6,8 +6,6 @@ import { useAuth } from './auth'
 import type { User, Zev } from '../types/api'
 import { relationOf, type CommunityRelation } from './membership'
 
-export type { CommunityRelation } from './membership'
-
 /** One community the account can switch to. */
 export interface CommunityEntry {
     id: string

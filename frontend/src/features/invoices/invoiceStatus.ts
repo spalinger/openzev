@@ -2,9 +2,9 @@
  * Single source for the "open invoice" concept: an invoice that has been
  * approved or sent but is not yet settled (paid/cancelled/draft).
  */
-export const OPEN_INVOICE_STATUSES: readonly string[] = ['approved', 'sent']
+const OPEN_INVOICE_STATUSES: readonly string[] = ['approved', 'sent']
 
-export function isOpenInvoiceStatus(status: string): boolean {
+function isOpenInvoiceStatus(status: string): boolean {
   return OPEN_INVOICE_STATUSES.includes(status)
 }
 
