@@ -1,6 +1,7 @@
 import { todayBusinessIso } from '../../lib/dates'
 import type {
   Building,
+  ChartDataPoint,
   MeteringPoint,
   MeteringPointAssignment,
   MeteringPointAssignmentInput,
@@ -116,6 +117,32 @@ export function getMeteringPointHealthWindow(todayIso: string, days = HEALTH_WIN
   return { from: addDaysIso(todayIso, -days), to: addDaysIso(todayIso, -1) }
 }
 
+/**
+ * Each meter's daily kWh for the sparklines, one entry per day of the window
+ * and `null` for a day without readings. A production meter shows what it fed
+ * in, a bidirectional one its net draw, any other what it drew.
+ */
+export function getDailySeries(
+  rows: ChartDataPoint[],
+  points: Pick<MeteringPoint, 'id' | 'meter_type'>[],
+  window: { from: string; to: string },
+): Map<string, Array<number | null>> {
+  const days: string[] = []
+  for (let day = window.from; day <= window.to; day = addDaysIso(day, 1)) days.push(day)
+  const typeById = new Map(points.map((point) => [point.id, point.meter_type]))
+  const byMeter = new Map<string, Map<string, number>>()
+  for (const row of rows) {
+    const type = row.metering_point ? typeById.get(row.metering_point) : undefined
+    if (!type) continue
+    const value = type === 'production' ? row.out_kwh : type === 'bidirectional' ? row.in_kwh - row.out_kwh : row.in_kwh
+    const perDay = byMeter.get(row.metering_point!) ?? new Map<string, number>()
+    // A day bucket starts at the civil midnight, so its date is the civil day.
+    perDay.set(row.bucket.slice(0, 10), value)
+    byMeter.set(row.metering_point!, perDay)
+  }
+  return new Map([...byMeter].map(([id, perDay]) => [id, days.map((day) => perDay.get(day) ?? null)]))
+}
+
 export type MeteringPointHealth = 'green' | 'yellow' | 'red' | 'no_data'
 
 /**
@@ -161,13 +188,6 @@ export function meteringPointNeedsAttention(
   return point.is_active && (health !== 'green' || holderLess)
 }
 
-
-export function meteringPointHealthBadgeClass(health: MeteringPointHealth): string {
-  if (health === 'green') return 'badge badge-success'
-  if (health === 'yellow') return 'badge badge-warning'
-  if (health === 'red') return 'badge badge-danger'
-  return 'badge badge-neutral'
-}
 
 // ── Filters as URL state (#625) ─────────────────────────────────────────────
 //

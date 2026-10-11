@@ -24,8 +24,9 @@ location, and a vZEV with several landowners cannot say who owns which building.
 - A ZEV has one or more **buildings** (address, optional EGID).
 - Every metering point belongs to one building; `location_description` is the unit within it.
 - A landowner role can name the building it owns.
-- Buildings are managed on the metering points page, which groups metering points by building;
-  the simple one-building ZEV shows one compact building line and no new form field.
+- Buildings are managed on the metering points page, which gives each building its own sheet
+  of metering points; the simple one-building ZEV shows one sheet headed by its building and no
+  new form field.
 - Existing data migrates: one building per ZEV, one per distinct participant address in a vZEV.
 
 ## 2. Scope
@@ -268,17 +269,53 @@ ZEV settings.
 
 - **Toolbar** (`MeteringPointsToolbar`): "Add building" as a secondary action next to the primary
   "Add metering point" (managers only); a building filter when the ZEV has more than one building.
-- **One building:** a compact building line above the metering-point list (`BuildingHeader`):
-  name, address on one line, EGID when set, landowners whose role names it, and an edit action
-  for managers. The cards are otherwise unchanged.
-- **Several buildings:** `MeteringPointsList` groups the cards by building (ordered by building
-  name). Each group starts with a `BuildingHeader` (name, address, EGID, landowners, metering-point
-  count) with "Add metering point" and edit actions for managers; delete sits in an
-  `ActionMenu` ("More" → "Delete building", confirm) that appears only while the building has
-  no metering points. A building with no metering points still shows its header with
-  "No metering points in this building yet". Filtering by building shows only that group; search
-  and the other filters apply within groups, and a group with no matching card is hidden unless
-  it has no metering points at all and no filter is active.
+- **One building:** the single metering-point sheet is headed by the building (`BuildingHeader`,
+  variant `line`): name as the sheet's `h2`, address on one line, EGID when set, landowners whose
+  role names it, and an edit action for managers. The empty states sit in the same sheet under it.
+- **Several buildings:** `MeteringPointsList` renders one sheet (`.table-card.metering-sheet`)
+  per building (ordered by building name), spaced apart in `.building-groups`. Each sheet starts
+  with a `BuildingHeader` (variant `group`: name, address, EGID, landowners, metering-point count)
+  with "Add metering point" and edit actions for managers; delete sits in an `ActionMenu`
+  ("More" → "Delete building", confirm) that appears only while the building has no metering
+  points. A building with no metering points still shows its sheet with "No metering points in
+  this building yet". Filtering by building shows only that sheet; search and the other filters
+  apply within sheets, and a sheet with no matching row is hidden unless the building has no
+  metering points at all and no filter is active.
+- **Rows** (both building layouts on `/metering/points`; `/me/metering-points` uses a separate component): each sheet holds a `table.metering-rows`
+  under the dark column band — Metering point, Holder (management view only, viewers included),
+  Last reading, and the actions. *Metering point* leads with the type as a muted icon
+  (`METER_TYPE_ICONS`: house = consumption, solar panel = production, two arrows =
+  bidirectional; the type name as its tooltip and visually hidden text), then the ID, kept on one
+  line with the icon (`.metering-row-name`); the unit within the building below; an `Inactive`
+  badge, the surplus-metering badge and, in the management view, the energy-data chip beside the
+  ID. A legend under the sheets (`.metering-type-legend`) names the icons of the types on show.
+  The columns have fixed widths (`table-layout: fixed`; Data 11.5rem, actions 10rem), so the
+  sheets of several buildings line up. *Holder* shows the current holder with the allocation tag
+  (SPEC-2026-08-shared-metering-points §8.1) and "since {date}"; a meter without a current holder
+  shows the outlined **Assign participant** button (managers), after the red "No current holder"
+  badge when it is active and has readings, and "No holder" to a viewer. When a meter has any
+  assignment beyond its current holder, an "{n} assignments" toggle (`aria-expanded`/
+  `aria-controls`) opens a row beneath it listing every assignment with its state, dates, Edit
+  and a "More" → Remove menu. *Last reading* is a dot that links to the data-quality view: green with the
+  last reading time, otherwise the state (Data gaps, Data at risk, No data yet). The actions are
+  the chart link and, for managers, an icon-only "More" menu. The chart link draws the meter's
+  daily kWh over the last 7 complete days, ending yesterday, as a sparkline
+  (`components/Sparkline.tsx`: a faint `--brand-pale` area under a 1.5px `--brand-mid` line on a
+  zero baseline, broken at a day without readings, the latest day marked) — consumption, the
+  production meter's feed-in, or a bidirectional meter's net draw (`getDailySeries`). One
+  request feeds every row: `chart-data` with `zev_id` and `by_metering_point=true`
+  (SPEC-2026-03-metering-import-and-quality §5.2, query key `metering.dailyByMeter`). With fewer
+  than two days of data the link shows the chart icon instead. Both controls are named with the
+  meter ID for screen readers and as their tooltip ("Chart for {meter} · {kWh} kWh in the last
+  {n} days", or "Chart for {meter}" without data; "More actions for {meter}"; a history row's
+  menu names the holder). The menu holds Edit, Delete data (admins) and Delete; when the meter
+  has a holder it leads with a *Holder* section (Assign participant, Edit assignment, Remove
+  assignment) and labels the rest *Metering point*. The sheet is an inline-size container: at
+  54rem and narrower each row stacks (meter and actions, then holder and data), and at 28rem the
+  data moves below the holder.
+  Tables retain explicit table, rowgroup, row, columnheader and cell roles when rows stack;
+  history cells span the visible columns. Building tables are named by their `h2` heading.
+  The latest reading time remains available in the health-link tooltip.
 - **Building form** (`BuildingFormModal`): name, address (line 1, line 2, postal code, city),
   EGID (number input), notes; on create, a "Copy address from participant" select (participants'
   parties with an address) that fills the address and, when the name is empty, the name. A short
@@ -413,7 +450,15 @@ building; landowner role keeps no building when buildings are not imported.
 Backend (`backend/backups`): registry order covers `Building`.
 
 Frontend unit tests: building select visible only with several buildings; copy address from
-building fills the participant form.
+building fills the participant form. `tests/metering-points-list.test.ts` (6): Assign shows only
+on a meter without a current holder; the assignments toggle opens the history row; a held meter's
+menu is grouped into holder and meter actions; the type is named behind its icon and in the
+legend; the daily series is drawn in the chart button, broken at a missing day; a viewer gets
+neither Assign nor the menu. `tests/metering-point-forms.test.ts`: `getDailySeries` builds one
+series per meter with gaps as `null`, by meter type.
+
+`tests/sparkline.test.ts` (9) covers negative-only, constant-negative, mixed and zero
+scales, gaps, isolated markers and insufficient data.
 
 ## 12. Acceptance criteria
 

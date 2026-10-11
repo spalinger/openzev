@@ -61,7 +61,7 @@ async function render() {
         createElement(QueryClientProvider, { client },
             createElement(MantineProvider, null, createElement(MeteringPointsPage))),
     )))
-    await waitForCondition(() => !!container.querySelector('.metering-point-card'), 'meter rows')
+    await waitForCondition(() => !!container.querySelector('.metering-row'), 'meter rows')
 }
 
 async function openDraft(mode: 'create' | 'edit' | 'assignment' | 'delete') {
@@ -69,8 +69,8 @@ async function openDraft(mode: 'create' | 'edit' | 'assignment' | 'delete') {
         const button = mode === 'create'
             ? container.querySelector<HTMLButtonElement>('.metering-toolbar .toolbar-actions button')!
             : mode === 'assignment'
-                ? container.querySelector<HTMLButtonElement>('.metering-point-actions .button-primary')!
-                : container.querySelector<HTMLButtonElement>('.metering-point-actions [aria-haspopup="menu"]')!
+                ? container.querySelector<HTMLButtonElement>('.metering-assign-button')!
+                : container.querySelector<HTMLButtonElement>('.metering-row-actions [aria-haspopup="menu"]')!
         button.click()
     })
     if (mode === 'edit' || mode === 'delete') {
@@ -153,7 +153,7 @@ describe('metering write ownership', () => {
         await render()
         expect(document.querySelector('[role="dialog"]')).toBeNull()
         expect(container.querySelector('.toolbar-actions')).toBeNull()
-        expect(container.querySelector('.metering-point-actions .button-primary')).toBeNull()
+        expect(container.querySelector('.metering-assign-button')).toBeNull()
     })
 
     it.each(['create', 'edit', 'assignment', 'delete'] as const)('keeps the %s dialog mounted during a failed scope refresh', async mode => {
@@ -168,7 +168,7 @@ describe('metering write ownership', () => {
     it('closes reading deletion when the admin override is lost', async () => {
         state.role = 'admin'
         await render()
-        act(() => container.querySelector<HTMLButtonElement>('.metering-point-actions [aria-haspopup="menu"]')!.click())
+        act(() => container.querySelector<HTMLButtonElement>('.metering-row-actions [aria-haspopup="menu"]')!.click())
         await waitForCondition(() => !!document.querySelector('[role="menuitem"]'), 'admin meter actions')
         act(() => Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
             .find(button => button.textContent?.includes('pages.meteringPoints.deleteData.button'))!.click())

@@ -544,12 +544,17 @@ edit.
   new select `allocation_mode` (personal/community) in the controlled form
   state and layout, default `personal` (the modal is a controlled MUI form —
   `form`/`setForm` props, no zod/react-hook-form).
-- **`frontend/src/features/meteringPoints/MeteringPointsList.tsx`:** badge on
-  assignment rows where the current assignment is community.
+- **`frontend/src/features/meteringPoints/MeteringPointsList.tsx`:** a badge
+  beside the current holder, and on each history row, whose assignment is
+  community — "Shared by all" / "Auf alle verteilt", with `communityBadgeHint`
+  as its tooltip (renamed from "Community" / "Gemeinschaft", which did not say
+  what the mode does).
 - i18n (4 locales, `frontend/src/i18n/locales/{de,fr,it,en}.ts`), under the
   `pages.meteringPoints.assignForm` block: `allocationMode`,
   `allocationModePersonal`, `allocationModeCommunity`, `allocationModeHint`,
-  plus `pages.meteringPoints.communityBadge`.
+  plus `pages.meteringPoints.communityBadge` and `communityBadgeHint`. The
+  options read "Holder only" / "Shared by all" (DE "Nur Inhaber" / "Auf alle
+  verteilt"); the API values stay `personal` / `community`.
 - Gate: selector ships together with the engine change (not in isolation).
 
 ### 8.2 Participants

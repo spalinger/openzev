@@ -49,18 +49,18 @@ are, and both are recorded. Buildings are managed on this page.
 
 - A new ZEV starts with one building, taking the issuer's address when the
   issuer lives at the grid connection's postal code. With a single building
-  the page shows it as one line above the list, with **Edit**, and the meter
+  the list is one sheet headed by that building, with **Edit**, and the meter
   form does not ask for a building.
 - **Add building** (next to **New Metering Point**) creates one; you can copy
   the address of a participant or other contact. Landowners linked to a
   building (see [People & access](02-zev-setup.md#people-and-access-tab)) are
   named in its header.
-- With several buildings, the metering points are **grouped by building**, ordered by
-  name. Each group's header shows the address, EGID, landowners and number of
+- With several buildings, **each building gets its own sheet**, ordered by
+  name. Each sheet's header shows the address, EGID, landowners and number of
   metering points, with **Add metering point** (that building preselected)
   and **Edit**. A building without metering points shows "No
   metering points in this building yet". Search and the other filters apply
-  within the groups; the **Building** filter shows one group.
+  within the sheets; the **Building** filter shows one sheet.
 - A building can be deleted only once it is empty: move or delete its meters
   first, then **More → Delete building** appears in its header. Landowner rows that pointed at a deleted building are
   kept, without a building.
@@ -72,7 +72,7 @@ are, and both are recorded. Buildings are managed on this page.
 > participant it is assigned to; meters without a clear holder went to the
 > issuer's building. That is a **guess** from billing addresses, which are not
 > always where the meters are (a landlord billed for an empty flat, a holiday
-> home). Review the groups and correct them: move the metering points, then
+> home). Review the buildings and correct them: move the metering points, then
 > delete the empty building.
 
 ## Creating a Metering Point
@@ -98,8 +98,10 @@ its meters.
 
 3. Click **Create Metering Point**
 
-4. To bill this meter, assign a participant: click **Assign participant** on
-   its entry and set the assignment's validity window — see below.
+4. To bill this meter, assign a participant: click **Assign participant** in
+   its row and set the assignment's validity window — see below. Once the
+   meter has a holder, a further assignment (a new tenant) is made from its
+   **⋯ More** menu → **Assign participant**.
 
 > **Tip:** **Active** only tracks whether a meter is in inventory; on its own
 > it does not affect billing. To *stop billing* a meter, end its assignment
@@ -196,25 +198,26 @@ decides who pays for it:
 
 | Allocation | Who pays |
 | --- | --- |
-| **Personal** (default) | The assigned participant alone. This is how every meter behaved before this setting existed. |
-| **Community** | Every participant of the ZEV, split by their [allocation weight](03-participant-management.md#allocation-weight). |
+| **Holder only** (default) | The assigned participant alone. This is how every meter behaved before this setting existed. |
+| **Shared by all** | Every participant of the ZEV, split by their [allocation weight](03-participant-management.md#allocation-weight). |
 
 > **The assigned participant does not change.** A community meter still has a
 > holder of record — usually the *Verwaltung* or a caretaker participant — who
 > stays responsible for the meter in the UI, in data-quality checks, and in
-> the audit log. `Community` changes only **who is billed**, not who holds it.
+> the audit log. `Shared by all` changes only **who is billed**, not who holds it.
 > The holder pays their own weighted share like everybody else, with no
 > special case.
 
-Assignment rows set to `Community` are marked with a **Community** badge in
-the metering points list — visible on the common-area meter in the
+Assignments set to `Shared by all` are marked with a **Shared by all** badge
+next to the holder in the metering points list (hover it for an explanation) —
+visible on the common-area meter in the
 [page screenshot above](#what-is-a-metering-point).
 
-### Switching a meter to Community
+### Sharing a meter across all participants
 
 1. Go to **Metering Points**
-2. Find the meter and click **Edit** on its assignment row
-3. Set **Allocation** to `Community`
+2. Find the meter, open its **⋯ More** menu and click **Edit Assignment**
+3. Set **Allocation** to `Shared by all`
 4. Click **Save Assignment**
 
 Regenerate any **draft** invoices for affected periods to pick up the change.
@@ -224,14 +227,14 @@ Invoices that have already been sent are protected and will not change — see
 ### Switching mid-period is safe
 
 Allocation is resolved **per reading**, not per invoice. A meter that is
-`Personal` in January and `Community` from February bills correctly on both
+`Holder only` in January and `Shared by all` from February bills correctly on both
 sides of the change: January's readings go to the holder in full, February's
 are split across the community. No readings are lost and none are billed
 twice.
 
 ### What gets split
 
-For a `Community` meter, all of the following are divided by allocation weight:
+For a `Shared by all` meter, all of the following are divided by allocation weight:
 
 - Energy consumed (both the local/solar share and the grid share), including
   any levies and percentage-based tariffs on it
@@ -253,25 +256,37 @@ join date, and a leaver's share stops on their leave date.
 > for per-metering-point fees, exactly like an inactive personal meter. Its
 > historical readings still count towards the community energy pool.
 
-## What a Metering Point Card Shows
+## What a Metering Point Row Shows
 
-Each entry on the **Metering Points** page shows, at a glance:
+Each metering point is one row in its building's sheet:
 
-- The **meter ID**, its **building** (when the community has several) and
-  its **location** within the building (or "No location set")
-- **Active**/**Inactive** and meter-**type** badges, plus a **Surplus
-  metering** badge when [Generation behind the meter](#generation-behind-the-meter)
-  is ticked
-- A **data-health badge** — `Healthy`, `Data gaps`, `Data at risk`, or `No
-  data yet`, based on the last 30 complete days (up to yesterday); click it to open the
-  metering point's data-quality view
-- **Last reading** date, or "No readings received yet"
-- A **No current holder** warning if the meter has readings but no
-  participant is currently assigned to it
-- Its current assignment (holder and validity window), or its full
-  assignment history if it has more than one
+- **Metering point** — an icon for its type (a house for Consumption, a solar
+  panel for Production, two arrows for Bidirectional; hover it for the name,
+  and the legend under the list names them), the meter ID and its unit within
+  the building, with an **Inactive** badge for a deactivated meter and a
+  **Surplus metering** badge when
+  [Generation behind the meter](#generation-behind-the-meter) is ticked
+- **Holder** — the participant who currently holds the meter and since when.
+  A meter without a holder shows **Assign participant** instead, after a red
+  **No current holder** warning if it has readings that cannot be billed.
+  When a meter has had other assignments (or one is coming up), click
+  **_n_ assignments** under the holder to open them all, each with its dates,
+  **Edit** and **⋯ More → Remove**
+- **Last reading** — a dot for the data health over the last 30 complete days (up to
+  yesterday): green with the last reading time, otherwise `Data gaps`,
+  `Data at risk` or `No data yet`. Click it to open the metering point's
+  data-quality view. Hover to see the latest reading time when available
 
-Click **Chart** on an entry for the metering point's full reading history.
+At the end of the row, a small chart of the meter's daily kWh over the last
+7 complete days, ending yesterday (production meters show what they fed in), opens its full reading
+history; a break in the line is a day without readings. Hover it for the
+7-day total. With fewer than two daily values, the link shows a chart icon instead. The
+**⋯ More** menu holds the rest. When the meter has a holder
+it starts with the holder's actions (**Assign participant**,
+**Edit Assignment**, **Remove Assignment**), followed by the meter's own
+(**Edit**, **Delete data** for administrators, **Delete**).
+
+On a narrow screen each row becomes a small card with the same content.
 
 ## Meter Maintenance
 
@@ -289,7 +304,7 @@ Click **Chart** on an entry for the metering point's full reading history.
 
 To stop billing a meter:
 
-1. Click **Edit** on its current assignment row
+1. Open the meter's **⋯ More** menu and click **Edit Assignment**
 2. Set **Valid To** to the last day it should be billed
 3. Click **Save Assignment**
 

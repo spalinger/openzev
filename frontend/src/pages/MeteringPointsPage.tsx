@@ -124,6 +124,7 @@ function MeteringPointsView({ canWrite, canDeleteData }: { canWrite: boolean; ca
         hasFilters,
         meteringPointHealthById,
         meteringPointHolderLessById,
+        dailySeriesByMeteringPoint,
         dialog,
         confirm,
         dialogLoading,
@@ -136,12 +137,21 @@ function MeteringPointsView({ canWrite, canDeleteData }: { canWrite: boolean; ca
         canDeleteData,
     })
 
-    // Several buildings: cards grouped by building (a one-building ZEV keeps the flat list).
+    // Several buildings: one sheet per building (a one-building ZEV keeps a single sheet).
     const groups = isManagedScope && buildings.length > 1
         ? groupMeteringPointsByBuilding(buildings, meteringPoints, { filtersActive: hasFilters })
         : null
     // An empty building still shows its header, so the page is not "empty".
     const hasGroups = !!groups && groups.length > 0
+    const singleBuildingHeader = isManagedScope && buildings.length === 1 ? (
+        <BuildingHeader
+            building={buildings[0]}
+            landowners={landownersOf(buildings[0])}
+            variant="line"
+            canManage={canWrite}
+            onEdit={openEditBuildingModal}
+        />
+    ) : null
 
     const typeCounts: Partial<Record<MeteringPoint['meter_type'], number>> = {}
     for (const point of scopedMeteringPoints) typeCounts[point.meter_type] = (typeCounts[point.meter_type] ?? 0) + 1
@@ -221,70 +231,56 @@ function MeteringPointsView({ canWrite, canDeleteData }: { canWrite: boolean; ca
                         {t('pages.meteringPoints.filteredCount', { shown: meteringPoints.length, total: scopedMeteringPoints.length })}
                     </p>
                 )}
-                {isManagedScope && buildings.length === 1 && (
-                    <BuildingHeader
-                        building={buildings[0]}
-                        landowners={landownersOf(buildings[0])}
-                        variant="line"
-                        canManage={canWrite}
-                        onEdit={openEditBuildingModal}
-                    />
-                )}
-                <div className="table-card">
-                    {scopedMeteringPoints.length === 0 && !hasGroups ? (
+                {meteringPoints.length === 0 && !hasGroups ? (
+                    <div className="table-card">
+                        {singleBuildingHeader}
                         <MeteringPointsEmptyState
                             isManagedScope={isManagedScope}
                             readOnly={readOnly}
-                            hasFilters={false}
-                            onOpenCreateModal={openCreateMpModal}
-                            onClearFilters={() => undefined}
-                        />
-                    ) : meteringPoints.length === 0 && !hasGroups ? (
-                        <MeteringPointsEmptyState
-                            isManagedScope={isManagedScope}
-                            readOnly={readOnly}
-                            hasFilters={hasFilters}
+                            hasFilters={scopedMeteringPoints.length > 0 && hasFilters}
                             onOpenCreateModal={openCreateMpModal}
                             onClearFilters={clearFilters}
                         />
-                    ) : (
-                        <MeteringPointsList
-                            settings={settings}
-                            meteringPoints={meteringPoints}
-                            assignmentsByMeteringPoint={filteredAssignmentsByMeteringPoint}
-                            participantNameById={participantNameById}
-                            healthByMeteringPoint={meteringPointHealthById}
-                            holderLessByMeteringPoint={meteringPointHolderLessById}
-                            isManagedScope={isManagedScope}
-                            showBuilding={isManagedScope && buildings.length > 1}
-                            groups={groups}
-                            renderGroupHeader={(group) => (
-                                <BuildingHeader
-                                    building={group.building}
-                                    landowners={landownersOf(group.building)}
-                                    variant="group"
-                                    canManage={canWrite}
-                                    deletePending={deleteBuildingMutation.isPending}
-                                    onEdit={openEditBuildingModal}
-                                    onDelete={confirmDeleteBuilding}
-                                    onAddMeteringPoint={(building) => openCreateMpModalInBuilding(building.id)}
-                                />
-                            )}
-                            readOnly={readOnly}
-                            canDeleteData={canDeleteData}
-                            deleteMeteringPointPending={deleteMpMutation.isPending}
-                            deleteAssignmentPending={deleteAssignMutation.isPending}
-                            dialogLoading={dialogLoading}
-                            confirm={confirm}
-                            onOpenCreateAssignModal={openCreateAssignModal}
-                            onOpenEditMeteringPoint={openEditMpModal}
-                            onOpenDeleteDataModal={openDeleteDataModal}
-                            onOpenEditAssignment={openEditAssignModal}
-                            onDeleteMeteringPoint={(id) => deleteMpMutation.mutate({ id, scope })}
-                            onDeleteAssignment={(id) => deleteAssignMutation.mutate({ id, scope })}
-                        />
-                    )}
-                </div>
+                    </div>
+                ) : (
+                    <MeteringPointsList
+                        settings={settings}
+                        meteringPoints={meteringPoints}
+                        assignmentsByMeteringPoint={filteredAssignmentsByMeteringPoint}
+                        participantNameById={participantNameById}
+                        healthByMeteringPoint={meteringPointHealthById}
+                        holderLessByMeteringPoint={meteringPointHolderLessById}
+                        dailySeriesByMeteringPoint={dailySeriesByMeteringPoint}
+                        isManagedScope={isManagedScope}
+                        groups={groups}
+                        header={singleBuildingHeader}
+                        buildingId={singleBuildingHeader ? buildings[0].id : undefined}
+                        renderGroupHeader={(group) => (
+                            <BuildingHeader
+                                building={group.building}
+                                landowners={landownersOf(group.building)}
+                                variant="group"
+                                canManage={canWrite}
+                                deletePending={deleteBuildingMutation.isPending}
+                                onEdit={openEditBuildingModal}
+                                onDelete={confirmDeleteBuilding}
+                                onAddMeteringPoint={(building) => openCreateMpModalInBuilding(building.id)}
+                            />
+                        )}
+                        readOnly={readOnly}
+                        canDeleteData={canDeleteData}
+                        deleteMeteringPointPending={deleteMpMutation.isPending}
+                        deleteAssignmentPending={deleteAssignMutation.isPending}
+                        dialogLoading={dialogLoading}
+                        confirm={confirm}
+                        onOpenCreateAssignModal={openCreateAssignModal}
+                        onOpenEditMeteringPoint={openEditMpModal}
+                        onOpenDeleteDataModal={openDeleteDataModal}
+                        onOpenEditAssignment={openEditAssignModal}
+                        onDeleteMeteringPoint={(id) => deleteMpMutation.mutate({ id, scope })}
+                        onDeleteAssignment={(id) => deleteAssignMutation.mutate({ id, scope })}
+                    />
+                )}
 
                 <MeteringDeleteDataModal
                     settings={settings}

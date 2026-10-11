@@ -14,13 +14,13 @@ System administrator role with unrestricted access to all ZEVs, settings, and us
 Distribution of community energy production among participants proportional to their consumption at each timestamp. See [How Energy Allocation Works](08-billing-allocation-explained.md).
 
 **Allocation Mode**
-Setting on a metering point assignment deciding who pays for that meter: `Personal` (the assigned participant alone, the default) or `Community` (split across every participant by allocation weight). See [Metering Points](04-metering-points.md#shared-common-area-metering-points).
+Setting on a metering point assignment deciding who pays for that meter: `Holder only` (the assigned participant alone, the default) or `Shared by all` (split across every participant by allocation weight). See [Metering Points](04-metering-points.md#shared-common-area-metering-points).
 
 **Allocation Weight**
 A plain relative number per participant deciding how much of a shared cost they carry — not a percentage and not a Wertquote. Defaults to `1`, which splits shared costs equally. See [Managing Participants](03-participant-management.md#allocation-weight).
 
 **Allgemeinstrom**
-German for common-area electricity: stairwell lighting, lift, laundry, shared heat pump. In OpenZEV, billed by marking the meter's assignment as `Community`. See [Metering Points](04-metering-points.md#shared-common-area-metering-points).
+German for common-area electricity: stairwell lighting, lift, laundry, shared heat pump. In OpenZEV, billed by setting the meter's assignment to `Shared by all`. See [Metering Points](04-metering-points.md#shared-common-area-metering-points).
 
 ## B
 

@@ -208,6 +208,7 @@ class MeterReadingViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
           date_from       – YYYY-MM-DD (optional)
           date_to         – YYYY-MM-DD (optional)
           bucket          – day | hour | month  (default: day)
+          by_metering_point – "true" groups by meter; rows include ``metering_point``
         """
         mp_id = _validated_uuid(request.query_params.get("metering_point"), "metering_point")
         zev_id = request.query_params.get("zev_id")
@@ -217,6 +218,7 @@ class MeterReadingViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
         date_from = _validated_date(request.query_params.get("date_from"), "date_from")
         date_to = _validated_date(request.query_params.get("date_to"), "date_to")
         bucket = request.query_params.get("bucket", "day")
+        by_meter = request.query_params.get("by_metering_point") == "true"
 
         trunc_fn = _bucket_trunc(bucket)
 
@@ -232,25 +234,29 @@ class MeterReadingViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
         if date_to:
             qs = qs.filter(timestamp__lt=period_end_exclusive_dt(date_to))
 
+        group = ("bucket", "direction", "metering_point_id") if by_meter else ("bucket", "direction")
         rows = (
             qs.annotate(bucket=trunc_fn("timestamp"))
-            .values("bucket", "direction")
+            .values(*group)
             .annotate(total_kwh=Sum("energy_kwh"))
             .order_by("bucket")
         )
 
         pivot: dict = {}
         for row in rows:
-            key = row["bucket"].isoformat()
+            bucket_key = row["bucket"].isoformat()
+            key = (bucket_key, str(row["metering_point_id"])) if by_meter else (bucket_key, "")
             if key not in pivot:
-                pivot[key] = {"bucket": key, "in_kwh": 0.0, "out_kwh": 0.0}
+                pivot[key] = {"bucket": bucket_key, "in_kwh": 0.0, "out_kwh": 0.0}
+                if by_meter:
+                    pivot[key]["metering_point"] = key[1]
             direction = row["direction"]
             if direction == "in":
                 pivot[key]["in_kwh"] = float(row["total_kwh"])
             elif direction == "out":
                 pivot[key]["out_kwh"] = float(row["total_kwh"])
 
-        return Response(sorted(pivot.values(), key=lambda x: x["bucket"]))
+        return Response([pivot[key] for key in sorted(pivot)])
 
     @action(detail=False, methods=["get"], url_path="raw-data", permission_classes=[IsAuthenticated])
     def raw_data(self, request):

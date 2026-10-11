@@ -1242,6 +1242,65 @@ class ChartDataEndpointTests(TestCase):
 		# self.mp's 1.5 + 2.5 (from setUp) plus second_mp's 3.0.
 		self.assertAlmostEqual(resp.data[0]["in_kwh"], 7.0)
 
+	def test_chart_data_by_metering_point_keeps_each_meter_apart(self):
+		"""by_metering_point=true splits the ZEV's buckets per meter, for the list's sparklines."""
+		second_mp = MeteringPoint.objects.create(
+			zev=self.zev,
+			meter_id="CH-CHART-2",
+			meter_type=MeteringPointType.PRODUCTION,
+		)
+		MeterReading.objects.create(
+			metering_point=second_mp,
+			timestamp=datetime(2026, 4, 1, 0, 0, tzinfo=timezone.utc),
+			energy_kwh=Decimal("3.0"),
+			direction=ReadingDirection.OUT,
+			resolution=ReadingResolution.FIFTEEN_MIN,
+		)
+		auth(self.client, self.owner)
+
+		resp = self.client.get(
+			"/api/v1/metering/readings/chart-data/",
+			{"zev_id": str(self.zev.id), "date_from": "2026-04-01", "date_to": "2026-04-01", "by_metering_point": "true"},
+		)
+
+		self.assertEqual(resp.status_code, 200)
+		by_meter = {row["metering_point"]: row for row in resp.data}
+		self.assertEqual(set(by_meter), {str(self.mp.id), str(second_mp.id)})
+		self.assertAlmostEqual(by_meter[str(self.mp.id)]["in_kwh"], 4.0)
+		self.assertAlmostEqual(by_meter[str(self.mp.id)]["out_kwh"], 0.0)
+		self.assertAlmostEqual(by_meter[str(second_mp.id)]["out_kwh"], 3.0)
+		self.assertEqual({row["bucket"] for row in resp.data}, {"2026-04-01T00:00:00+02:00"})
+
+	def test_chart_data_by_metering_point_hourly_pivots_and_orders_dst_hours(self):
+		second_mp = MeteringPoint.objects.create(
+			zev=self.zev, meter_id="CH-CHART-HOUR-2", meter_type=MeteringPointType.BIDIRECTIONAL,
+		)
+		meters = sorted([self.mp, second_mp], key=lambda meter: str(meter.id))
+		expected = []
+		for hour in (0, 1):
+			for index, meter in enumerate(meters):
+				incoming, outgoing = index + hour + 1, index + hour + 3
+				for direction, value in ((ReadingDirection.IN, incoming), (ReadingDirection.OUT, outgoing)):
+					for minute in (0, 15):
+						MeterReading.objects.create(
+							metering_point=meter,
+							timestamp=datetime(2026, 10, 25, hour, minute, tzinfo=timezone.utc),
+							energy_kwh=Decimal(value) / 2,
+							direction=direction,
+							resolution=ReadingResolution.FIFTEEN_MIN,
+						)
+				expected.append({
+					"bucket": f"2026-10-25T0{hour}:00:00+00:00",
+					"metering_point": str(meter.id), "in_kwh": float(incoming), "out_kwh": float(outgoing),
+				})
+		auth(self.client, self.owner)
+		resp = self.client.get("/api/v1/metering/readings/chart-data/", {
+			"zev_id": str(self.zev.id), "date_from": "2026-10-25", "date_to": "2026-10-25",
+			"bucket": "hour", "by_metering_point": "true",
+		})
+		self.assertEqual(resp.status_code, 200)
+		self.assertEqual(resp.data, expected)
+
 	def test_chart_data_zev_id_excludes_other_zevs(self):
 		other_owner = make_user("chart_other_owner", UserRole.USER)
 		other_zev = create_managed_zev(name="Other ZEV", owner=other_owner, zev_type="vzev", invoice_prefix="O")

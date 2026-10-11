@@ -177,12 +177,14 @@ export function uploadMeteringFiles(
 }
 
 export async function fetchChartData(params: {
-  /** Exactly one of meteringPoint / zevId — the latter aggregates every metering point in that ZEV (#650). */
+  /** At least one of meteringPoint / zevId; both narrow the scope. */
   meteringPoint?: string
   zevId?: string
   dateFrom?: string
   dateTo?: string
   bucket?: 'day' | 'hour' | 'month'
+  /** Keep each metering point's series apart instead of summing them. */
+  byMeteringPoint?: boolean
 }): Promise<ChartDataPoint[]> {
   const { data } = await api.get<ChartDataPoint[]>('/metering/readings/chart-data/', {
     params: {
@@ -191,6 +193,7 @@ export async function fetchChartData(params: {
       date_from: params.dateFrom,
       date_to: params.dateTo,
       bucket: params.bucket ?? 'day',
+      by_metering_point: params.byMeteringPoint ? 'true' : undefined,
     },
   })
   return data

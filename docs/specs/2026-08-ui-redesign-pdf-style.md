@@ -1089,7 +1089,9 @@ contracts are unchanged.
   hairline-separated rows inside one sheet. Participant rows lead with the
   name (`.participant-card-heading`), then badges, then five labelled detail
   columns; Edit is a secondary action (SPEC-2026-04 §7.3). Metering points
-  nest their assignments under a left rule; Assign is `button-outline`.
+  are table rows instead, one sheet per building under the dark band
+  (SPEC-2026-10-buildings-and-sites §7.3 *Rows*); Assign is `button-outline`
+  and shows only on a meter without a holder.
 - Tariff list (`TariffCategorySections`): a rate card like the tariff overview PDF.
   - List contents: one sheet with a `.tariff-table` per category; the header shows the category. One row per series with its name, energy type, note first line, applicability, CHF price, unit, and validity. One line per band. No version count.
   - Pricing and coverage: `buildRateLines` in `rateLines.ts` (tested in `tariff-rate-lines.test.ts`); per-kWh prices carry at least three decimals, fees two. Applies names the band, weekdays (`formatWeekdays`), window and season; a dynamic average reads "Dynamic, average" or "Dynamic, incomplete average"; a percentage names its share and base with the approximate price; fees name their basis. Applies lines carry their full text as tooltip; the price column carries the pricing explanation; a shown (non-upcoming) validity keeps the full range as tooltip.

@@ -21,7 +21,7 @@ import {
     updateMeteringPointAssignment,
 } from '../../lib/api/zev'
 import { formatApiError } from '../../lib/api/errors'
-import { fetchMeteringDataQualityStatus } from '../../lib/api/metering'
+import { fetchChartData, fetchMeteringDataQualityStatus } from '../../lib/api/metering'
 import { queryKeys } from '../../lib/api/queryKeys'
 import { formatShortDate, useAppSettings } from '../../lib/appSettings'
 import { todayBusinessIso } from '../../lib/dates'
@@ -31,6 +31,7 @@ import { useWriteScope } from '../../lib/useWriteScope'
 import {
     defaultAssignmentForm,
     defaultMeteringPointForm,
+    getDailySeries,
     getMeteringPointHealth,
     getMeteringPointHealthWindow,
     getNextAssignmentGuidance,
@@ -346,7 +347,7 @@ export function useMeteringPointActions({
     // Not role-gated: the endpoint scopes readings to what the caller may
     // see (a participant's own assigned meters), so the health indicator
     // stays accurate for every role instead of being hidden for some (#623).
-    const healthWindow = getMeteringPointHealthWindow(todayIso)
+    const healthWindow = useMemo(() => getMeteringPointHealthWindow(todayIso), [todayIso])
     const dataQualityQuery = useQuery({
         queryKey: queryKeys.metering.qualityStatus(
             healthWindow.from,
@@ -361,6 +362,14 @@ export function useMeteringPointActions({
                 zevId: isManagedScope ? (selectedZevId || undefined) : undefined,
             }),
         enabled: !isManagedScope || !!selectedZevId,
+    })
+    const sparklineWindow = useMemo(() => getMeteringPointHealthWindow(todayIso, 7), [todayIso])
+    // One request for every meter's sparkline.
+    const dailySeriesQuery = useQuery({
+        queryKey: queryKeys.metering.dailyByMeter(selectedZevId ?? '', sparklineWindow.from, sparklineWindow.to),
+        queryFn: () =>
+            fetchChartData({ zevId: selectedZevId!, dateFrom: sparklineWindow.from, dateTo: sparklineWindow.to, byMeteringPoint: true }),
+        enabled: !!selectedZevId,
     })
 
     const saveMpMutation = useMutation({
@@ -694,6 +703,11 @@ export function useMeteringPointActions({
         return map
     }, [dataQualityQuery.data])
 
+    const dailySeriesByMeteringPoint = useMemo(
+        () => getDailySeries(dailySeriesQuery.data ?? [], meteringPointsQuery.data ?? [], sparklineWindow),
+        [dailySeriesQuery.data, meteringPointsQuery.data, sparklineWindow],
+    )
+
     const meteringPointHealthById = useMemo(() => {
         const map = new Map<string, MeteringPointHealth>()
         for (const point of meteringPointsQuery.data ?? []) {
@@ -859,6 +873,7 @@ export function useMeteringPointActions({
         needsAttentionCount,
         hasFilters,
         // Data health (#623)
+        dailySeriesByMeteringPoint,
         meteringPointHealthById,
         meteringPointHolderLessById,
         needsAttentionByMeteringPoint,

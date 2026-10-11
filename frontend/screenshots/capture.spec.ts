@@ -197,12 +197,12 @@ test.describe('User Guide Screenshots', () => {
   // seeded unassigned metering point (CH-DEMO-CONS-0003) — no fixture needed.
   test('04b-metering-points-assign', async ({ page }) => {
     await navigateTo(page, '/metering-points')
-    await page.waitForSelector('.metering-point-card, table, .card', { timeout: 10_000 })
+    await page.waitForSelector('.metering-row', { timeout: 10_000 })
 
-    const pointCard = page.locator('.metering-point-card').filter({ hasText: 'CH-DEMO-CONS-0003' }).first()
-    await expect(pointCard).toBeVisible({ timeout: 10_000 })
+    const pointRow = page.locator('tr.metering-row').filter({ hasText: 'CH-DEMO-CONS-0003' }).first()
+    await expect(pointRow).toBeVisible({ timeout: 10_000 })
 
-    const assignBtn = pointCard.getByRole('button', {
+    const assignBtn = pointRow.getByRole('button', {
       name: /assign|zuweisen|assigner|assegna/i,
     })
     await assignBtn.click()

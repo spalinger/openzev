@@ -254,8 +254,8 @@ eligibility rule as consumption.
 
 ### A meter can change mid-period
 
-Allocation is resolved per reading, so a meter that is `Personal` in January
-and `Community` from February bills correctly on both sides: the holder is
+Allocation is resolved per reading, so a meter that is `Holder only` in January
+and `Shared by all` from February bills correctly on both sides: the holder is
 charged in full for January, and February is split. Nothing is lost and
 nothing is billed twice.
 

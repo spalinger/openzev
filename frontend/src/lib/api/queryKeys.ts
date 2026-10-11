@@ -73,6 +73,8 @@ export const queryKeys = {
     importLogs: () => ['metering', 'import-logs'] as const,
     chartData: (meteringPointId: string, dateFrom: string, dateTo: string, bucket: 'day' | 'hour' | 'month') =>
       ['metering', 'chart-data', meteringPointId, dateFrom, dateTo, bucket] as const,
+    dailyByMeter: (zevId: string, dateFrom: string, dateTo: string) =>
+      ['metering', 'chart-data-by-meter', zevId, dateFrom, dateTo] as const,
     rawData: (meteringPointId: string, dateFrom: string, dateTo: string) =>
       ['metering', 'raw-data', meteringPointId, dateFrom, dateTo] as const,
     rawDay: (meteringPointId: string, date: string) =>

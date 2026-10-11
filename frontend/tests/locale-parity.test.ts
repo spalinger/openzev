@@ -39,6 +39,12 @@ describe('locale parity and integrity', () => {
     expect(localeKeys).toEqual([...enMap.keys()].sort())
   })
 
+  it('keeps the location fallback used by the participant meter page', () => {
+    for (const locale of [en, de, fr, itLocale]) {
+      expect(locale.pages.meteringPoints.noLocation).toBeTruthy()
+    }
+  })
+
   it('every leaf is a non-empty string', () => {
     const allLocales = { en, de, fr, it: itLocale }
     for (const [name, dict] of Object.entries(allLocales)) {

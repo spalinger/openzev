@@ -8,7 +8,7 @@ type BuildingHeaderProps = {
   building: Building
   /** Names of the landowners whose role names this building, active today. */
   landowners: string[]
-  /** `line`: the compact line above the list of a one-building ZEV; `group`: the header of a building's group. */
+  /** `line`: heads the single sheet of a one-building ZEV; `group`: heads one building's sheet among several. */
   variant: 'line' | 'group'
   /** Managers only: edit (and, in a group, delete and add a metering point). */
   canManage: boolean
@@ -26,8 +26,8 @@ function buildingAddress(building: Building): string {
 }
 
 /**
- * The building a group of metering points is in (#890, ADR 0029): name,
- * address, EGID, landowners and how many meters it holds.
+ * The title block of a building's sheet of metering points (#890, ADR 0029):
+ * name, address, EGID, landowners and how many meters it holds.
  */
 export function BuildingHeader({
   building,
@@ -45,9 +45,9 @@ export function BuildingHeader({
   const isGroup = variant === 'group'
 
   return (
-    <div className={`building-header building-header-${variant}`}>
+    <div className="building-header">
       <div className="building-header-main">
-        <strong className="building-header-name">{building.name}</strong>
+        <h2 id={`metering-building-${building.id}`} className="building-header-name">{building.name}</h2>
         <span className="building-header-meta muted">
           {address && <span>{address}</span>}
           {building.egid !== null && <span>{t('pages.meteringPoints.buildings.egidBadge', { egid: building.egid })}</span>}

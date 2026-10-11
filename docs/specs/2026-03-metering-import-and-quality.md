@@ -477,12 +477,23 @@ All metering endpoints are routed under `/api/v1/metering/` via DRF routers.
 
 | Method | URL | Permission | Query params |
 |---|---|---|---|
-| `GET` | `/readings/chart-data/` | `IsAuthenticated` | `metering_point` (required), `date_from`, `date_to`, `bucket` |
+| `GET` | `/readings/chart-data/` | `IsAuthenticated` | `metering_point` or `zev_id` (at least one, else 400), `date_from`, `date_to`, `bucket`, `by_metering_point` |
 
 **Bucket options:** `day` (default), `hour`, `month`.
 
+**Scope:** `metering_point` gives one meter's series; `zev_id` alone sums every
+metering point of that ZEV into one series (#650); both narrow the meter to the
+ZEV.
+
 **Response:** array of `{bucket, in_kwh, out_kwh}` objects, pivoted by
-direction within each time bucket.
+direction within each time bucket, ordered by bucket.
+
+**Per-meter series:** with `by_metering_point=true` the buckets are also
+grouped by metering point and each row carries `metering_point` (UUID string):
+`{bucket, metering_point, in_kwh, out_kwh}`, ordered by bucket, then metering
+point. One request then feeds every row's sparkline on the metering points
+page (SPEC-2026-10-buildings-and-sites §7.3 *Rows*). Any other value keeps the
+summed series. Scoping and participant visibility are unchanged.
 
 **Participant visibility:** filter each reading by an assignment belonging to
 the caller that covers the reading's civil date (Europe/Zurich), before aggregation
@@ -1152,7 +1163,7 @@ type MeteringDashboardSummary =
 | `SharedMeteringDashboardTests` | §5.4: personal/community reconciliation; multi-record accounts; separate ZEV pools; membership and assignment boundaries; Swiss period boundaries; disabled membership scopes; weighted hourly profile |
 | `ParticipantImportRestrictionTests` | §6.2: participant cannot list import logs, preview CSV, or upload CSV (all 403) |
 | `MeteringRawDataEndpointTests` | §5.3: owner gets daily-grouped raw rows with correct direction sums; participant can read own metering point's raw data |
-| `ChartDataEndpointTests` | §5.2: direction aggregates; Swiss day/month boundaries agree with raw data (`test_daily_bucket_uses_the_same_civil_day_as_raw_data`, `test_month_bucket_does_not_cross_the_civil_month_boundary`); hourly buckets stay distinct across both DST transitions |
+| `ChartDataEndpointTests` | §5.2: direction aggregates; Swiss day/month boundaries agree with raw data (`test_daily_bucket_uses_the_same_civil_day_as_raw_data`, `test_month_bucket_does_not_cross_the_civil_month_boundary`); hourly buckets stay distinct across both DST transitions; `by_metering_point=true` keeps each meter's series apart (`test_chart_data_by_metering_point_keeps_each_meter_apart`); per-meter hourly IN/OUT pivots and chronological meter ordering across the repeated autumn hour (`test_chart_data_by_metering_point_hourly_pivots_and_orders_dst_hours`) |
 | `DashboardCivilDayBucketingTests` | §5.4: a 23:45 Swiss-time reading stays in its civil-day bucket (`+02:00`); 00:00 the next day is excluded |
 | `DataQualityStatusTests` | §5.5: owner sees gaps and severity; participant sees own meters; default range is the 30 days ending yesterday, and a lone `date_from` of today still yields a one-day window; fully assigned readings report no unassigned; holder-less meter flags every reading; assignment-gap readings flagged unassigned; overlapping windows flag only the corrupt meter (others still report) |
 
@@ -1171,19 +1182,19 @@ type MeteringDashboardSummary =
 
 ### Backend (`metering/test_reading_visibility.py`)
 
-72 parametrized API cases cover raw summaries, raw single-day details, and
-day/hour/month chart buckets:
+100 parametrized API cases cover raw summaries, raw single-day details,
+day/hour/month chart buckets, and per-meter day/hour buckets (`by_metering_point`):
 
 | Test function | Cases | Validates |
 |---|---|---|
-| `test_only_assignment_days_are_visible_without_duplicate_totals` | 35 | Before/after-transfer exclusion, inclusive civil-day boundaries (fixtures in Swiss time), gaps, returning-holder windows, open-ended assignments through DST, and unduplicated IN/OUT totals |
-| `test_next_holder_can_read_their_own_readings` | 5 | The next holder retains access during their own window |
+| `test_only_assignment_days_are_visible_without_duplicate_totals` | 49 | Before/after-transfer exclusion, inclusive civil-day boundaries (fixtures in Swiss time), gaps, returning-holder windows, open-ended assignments through DST, and unduplicated IN/OUT totals |
+| `test_next_holder_can_read_their_own_readings` | 7 | The next holder retains access during their own window |
 | `test_unbounded_requests_only_aggregate_owned_readings` | 2 | Requests without date bounds aggregate only owned readings, including exact raw reading counts |
-| `test_assignment_to_one_meter_does_not_grant_access_to_another` | 5 | Assignment correlation includes the meter, not only caller/date |
-| `test_zev_filter_cannot_widen_participant_visibility` | 5 | Foreign meter access is denied and a mismatched ZEV filter excludes an otherwise authorized meter |
-| `test_participant_without_assignments_sees_no_readings` | 5 | ZEV membership alone grants no raw/chart access |
-| `test_managers_can_read_assignment_gaps` | 10 | Admin/owner access does not depend on assignments |
-| `test_owner_cannot_read_another_zevs_meter` | 5 | Owner tenant isolation remains enforced |
+| `test_assignment_to_one_meter_does_not_grant_access_to_another` | 7 | Assignment correlation includes the meter, not only caller/date |
+| `test_zev_filter_cannot_widen_participant_visibility` | 7 | Foreign meter access is denied and a mismatched ZEV filter excludes an otherwise authorized meter |
+| `test_participant_without_assignments_sees_no_readings` | 7 | ZEV membership alone grants no raw/chart access |
+| `test_managers_can_read_assignment_gaps` | 14 | Admin/owner access does not depend on assignments |
+| `test_owner_cannot_read_another_zevs_meter` | 7 | Owner tenant isolation remains enforced |
 
 ### Backend (`metering/test_import_limits.py`, `metering/test_import_sdatch.py`)
 

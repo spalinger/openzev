@@ -147,7 +147,7 @@ To mark a participant as active/inactive:
 **Allocation weight** decides how much of a shared cost a participant carries.
 It is used for:
 
-- [Community (common-area) metering points](04-metering-points.md#shared-common-area-metering-points) — always
+- [Shared (common-area) metering points](04-metering-points.md#shared-common-area-metering-points) — always
 - Shared fees whose split key is set to *By allocation weight*
   (see [Tariff Configuration](07-tariff-configuration.md#how-a-shared-fee-is-split))
 

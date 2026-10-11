@@ -1570,6 +1570,8 @@ export interface ChartDataPoint {
     bucket: string
     in_kwh: number
     out_kwh: number
+    /** Only with `by_metering_point=true`: whose series the row belongs to. */
+    metering_point?: string
 }
 
 export interface RawMeteringReading {

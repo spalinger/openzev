@@ -5,12 +5,12 @@ import {
   defaultAssignmentForm,
   defaultMeteringPointForm,
   getAssignmentState,
+  getDailySeries,
   getMeteringPointHealth,
   getMeteringPointHealthWindow,
   getNextAssignmentGuidance,
   isAssignmentCurrent,
   isMeteringPointHolderLess,
-  meteringPointHealthBadgeClass,
   meteringPointNeedsAttention,
   readMeteringPointTypeFilter,
   readMeteringPointView,
@@ -206,11 +206,25 @@ describe('metering point form helpers', () => {
     })
   })
 
-  it('maps health to badge classes', () => {
-    expect(meteringPointHealthBadgeClass('green')).toBe('badge badge-success')
-    expect(meteringPointHealthBadgeClass('yellow')).toBe('badge badge-warning')
-    expect(meteringPointHealthBadgeClass('red')).toBe('badge badge-danger')
-    expect(meteringPointHealthBadgeClass('no_data')).toBe('badge badge-neutral')
+  it('builds one daily series per meter for the sparklines, with gaps as null', () => {
+    const rows = [
+      { bucket: '2026-10-01T00:00:00+02:00', in_kwh: 5, out_kwh: 0, metering_point: 'cons' },
+      { bucket: '2026-10-03T00:00:00+02:00', in_kwh: 7, out_kwh: 0, metering_point: 'cons' },
+      { bucket: '2026-10-02T00:00:00+02:00', in_kwh: 1, out_kwh: 9, metering_point: 'prod' },
+      { bucket: '2026-10-02T00:00:00+02:00', in_kwh: 4, out_kwh: 1, metering_point: 'bidi' },
+      { bucket: '2026-10-02T00:00:00+02:00', in_kwh: 3, out_kwh: 0, metering_point: 'unknown' },
+    ]
+    const points = [
+      { id: 'cons', meter_type: 'consumption' as const },
+      { id: 'prod', meter_type: 'production' as const },
+      { id: 'bidi', meter_type: 'bidirectional' as const },
+    ]
+    const series = getDailySeries(rows, points, { from: '2026-10-01', to: '2026-10-03' })
+
+    expect(series.get('cons')).toEqual([5, null, 7])
+    expect(series.get('prod')).toEqual([null, 9, null])
+    expect(series.get('bidi')).toEqual([null, 3, null])
+    expect(series.has('unknown')).toBe(false)
   })
 
   describe('reading filters from the URL (#625)', () => {

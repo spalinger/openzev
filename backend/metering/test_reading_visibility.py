@@ -20,10 +20,18 @@ from testing.helpers import authenticate, zev_manager
 pytestmark = pytest.mark.django_db
 
 
-@pytest.fixture(params=["raw-summary", "raw-detail", "chart-day", "chart-hour", "chart-month"])
+@pytest.fixture(params=[
+    pytest.param(("raw-summary", None, False), id="raw-summary"),
+    pytest.param(("raw-detail", None, False), id="raw-detail"),
+    pytest.param(("chart", "day", False), id="chart-day"),
+    pytest.param(("chart", "hour", False), id="chart-hour"),
+    pytest.param(("chart", "month", False), id="chart-month"),
+    pytest.param(("chart", "day", True), id="chart-day-by-meter"),
+    pytest.param(("chart", "hour", True), id="chart-hour-by-meter"),
+])
 def read_energy(request, api_client):
     """Exercise all raw-data modes and chart buckets through authenticated HTTP."""
-    mode = request.param
+    mode, bucket, by_meter = request.param
 
     def read(user, meter, day, **extra_params):
         authenticate(api_client, user)
@@ -32,10 +40,12 @@ def read_energy(request, api_client):
             params["date"] = day
         else:
             params.update(date_from=day, date_to=day)
-        if mode.startswith("chart-"):
-            params["bucket"] = mode.removeprefix("chart-")
+        if bucket:
+            params["bucket"] = bucket
+        if by_meter:
+            params["by_metering_point"] = "true"
         params.update(extra_params)
-        action = "chart-data" if mode.startswith("chart-") else "raw-data"
+        action = "chart-data" if bucket else "raw-data"
         response = api_client.get(f"/api/v1/metering/readings/{action}/", params)
         assert response.status_code == 200, response.data
         if mode == "raw-detail":
