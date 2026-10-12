@@ -41,6 +41,17 @@ class MeterReading(models.Model):
     )
     import_source = models.CharField(max_length=20, choices=ImportSource.choices, default=ImportSource.CSV)
     import_batch = models.UUIDField(null=True, blank=True, help_text="Groups readings from the same import")
+    source_creation = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="SDAT-CH InstanceDocument Creation of the delivery that wrote this reading (Q12 provenance).",
+    )
+    source_document_id = models.CharField(
+        max_length=40,
+        blank=True,
+        default="",
+        help_text="SDAT-CH MeteringData DocumentID of the delivery that wrote this reading.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -56,6 +67,63 @@ class MeterReading(models.Model):
         return (
             f"{self.metering_point.meter_id} {self.timestamp.isoformat()} "
             f"{self.direction} {self.energy_kwh} kWh"
+        )
+
+
+# ---------------------------------------------------------------------------
+# SDAT-CH quarantine (grill decisions Q4/Q11/Q15/Q16)
+#
+# Info-only (BusinessReason C38) and temporary (Condition 21) observations are
+# stored here, never in ``MeterReading``. Nothing in allocation, tariffs, the
+# invoice engine, dashboards or charts reads this table, so forecast-grade
+# data cannot leak into billing by construction. A later billable (E88) or
+# Status=5 replace delivery promotes matching rows into ``MeterReading`` and
+# deletes the quarantined row.
+# ---------------------------------------------------------------------------
+
+
+class QuarantinedReading(models.Model):
+    """One SDAT-CH observation held back from billing."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    metering_point = models.ForeignKey(
+        MeteringPoint, on_delete=models.CASCADE, related_name="quarantined_readings"
+    )
+    timestamp = models.DateTimeField(help_text="Start of the measurement interval (UTC)")
+    energy_kwh = models.DecimalField(max_digits=12, decimal_places=4)
+    direction = models.CharField(max_length=5, choices=ReadingDirection.choices, default=ReadingDirection.IN)
+    resolution = models.CharField(
+        max_length=10, choices=ReadingResolution.choices, default=ReadingResolution.FIFTEEN_MIN
+    )
+    import_source = models.CharField(max_length=20, choices=ImportSource.choices, default=ImportSource.SDATCH)
+    import_batch = models.UUIDField(null=True, blank=True, help_text="Groups readings from the same import")
+    business_reason = models.CharField(
+        max_length=10, blank=True, default="", help_text="SDAT-CH BusinessReason code (e.g. C38, E88)"
+    )
+    condition = models.CharField(
+        max_length=5, blank=True, default="", help_text="SDAT-CH Condition code (21 temporary, 56 estimated)"
+    )
+    source_creation = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="SDAT-CH InstanceDocument Creation of the delivery that wrote this row.",
+    )
+    source_document_id = models.CharField(max_length=40, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["metering_point", "timestamp", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["metering_point", "timestamp", "direction"],
+                name="unique_quarantined_per_point_time_direction",
+            )
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.metering_point.meter_id} {self.timestamp.isoformat()} "
+            f"{self.direction} {self.energy_kwh} kWh ({self.business_reason or '?'}/{self.condition or 'good'})"
         )
 
 

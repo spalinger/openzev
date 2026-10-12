@@ -774,6 +774,9 @@ export interface MeteringPoint {
     id: string
     zev: string
     meter_id: string
+    /** Second 33-char VSENationalID of the same physical meter (SDAT-CH flow
+     * direction pair); null when the point has a single ID. */
+    secondary_meter_id: string | null
     meter_type: 'consumption' | 'production' | 'bidirectional'
     is_active: boolean
     location_description?: string
@@ -795,6 +798,8 @@ export interface MeteringPoint {
 export interface MeteringPointInput {
     zev: string
     meter_id: string
+    /** Second VSENationalID of the same physical meter, if any. */
+    secondary_meter_id?: string | null
     meter_type: 'consumption' | 'production' | 'bidirectional'
     is_active: boolean
     location_description?: string
