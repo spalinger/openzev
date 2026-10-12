@@ -134,6 +134,7 @@ import { ParticipantDashboardBody } from '../src/features/dashboard/ParticipantD
 import { ParticipantInvoicesCard } from '../src/components/dashboard/ParticipantInvoicesCard'
 import { HourlyProfileCard } from '../src/components/dashboard/HourlyProfileCard'
 import { openInvoicePdf } from '../src/lib/api/invoices'
+import { ToastProvider } from '../src/lib/toast'
 
 const cleanups: Array<() => void> = []
 afterEach(() => {
@@ -224,7 +225,9 @@ async function renderDashboard(page?: ReactElement, client = new QueryClient({ d
                 createElement(
                     QueryClientProvider,
                     { client },
-                    createElement(MemoryRouter, null, page ?? createElement(DashboardPage)),
+                    // The page header's community switcher confirms through a toast.
+                    createElement(ToastProvider, null,
+                        createElement(MemoryRouter, null, page ?? createElement(DashboardPage))),
                 ),
             ),
         )
@@ -416,10 +419,10 @@ describe('dashboard behavior preservation', () => {
 
         // Community KPIs stay ZEV-wide.
         const kpiRow = container.querySelector('.kpi-row')
-        expect(kpiRow?.textContent).toContain('100 kWh')
-        expect(kpiRow?.textContent).toContain('80 kWh')
-        expect(kpiRow?.textContent).toContain('20 kWh')
-        expect(kpiRow?.textContent).toContain('40 kWh')
+        expect(kpiRow?.textContent).toContain('100\u00a0kWh')
+        expect(kpiRow?.textContent).toContain('80\u00a0kWh')
+        expect(kpiRow?.textContent).toContain('20\u00a0kWh')
+        expect(kpiRow?.textContent).toContain('40\u00a0kWh')
 
         // Balance chart heading is filtered to the participant.
         const balanceHeading = Array.from(container.querySelectorAll('h3')).find((h) =>

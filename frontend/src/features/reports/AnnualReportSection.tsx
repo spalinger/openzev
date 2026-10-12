@@ -4,9 +4,9 @@ import { useQuery } from '@tanstack/react-query'
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { fetchAnnualReport } from '../../lib/api/invoices'
 import { queryKeys } from '../../lib/api/queryKeys'
-import { AXIS_COLOR, CHART_GRIDLINE, CHART_LOCAL, FLOW_LOCAL_CONS } from '../../lib/chartTokens'
+import { AXIS_COLOR, CHART_GRIDLINE, CHART_LOCAL, CONS_COLORS } from '../../lib/chartTokens'
 import { CHART_AXIS_TICK, CHART_TOOLTIP_STYLE } from '../../lib/chartTheme'
-import { formatChf, formatKwh, formatPercent } from '../../lib/numbers'
+import { formatChf, formatChfAmount, formatKwh, formatPercent, formatPercentFigure } from '../../lib/numbers'
 import { behindMeterHintKey } from '../../lib/supplementary'
 import { StatCard } from '../../components/StatCard'
 import { PageSkeleton } from '../../components/PageSkeleton'
@@ -83,19 +83,22 @@ function AnnualReportKpis({ report }: { report: AnnualReport }) {
                 <StatCard
                     accent
                     label={t('pages.reports.annualReport.stats.selfConsumptionRate')}
-                    value={percentOrDash(totals.self_consumption_rate)}
+                    value={totals.self_consumption_rate == null ? null : formatPercentFigure(totals.self_consumption_rate)}
+                    unit="%"
                     hint={previousHint(t, previous, 'self_consumption_rate', year)}
                 />
                 <StatCard
                     label={t('pages.reports.annualReport.stats.selfSufficiencyRate')}
-                    value={percentOrDash(totals.self_sufficiency_rate)}
+                    value={totals.self_sufficiency_rate == null ? null : formatPercentFigure(totals.self_sufficiency_rate)}
+                    unit="%"
                     hint={previousHint(t, previous, 'self_sufficiency_rate', year)}
                 />
-                <StatCard label={t('pages.reports.annualReport.stats.produced')} value={yearKwh(totals.produced_kwh)} />
-                <StatCard label={t('pages.reports.annualReport.stats.consumed')} value={yearKwh(totals.consumed_kwh)} />
+                <StatCard label={t('pages.reports.annualReport.stats.produced')} value={formatKwh(totals.produced_kwh, { maxDecimals: 0 })} unit="kWh" />
+                <StatCard label={t('pages.reports.annualReport.stats.consumed')} value={formatKwh(totals.consumed_kwh, { maxDecimals: 0 })} unit="kWh" />
                 <StatCard
                     label={t('pages.reports.annualReport.stats.savings')}
-                    value={chfOrDash(report.savings_total_chf)}
+                    value={report.savings_total_chf == null ? null : formatChfAmount(Number(report.savings_total_chf))}
+                    currency="CHF"
                     hint={t('pages.reports.annualReport.hints.savings')}
                 />
             </section>
@@ -139,7 +142,7 @@ function AnnualTrendCard({ report }: { report: AnnualReport }) {
                         type="monotone"
                         dataKey="self_sufficiency_rate"
                         name={t('pages.reports.annualReport.trend.selfSufficiency', { year: current })}
-                        stroke={FLOW_LOCAL_CONS}
+                        stroke={CONS_COLORS[0]}
                         strokeWidth={2}
                     />
                     {hasPrevious && (
@@ -158,7 +161,7 @@ function AnnualTrendCard({ report }: { report: AnnualReport }) {
                             type="monotone"
                             dataKey="previous_self_sufficiency_rate"
                             name={t('pages.reports.annualReport.trend.selfSufficiency', { year: previous })}
-                            stroke={FLOW_LOCAL_CONS}
+                            stroke={CONS_COLORS[0]}
                             strokeDasharray="5 4"
                             strokeOpacity={0.6}
                             dot={false}
