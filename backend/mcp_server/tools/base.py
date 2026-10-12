@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
-from ..dispatch import DispatchError, dispatch_get, dispatch_get_all
+from ..dispatch import DispatchError, dispatch_get, dispatch_get_all, sub_error_message
 
 
 class ToolError(Exception):
@@ -26,18 +26,6 @@ class ToolError(Exception):
         # Audit status this failure maps to: "failed" (default) or "denied"
         # for a sub-request 403, per SPEC-2026-mcp-server §8.
         self.status = status
-
-
-def sub_error_message(sub) -> str:
-    """Best-effort human-readable message from a non-2xx ``SubResponse``."""
-    data = sub.data
-    if isinstance(data, dict):
-        for key in ("error", "detail"):
-            if key in data and isinstance(data[key], str):
-                return data[key]
-        if data:
-            return str(data)
-    return f"Request failed with status {sub.status}."
 
 
 @dataclass
@@ -69,7 +57,7 @@ class ToolContext:
                 on_dispatch=self._count,
             )
         except DispatchError as exc:
-            raise ToolError(str(exc)) from exc
+            raise ToolError(str(exc), status="denied" if exc.status == 403 else "failed") from exc
 
     def get_or_raise(self, path: str, params: dict | None = None, *, allowed_url_names: frozenset[str]):
         """Like :meth:`get`, but a non-2xx response becomes a
@@ -105,7 +93,7 @@ class ToolContext:
                 on_dispatch=self._count,
             )
         except DispatchError as exc:
-            raise ToolError(str(exc)) from exc
+            raise ToolError(str(exc), status="denied" if exc.status == 403 else "failed") from exc
 
 
 class Tool:

@@ -1,15 +1,25 @@
 from datetime import timedelta
+from decimal import Decimal
 from unittest import mock
 
+from django.core.cache import cache
 from django.test import TestCase
 from django.utils import timezone
-from rest_framework.test import APIClient
+from rest_framework.test import APIClient, APIRequestFactory
+from django.urls import resolve
+from accounts.authentication import ApiKeyAuthentication
+from accounts.jwt_utils import make_jwt_for_user
 
 from accounts.models import FeatureFlag, UserRole
+from accounts.test_api_keys import create_api_key
+from accounts.throttling import ApiKeyRateThrottle, AuditListThrottle
 from metering.models import MeterReading
 from invoices.models import Invoice, InvoiceStatus
 from tariffs.models import Tariff, TariffCategory, BillingMode
-from zev.models import MeteringPoint, MeteringPointAssignment, MeteringPointType, Participant
+from zev.models import (
+    MeteringPoint, MeteringPointAssignment, MeteringPointType, Participant,
+    Party, PartyRole, ZevAccessGrant, ZevAccessRole, ZevPartyRole,
+)
 
 from audit.models import AuditActionCategory, AuditEvent, AuditEventStatus
 from audit.services import (
@@ -94,15 +104,67 @@ class AuditEventModelTests(TestCase):
         redacted = redact_metadata(
             {
                 "password": "secret",
+                "Password": "secret",
+                "user_password": "secret",
+                "access_token": "secret",
+                "api_key_value": "secret",
                 "client_secret": "very-secret",
                 "bank_iban": "CH9300762011623852957",
                 "safe_field": "safe",
             }
         )
         self.assertNotIn("password", redacted)
+        for key in ("Password", "user_password", "access_token", "api_key_value"):
+            self.assertNotIn(key, redacted)
         self.assertNotIn("client_secret", redacted)
         self.assertEqual(redacted["bank_iban"], "****2957")
         self.assertEqual(redacted["safe_field"], "safe")
+
+    def test_redaction_masks_only_iban_fields(self):
+        self.assertEqual(
+            redact_metadata({
+                "iban": "CH12", "bank_iban": "CH123456789",
+                "recipient_iban": ["CH987654321"],
+                "iban_note": "use for refunds", "iban_holder": "Alice",
+                "iban_history": ["active", "cancelled"], "liban_notes": "safe",
+            }),
+            {
+                "iban": "****", "bank_iban": "****6789", "recipient_iban": ["****4321"],
+                "iban_note": "use for refunds", "iban_holder": "Alice",
+                "iban_history": ["active", "cancelled"], "liban_notes": "safe",
+            },
+        )
+
+    def test_redaction_caps_stringified_values_before_persistence(self):
+        class LongValue:
+            def __str__(self):
+                return "x" * 1000
+
+        event = record_audit_event(
+            action_category=AuditActionCategory.SYSTEM, action_type="system.test",
+            target_type="test", summary="String conversion",
+            metadata={"custom": LongValue(), "decimal": Decimal("1" * 1000)},
+        )
+        event.refresh_from_db()
+        for value in event.metadata_json.values():
+            self.assertEqual(len(value), 500)
+            self.assertTrue(value.endswith("..."))
+
+    def test_redaction_preserves_empty_diff_sides(self):
+        for before, after, expected in (
+            ({"mode": "on"}, {}, {"before": {"mode": "on"}, "after": {}}),
+            ({}, {"mode": "on"}, {"before": {}, "after": {"mode": "on"}}),
+            ({"token": "old"}, {"token": "new"}, {"before": {}, "after": {}}),
+        ):
+            with self.subTest(before=before, after=after):
+                event = record_audit_event(
+                    action_category=AuditActionCategory.SYSTEM, action_type="system.test",
+                    target_type="test", summary="Empty diff sides",
+                    changes=build_diff({"settings": before}, {"settings": after}, ["settings"]),
+                )
+                event.refresh_from_db()
+                self.assertEqual(event.changes_json, {"settings": expected})
+        self.assertEqual(redact_metadata({"settings": {}, "secrets": {"token": "secret"}}), {})
 
     def test_redaction_truncates_large_strings_and_caps_collections(self):
         redacted = redact_metadata(
@@ -122,6 +184,70 @@ class AuditEventModelTests(TestCase):
         self.assertTrue(redacted["nested"]["value"].endswith("..."))
         self.assertEqual(len(redacted["deep_list"]), 21)
         self.assertEqual(redacted["deep_list"][-1], "...(+2 more)")
+
+    def test_redaction_recurses_through_lists_tuples_and_diffs(self):
+        payload = {"items": ([{"password": "secret", "bank_iban": "CH123456789", "safe": "value"}],)}
+        expected = {"items": [[{"bank_iban": "****6789", "safe": "value"}]]}
+        self.assertEqual(redact_metadata(payload), expected)
+        event = record_audit_event(
+            action_category=AuditActionCategory.SYSTEM,
+            action_type="system.test",
+            target_type="test",
+            summary="Nested redaction",
+            metadata=payload,
+            changes=build_diff({"data": payload}, {"data": None}, ["data"]),
+        )
+        event.refresh_from_db()
+        self.assertEqual(event.metadata_json, expected)
+        self.assertEqual(event.changes_json, {"data": {"before": expected, "after": None}})
+
+    def test_redaction_caps_root_and_nested_dictionaries(self):
+        oversized = {str(i): "safe" for i in range(55)}
+        expected = {str(i): "safe" for i in range(50)} | {"...": "+5 more"}
+        self.assertEqual(redact_metadata(oversized), expected)
+        self.assertEqual(redact_metadata({"items": [oversized]}), {"items": [expected]})
+        payload = {"items": [oversized] * 25}
+        redacted = redact_metadata(payload)
+        event = record_audit_event(
+            action_category=AuditActionCategory.SYSTEM, action_type="system.test",
+            target_type="test", summary="Truncated diff",
+            changes=build_diff({}, {"data": payload}, ["data"]),
+        )
+        event.refresh_from_db()
+        self.assertEqual(event.changes_json["data"]["after"], redacted)
+
+    def test_redaction_recomputes_marker_shaped_user_values(self):
+        payload = {**{str(i): "safe" for i in range(55)}, "...": "+attacker more"}
+        self.assertEqual(redact_metadata(payload)["..."], "+6 more")
+        self.assertEqual(
+            redact_metadata({"items": [*range(21), "...(+999 more)"]})["items"],
+            [*range(20), "...(+2 more)"],
+        )
+
+    def test_scalar_iban_diffs_are_masked_before_persistence(self):
+        event = record_audit_event(
+            action_category=AuditActionCategory.SYSTEM, action_type="system.test",
+            target_type="test", summary="IBAN diff",
+            changes=build_diff({"bank_iban": "CH123456789"}, {"bank_iban": "CH987654321"}, ["bank_iban"]),
+        )
+        event.refresh_from_db()
+        self.assertEqual(event.changes_json, {"bank_iban": {"before": "****6789", "after": "****4321"}})
+
+    def test_api_key_attribution_survives_oversized_and_spoofed_metadata(self):
+        key, raw_key = create_api_key(self.admin, name="trusted key")
+        request = APIRequestFactory().get("/api/v1/audit/events/", HTTP_AUTHORIZATION=f"Api-Key {raw_key}")
+        request.resolver_match = resolve(request.path)
+        request.user, request.auth = ApiKeyAuthentication().authenticate(request)
+        event = record_audit_event(
+            action_category=AuditActionCategory.SYSTEM, action_type="system.test",
+            target_type="test", summary="Key attribution", request=request,
+            metadata={**{str(i): "safe" for i in range(50)}, "api_key_id": "spoof", "api_key_name": "spoof"},
+        )
+        event.refresh_from_db()
+        self.assertEqual(event.metadata_json["api_key_id"], str(key.pk))
+        self.assertEqual(event.metadata_json["api_key_name"], "trusted key")
+        self.assertEqual(len(event.metadata_json), 51)
+        self.assertEqual(event.metadata_json["..."], "+2 more")
 
     def test_record_audit_event_truncates_reason(self):
         event = record_audit_event(
@@ -144,6 +270,13 @@ class AuditEventModelTests(TestCase):
             allowed_fields=["status", "total"],
         )
         self.assertEqual(diff, {"status": {"before": "draft", "after": "approved"}})
+
+    def test_build_diff_compares_untruncated_values(self):
+        before, after = "x" * 500 + "before", "x" * 500 + "after"
+        self.assertEqual(
+            build_diff({"notes": before}, {"notes": after}, ["notes"]),
+            {"notes": {"before": before, "after": after}},
+        )
 
     def test_build_instance_snapshot_reads_fks_without_extra_queries(self):
         participant = Participant.objects.create(
@@ -325,6 +458,107 @@ class AuditEventApiTests(TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["id"], str(self.owner1_event.id))
 
+    def test_search_preserves_scope_and_combined_filters(self):
+        AuditEvent.objects.all().update(summary="Same matching text", actor_user=self.owner2)
+        auth(self.client, self.owner1)
+        for extra in ({}, {"zev": str(self.zev1.id), "actor_user": self.owner2.id, "target_id": "inv-1"}):
+            with self.subTest(filters=extra):
+                response = self.client.get("/api/v1/audit/events/", {"q": "matching", **extra})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.data["count"], 1)
+                self.assertEqual([row["id"] for row in response.data["results"]], [str(self.owner1_event.id)])
+        for extra in ({"zev": str(self.zev2.id)}, {"target_id": "zev-2"}, {"actor_user": self.admin.id}):
+            with self.subTest(filters=extra):
+                response = self.client.get("/api/v1/audit/events/", {"q": "matching", **extra})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.data["count"], 0)
+                self.assertEqual(response.data["results"], [])
+        auth(self.client, self.admin)
+        response = self.client.get("/api/v1/audit/events/", {"q": "matching"})
+        self.assertEqual(response.data["count"], 3)
+
+    def test_search_matches_each_field(self):
+        auth(self.client, self.owner1)
+        for field in ("summary", "target_display", "action_type"):
+            with self.subTest(field=field):
+                AuditEvent.objects.filter(pk=self.owner1_event.pk).update(
+                    **{"summary": "ordinary", "target_display": "", "action_type": "test", field: "MiXeD text"}
+                )
+                response = self.client.get("/api/v1/audit/events/", {"q": "mixed"})
+                self.assertEqual(response.data["count"], 1)
+
+    def test_search_treats_input_literally(self):
+        auth(self.client, self.owner1)
+        for query in ("%", "_", "\\", "' OR 1=1 --", "<script>alert(1)</script>", "é😀"):
+            with self.subTest(query=query):
+                AuditEvent.objects.filter(pk=self.owner1_event.pk).update(summary=f"Literal {query}")
+                response = self.client.get("/api/v1/audit/events/", {"q": query})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.data["count"], 1)
+                AuditEvent.objects.filter(pk=self.owner1_event.pk).update(summary="ordinary")
+                response = self.client.get("/api/v1/audit/events/", {"q": query})
+                self.assertEqual(response.data["count"], 0)
+
+    def test_search_ignores_blank_and_trims_input(self):
+        auth(self.client, self.owner1)
+        unfiltered = self.client.get("/api/v1/audit/events/").data
+        for query in ("", "   "):
+            with self.subTest(query=query):
+                self.assertEqual(self.client.get("/api/v1/audit/events/", {"q": query}).data, unfiltered)
+        response = self.client.get("/api/v1/audit/events/", {"q": "  invoice  "})
+        self.assertEqual([row["id"] for row in response.data["results"]], [str(self.owner1_event.pk)])
+
+    def test_search_validates_text_length_boundaries(self):
+        auth(self.client, self.owner1)
+        for length, status in ((50, 200), (51, 400)):
+            self.assertEqual(self.client.get("/api/v1/audit/events/", {"q": "😀" * length}).status_code, status)
+        for field, limit in (("q", 50), ("action_type", 80), ("target_type", 120), ("target_id", 64)):
+            with self.subTest(field=field):
+                response = self.client.get("/api/v1/audit/events/", {field: "x" * limit})
+                self.assertEqual(response.status_code, 200)
+                response = self.client.get("/api/v1/audit/events/", {field: "x" * (limit + 1)})
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(field, response.data)
+
+    def test_search_rejects_invalid_structured_filters(self):
+        auth(self.client, self.owner1)
+        for filters in ({"zev": "bad"}, {"date_from": "bad"}, {"status": "bad"},
+                        {"action_category": "bad"}, {"date_from": "2026-02-02", "date_to": "2026-01-01"}):
+            with self.subTest(filters=filters):
+                self.assertEqual(self.client.get("/api/v1/audit/events/", {"q": "x", **filters}).status_code, 400)
+
+    def test_search_allows_viewer_and_party_derived_manager(self):
+        today = timezone.localdate()
+        viewer = make_user("audit_viewer", UserRole.USER)
+        ZevAccessGrant.objects.create(zev=self.zev1, user=viewer, role=ZevAccessRole.VIEWER, valid_from=today)
+        party_manager = make_user("audit_party_manager", UserRole.USER)
+        party = Party.objects.create(zev=self.zev1, user=party_manager, last_name="Issuer")
+        ZevPartyRole.objects.create(zev=self.zev1, party=party, role=PartyRole.ISSUER, valid_from=today)
+        for user in (viewer, party_manager):
+            with self.subTest(user=user.username):
+                auth(self.client, user)
+                response = self.client.get("/api/v1/audit/events/", {"q": "invoice"})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.data["count"], 1)
+                self.assertEqual(response.data["results"][0]["id"], str(self.owner1_event.id))
+
+    def test_search_denies_missing_expired_future_and_revoked_access(self):
+        auth(self.client, self.participant_user)
+        self.assertEqual(self.client.get("/api/v1/audit/events/", {"q": "invoice"}).status_code, 403)
+        grants = ZevAccessGrant.objects.filter(user=self.owner1)
+        today = timezone.localdate()
+        for dates in (
+            {"valid_from": today - timedelta(days=2), "valid_to": today - timedelta(days=1)},
+            {"valid_from": today + timedelta(days=1), "valid_to": None},
+        ):
+            with self.subTest(dates=dates):
+                grants.update(**dates)
+                auth(self.client, self.owner1)
+                self.assertEqual(self.client.get("/api/v1/audit/events/", {"q": "invoice"}).status_code, 403)
+        grants.delete()
+        auth(self.client, self.owner1)
+        self.assertEqual(self.client.get("/api/v1/audit/events/", {"q": "invoice"}).status_code, 403)
+
     def test_filter_options_admin_sees_all_zevs_and_actors(self):
         AuditEvent.objects.filter(pk=self.owner1_event.pk).update(actor_user=self.owner1)
         AuditEvent.objects.filter(pk=self.owner2_event.pk).update(actor_user=self.owner2)
@@ -392,6 +626,62 @@ class AuditEventApiTests(TestCase):
         self.assertIn("changes_json", response.data)
         self.assertIn("metadata_json", response.data)
         self.assertEqual(response.data["metadata_json"]["safe"], "value")
+
+
+@mock.patch.object(AuditListThrottle, "THROTTLE_RATES", {"audit_list": "2/minute"})
+class AuditEventThrottleTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        self.client = APIClient()
+        self.owner = make_user("audit_throttle_owner", UserRole.USER)
+        self.zev = create_managed_zev(name="Throttled ZEV", owner=self.owner)
+        self.client.cookies["openzev_access"] = make_jwt_for_user(self.owner)["access"]
+
+    def test_cookie_search_budget_is_shared_across_filters_and_api_keys(self):
+        self.assertEqual(self.client.get("/api/v1/audit/events/", {"q": "first"}).status_code, 200)
+        _, key = create_api_key(self.owner)
+        key_client = APIClient()
+        key_client.credentials(HTTP_AUTHORIZATION=f"Api-Key {key}")
+        self.assertEqual(key_client.get("/api/v1/audit/events/", {"zev": str(self.zev.id)}).status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/audit/events/", {"q": "different"}).status_code, 429)
+        _, other_key = create_api_key(self.owner, name="other")
+        key_client.credentials(HTTP_AUTHORIZATION=f"Api-Key {other_key}")
+        self.assertEqual(key_client.get("/api/v1/audit/events/").status_code, 429)
+
+    def test_users_have_separate_budgets_and_detail_options_are_unaffected(self):
+        for _ in range(2):
+            self.assertEqual(self.client.get("/api/v1/audit/events/").status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/audit/events/").status_code, 429)
+        self.assertEqual(self.client.get("/api/v1/audit/events/filter-options/").status_code, 200)
+        event = AuditEvent.objects.create(
+            zev=self.zev, action_category=AuditActionCategory.SYSTEM,
+            action_type="system.test", target_type="test", summary="test",
+        )
+        self.assertEqual(self.client.get(f"/api/v1/audit/events/{event.pk}/").status_code, 200)
+        other = make_user("audit_throttle_other", UserRole.USER)
+        create_managed_zev(name="Other throttled ZEV", owner=other)
+        auth(self.client, other)
+        self.assertEqual(self.client.get("/api/v1/audit/events/").status_code, 200)
+
+    @mock.patch.object(ApiKeyRateThrottle, "THROTTLE_RATES", {"api_key": "1/minute"})
+    def test_existing_api_key_budget_still_applies(self):
+        _, key = create_api_key(self.owner)
+        key_client = APIClient()
+        key_client.credentials(HTTP_AUTHORIZATION=f"Api-Key {key}")
+        self.assertEqual(key_client.get("/api/v1/audit/events/").status_code, 200)
+        self.assertEqual(key_client.get("/api/v1/audit/events/").status_code, 429)
+        self.assertEqual(self.client.get("/api/v1/audit/events/").status_code, 429)
+
+    @mock.patch.object(AuditListThrottle, "timer", return_value=0)
+    def test_budget_recovers_after_retry_after(self, timer):
+        for _ in range(2):
+            self.assertEqual(self.client.get("/api/v1/audit/events/").status_code, 200)
+        response = self.client.get("/api/v1/audit/events/")
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response["Retry-After"], "60")
+        timer.return_value = 61
+        self.assertEqual(self.client.get("/api/v1/audit/events/").status_code, 200)
 
 
 class AuditInstrumentationTests(TestCase):

@@ -16,13 +16,8 @@ class RegistrationUnavailable(APIException):
 class ApiKeyRateThrottle(SimpleRateThrottle):
     """Rate-limit requests authenticated with an API key.
 
-    Scoped to the key rather than the user or the IP: a standing credential in a
-    loop is the case worth bounding, and a user's browser session should not be
-    slowed down because one of their scripts is busy.
-
-    Returns ``None`` for anything that is not key-authenticated, which leaves
-    cookie sessions untouched — nothing is throttled today, and tuning limits
-    for the interactive UI is a separate decision.
+    The general budget is per key and exempts browser sessions. Endpoint-specific
+    account budgets, including audit lists, are shared by keys and browsers.
     """
 
     scope = "api_key"
@@ -143,6 +138,12 @@ class ImportThrottle(UserRateThrottle):
     """Per-user budget for metering imports."""
 
     scope = "import"
+
+
+class AuditListThrottle(UserRateThrottle):
+    """Per-account budget for audit list and search queries."""
+
+    scope = "audit_list"
 
 
 class TransferArchiveThrottle(UserRateThrottle):

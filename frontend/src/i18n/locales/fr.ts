@@ -1065,9 +1065,10 @@ export const fr = {
                 status: 'Statut',
                 dateFrom: 'Date de début',
                 dateTo: 'Date de fin',
-                search: 'Recherche en texte intégral',
+                search: 'Recherche',
                 searchPlaceholder: 'Résumé, cible, type d\'action',
-                searchRestricted: 'La recherche en texte intégral est actuellement réservée aux administrateurs.',
+                searchHint: 'Entrée ou quitter le champ pour appliquer. Max. 50 caractères.',
+                searchTooLong: 'Utilisez 50 caractères maximum.',
             },
             actions: {
                 clearFilters: 'Effacer les filtres',

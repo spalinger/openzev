@@ -6,9 +6,11 @@ from __future__ import annotations
 import pytest
 from django.core.cache import cache
 from django.http import HttpRequest
+from unittest.mock import patch
 
 from accounts.throttling import ApiKeyRateThrottle
-from mcp_server.dispatch import DispatchError, dispatch_get
+from mcp_server.dispatch import DispatchError, SubResponse, dispatch_get
+from mcp_server.tools.base import ToolContext, ToolError
 from testing.factories import ZevFactory
 
 from .conftest import make_api_key
@@ -97,3 +99,29 @@ class TestThrottleSkip:
         drf_request = type("R", (), {"auth": api_key})()
         throttle = ApiKeyRateThrottle()
         assert throttle.get_cache_key(drf_request, view=None) is not None
+
+
+@pytest.mark.parametrize("status", [403, 429, 500])
+@pytest.mark.parametrize("failed_page", [1, 2])
+def test_failed_page_raises_tool_error(owner_user, status, failed_page):
+    api_key, _ = make_api_key(owner_user)
+    ctx = ToolContext(_outer_request(owner_user, api_key), owner_user, api_key)
+    responses = [SubResponse(200, {"results": [{"id": "first"}], "count": 2, "next": "page2"})] * (failed_page - 1)
+    responses.append(SubResponse(status, {"detail": "Cannot read this page"}))
+    with patch("mcp_server.dispatch.dispatch_get", side_effect=responses):
+        with pytest.raises(ToolError, match="Cannot read this page") as error:
+            ctx.get_all("/api/v1/audit/events/", allowed_url_names=frozenset({"audit-event-list"}))
+    assert error.value.status == ("denied" if status == 403 else "failed")
+
+
+@pytest.mark.parametrize("data", [{"count": 1}, []])
+@pytest.mark.parametrize("failed_page", [1, 2])
+def test_malformed_page_raises_tool_error(owner_user, data, failed_page):
+    api_key, _ = make_api_key(owner_user)
+    ctx = ToolContext(_outer_request(owner_user, api_key), owner_user, api_key)
+    responses = [SubResponse(200, {"results": [{"id": "first"}], "count": 2, "next": "page2"})] * (failed_page - 1)
+    responses.append(SubResponse(200, data))
+    with patch("mcp_server.dispatch.dispatch_get", side_effect=responses):
+        with pytest.raises(ToolError, match="Expected a paginated response") as error:
+            ctx.get_all("/api/v1/audit/events/", allowed_url_names=frozenset({"audit-event-list"}))
+    assert error.value.status == "failed"

@@ -37,7 +37,7 @@ more — and every tool call is traceable in the audit log.
 | Feature flag | `mcp_server_enabled`, default off; `404` while off |
 | Tools | 10 read-only tools (§6) built on in-process sub-requests to existing REST GET endpoints |
 | Audit | `AuditEventSource.MCP`; one `mcp.tool.call` event per `tools/call` |
-| Throttling | One API-key throttle hit per MCP HTTP request; sub-requests are not throttled again |
+| Throttling | One API-key throttle hit per MCP HTTP request; sub-requests do not spend the per-key budget again, but endpoint-specific account budgets still apply |
 | Docs | New user-guide chapter `19-ai-assistants.md`; `mkdocs.yml` nav; baseline spec updates (§11) |
 
 ### Out of scope
@@ -464,12 +464,17 @@ Which metering points have missing readings.
 
 ### 6.8 `audit_query`
 
+Audit-list subrequests also consume the account's `audit_list` throttle budget
+(60/minute by default, `AUDIT_LIST_THROTTLE_RATE`), shared with REST audit-list
+requests. The existing per-key MCP budget remains separate.
+
 Filtered audit events within the caller's scope.
 
 - Input: `zev_id` (uuid, optional); `action_category` (enum of `AuditActionCategory`);
   `action_type` (string); `target_type` (string); `target_id` (string); `status` (enum of
   `AuditEventStatus`); `date_from`, `date_to` (date); `limit` (1–50, default 20).
-  `q` is **not** exposed (admin-only on the endpoint; the structured filters suffice).
+  `q` is **not** exposed through MCP; the REST endpoint supports scoped text
+  search, while this tool keeps its structured-filter contract.
 - Sub-request: `GET /api/v1/audit/events/?zev=…&…` (maps `zev_id` → `zev`).
 - Output: `{"events": [{"id", "created_at", "actor", "source", "action_category", "action_type", "status", "target_type", "target_display", "summary", "changes"?}], "total"?, "truncated"?}` —
   `changes` included as the endpoint returns it (already redacted server-side); `metadata`,
@@ -543,7 +548,10 @@ converts `UUID`/`Decimal` when the outer view's `Response` is eventually rendere
 
 `ApiKeyRateThrottle.get_cache_key` returns `None` when `getattr(request, "mcp_subrequest", False)`
 is true (read from the DRF request's underlying `HttpRequest`), so one MCP call costs one
-throttle hit regardless of fan-out.
+per-key throttle hit regardless of fan-out. Audit-list subrequests additionally
+consume the shared per-account `audit_list` budget. A failed page, including
+HTTP 429, raises `DispatchError`; `ToolContext.get_all` converts it to a tool
+error (`denied` for 403, otherwise `failed`), never a successful empty or partial list.
 
 `McpApiKeyAuthentication` (in `mcp_server/authentication.py`) subclasses
 `ApiKeyAuthentication`: accepts keyword `Api-Key` or `Bearer` with an `ozv_` key; skips
@@ -579,7 +587,7 @@ No new env vars.
 
 ## 10. Tests (`backend/mcp_server/tests/`)
 
-80 tests across four modules (`backend/mcp_server/tests/__init__.py` makes it a package;
+97 tests across four modules (`backend/mcp_server/tests/__init__.py` makes it a package;
 fixtures live in `backend/mcp_server/tests/conftest.py` — an autouse `mcp_server_enabled`
 fixture, `admin_mcp_client`/`owner_mcp_client`, and `rpc`/`call_tool` request helpers built
 on `APIClient`).
@@ -587,8 +595,8 @@ on `APIClient`).
 | Module | Count | Classes | Covers |
 |---|---|---|---|
 | `test_transport.py` | 28 | `TestFeatureFlagGate`, `TestMethodNotAllowed`, `TestAuthentication`, `TestRole`, `TestOrigin`, `TestBodyParsing`, `TestBatch`, `TestInitialize`, `TestPing`, `TestToolsList`, `TestToolsCall` | flag off → 404 (unauthenticated and with a valid key); `GET`/`DELETE` → 405 (authenticated); no auth → 401 with `WWW-Authenticate`; cookie JWT alone → 401; `Api-Key` and `Bearer` both accepted; revoked/expired key → 401; participant → 403; admin/owner → 200; untrusted `Origin` → 403, no `Origin` passes, trusted `Origin` passes; malformed JSON → `-32700`/400; non-object message → `-32600`; unknown method → `-32601`; batch (mixed request + notification), batch > 10 → `-32600`, notification-only → 202 with empty body; `initialize` version negotiation (requested-and-supported, and fallback for unsupported); `ping`; `tools/list` returns exactly the 10 tools, all `readOnlyHint: true`; unknown tool and invalid arguments → `-32602` with `data.errors` |
-| `test_dispatch.py` | 5 | `TestAllowList`, `TestForcedAuth`, `TestThrottleSkip` | non-allow-listed URL raises `DispatchError`; an allow-listed URL succeeds; a sub-request resolves data as the forced user (proves `_force_auth_user`/`_force_auth_token` took effect); `ApiKeyRateThrottle.get_cache_key` returns `None` when `mcp_subrequest` is set and a real cache key otherwise |
-| `test_tools.py` | 41 | `TestListZevs`, `TestListParticipants`, `TestPeriodReadiness`, `TestFindInvoices`, `TestExplainInvoice`, `TestImportTriage`, `TestConsumptionSummary`, `TestConsumptionProfile`, `TestDataGaps`, `TestAuditQuery` | one class per tool: happy-path shape; owner cannot see another owner's ZEV/invoice (`isError` with the view's own message, e.g. "Permission denied.", no data leaked); admin sees any ZEV; invalid arguments → `-32602`; caps/truncation (`find_invoices`, `import_triage`); `explain_invoice` previous-invoice selection skips a cancelled invoice and picks the correct prior period, and `compare_previous: false` skips the lookup; `import_triage` extracts meter ids from error text and respects `only_problems`; `consumption_summary` span > 400 days is a `ToolError` (`isError: true`, not `-32602` — see §6.6), the ZEV-wide call returns a per-participant breakdown sorted by consumption with `local_share_pct` and no contact fields, a `participant_id` call is scoped and has no breakdown, a participant without readings gets zeroed totals and a `note` (not the ZEV's totals), `bucket=hour` works within 7 days and is a `ToolError` beyond, and a net-metered participant gets `has_behind_meter_generation: true`, `local_share_pct: null`, and `totals.has_behind_meter_generation: true` (`test_net_metered_participant_has_null_local_share`, SPEC-2026-behind-the-meter-generation); `data_gaps` marks a meter with zero readings fully incomplete; `list_participants` returns assignments and none of the contact fields, filters by `query` and `active_on` (and `include_inactive`), caps with `truncated`/`total`, and gives an owner naming another owner's ZEV a tool error with no participant data; `find_invoices` `participant_id` narrows server-side; `consumption_profile` returns 24 rows with the correct peak hour, daily average and local share, `profile: null` plus a note without readings, `-32602` without `participant_id`, a tool error for a participant of another ZEV or another owner's ZEV, and a `ToolError` for a span over 400 days |
+| `test_dispatch.py` | 15 | `TestAllowList`, `TestForcedAuth`, `TestThrottleSkip` | non-allow-listed URL raises `DispatchError`; an allow-listed URL succeeds; a sub-request resolves data as the forced user (proves `_force_auth_user`/`_force_auth_token` took effect); `ApiKeyRateThrottle.get_cache_key` returns `None` when `mcp_subrequest` is set and a real cache key otherwise; `test_failed_page_raises_tool_error` and `test_malformed_page_raises_tool_error` cover first/later-page HTTP failures and malformed responses |
+| `test_tools.py` | 48 | `TestListZevs`, `TestListParticipants`, `TestPeriodReadiness`, `TestFindInvoices`, `TestExplainInvoice`, `TestImportTriage`, `TestConsumptionSummary`, `TestConsumptionProfile`, `TestDataGaps`, `TestAuditQuery` | one class per tool: happy-path shape; owner cannot see another owner's ZEV/invoice (`isError` with the view's own message, e.g. "Permission denied.", no data leaked); admin sees any ZEV; invalid arguments → `-32602`; caps/truncation (`find_invoices`, `import_triage`); `explain_invoice` previous-invoice selection skips a cancelled invoice and picks the correct prior period, and `compare_previous: false` skips the lookup; `import_triage` extracts meter ids from error text and respects `only_problems`; `consumption_summary` span > 400 days is a `ToolError` (`isError: true`, not `-32602` — see §6.6), the ZEV-wide call returns a per-participant breakdown sorted by consumption with `local_share_pct` and no contact fields, a `participant_id` call is scoped and has no breakdown, a participant without readings gets zeroed totals and a `note` (not the ZEV's totals), `bucket=hour` works within 7 days and is a `ToolError` beyond, and a net-metered participant gets `has_behind_meter_generation: true`, `local_share_pct: null`, and `totals.has_behind_meter_generation: true` (`test_net_metered_participant_has_null_local_share`, SPEC-2026-behind-the-meter-generation); `data_gaps` marks a meter with zero readings fully incomplete; `list_participants` returns assignments and none of the contact fields, filters by `query` and `active_on` (and `include_inactive`), caps with `truncated`/`total`, and gives an owner naming another owner's ZEV a tool error with no participant data; `find_invoices` `participant_id` narrows server-side; `consumption_profile` returns 24 rows with the correct peak hour, daily average and local share, `profile: null` plus a note without readings, `-32602` without `participant_id`, a tool error for a participant of another ZEV or another owner's ZEV, and a `ToolError` for a span over 400 days; `test_audit_budget_is_shared_with_browser_and_reported_as_tool_error` proves the shared browser/MCP budget and explicit throttle errors |
 | `test_audit.py` | 6 | `TestToolCallAudit` | successful call recorded with `source = mcp`, `mcp.Tool`/tool-name target, `api_key_prefix`/`duration_ms`/`subrequests` in metadata; `zev_id` argument attaches the `Zev` row only when it is visible to the caller (an owner naming another owner's ZEV gets `zev = null` **and** `status = denied`, not a leak); a failed tool call is recorded `failed` or `denied`; `tools/list` and `initialize` write no `mcp.tool.call` event |
 
 `accounts/test_throttling.py` gains `McpSubrequestThrottleTests` (1 test,

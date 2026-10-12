@@ -1065,9 +1065,10 @@ export const de = {
                 status: 'Status',
                 dateFrom: 'Von Datum',
                 dateTo: 'Bis Datum',
-                search: 'Volltextsuche',
+                search: 'Suche',
                 searchPlaceholder: 'Zusammenfassung, Ziel, Aktionstyp',
-                searchRestricted: 'Die Volltextsuche ist derzeit nur für Admin-Benutzer verfügbar.',
+                searchHint: 'Mit Enter oder beim Verlassen anwenden. Max. 50 Zeichen.',
+                searchTooLong: 'Höchstens 50 Zeichen verwenden.',
             },
             actions: {
                 clearFilters: 'Filter zurücksetzen',

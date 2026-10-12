@@ -1074,9 +1074,10 @@ export const en = {
                 status: 'Status',
                 dateFrom: 'From date',
                 dateTo: 'To date',
-                search: 'Full-text search',
+                search: 'Search',
                 searchPlaceholder: 'Summary, target, action type',
-                searchRestricted: 'Full-text search is currently available only for admin users.',
+                searchHint: 'Enter or leave the field to apply. Max 50 characters.',
+                searchTooLong: 'Use 50 characters or fewer.',
             },
             actions: {
                 clearFilters: 'Clear filters',

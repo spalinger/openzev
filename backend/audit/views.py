@@ -1,10 +1,10 @@
 from django.db.models import Q
 from drf_spectacular.utils import extend_schema
-from rest_framework.exceptions import PermissionDenied
 from rest_framework.generics import GenericAPIView, ListAPIView, RetrieveAPIView
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 
+from accounts.throttling import ApiKeyRateThrottle, AuditListThrottle
 from zev import access
 
 from .models import AuditEvent
@@ -38,6 +38,8 @@ class BaseAuditEventView:
 
 
 class AuditEventListView(BaseAuditEventView, ListAPIView):
+    throttle_classes = [ApiKeyRateThrottle, AuditListThrottle]
+
     def get_queryset(self):
         queryset = self._base_queryset()
 
@@ -66,8 +68,6 @@ class AuditEventListView(BaseAuditEventView, ListAPIView):
 
         query = filters.get("q")
         if query:
-            if not self.request.user.is_admin:
-                raise PermissionDenied("Search is only available for admins in this version.")
             queryset = queryset.filter(
                 Q(summary__icontains=query)
                 | Q(target_display__icontains=query)

@@ -24,10 +24,10 @@ gap for operational investigations, incident analysis, and finance-sensitive
 change traceability.
 
 **Outcome:** OpenZEV gains a centralized append-only audit event stream for
-high-risk write workflows. Admins can search all events, managers and viewers can inspect
-events scoped to their communities, and the system records who performed an
-action, which tenant it affected, whether it succeeded, and which business
-fields changed.
+high-risk write workflows. Admins can search all events; managers and viewers
+can inspect and search events scoped to their communities, and the system records
+who performed an action, which tenant it affected, whether it succeeded, and
+which business fields changed.
 
 This spec defines Audit Log v1 as a backend-first feature with a minimal admin
 UI. It is sufficient to implement the first production-ready audit subsystem
@@ -97,10 +97,12 @@ hub tabs:
   enabled,
 - owner scope as the Audit log tab of the ZEV settings hub
   (`ZevSettingsPage tab="audit"`), with ZEV-scoped visibility and search
-  disabled. The component accepts `embedded` to drop its standalone page
-  header when mounted inside a tab; scopes never merge. Owner scope is locked
-  to the global ZEV selection. Switching it resets pagination and closes the
-  drawer; no event request runs while the managed selection is loading or empty.
+  enabled for accounts with community audit read access. The component accepts
+  `embedded` to drop its standalone page header when mounted inside a tab;
+  scopes never merge. Owner scope is locked
+  to the global ZEV selection. Switching it clears draft/applied search, resets
+  pagination and closes the drawer; no event request runs while the managed
+  selection is loading, empty or lacks management-view access.
 
 ### ZEV resolution rules
 
@@ -242,11 +244,30 @@ The audit service must redact or omit these fields from `changes_json` and
 | Uploaded file contents | Omit entirely |
 | User notes / free-text comments | Exclude by default unless explicitly required |
 
+Redaction recursively traverses dictionaries, lists and tuples, including nested
+before/after diff values. Keys are compared case-insensitively against
+`SENSITIVE_KEYS` (password, user_password, token, access_token, refresh, access,
+client_secret, secret_key, email_host_password, authorization, api_key,
+api_key_value, push_token, refresh_token), plus
+body/template keys (`email_body_template`, `body`, `template_content`, `content`).
+Fields named `iban` or ending in `_iban` retain only the final four characters;
+values of four characters or fewer are fully masked. Diff sides inherit their
+field’s masking policy.
+Safe strings are capped at 500 characters; lists/tuples at 20 entries;
+dictionaries at 50 input entries at every level, including the root. An extra
+truncation marker records omitted input entries. `build_diff` compares raw values;
+`record_audit_event` normalizes metadata and diffs once before persistence.
+Trusted API-key attribution survives truncation and overrides caller values.
+Diff sides remain explicit even when empty or fully redacted.
+
+
 ---
 
 ## 5. API contracts
 
 The audit API is read-only. Events are created only by backend services.
+An **audit reader** is an authenticated admin or an account with an active
+manager/viewer grant or a managing party role. Non-admin reads are community-scoped.
 
 ### 5.1 URL registration
 
@@ -260,9 +281,9 @@ Add a new include in `backend/config/urls.py`:
 
 | Endpoint | Method | Permission | Behaviour |
 |---|---|---|---|
-| `/api/v1/audit/events/` | GET | Authenticated admin, or an account with a manager or viewer grant | Paginated list with role-scoped filtering |
-| `/api/v1/audit/events/{id}/` | GET | Authenticated admin, or an account with a manager or viewer grant | Single event detail if event is visible to actor |
-| `/api/v1/audit/events/filter-options/` | GET | Authenticated admin, or an account with a manager or viewer grant | Unpaginated `{zevs, actors}` distinct options derived from the visible event queryset |
+| `/api/v1/audit/events/` | GET | Audit reader; community-scoped unless admin | Paginated list with role-scoped filtering |
+| `/api/v1/audit/events/{id}/` | GET | Audit reader; community-scoped unless admin | Single event detail if event is visible to actor |
+| `/api/v1/audit/events/filter-options/` | GET | Audit reader; community-scoped unless admin | Unpaginated `{zevs, actors}` distinct options derived from the visible event queryset |
 
 ### 5.3 List query parameters
 
@@ -271,13 +292,22 @@ Add a new include in `backend/config/urls.py`:
 | `actor_user` | int | Filter by actor user ID |
 | `zev` | UUID | Filter by ZEV |
 | `action_category` | string | Filter by category |
-| `action_type` | string | Filter by exact action name |
-| `target_type` | string | Filter by target model label |
-| `target_id` | string | Filter by target primary key |
+| `action_type` | string | Filter by exact action name; maximum 80 characters |
+| `target_type` | string | Filter by target model label; maximum 120 characters |
+| `target_id` | string | Filter by target primary key; maximum 64 characters |
 | `status` | string | Filter by event status |
 | `date_from` | ISO date | Inclusive lower bound on `created_at` date |
 | `date_to` | ISO date | Inclusive upper bound on `created_at` date |
-| `q` | string | Case-insensitive summary/target search; admin-only in v1 |
+| `q` | string | Case-insensitive substring search across summary, target_display and action_type within existing read scope; maximum 50 Unicode code points after trimming; blank means no search |
+
+Text filters are trimmed. Over-limit nonblank filters return HTTP `400`; `%`,
+`_`, backslashes, quotes and markup remain literal search text. Search OR
+conditions are applied to the visibility-scoped queryset, including pagination
+counts. Default: 60 list requests/minute/account, configured by
+`AUDIT_LIST_THROTTLE_RATE`. All list requests share this budget across communities,
+sessions, API keys and MCP. Existing per-key limits also apply. Exhaustion returns
+HTTP `429` with `Retry-After`; detail and filter-options retain their existing
+throttles.
 
 ### 5.4 List response shape
 
@@ -337,9 +367,9 @@ Proposed classes:
 ### 5.6 Queryset rules
 
 1. Admin: unrestricted queryset.
-2. Managers and viewers: only events of ZEVs they hold an active grant for (`zev_id__in=zev.access.viewable_zev_ids(user)`, #761).
+2. Managers and viewers: only events in `zev.access.viewable_zev_ids(user)` (active manager/viewer grants or active issuer/representative party roles).
 3. Events with `zev = null` are admin-only in v1.
-4. Accounts without a grant receive HTTP `403` (`CanViewAuditEvents`).
+4. Non-admin accounts without community audit read access receive HTTP `403` (`CanViewAuditEvents`).
 
 ---
 
@@ -483,8 +513,15 @@ UI elements:
    admins; `id` + `username` only, no email or names; unrelated accounts never
    appear).
 4. Category/type/status filters.
-5. Search input for summary/target lookup — admin-only: disabled for everyone
-   except users with `role = 'admin'`, with the `searchRestricted` hint shown.
+5. Search input for summary/target/action-type lookup in both scopes. Platform
+   scope requires an admin; community scope requires `isZevScope`, a resolved
+   selected community and completed selection loading. Draft text applies on
+   Enter or blur, is trimmed and limited to 50 Unicode code points (frontend
+   `Array.from`, backend `len`). Oversized drafts show a translated inline error
+   and do not apply. Empty search clears `q`. Applying resets page 1; Clear
+   clears draft and applied text. Community switches clear both before requesting
+   the new scope, so no new-community request carries the old query. Backend
+   validation errors are displayed using `formatApiError`.
 6. Dense table with timestamp, summary, ZEV (name resolved from the options
    query, raw UUID as fallback), category, action, target, actor, status.
 7. Pagination row (page label + Zurück/Weiter buttons) below the table,
@@ -509,6 +546,12 @@ against `AUDIT_ACTION_CATEGORIES`; other values are passed to the API
 filters. The three text inputs keep editable drafts and commit them to the URL
 on Enter or blur; category selection applies immediately. External URL changes
 synchronize the drafts. Pagination and other controls stay local.
+Unchanged search submissions preserve pagination. Clear discards unfinished
+drafts; ordinary blur applies them. List requests and filter options require
+resolved audit access; community views also require a matching selected community.
+Manual Refresh and Retry use the same list eligibility guard. List queries
+retry network/server failures up to three times, skip HTTP 4xx retries and do not
+refetch on window focus; error feedback offers a guarded manual retry.
 A change in effective URL filters or owner community scope resets pagination to page 1 and closes
 the selected event before the new query runs. Unrelated query/hash changes do
 not reset those states. Reload restores URL filters; edits replace history,
@@ -585,11 +628,6 @@ export type AuditActionCategory =
 
 export type AuditEventStatus = 'started' | 'queued' | 'success' | 'failed' | 'denied'
 
-export interface AuditFieldChange {
-  before: string | number | boolean | null | string[] | number[] | boolean[]
-  after: string | number | boolean | null | string[] | number[] | boolean[]
-}
-
 export interface AuditEvent {
   id: string
   created_at: string
@@ -610,7 +648,7 @@ export interface AuditEvent {
   user_agent: string
   summary: string
   reason: string
-  changes_json: Record<string, AuditFieldChange>
+  changes_json: Record<string, unknown>
   metadata_json: Record<string, unknown>
 }
 
@@ -701,7 +739,7 @@ coverage.
 | Over-auditing low-value events creates noise | High | Restrict v1 to high-risk writes and async outcomes |
 | Sensitive values accidentally persisted | High | Central redaction helper and field allowlists per model |
 | Generic model signals lose business context | High | Use explicit service calls in view/service workflows instead of relying primarily on signals |
-| Owner-scoped visibility leaks cross-tenant events | High | Require resolved `zev` for owner-visible events and filter queryset by `zev.owner` |
+| Owner-scoped visibility leaks cross-tenant events | High | Filter the base queryset by `zev.access.viewable_zev_ids`; apply search and structured filters only to that scope |
 | Event rows become too large | Medium | Keep `changes_json` and `metadata_json` compact, avoid raw blobs/templates |
 | Async actions cannot be correlated to initiating request | Medium | Persist `request_id` and pass `correlation_id` into Celery payloads where relevant |
 | Audit API becomes slow under growth | Medium | Add indexes from day one and keep list/search filter set limited |
@@ -725,26 +763,48 @@ the event rows themselves is still not implemented.
 
 ---
 
+### Operational limits and follow-up
+
+- Cache-backed throttling does not bound concurrent query work. Substring search
+  and pagination counts can scan many rows; measure representative PostgreSQL
+  query plans and latency before choosing search indexes.
+- Deeply nested metadata can exceed Python's recursion limit and fail an audit
+  write, rolling back a surrounding business transaction. A depth cap remains a
+  separate hardening task.
+- Historical rows are unchanged; production history has not been assessed.
+  Before deployment, the deployment owner must inventory affected list/scalar
+  IBAN payloads, identify their readers and record a remediation decision.
+  Rotate credentials if exposure is confirmed; assess cleanup separately.
+
 ## 10. Test plan
 
 ### Backend — `backend/audit/tests.py`
 
-**`AuditEventModelTests`** (10 tests):
+**`AuditEventModelTests`** (19 tests):
 
 | Test | Asserts |
 |---|---|
 | `test_audit_event_orders_by_newest_first` | Default ordering is descending by `created_at` |
 | `test_audit_event_persists_actor_and_target_snapshots` | Snapshot fields remain populated independently of related object display changes |
 | `test_audit_event_preserves_deleted_actor_snapshot` | A deleted actor's display and role persist with no user FK |
-| `test_redaction_omits_secret_fields` | Secrets and masked fields are redacted before persistence |
+| `test_redaction_omits_secret_fields` | Credential keys and aliases are removed case-insensitively |
+| `test_redaction_masks_only_iban_fields` | IBAN fields are masked without altering notes or holder/history fields |
+| `test_redaction_caps_stringified_values_before_persistence` | Custom values and Decimal strings respect the string cap |
+| `test_redaction_preserves_empty_diff_sides` | Empty and fully redacted sides remain explicit in persisted diffs |
 | `test_redaction_truncates_large_strings_and_caps_collections` | Oversized values are capped before persistence |
+| `test_redaction_recurses_through_lists_tuples_and_diffs` | Nested secrets are omitted and IBANs masked in persisted metadata and before/after diffs |
+| `test_redaction_caps_root_and_nested_dictionaries` | Root/nested dictionaries and persisted diffs retain accurate truncation counts |
+| `test_redaction_recomputes_marker_shaped_user_values` | Marker-shaped input cannot forge truncation counts |
+| `test_scalar_iban_diffs_are_masked_before_persistence` | Scalar IBAN diff sides are masked in persisted events |
+| `test_api_key_attribution_survives_oversized_and_spoofed_metadata` | Trusted attribution survives oversized caller metadata and overrides spoofed values |
 | `test_record_audit_event_truncates_reason` | Long free-text reasons are truncated |
 | `test_build_diff_uses_allowed_fields_only` | Diff helper excludes unapproved fields |
+| `test_build_diff_compares_untruncated_values` | Differences beyond the stored string cap still register |
 | `test_build_instance_snapshot_reads_fks_without_extra_queries` | Snapshots resolve FKs without extra queries |
 | `test_audited_update_mixin_tracks_every_writable_serializer_field` | Audit mixin records every writable serializer field |
 | `test_infer_zev_resolves_nested_objects` | ZEV resolution works for invoice/participant/assignment targets |
 
-**`AuditEventApiTests`** (10 tests):
+**`AuditEventApiTests`** (18 tests):
 
 | Test | Asserts |
 |---|---|
@@ -757,7 +817,24 @@ the event rows themselves is still not implemented.
 | `test_filter_options_admin_sees_all_zevs_and_actors` | Options expose all ZEVs and distinct actors, unpaginated |
 | `test_filter_options_owner_scoped_to_own_community` | Owner options only include own ZEVs and actors who acted there (participant, owner, admin) |
 | `test_filter_options_participant_forbidden` | Participant receives 403 on options endpoint |
+| `test_search_preserves_scope_and_combined_filters` | Matching foreign/global events stay out of results and counts; structured filters cannot widen scope; admins search globally |
+| `test_search_matches_each_field` | All three fields match case-insensitively |
+| `test_search_treats_input_literally` | Wildcard/SQL-looking/markup/Unicode input remains literal |
+| `test_search_ignores_blank_and_trims_input` | Blank returns unfiltered rows; surrounding spaces do not change matches |
+| `test_search_validates_text_length_boundaries` | 50-code-point boundary and exact-filter length bounds |
+| `test_search_rejects_invalid_structured_filters` | Invalid structured filters return 400 alongside search |
+| `test_search_allows_viewer_and_party_derived_manager` | Existing viewer and managing-party read access permits search |
+| `test_search_denies_missing_expired_future_and_revoked_access` | No access, inactive grant windows and revoked grants deny search |
 | `test_detail_returns_full_diff_and_metadata` | Detail response exposes structured payloads |
+
+**`AuditEventThrottleTests`** (4 tests):
+
+| Test | Asserts |
+|---|---|
+| `test_cookie_search_budget_is_shared_across_filters_and_api_keys` | Cookie and API-key requests share an account budget across filters and keys |
+| `test_users_have_separate_budgets_and_detail_options_are_unaffected` | Other accounts have independent budgets; list exhaustion does not throttle detail/options |
+| `test_existing_api_key_budget_still_applies` | Existing per-key throttling is retained alongside the account limit |
+| `test_budget_recovers_after_retry_after` | HTTP 429 includes Retry-After and requests resume after the window expires |
 
 ### Backend — workflow instrumentation
 
@@ -832,9 +909,14 @@ configuration invariants, including the Helm schema constraint on
   selection, admin scope keeps its own selector, and source links supply visible
   target filters from the first request. Mounted contextual-filter changes reset
   pagination/drawer while unrelated URL edits retain them; Clear retains URL context.
-  Text typing remains local until Enter/blur, and new actor intents close details.
+  Text typing, including `q`, remains local until Enter/blur, and new actor
+  intents close details. Search tests cover manager/viewer/admin community access,
+  draft/applied search clearing on community changes with no carried-over query,
+  Unicode length limits, participant-only list/options denial, unchanged search
+  pagination, pointer Clear without an intermediate request, keyboard blur, HTTP 4xx
+  feedback without retries, guarded Refresh/Retry, and escaped markup rendering.
 - `frontend/tests/zev-settings-tabs.test.ts` checks that a community switch from
-  audit page 3 remounts the scoped view at page 1 and closes the old drawer.
+  audit page 3 resets the scoped view to page 1 and closes the old drawer.
 - Component/manual validation via `npm run lint`, `npm run build`, and
   `npm run test:unit`.
 

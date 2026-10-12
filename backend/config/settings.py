@@ -190,8 +190,9 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_THROTTLE_RATES": {
         # Only applies to key-authenticated requests; cookie sessions return a
-        # null cache key and are not throttled.
+        # null cache key for this scope; endpoint-specific user budgets still apply.
         "api_key": env("API_KEY_THROTTLE_RATE", default="600/hour"),
+        "audit_list": env("AUDIT_LIST_THROTTLE_RATE", default="60/minute"),
         # Per-IP budgets for the public auth endpoints (accounts.throttling).
         # Per push token (supplementary energy data); a 15-minute feed needs 4/hour.
         "supplementary_push": env("SUPPLEMENTARY_PUSH_THROTTLE_RATE", default="120/hour"),

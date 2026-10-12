@@ -133,8 +133,10 @@ Key-authenticated requests are limited to **600 requests per hour per key**
 (configurable by your administrator via `API_KEY_THROTTLE_RATE`). Exceeding it
 returns `429 Request was throttled.`
 
-The limit is per key, not per account, so one busy script cannot starve another.
-Browser sessions are not throttled by this limit; the login, registration,
+This general limit is per key. The audit list also has a separate limit of
+60 requests per minute per account by default, shared across all that account's
+keys and browser sessions (`AUDIT_LIST_THROTTLE_RATE`).
+Browser sessions are exempt from the general per-key limit; the login, registration,
 refresh, verification and OAuth login/exchange endpoints carry their own
 per-IP limits (see `AUTH_*_THROTTLE_RATE` settings).
 
