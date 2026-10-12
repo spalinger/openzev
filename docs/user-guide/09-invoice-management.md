@@ -309,7 +309,10 @@ PDF does:
 
 - **Total CHF** (the dark tile) — the final invoiced amount.
 - **Subtotal CHF** — amount before VAT.
-- **VAT CHF** — the VAT portion.
+- **VAT CHF** — the VAT portion. For a VAT-registered ZEV that pays a producer
+  for their electricity, the VAT is charged on what the ZEV supplies, so it
+  does not equal the subtotal times the rate; the invoice PDF below lists the
+  producer credit after the VAT.
 
 **Energy totals:**
 

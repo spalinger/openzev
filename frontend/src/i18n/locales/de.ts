@@ -281,6 +281,8 @@ export const de = {
             vatRateFraction: 'MWST-Satz als Bruchteil (0.0810)',
             vatRatePercent: 'MWST-Prozentwert (8.1, ohne %)',
             vatAmount: 'MWST-Betrag (CHF)',
+            vatBase: 'MWST-Basis (CHF)',
+            producerCredit: 'Vergütung Produktion (CHF)',
             total: 'Total (CHF)',
             invoiceNotes: 'Bemerkungen',
             formattedDates: 'Daten',

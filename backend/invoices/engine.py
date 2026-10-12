@@ -1443,6 +1443,11 @@ def _round_to_group_total(raw_totals: list[Decimal], target: Decimal) -> list[De
     return quantized
 
 
+# What the ZEV pays a producer for their solar electricity; kept out of the
+# VAT base (#957, tariffs spec §4.8).
+PRODUCER_CREDIT_BUCKETS = frozenset({"producer_credit", "shared_producer_credit"})
+
+
 def _build_item_payloads(
     accumulator, *, gross_rate: Decimal = Decimal("0")
 ) -> tuple[list, Decimal, Decimal]:
@@ -1858,8 +1863,14 @@ def generate_invoice(
         items_accumulator, gross_rate=gross_rate
     )
 
+    # VAT is charged on the ZEV's own supplies; producer credits only settle (#957).
+    producer_credit_chf = sum(
+        (p["total"] for p in item_payloads if p["bucket"] in PRODUCER_CREDIT_BUCKETS),
+        Decimal("0"),
+    )
+    vat_base_chf = subtotal - producer_credit_chf
     vat_rate = _resolve_vat_rate(zev, period_end)
-    vat_chf = (subtotal * vat_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    vat_chf = (vat_base_chf * vat_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     total_chf = subtotal + vat_chf
 
     # ─── 8. Create invoice ────────────────────────────────────────────────
@@ -1876,6 +1887,7 @@ def generate_invoice(
         total_feed_in_kwh=exported_kwh_acc.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP),
         subtotal_chf=subtotal,
         vat_rate=vat_rate,
+        vat_base_chf=vat_base_chf if zev.vat_mode == VatMode.REGISTERED else None,
         vat_chf=vat_chf,
         embedded_vat_chf=embedded_vat_chf if zev.vat_mode == VatMode.INCLUSIVE else None,
         total_chf=total_chf,

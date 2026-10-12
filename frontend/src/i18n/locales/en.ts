@@ -290,6 +290,8 @@ export const en = {
             vatRateFraction: 'Stored VAT fraction (0.0810)',
             vatRatePercent: 'VAT percent value (8.1, without %)',
             vatAmount: 'VAT amount (CHF)',
+            vatBase: 'VAT base (CHF)',
+            producerCredit: 'Producer remuneration (CHF)',
             total: 'Total (CHF)',
             invoiceNotes: 'Notes',
             formattedDates: 'Dates',

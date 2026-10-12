@@ -63,6 +63,12 @@ class Invoice(models.Model):
     total_feed_in_kwh = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     subtotal_chf = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     vat_rate = models.DecimalField(max_digits=5, decimal_places=4, default=0)
+    # What ``vat_chf`` was charged on (#957): the subtotal without producer
+    # credits. Null outside VatMode.REGISTERED and on older invoices, whose
+    # base is the subtotal.
+    vat_base_chf = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True
+    )
     vat_chf = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     # Non-recoverable VAT already contained in the line totals, for a ZEV on
     # VatMode.INCLUSIVE. Not charged and not shown on the participant invoice

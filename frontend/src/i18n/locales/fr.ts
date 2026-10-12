@@ -281,6 +281,8 @@ export const fr = {
             vatRateFraction: 'Taux TVA en fraction (0.0810)',
             vatRatePercent: 'Pourcentage TVA (8.1, sans %)',
             vatAmount: 'Montant TVA (CHF)',
+            vatBase: 'Base TVA (CHF)',
+            producerCredit: 'Rémunération de la production (CHF)',
             total: 'Total (CHF)',
             invoiceNotes: 'Remarques',
             formattedDates: 'Dates',

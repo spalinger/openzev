@@ -331,9 +331,16 @@ def _build_template_context(
     # Convert the stored fraction (0.0810) to percent form (8.1).
     vat_rate_percent = Decimal(invoice.vat_rate or 0) * 100
 
+    # Producer credits, listed after the VAT (#957); None when there are none
+    # or the invoice has no recorded VAT base.
+    producer_credit_chf = None
+    if invoice.vat_base_chf is not None:
+        producer_credit_chf = (invoice.subtotal_chf - invoice.vat_base_chf) or None
+
     return {
         "invoice": invoice,
         "vat_rate_percent": vat_rate_percent,
+        "producer_credit_chf": producer_credit_chf,
         "invoice_number_prefix": invoice_number_prefix,
         "invoice_number_suffix": invoice_number_suffix,
         "grouped_items": grouped_items,
