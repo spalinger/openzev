@@ -10,8 +10,9 @@ account, and a first tour of the interface.
 |---|---|---|
 | Try OpenZEV with sample data | `scripts/start-demo-environment.sh` | [Demo and local development](#demo-and-local-development) |
 | Work on the code | `docker-compose.dev.yml` | [Demo and local development](#demo-and-local-development) |
-| Run it for a real community on one server | `docker-compose.yml` | [Production with Docker Compose](#production-with-docker-compose) |
-| Run it as one application container | `docker-compose.fullstack.yml` | [Single-container variant](#single-container-variant) |
+| Run it for a real community on one server | `docker-compose.yml` from the release | [Production with Docker Compose](#production-with-docker-compose) |
+| Run it on a Synology NAS | Release `docker-compose.yml` in Container Manager | [Synology NAS](#synology-nas-container-manager) |
+| Build the production stack from source | `docker-compose.yml` or `docker-compose.fullstack.yml` | [Building from source](#building-from-source) |
 | Run it on Kubernetes | Helm chart `charts/openzev` | [Production on Kubernetes (Helm)](#production-on-kubernetes-helm) |
 
 A production instance starts empty: no accounts, no communities. After
@@ -20,8 +21,8 @@ installing, [create the first admin account](#creating-the-first-admin-account).
 ## Prerequisites
 
 - For Docker Compose: Docker with the Compose plugin (or Podman with
-  `podman compose`), and a copy of this repository (`git clone
-  https://github.com/splattner/openzev.git`)
+  `podman compose`). Building from source also needs a copy of this repository
+  (`git clone https://github.com/splattner/openzev.git`)
 - For Kubernetes: a cluster, `helm`, `kubectl`, and a PostgreSQL database and
   Redis instance the cluster can reach
 - For a public instance: a domain name, TLS termination (a reverse proxy or
@@ -66,27 +67,38 @@ demo seed ships well-known passwords.
 
 ## Production with Docker Compose
 
-`docker-compose.yml` runs the frontend (nginx), the backend (Django +
-gunicorn), a Celery worker, one Celery Beat scheduler, PostgreSQL and Redis on
-one host. Only the frontend port `8080` is published; nginx proxies `/api/` to
-the backend, and PostgreSQL and Redis are reachable only on the compose
-network. The images are built from your checkout of the repository.
+Each release ships a ready-made `docker-compose.yml` that runs the published
+OpenZEV images — nothing is built on your server. It starts the application
+(`app`: nginx serving the frontend and proxying `/api/` to Django/gunicorn in
+the same container), a Celery worker, one Celery Beat scheduler, PostgreSQL and
+Redis on one host. Only port `8080` is published; PostgreSQL and Redis are
+reachable only on the compose network. The images are signed with cosign and
+come with an SBOM.
 Keep the shared Redis cache supplied by Compose: registration reservations and
 throttles must be shared across backend workers; an in-memory cache is local to
 each process.
 
-### 1. Get the code
+### 1. Download the release files
+
+Pick the newest release on the
+[releases page](https://github.com/splattner/openzev/releases) and download
+`docker-compose.yml` and `env.production.example` into an empty directory:
 
 ```bash
-git clone https://github.com/splattner/openzev.git
-cd openzev
-git checkout vX.Y.Z   # pick the newest release tag; main may be unstable
+mkdir openzev && cd openzev
+VERSION=vX.Y.Z   # the newest release tag
+curl -LO https://github.com/splattner/openzev/releases/download/$VERSION/docker-compose.yml
+curl -LO https://github.com/splattner/openzev/releases/download/$VERSION/env.production.example
 ```
 
-### 2. Configure `backend/.env`
+The compose file pulls the image of the release it was published with, so the
+version is pinned by the file you download. To run a different version without
+changing the file, add `OPENZEV_VERSION=vX.Y.Z` to `.env`.
+
+### 2. Configure `.env`
 
 ```bash
-cp backend/.env.production.example backend/.env
+cp env.production.example .env
 ```
 
 Fill in every value. The examples below assume the instance is reached at
@@ -138,16 +150,16 @@ The backend checks this configuration every time it starts. If a required
 value is missing or still points at a development host, the database
 migration step stops with an error such as `accounts.E003` (hosts),
 `accounts.E005` (trusted origins) or `accounts.E006` (email backend), and the
-backend container exits — read it with `docker compose logs backend`.
+`app` container exits — read it with `docker compose logs app`.
 
 ### 3. Start the stack
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 docker compose ps
 ```
 
-The backend applies database migrations on every start. The `beat` container
+The first start pulls the images. The application applies database migrations on every start. The `beat` container
 may exit once on the very first start, before those migrations have created
 its tables; it restarts on its own.
 
@@ -159,6 +171,49 @@ check on the server itself, but a public instance needs TLS termination in
 front of port `8080` — for example Caddy, Traefik, or an nginx with a Let's
 Encrypt certificate — forwarding `https://zev.example.ch` to
 `http://127.0.0.1:8080`. Open the app at that `https://` URL.
+
+**Caddy** obtains and renews the certificate on its own. With Caddy installed
+on the same host, this is the whole `Caddyfile`:
+
+```caddyfile
+zev.example.ch {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+If Caddy runs as a container in this compose project instead, put it on the
+same network and point it at the service: `reverse_proxy app:80`.
+
+**Traefik** (v2 or v3, with the Docker provider, an HTTPS entry point and a
+certificate resolver you already run) routes by container labels. Add a
+`docker-compose.override.yml` next to `docker-compose.yml`; Compose merges it
+automatically. It joins `app` to Traefik's network and stops publishing port
+`8080`, so the only way in is through Traefik:
+
+```yaml
+services:
+  app:
+    ports: !reset []            # needs Docker Compose 2.24 or later
+    networks:
+      - default
+      - proxy
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=proxy
+      - traefik.http.routers.openzev.rule=Host(`zev.example.ch`)
+      - traefik.http.routers.openzev.entrypoints=websecure
+      - traefik.http.routers.openzev.tls.certresolver=letsencrypt
+      - traefik.http.services.openzev.loadbalancer.server.port=80
+
+networks:
+  proxy:
+    external: true              # the network Traefik is attached to
+```
+
+Replace `proxy`, `websecure` and `letsencrypt` with the network, entry point
+and resolver names from your Traefik setup, and `zev.example.ch` with your
+domain. On older Compose versions, delete the `ports` line and remove the
+`8080:80` mapping from `docker-compose.yml` by hand.
 
 The shipped nginx sanitizes `X-Forwarded-For` and the production stack keeps
 `NUM_PROXIES=1`. If another proxy sits in front of it, audit and rate-limit
@@ -177,31 +232,79 @@ See [Creating the first admin account](#creating-the-first-admin-account) below.
 
 - Set up backups of the database **and** the `backend_media` volume (invoice
   PDFs) before billing real participants — see [Backups](18-backups.md).
-- To update, check out the new release tag and rebuild; migrations run
-  automatically when the backend starts:
+- To update, download `docker-compose.yml` of the new release over the old
+  one (or set `OPENZEV_VERSION=vX.Y.Z` in `.env`), then pull and restart;
+  migrations run automatically when the application starts. Read the release
+  notes first, and make a backup before upgrading:
 
   ```bash
-  git fetch --tags
-  git checkout vX.Y.Z
-  docker compose up -d --build
+  docker compose pull
+  docker compose up -d
   ```
 
-### Single-container variant
+### Synology NAS (Container Manager)
 
-`docker-compose.fullstack.yml` runs the frontend and backend in one `app`
-container (nginx and gunicorn together); the worker, Beat scheduler,
-PostgreSQL and Redis stay separate services. Configuration and HTTPS work
-exactly as above:
+On a Synology NAS the release file runs as a *Project* in **Container Manager**
+(called *Docker* before DSM 7.2). You need DSM 7.2 or later on a model that
+supports Container Manager.
+
+1. In **File Station**, create a folder for the stack, for example
+   `docker/openzev`, and copy `docker-compose.yml` into it (download it as in
+   [step 1](#1-download-the-release-files)).
+2. Fill in the settings from [step 2](#2-configure-env) and save them as a file
+   named `.env` in the same folder — for example by editing
+   `env.production.example` on your computer and uploading it as `.env`.
+   File Station hides names that start with a dot; the file is still there.
+3. Open **Container Manager → Project → Create**, enter a name such as
+   `openzev`, choose the folder as the **Path**, and pick **Use existing
+   docker-compose.yml**. Click through the remaining pages and finish with
+   **Done**. DSM pulls the images and starts the stack.
+4. Create the first admin account as in
+   [Creating the first admin account](#creating-the-first-admin-account). Use
+   the project's `app` container: SSH into the NAS and run
+   `sudo docker compose exec app …` from the project folder, or open a
+   terminal on the `app` container under **Container Manager → Container**.
+
+Things that differ from a plain Linux server:
+
+- **Port.** The stack publishes `8080`. If another package already uses it,
+  change the left-hand number of `"8080:80"` in `docker-compose.yml`, for
+  example `"8088:80"`, and use that port below.
+- **HTTPS.** Let DSM terminate TLS: get a certificate under **Control Panel →
+  Security → Certificate**, then add a rule under **Control Panel → Login
+  Portal → Advanced → Reverse Proxy** from `https://zev.example.ch` (port 443)
+  to `http://localhost:8080`. Set `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`,
+  `FRONTEND_URL` and the passkey settings in `.env` to that address as in
+  step 2, and forward the name and ports from your router.
+- **Updating.** Replace `docker-compose.yml` with the new release's file (or
+  set `OPENZEV_VERSION` in `.env`), then over SSH run `sudo docker compose pull`
+  followed by `sudo docker compose up -d` in the project folder. Make a backup
+  first.
+- **Backups.** The database and invoice files live in Docker volumes, which
+  DSM's own backup tools do not include by default. Set up the backups
+  described in [Backups](18-backups.md), and send them to a location outside
+  the NAS.
+
+### Building from source
+
+To build the images yourself — for a patched checkout, or a platform the
+published images do not cover — use a copy of the repository instead:
 
 ```bash
+git clone https://github.com/splattner/openzev.git
+cd openzev
+git checkout vX.Y.Z   # pick the newest release tag; main may be unstable
 cp backend/.env.production.example backend/.env   # then fill it in as in step 2
 docker compose -f docker-compose.fullstack.yml up -d --build
 ```
 
-The frontend is on http://localhost:8080. Stop it with
-`docker compose -f docker-compose.fullstack.yml down`. Pass
-`-f docker-compose.fullstack.yml` to every `docker compose` command for this
-stack, and use the service name `app` where the default stack uses `backend`.
+`docker-compose.fullstack.yml` is the same single-application-container stack
+as the release file, built locally and reading `backend/.env`. The repository
+also contains `docker-compose.yml`, which builds the frontend (nginx) and the
+backend as two containers — use the service name `backend` instead of `app`
+there. Pass `-f docker-compose.fullstack.yml` to every `docker compose` command
+for the fullstack stack. To update, check out the new tag and run the `up`
+command again.
 
 ## Production on Kubernetes (Helm)
 
@@ -212,7 +315,7 @@ chart).
 
 1. Create secrets for the database URL, Django `SECRET_KEY`, the SMTP password
    and the encryption keys (generate the keys as shown in
-   [step 2](#2-configure-backendenv) above).
+   [step 2](#2-configure-env) above).
 2. Write a `values-prod.yaml` with your domain, trusted origins, passkey
    domain, database and Redis endpoints, SMTP settings and ingress. The
    [chart README](../../charts/openzev/README.md#example-values) has a
@@ -240,11 +343,11 @@ create an admin. Create the first one from the command line with Django's
 username, an email address and a password:
 
 ```bash
-# Docker Compose (docker-compose.yml)
-docker compose exec backend python manage.py createsuperuser
+# Docker Compose (release docker-compose.yml)
+docker compose exec app python manage.py createsuperuser
 
-# Single container (docker-compose.fullstack.yml)
-docker compose -f docker-compose.fullstack.yml exec app python manage.py createsuperuser
+# Built from source with the two-container docker-compose.yml
+docker compose exec backend python manage.py createsuperuser
 
 # Kubernetes (release "openzev" in namespace "openzev")
 kubectl -n openzev exec -it deploy/openzev-backend -- python manage.py createsuperuser
@@ -258,7 +361,7 @@ To create the account from a script instead of interactively, pass the
 password through the environment:
 
 ```bash
-docker compose exec -e DJANGO_SUPERUSER_PASSWORD='choose-a-strong-password' backend \
+docker compose exec -e DJANGO_SUPERUSER_PASSWORD='choose-a-strong-password' app \
   python manage.py createsuperuser --noinput --username admin --email admin@example.ch
 ```
 
@@ -275,7 +378,7 @@ Then:
    default**: anyone who can reach the login page can register an account
    and create a community, which makes them its issuer and manager. On a public instance you run only for your
    own community, turn it off under **Platform → Settings → Functions**,
-   or set `FEATURE_ZEV_SELF_REGISTRATION_ENABLED=false` in `backend/.env`.
+   or set `FEATURE_ZEV_SELF_REGISTRATION_ENABLED=false` in `.env`.
 
 Use `createsuperuser` again whenever you need another admin and cannot sign in
 — for example, if the only admin account was locked out.
