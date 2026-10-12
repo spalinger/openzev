@@ -260,33 +260,36 @@ join date, and a leaver's share stops on their leave date.
 
 Each metering point is one row in its building's sheet:
 
-- **Metering point** — an icon for its type (a house for Consumption, a solar
+- **Metering point** — click the meter ID to open **Edit Metering Point** (managers). An icon for its type (a house for Consumption, a solar
   panel for Production, two arrows for Bidirectional; hover it for the name,
   and the legend under the list names them), the meter ID and its unit within
   the building, with an **Inactive** badge for a deactivated meter and a
   **Surplus metering** badge when
   [Generation behind the meter](#generation-behind-the-meter) is ticked
 - **Holder** — the participant who currently holds the meter and since when.
+  Managers can click the holder name to open **Edit Assignment**.
   A meter without a holder shows **Assign participant** instead, after a red
   **No current holder** warning if it has readings that cannot be billed.
   When a meter has had other assignments (or one is coming up), click
-  **_n_ assignments** under the holder to open them all, each with its dates,
-  **Edit** and **⋯ More → Remove**
+  **_n_ assignments** under the holder to show all assignments with their dates
+  and status. Managers can click a holder name to edit that assignment or use
+  its **⋯** menu to remove it
 - **Last reading** — a dot for the data health over the last 30 complete days (up to
   yesterday): green with the last reading time, otherwise `Data gaps`,
   `Data at risk` or `No data yet`. Click it to open the metering point's
   data-quality view. Hover to see the latest reading time when available
 
-At the end of the row, a small chart of the meter's daily kWh over the last
-7 complete days, ending yesterday (production meters show what they fed in), opens its full reading
-history; a break in the line is a day without readings. Hover it for the
-7-day total. With fewer than two daily values, the link shows a chart icon instead. The
+At the end of the row, the chart link shows recorded hourly energy over the last
+7 complete days, ending yesterday: consumption, feed-in for production meters,
+or net draw for bidirectional meters. It opens the full reading history.
+Missing hours break the line. Hover for the recorded total; missing hours do
+not contribute to it. With fewer than two hourly values, the link shows a chart icon instead. The
 **⋯ More** menu holds the rest. When the meter has a holder
 it starts with the holder's actions (**Assign participant**,
 **Edit Assignment**, **Remove Assignment**), followed by the meter's own
 (**Edit**, **Delete data** for administrators, **Delete**).
 
-On a narrow screen each row becomes a small card with the same content.
+On a narrow screen each row stacks with the same content.
 
 ## Meter Maintenance
 

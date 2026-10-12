@@ -1,4 +1,4 @@
-import { todayBusinessIso } from '../../lib/dates'
+import { businessDayStartMs, nextIsoDate, todayBusinessIso } from '../../lib/dates'
 import type {
   Building,
   ChartDataPoint,
@@ -60,12 +60,6 @@ export function isAssignmentCurrent(assignment: MeteringPointAssignment, todayIs
   return getAssignmentState(assignment, todayIso) === 'current'
 }
 
-export function assignmentStateBadgeClass(state: AssignmentState): string {
-  if (state === 'current') return 'badge badge-success'
-  if (state === 'upcoming') return 'badge badge-info'
-  return 'badge badge-neutral'
-}
-
 export function assignmentStateSortOrder(state: AssignmentState): number {
   if (state === 'current') return 0
   if (state === 'upcoming') return 1
@@ -117,30 +111,34 @@ export function getMeteringPointHealthWindow(todayIso: string, days = HEALTH_WIN
   return { from: addDaysIso(todayIso, -days), to: addDaysIso(todayIso, -1) }
 }
 
+export const SPARKLINE_WINDOW_DAYS = 7
+
 /**
- * Each meter's daily kWh for the sparklines, one entry per day of the window
- * and `null` for a day without readings. A production meter shows what it fed
+ * Each meter's hourly kWh for the sparklines, one entry per hour of the window
+ * and `null` for an hour without readings. A production meter shows what it fed
  * in, a bidirectional one its net draw, any other what it drew.
  */
-export function getDailySeries(
+export function getHourlySeries(
   rows: ChartDataPoint[],
   points: Pick<MeteringPoint, 'id' | 'meter_type'>[],
   window: { from: string; to: string },
 ): Map<string, Array<number | null>> {
-  const days: string[] = []
-  for (let day = window.from; day <= window.to; day = addDaysIso(day, 1)) days.push(day)
+  const hours: number[] = []
+  const end = businessDayStartMs(nextIsoDate(window.to))
+  for (let hour = businessDayStartMs(window.from); hour < end; hour += 3_600_000) hours.push(hour)
   const typeById = new Map(points.map((point) => [point.id, point.meter_type]))
-  const byMeter = new Map<string, Map<string, number>>()
+  const byMeter = new Map<string, Map<number, number>>()
   for (const row of rows) {
-    const type = row.metering_point ? typeById.get(row.metering_point) : undefined
+    const meterId = row.metering_point
+    if (!meterId) continue
+    const type = typeById.get(meterId)
     if (!type) continue
     const value = type === 'production' ? row.out_kwh : type === 'bidirectional' ? row.in_kwh - row.out_kwh : row.in_kwh
-    const perDay = byMeter.get(row.metering_point!) ?? new Map<string, number>()
-    // A day bucket starts at the civil midnight, so its date is the civil day.
-    perDay.set(row.bucket.slice(0, 10), value)
-    byMeter.set(row.metering_point!, perDay)
+    const perHour = byMeter.get(meterId) ?? new Map<number, number>()
+    perHour.set(Date.parse(row.bucket), value)
+    byMeter.set(meterId, perHour)
   }
-  return new Map([...byMeter].map(([id, perDay]) => [id, days.map((day) => perDay.get(day) ?? null)]))
+  return new Map([...byMeter].map(([id, perHour]) => [id, hours.map((hour) => perHour.get(hour) ?? null)]))
 }
 
 export type MeteringPointHealth = 'green' | 'yellow' | 'red' | 'no_data'

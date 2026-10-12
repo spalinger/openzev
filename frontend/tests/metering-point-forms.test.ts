@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
-  assignmentStateBadgeClass,
   assignmentStateSortOrder,
   defaultAssignmentForm,
   defaultMeteringPointForm,
   getAssignmentState,
-  getDailySeries,
+  getHourlySeries,
   getMeteringPointHealth,
   getMeteringPointHealthWindow,
   getNextAssignmentGuidance,
@@ -60,11 +59,7 @@ describe('metering point form helpers', () => {
     expect(getAssignmentState(ended, today)).toBe('ended')
   })
 
-  it('maps assignment state to badge classes and sort order', () => {
-    expect(assignmentStateBadgeClass('current')).toBe('badge badge-success')
-    expect(assignmentStateBadgeClass('upcoming')).toBe('badge badge-info')
-    expect(assignmentStateBadgeClass('ended')).toBe('badge badge-neutral')
-
+  it('orders assignment states', () => {
     expect(assignmentStateSortOrder('current')).toBeLessThan(assignmentStateSortOrder('upcoming'))
     expect(assignmentStateSortOrder('upcoming')).toBeLessThan(assignmentStateSortOrder('ended'))
   })
@@ -206,7 +201,7 @@ describe('metering point form helpers', () => {
     })
   })
 
-  it('builds one daily series per meter for the sparklines, with gaps as null', () => {
+  it('builds one hourly series per meter for the sparklines, with gaps as null', () => {
     const rows = [
       { bucket: '2026-10-01T00:00:00+02:00', in_kwh: 5, out_kwh: 0, metering_point: 'cons' },
       { bucket: '2026-10-03T00:00:00+02:00', in_kwh: 7, out_kwh: 0, metering_point: 'cons' },
@@ -219,12 +214,31 @@ describe('metering point form helpers', () => {
       { id: 'prod', meter_type: 'production' as const },
       { id: 'bidi', meter_type: 'bidirectional' as const },
     ]
-    const series = getDailySeries(rows, points, { from: '2026-10-01', to: '2026-10-03' })
+    const series = getHourlySeries(rows, points, { from: '2026-10-01', to: '2026-10-03' })
 
-    expect(series.get('cons')).toEqual([5, null, 7])
-    expect(series.get('prod')).toEqual([null, 9, null])
-    expect(series.get('bidi')).toEqual([null, 3, null])
+    expect(series.get('cons')).toHaveLength(72)
+    expect(series.get('cons')?.[0]).toBe(5)
+    expect(series.get('cons')?.[1]).toBeNull()
+    expect(series.get('cons')?.[48]).toBe(7)
+    expect(series.get('prod')?.[24]).toBe(9)
+    expect(series.get('bidi')?.[24]).toBe(3)
     expect(series.has('unknown')).toBe(false)
+  })
+
+  it('keeps both autumn DST hours and skips the missing spring hour', () => {
+    const points = [{ id: 'cons', meter_type: 'consumption' as const }]
+    const rows = [
+      { bucket: '2026-10-25T02:00:00+02:00', in_kwh: 1, out_kwh: 0, metering_point: 'cons' },
+      { bucket: '2026-10-25T02:00:00+01:00', in_kwh: 2, out_kwh: 0, metering_point: 'cons' },
+    ]
+    const autumn = getHourlySeries(rows, points, { from: '2026-10-25', to: '2026-10-25' }).get('cons')!
+    expect(autumn).toHaveLength(25)
+    expect(autumn.slice(2, 4)).toEqual([1, 2])
+    const spring = getHourlySeries([
+      { bucket: '2026-03-29T03:00:00+02:00', in_kwh: 3, out_kwh: 0, metering_point: 'cons' },
+    ], points, { from: '2026-03-29', to: '2026-03-29' }).get('cons')!
+    expect(spring).toHaveLength(23)
+    expect(spring[2]).toBe(3)
   })
 
   describe('reading filters from the URL (#625)', () => {

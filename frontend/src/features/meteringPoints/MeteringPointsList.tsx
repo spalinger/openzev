@@ -26,8 +26,8 @@ import { METER_TYPE_OPTIONS } from '../../lib/options'
 import { SupplementarySourceStatus } from './SupplementarySourceStatus'
 import type { AppSettings, MeteringPoint, MeteringPointAssignment } from '../../types/api'
 import {
-  assignmentStateBadgeClass,
   assignmentStateSortOrder,
+  SPARKLINE_WINDOW_DAYS,
   getAssignmentState,
   type BuildingGroup,
   type MeteringPointHealth,
@@ -54,8 +54,8 @@ type MeteringPointsListProps = {
   healthByMeteringPoint: Map<string, MeteringPointHealth>
   /** Empty for a role that has no assignment data loaded (see the hook) — never render a false positive from a missing entry. */
   holderLessByMeteringPoint: Map<string, boolean>
-  /** Daily kWh over the health window per meter, `null` for a day without readings; drawn in the chart button. */
-  dailySeriesByMeteringPoint?: Map<string, Array<number | null>>
+  /** Hourly kWh over the last seven complete days per meter, `null` for an hour without readings; drawn in the chart button. */
+  hourlySeriesByMeteringPoint?: Map<string, Array<number | null>>
   settings: AppSettings
   isManagedScope: boolean
   /** Several buildings: one sheet per building, each headed by `renderGroupHeader`. */
@@ -86,7 +86,7 @@ export function MeteringPointsList({
   participantNameById,
   healthByMeteringPoint,
   holderLessByMeteringPoint,
-  dailySeriesByMeteringPoint,
+  hourlySeriesByMeteringPoint,
   settings,
   isManagedScope,
   groups = null,
@@ -231,13 +231,14 @@ export function MeteringPointsList({
     const health = healthByMeteringPoint.get(point.id) ?? 'no_data'
     const isHolderLess = holderLessByMeteringPoint.get(point.id) ?? false
     const typeLabel = t(`pages.meteringPoints.meterTypes.${point.meter_type}`)
-    const series = dailySeriesByMeteringPoint?.get(point.id)
+    const series = hourlySeriesByMeteringPoint?.get(point.id)
     const seriesValues = series?.filter((value): value is number => value !== null) ?? []
     const chartLabel = seriesValues.length > 1
       ? t('pages.meteringPoints.chartForTotal', {
           meterId: point.meter_id,
-          kwh: formatKwh(seriesValues.reduce((sum, value) => sum + value, 0), { maxDecimals: 0 }),
-          days: series!.length,
+          kwh: formatKwh(seriesValues.reduce((sum, value) => sum + value, 0), { maxDecimals: 1 }),
+          days: SPARKLINE_WINDOW_DAYS,
+          quantity: t(`pages.meteringPoints.recordedEnergy.${point.meter_type}`),
         })
       : t('pages.meteringPoints.chartFor', { meterId: point.meter_id })
 
@@ -251,7 +252,18 @@ export function MeteringPointsList({
                   <FontAwesomeIcon icon={METER_TYPE_ICONS[point.meter_type]} fixedWidth aria-hidden="true" />
                   <span className="visually-hidden">{typeLabel}</span>
                 </span>
-                <strong>{point.meter_id}</strong>
+                <strong>
+                  {canManage ? (
+                    <button
+                      type="button"
+                      className="metering-name-button"
+                      title={t('pages.meteringPoints.editTitle')}
+                      onClick={() => onOpenEditMeteringPoint(point)}
+                    >
+                      {point.meter_id}
+                    </button>
+                  ) : point.meter_id}
+                </strong>
               </span>
               {!point.is_active && <span className="badge badge-neutral">{t('pages.meteringPoints.inactive')}</span>}
               {point.has_behind_meter_generation && <BehindMeterBadge />}
@@ -264,7 +276,16 @@ export function MeteringPointsList({
               {current ? (
                 <>
                   <span className="metering-holder-name">
-                    {holderName(current)}
+                    {canManage ? (
+                      <button
+                        type="button"
+                        className="metering-name-button metering-holder-button"
+                        title={t('pages.meteringPoints.editAssignTitle')}
+                        onClick={() => onOpenEditAssignment(current)}
+                      >
+                        {holderName(current)}
+                      </button>
+                    ) : holderName(current)}
                     {current.allocation_mode === 'community' && (
                       <span className="badge badge-tag" title={t('pages.meteringPoints.communityBadgeHint')}>{t('pages.meteringPoints.communityBadge')}</span>
                     )}
@@ -356,31 +377,30 @@ export function MeteringPointsList({
                   const assignmentState = getAssignmentState(assignment, todayIso)
                   return (
                     <div key={assignment.id} className="metering-assignment-row">
-                      <div className="metering-assignment-main">
-                        <div className="metering-assignment-line">
-                          <strong>{holderName(assignment)}</strong>
-                          <span className={assignmentStateBadgeClass(assignmentState)}>
-                            {t(`pages.meteringPoints.assignmentState.${assignmentState}`)}
-                          </span>
-                          {assignment.allocation_mode === 'community' && (
-                            <span className="badge badge-tag" title={t('pages.meteringPoints.communityBadgeHint')}>{t('pages.meteringPoints.communityBadge')}</span>
-                          )}
-                        </div>
-                        <div className="muted">
-                          {formatShortDate(assignment.valid_from, settings)} –{' '}
-                          {assignment.valid_to ? formatShortDate(assignment.valid_to, settings) : t('pages.meteringPoints.openEnded')}
-                        </div>
-                      </div>
-                      {canManage && (
-                        <div className="metering-assignment-actions">
+                      <div className="metering-assignment-name">
+                        {canManage ? (
                           <button
-                            className="button button-secondary button-compact"
                             type="button"
+                            className="metering-name-button"
+                            title={t('pages.meteringPoints.editAssignTitle')}
                             onClick={() => onOpenEditAssignment(assignment)}
                           >
-                            <FontAwesomeIcon icon={faPen} fixedWidth />
-                            {t('common.edit')}
+                            {holderName(assignment)}
                           </button>
+                        ) : holderName(assignment)}
+                        {assignment.allocation_mode === 'community' && (
+                          <span className="badge badge-tag" title={t('pages.meteringPoints.communityBadgeHint')}>{t('pages.meteringPoints.communityBadge')}</span>
+                        )}
+                      </div>
+                      <span className="metering-assignment-dates muted">
+                        {formatShortDate(assignment.valid_from, settings)} –{' '}
+                        {assignment.valid_to ? formatShortDate(assignment.valid_to, settings) : t('pages.meteringPoints.openEnded')}
+                      </span>
+                      <span className="metering-assignment-state muted">
+                        {t(`pages.meteringPoints.assignmentState.${assignmentState}`)}
+                      </span>
+                      {canManage && (
+                        <div className="metering-assignment-actions">
                           <ActionMenu
                             label={t('pages.meteringPoints.assignmentActionsFor', { name: holderName(assignment) })}
                             icon={<FontAwesomeIcon icon={faEllipsis} fixedWidth />}

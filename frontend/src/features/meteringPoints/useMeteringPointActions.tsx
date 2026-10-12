@@ -31,7 +31,8 @@ import { useWriteScope } from '../../lib/useWriteScope'
 import {
     defaultAssignmentForm,
     defaultMeteringPointForm,
-    getDailySeries,
+    getHourlySeries,
+    SPARKLINE_WINDOW_DAYS,
     getMeteringPointHealth,
     getMeteringPointHealthWindow,
     getNextAssignmentGuidance,
@@ -363,12 +364,12 @@ export function useMeteringPointActions({
             }),
         enabled: !isManagedScope || !!selectedZevId,
     })
-    const sparklineWindow = useMemo(() => getMeteringPointHealthWindow(todayIso, 7), [todayIso])
+    const sparklineWindow = useMemo(() => getMeteringPointHealthWindow(todayIso, SPARKLINE_WINDOW_DAYS), [todayIso])
     // One request for every meter's sparkline.
-    const dailySeriesQuery = useQuery({
-        queryKey: queryKeys.metering.dailyByMeter(selectedZevId ?? '', sparklineWindow.from, sparklineWindow.to),
+    const hourlySeriesQuery = useQuery({
+        queryKey: queryKeys.metering.hourlyByMeter(selectedZevId ?? '', sparklineWindow.from, sparklineWindow.to),
         queryFn: () =>
-            fetchChartData({ zevId: selectedZevId!, dateFrom: sparklineWindow.from, dateTo: sparklineWindow.to, byMeteringPoint: true }),
+            fetchChartData({ zevId: selectedZevId!, dateFrom: sparklineWindow.from, dateTo: sparklineWindow.to, bucket: 'hour', byMeteringPoint: true }),
         enabled: !!selectedZevId,
     })
 
@@ -703,9 +704,9 @@ export function useMeteringPointActions({
         return map
     }, [dataQualityQuery.data])
 
-    const dailySeriesByMeteringPoint = useMemo(
-        () => getDailySeries(dailySeriesQuery.data ?? [], meteringPointsQuery.data ?? [], sparklineWindow),
-        [dailySeriesQuery.data, meteringPointsQuery.data, sparklineWindow],
+    const hourlySeriesByMeteringPoint = useMemo(
+        () => getHourlySeries(hourlySeriesQuery.data ?? [], meteringPointsQuery.data ?? [], sparklineWindow),
+        [hourlySeriesQuery.data, meteringPointsQuery.data, sparklineWindow],
     )
 
     const meteringPointHealthById = useMemo(() => {
@@ -873,7 +874,7 @@ export function useMeteringPointActions({
         needsAttentionCount,
         hasFilters,
         // Data health (#623)
-        dailySeriesByMeteringPoint,
+        hourlySeriesByMeteringPoint,
         meteringPointHealthById,
         meteringPointHolderLessById,
         needsAttentionByMeteringPoint,

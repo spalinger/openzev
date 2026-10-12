@@ -190,6 +190,8 @@ test.describe('User Guide Screenshots', () => {
   test('04-metering-points', async ({ page }) => {
     await navigateTo(page, '/metering-points')
     await page.waitForSelector('table, .card', { timeout: 10_000 })
+    await page.locator('tr.metering-row').filter({ hasText: 'CH-DEMO-CONS-0004' }).locator('.metering-history-toggle').click()
+    await expect(page.locator('.metering-history-row')).toBeVisible()
     await screenshotFull(page, '04-metering-points')
   })
 

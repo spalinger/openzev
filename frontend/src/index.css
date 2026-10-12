@@ -2955,6 +2955,21 @@ input.recurrence-chip-input {
   color: var(--muted);
 }
 
+.metering-name-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.metering-name-button:hover,
+.metering-name-button:focus-visible {
+  text-decoration: underline;
+}
+
 .metering-type-legend {
   display: flex;
   flex-wrap: wrap;
@@ -2984,6 +2999,7 @@ input.recurrence-chip-input {
   gap: 0.375rem;
 }
 
+/* The latest available hour is marked. */
 .sparkline {
   display: block;
   overflow: visible;
@@ -3124,45 +3140,64 @@ input.recurrence-chip-input {
 }
 
 .metering-assignment-list {
-  display: grid;
-  gap: 0.375rem;
+  padding: 0 0.75rem;
+  background: var(--surface);
 }
 
 .metering-assignment-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem 1rem;
-  padding: 0.5rem 0.75rem;
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  flex-wrap: wrap;
-}
-
-.metering-history-row:hover > td .metering-assignment-row {
-  background: var(--surface-card);
-}
-
-.metering-assignment-main {
   display: grid;
-  gap: 0.15rem;
+  grid-template-columns: minmax(0, 1fr) 15rem 5rem 2rem;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  padding: 0.6rem 0;
   font-size: 0.875rem;
 }
 
-.metering-assignment-main > .muted {
-  font-size: 0.8125rem;
+.metering-assignment-row + .metering-assignment-row {
+  border-top: 1px solid var(--border-default);
 }
 
-.metering-assignment-line,
-.metering-assignment-actions {
+.metering-assignment-name {
   display: flex;
   align-items: center;
   gap: 0.375rem;
   flex-wrap: wrap;
+  min-width: 0;
+}
+
+.metering-assignment-dates,
+.metering-assignment-state {
+  font-size: 0.8125rem;
 }
 
 .metering-assignment-actions {
-  justify-content: flex-end;
+  justify-self: end;
+}
+
+@container (max-width: 40rem) {
+  .metering-assignment-row {
+    grid-template:
+      'name actions' auto
+      'dates state' auto / minmax(0, 1fr) auto;
+    gap: 0.2rem 0.75rem;
+  }
+
+  .metering-assignment-name {
+    grid-area: name;
+  }
+
+  .metering-assignment-dates {
+    grid-area: dates;
+  }
+
+  .metering-assignment-state {
+    grid-area: state;
+    text-align: right;
+  }
+
+  .metering-assignment-actions {
+    grid-area: actions;
+  }
 }
 
 /* Stack metering rows in narrow sheets. */
@@ -4793,8 +4828,7 @@ fieldset.form-grid {
   }
 
   .tariff-period-actions,
-  .participant-card-actions,
-  .metering-assignment-actions {
+  .participant-card-actions {
     justify-content: flex-start;
   }
 }

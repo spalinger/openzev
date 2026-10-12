@@ -281,41 +281,41 @@ ZEV settings.
   this building yet". Filtering by building shows only that sheet; search and the other filters
   apply within sheets, and a sheet with no matching row is hidden unless the building has no
   metering points at all and no filter is active.
-- **Rows** (both building layouts on `/metering/points`; `/me/metering-points` uses a separate component): each sheet holds a `table.metering-rows`
-  under the dark column band — Metering point, Holder (management view only, viewers included),
-  Last reading, and the actions. *Metering point* leads with the type as a muted icon
-  (`METER_TYPE_ICONS`: house = consumption, solar panel = production, two arrows =
-  bidirectional; the type name as its tooltip and visually hidden text), then the ID, kept on one
-  line with the icon (`.metering-row-name`); the unit within the building below; an `Inactive`
-  badge, the surplus-metering badge and, in the management view, the energy-data chip beside the
-  ID. A legend under the sheets (`.metering-type-legend`) names the icons of the types on show.
-  The columns have fixed widths (`table-layout: fixed`; Data 11.5rem, actions 10rem), so the
-  sheets of several buildings line up. *Holder* shows the current holder with the allocation tag
-  (SPEC-2026-08-shared-metering-points §8.1) and "since {date}"; a meter without a current holder
-  shows the outlined **Assign participant** button (managers), after the red "No current holder"
-  badge when it is active and has readings, and "No holder" to a viewer. When a meter has any
-  assignment beyond its current holder, an "{n} assignments" toggle (`aria-expanded`/
-  `aria-controls`) opens a row beneath it listing every assignment with its state, dates, Edit
-  and a "More" → Remove menu. *Last reading* is a dot that links to the data-quality view: green with the
-  last reading time, otherwise the state (Data gaps, Data at risk, No data yet). The actions are
-  the chart link and, for managers, an icon-only "More" menu. The chart link draws the meter's
-  daily kWh over the last 7 complete days, ending yesterday, as a sparkline
-  (`components/Sparkline.tsx`: a faint `--brand-pale` area under a 1.5px `--brand-mid` line on a
-  zero baseline, broken at a day without readings, the latest day marked) — consumption, the
-  production meter's feed-in, or a bidirectional meter's net draw (`getDailySeries`). One
-  request feeds every row: `chart-data` with `zev_id` and `by_metering_point=true`
-  (SPEC-2026-03-metering-import-and-quality §5.2, query key `metering.dailyByMeter`). With fewer
-  than two days of data the link shows the chart icon instead. Both controls are named with the
-  meter ID for screen readers and as their tooltip ("Chart for {meter} · {kWh} kWh in the last
-  {n} days", or "Chart for {meter}" without data; "More actions for {meter}"; a history row's
-  menu names the holder). The menu holds Edit, Delete data (admins) and Delete; when the meter
-  has a holder it leads with a *Holder* section (Assign participant, Edit assignment, Remove
-  assignment) and labels the rest *Metering point*. The sheet is an inline-size container: at
-  54rem and narrower each row stacks (meter and actions, then holder and data), and at 28rem the
-  data moves below the holder.
-  Tables retain explicit table, rowgroup, row, columnheader and cell roles when rows stack;
-  history cells span the visible columns. Building tables are named by their `h2` heading.
-  The latest reading time remains available in the health-link tooltip.
+- **Rows** (`MeteringPointsList` on `/metering/points`): each building's sheet has
+  a table with Metering point, Holder, Last reading and Actions columns. The Holder column
+  is present in management scope, including read-only viewers; participant scope
+  has three columns. The separate `/me/metering-points` page uses `MyMeteringPointsPage`.
+  - **Metering point:** type icon and name, meter ID, unit within the building,
+    inactive/surplus-metering badges and the management energy-data chip. A legend
+    names the displayed types. Managers click the ID to edit; read-only users see text.
+  - **Holder:** current participant, allocation tag (SPEC-2026-08-shared-metering-points
+    §8.1), and start date. Managers click the name to edit. Without a current holder,
+    managers can assign a participant; active meters with unassigned readings show
+    the billing warning. An "{n} assignments" toggle opens all assignments beneath
+    the row when there are assignments beyond the current holder, including future
+    assignments. History shows holder, dates and state; managers edit by clicking
+    the name or remove through its overflow menu.
+  - **Last reading:** health links to the data-quality view. Healthy meters show the latest
+    reading time; other states show Data gaps, Data at risk or No data yet.
+    When available, the latest reading time remains in the link tooltip for all states.
+  - **Actions:** the chart link uses `components/Sparkline.tsx` and `getHourlySeries`
+    for recorded hourly energy over the last seven complete days through yesterday:
+    consumption, production feed-in or bidirectional net draw. Missing hours break
+    the line and do not contribute to the total; fewer than two recorded values
+    show a chart icon. The zero baseline and values remain within the chart for
+    positive, negative and mixed series. Tooltips identify the meter, quantity,
+    recorded total (up to one decimal) and complete-day window. A batched selected-ZEV
+    request uses query key `metering.hourlyByMeter`, `bucket=hour` and
+    `by_metering_point=true`; the API contract is in
+    SPEC-2026-03-metering-import-and-quality §5.2. The seven-day window and label
+    share `SPARKLINE_WINDOW_DAYS`. Managers have meter Edit/Delete actions and
+    administrators also have Delete data. With a current holder, its Assign/Edit/Remove
+    actions appear in a separate Holder menu section.
+  - **Accessibility and responsiveness:** rows stack in narrow sheets while retaining
+    explicit table, rowgroup, row, columnheader and cell roles, including the history's
+    spanning cell. Building tables are named by their `h2` heading; ungrouped tables
+    without a building heading use the page title. History toggles expose expanded
+    state and the controlled row; icon controls identify their meter or holder.
 - **Building form** (`BuildingFormModal`): name, address (line 1, line 2, postal code, city),
   EGID (number input), notes; on create, a "Copy address from participant" select (participants'
   parties with an address) that fills the address and, when the name is empty, the name. A short
@@ -450,15 +450,18 @@ building; landowner role keeps no building when buildings are not imported.
 Backend (`backend/backups`): registry order covers `Building`.
 
 Frontend unit tests: building select visible only with several buildings; copy address from
-building fills the participant form. `tests/metering-points-list.test.ts` (6): Assign shows only
-on a meter without a current holder; the assignments toggle opens the history row; a held meter's
+building fills the participant form. `tests/metering-points-list.test.ts` (17): Assign shows only
+on a meter without a current holder; clicking the meter name opens its edit dialog and clicking the holder opens the current
+assignment edit dialog for managers; the assignments toggle opens the history row; a held meter's
 menu is grouped into holder and meter actions; the type is named behind its icon and in the
-legend; the daily series is drawn in the chart button, broken at a missing day; a viewer gets
-neither Assign nor the menu. `tests/metering-point-forms.test.ts`: `getDailySeries` builds one
-series per meter with gaps as `null`, by meter type.
-
-`tests/sparkline.test.ts` (9) covers negative-only, constant-negative, mixed and zero
-scales, gaps, isolated markers and insufficient data.
+legend; the chart label includes the meter, recorded quantity and total; a viewer gets
+neither Assign nor the menu. Additional cases cover participant columns, table roles and
+history spanning cells, building sheets and empty buildings, future/ended-only assignments,
+admin deletion, small net totals, warning-state latest-reading tooltips and history collapse. `tests/sparkline.test.ts` (9) covers
+negative-only, constant-negative, mixed and zero scales; missing-hour runs; isolated markers;
+and insufficient data. `tests/metering-point-forms.test.ts`: `getHourlySeries` builds one
+series per meter with gaps as `null`, by meter type, and preserves the 23/25-hour
+Swiss DST days.
 
 ## 12. Acceptance criteria
 

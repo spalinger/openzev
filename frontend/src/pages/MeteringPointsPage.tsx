@@ -124,7 +124,7 @@ function MeteringPointsView({ canWrite, canDeleteData }: { canWrite: boolean; ca
         hasFilters,
         meteringPointHealthById,
         meteringPointHolderLessById,
-        dailySeriesByMeteringPoint,
+        hourlySeriesByMeteringPoint,
         dialog,
         confirm,
         dialogLoading,
@@ -250,7 +250,7 @@ function MeteringPointsView({ canWrite, canDeleteData }: { canWrite: boolean; ca
                         participantNameById={participantNameById}
                         healthByMeteringPoint={meteringPointHealthById}
                         holderLessByMeteringPoint={meteringPointHolderLessById}
-                        dailySeriesByMeteringPoint={dailySeriesByMeteringPoint}
+                        hourlySeriesByMeteringPoint={hourlySeriesByMeteringPoint}
                         isManagedScope={isManagedScope}
                         groups={groups}
                         header={singleBuildingHeader}
