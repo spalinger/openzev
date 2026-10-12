@@ -8,7 +8,7 @@ import { formatApiError, apiErrorPayload } from '../../lib/api/errors'
 import { queryKeys } from '../../lib/api/queryKeys'
 import { useToast } from '../../lib/toast'
 import type { EligibleMeteringPoint, SupplementaryProvider } from '../../types/api'
-import { PushTokenPanel } from '../supplementary/PushTokenPanel'
+import { PushTokenPanel } from './PushTokenPanel'
 
 interface Props {
     point: EligibleMeteringPoint
@@ -55,6 +55,7 @@ export function SupplementarySourceModal({ point, onClose }: Props) {
             void queryClient.invalidateQueries({ queryKey: queryKeys.metering.supplementarySources() })
             void queryClient.invalidateQueries({ queryKey: queryKeys.metering.supplementaryEligible() })
             void queryClient.invalidateQueries({ queryKey: ['metering', 'dashboard-summary'] })
+            void queryClient.invalidateQueries({ queryKey: ['metering', 'points'] })
             if (created.push_token) {
                 setToken(created.push_token)
                 return

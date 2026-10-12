@@ -89,9 +89,13 @@ export function useEnergyDataEligibility() {
     const eligible = query.data ?? []
     return {
         isLoading: query.isLoading,
+        /** The check itself failed: neither "feature off" nor "nothing to connect" is known. */
+        isError: query.isError,
+        isFetching: query.isFetching,
+        refetch: query.refetch,
         featureOn,
         eligible,
-        /** The Account tab is worth showing: the feature is on and the user holds a flagged meter. */
-        tabAvailable: featureOn && eligible.length > 0,
+        /** There is something to connect: the feature is on and the user holds a flagged meter. */
+        canConnect: featureOn && eligible.length > 0,
     }
 }

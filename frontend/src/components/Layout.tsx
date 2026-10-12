@@ -5,6 +5,8 @@ import { Link, NavLink, Outlet, matchPath, useLocation, useMatch, useNavigate } 
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../lib/auth'
 import { useCommunityAccess } from '../lib/communityAccess'
+import { useOptionalManagedZev } from '../lib/managedZev'
+import { useEnergyDataEligibility } from '../lib/supplementary'
 import { fetchFeasibilityCalculatorEnabled } from '../lib/api/feasibility'
 import { queryKeys } from '../lib/api/queryKeys'
 import { apiErrorPayload } from '../lib/api/errors'
@@ -50,6 +52,10 @@ export function Layout() {
     const { t } = useTranslation()
     const { user, logout, isImpersonating, impersonator, stopImpersonation } = useAuth()
     const { shellRole, isZevScope, isParticipantScope } = useCommunityAccess()
+    // A manager or viewer who also holds a flagged meter themselves sets up their own energy data there.
+    const energyData = useEnergyDataEligibility()
+    const selectedZevId = useOptionalManagedZev()?.selectedZevId
+    const holdsOwnFlaggedMeter = energyData.eligible.some((point) => point.zev === selectedZevId)
     // Query the flag only for accounts with community-wide access.
     const feasibilityEnabledQuery = useQuery({
         queryKey: queryKeys.feasibility.enabled(),
@@ -166,6 +172,11 @@ export function Layout() {
     // Account settings live behind the account card, so on that page the card
     // is where the sidebar shows "you are here".
     const accountActive = useMatch('/account') != null
+    // A participant has no Metering hub: their meters, and the chart and list reached from them, all
+    // belong to My metering points.
+    const myMeteringPointsMatch = useMatch('/me/metering-points') != null
+    const meteringListMatch = useMatch('/metering/points') != null
+    const myMeteringPointsActive = myMeteringPointsMatch || meteringChartActive || meteringListMatch
     const adminOverviewMatch = useMatch('/admin/:tab')
     const adminOverviewActive = useMatch('/admin') != null ||
         ['overview', 'zevs', 'invoices', 'dynamic-sources', 'audit', 'health'].includes(adminOverviewMatch?.params.tab ?? '')
@@ -236,6 +247,9 @@ export function Layout() {
                                 <SidebarLink to="/metering/chart" label={t('nav.metering')} icon={<ChartIcon />} active={meteringActive} collapsed={isNavigationCollapsed} />
                                 <SidebarLink to="/billing/invoices" label={t('nav.billing')} icon={<InvoiceIcon />} active={billingActive} collapsed={isNavigationCollapsed} />
                                 <SidebarLink to="/reports" label={t('nav.reports')} icon={<ReportsIcon />} collapsed={isNavigationCollapsed} />
+                                {holdsOwnFlaggedMeter && (
+                                    <SidebarLink to="/me/metering-points" label={t('nav.myMeteringPoints')} icon={<PlugIcon />} collapsed={isNavigationCollapsed} />
+                                )}
                             </>
                         )}
 
@@ -248,6 +262,7 @@ export function Layout() {
                                 <SidebarLink to="/" label={t('nav.dashboard')} icon={<DashboardIcon />} collapsed={isNavigationCollapsed} />
                                 <SidebarLink to="/me/invoices" label={t('nav.myInvoices')} icon={<InvoiceIcon />} collapsed={isNavigationCollapsed} />
                                 <SidebarLink to="/me/statement" label={t('nav.annualStatement')} icon={<ReportsIcon />} collapsed={isNavigationCollapsed} />
+                                <SidebarLink to="/me/metering-points" label={t('nav.myMeteringPoints')} icon={<PlugIcon />} active={myMeteringPointsActive} collapsed={isNavigationCollapsed} />
                             </>
                         )}
 

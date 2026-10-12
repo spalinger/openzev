@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react'
@@ -39,6 +39,11 @@ vi.mock('../src/lib/api/auth', () => ({
 vi.mock('../src/lib/api/feasibility', () => ({
     fetchFeasibilityCalculatorEnabled: vi.fn(() => Promise.resolve(true)),
 }))
+
+// Whether the user holds a flagged meter themselves decides the "My metering points" entry of a
+// management shell; null means the energy data feature is off.
+const mockEligible = vi.hoisted(() => vi.fn())
+vi.mock('../src/lib/api/supplementary', () => ({ fetchEligibleOrNull: mockEligible }))
 
 vi.mock('../src/lib/toast', () => ({
     useToast: () => ({ pushToast: vi.fn() }),
@@ -150,6 +155,8 @@ async function renderLayoutAt(path: string) {
     }
 }
 
+beforeEach(() => mockEligible.mockResolvedValue(null))
+
 function mockMobileViewport(initialMobile: boolean) {
     const matchMedia = window.matchMedia.bind(window)
     const media = Object.assign(new EventTarget(), {
@@ -250,6 +257,30 @@ describe('role navigation (see docs/specs/2026-03-community-and-access.md §9.3)
         page.unmount()
     })
 
+    it.each(['manager', 'viewer'] as const)('a %s who holds a flagged meter themselves also gets My metering points', async (persona) => {
+        mockSession(persona)
+        mockEligible.mockResolvedValue([{ metering_point: 'mp-1', meter_id: 'CH-1', zev: ZEV.id, zev_name: ZEV.name, participant: 'p-1', source: null }])
+        const page = await renderLayout()
+        try {
+            expect(page.hasHref('/me/metering-points')).toBe(true)
+        } finally {
+            page.unmount()
+        }
+    })
+
+    it('a manager without a flagged meter of their own, or with the feature off, gets no My metering points', async () => {
+        mockSession('manager')
+        for (const eligible of [[], null, [{ metering_point: 'mp-9', meter_id: 'CH-9', zev: SECOND_ZEV.id, zev_name: SECOND_ZEV.name, participant: 'p-1', source: null }]]) {
+            mockEligible.mockResolvedValue(eligible)
+            const page = await renderLayout()
+            try {
+                expect(page.hasHref('/me/metering-points')).toBe(false)
+            } finally {
+                page.unmount()
+            }
+        }
+    })
+
     it('participant sees Dashboard, My invoices and Annual statement only', async () => {
         mockSession('participant')
         const page = await renderLayout()
@@ -264,6 +295,27 @@ describe('role navigation (see docs/specs/2026-03-community-and-access.md §9.3)
         // no separate nav entry, deep link still works.
         expect(page.html()).not.toContain('nav.myConsumption')
         page.unmount()
+    })
+
+    it.each(['/me/metering-points', '/metering/chart', '/metering/points'])('highlights My metering points for a participant on %s', async (path) => {
+        mockSession('participant')
+        const page = await renderLayoutAt(path)
+        try {
+            expect(page.link('/me/metering-points')?.classList.contains('active')).toBe(true)
+            expect(page.container.querySelectorAll('nav.nav-list a.active')).toHaveLength(1)
+        } finally {
+            page.unmount()
+        }
+    })
+
+    it('does not highlight My metering points on other participant pages', async () => {
+        mockSession('participant')
+        const page = await renderLayoutAt('/me/invoices')
+        try {
+            expect(page.link('/me/metering-points')?.classList.contains('active')).toBe(false)
+        } finally {
+            page.unmount()
+        }
     })
 
     it.each([false, true])('keeps former-participant invoice navigation accessible when collapsed=%s', async (collapsed) => {

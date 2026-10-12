@@ -36,6 +36,7 @@ export const en = {
         billing: 'Billing',
         myInvoices: 'My invoices',
         annualStatement: 'Annual statement',
+        myMeteringPoints: 'My metering points',
         adminOverview: 'Overview',
         adminAccounts: 'Accounts',
         adminSystemSettings: 'Settings',
@@ -495,7 +496,6 @@ export const en = {
             profile: 'Profile',
             security: 'Security',
             apiKeys: 'API keys',
-            energyData: 'Energy data',
         },
         emailChange: {
             button: 'Change email',
@@ -647,6 +647,19 @@ export const en = {
         },
     },
     pages: {
+        myMeteringPoints: {
+            title: 'My metering points',
+            description: 'The metering points assigned to you.',
+            loadFailed: 'Failed to load your metering points.',
+            empty: {
+                title: 'No metering points',
+                participant: 'No metering point is assigned to you in this community yet.',
+                manager: 'You do not hold a metering point with generation behind the meter in this community.',
+            },
+            flagHint: 'Is a PV system behind your meter, but the meter is not marked as such? Ask your community\'s manager to mark it as "Generation behind the meter". Then you can connect your own energy data here.',
+            notHolder: 'Only the person who holds this meter personally can connect energy data for it.',
+            viewData: 'View metering data',
+        },
         myInvoices: {
             title: 'My invoices',
             allCommunities: 'All your communities',
@@ -3167,6 +3180,18 @@ export const en = {
                 health: 'System health',
             },
             health: {
+                supplementary: {
+                    title: 'Energy data',
+                    off: 'Switched off.',
+                    sources_one: '{{count}} configured source',
+                    sources_other: '{{count}} configured sources',
+                    unavailable: 'The check could not run.',
+                    noKey: 'INTEGRATION_ENCRYPTION_KEYS is not set: Solar Manager keys cannot be stored.',
+                    stale_one: '{{count}} source has not synced for a long time.',
+                    stale_other: '{{count}} sources have not synced for a long time.',
+                    oldest: 'Oldest successful sync {{time}}',
+                    manage: 'Manage in Functions',
+                },
                 backups: {
                     title: 'Backups',
                     notSetUp: 'No backup destination is enabled.',
@@ -3291,11 +3316,11 @@ export const en = {
             insufficientHint: 'A comparison needs at least two days that are present in both the source and the official meter data.',
         },
         section: {
-            title: 'Energy data',
             description: 'Connect the system behind your meter (for example Solar Manager) so your statistics can show your real production, consumption and self-sufficiency. This data is only used for statistics and never for billing.',
             notConnected: 'No energy data source is connected to this metering point yet.',
             connect: 'Connect',
             loadError: 'The energy data sources could not be loaded.',
+            eligibilityError: 'Could not check whether energy data is available.',
         },
         card: {
             smId: 'Solar Manager ID',
@@ -3388,6 +3413,11 @@ export const en = {
         owner: {
             chip: 'Energy data: {{status}}',
             chipHint: 'Open the status of this metering point\'s energy data source',
+            noSource: 'No energy data source',
+            noSourceHint: 'The participant can connect one under "My metering points". Energy data is optional.',
+            connectOwn: 'Connect your energy data',
+            connectOwnHint: 'This is your own meter: set up its energy data under \'My metering points\'',
+            manageOwn: 'Manage on My metering points',
             title: 'Energy data source of {{meter}}',
             readOnlyNote: '{{name}} connected this source. You see its status, not the credential, and cannot change the connection itself.',
             provider: 'Source',
@@ -3437,6 +3467,8 @@ export const en = {
         on: 'On',
         off: 'Off',
         updated: 'Feature flag updated.',
+        followsDefault: 'Following this instance\'s default. Changing it makes your choice permanent.',
+        controlledByEnv: 'Set by the {{variable}} environment variable on the server; the switch here has no effect.',
     },
     mfaGate: {
         title: 'Set up two-factor authentication',

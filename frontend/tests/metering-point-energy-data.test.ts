@@ -1,6 +1,9 @@
 import { act, createElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { EnergyDataSection } from '../src/features/account/EnergyDataSection'
+import { useQuery } from '@tanstack/react-query'
+import { ConfirmDialog, useConfirmDialog } from '../src/components/ConfirmDialog'
+import { MeteringPointEnergyData } from '../src/features/supplementary/MeteringPointEnergyData'
+import { queryKeys } from '../src/lib/api/queryKeys'
 import type { EligibleMeteringPoint, SupplementarySource } from '../src/types/api'
 import { renderWithProviders, setInputValue } from './helpers/render'
 import { waitForCondition } from './helpers/waitForCondition'
@@ -49,6 +52,17 @@ const source = (overrides: Partial<SupplementarySource> = {}): SupplementarySour
 
 const cleanups: Array<() => void> = []
 
+/** What the page around the component provides: the source lookup and the confirm dialog. */
+function Harness() {
+    const sources = useQuery({ queryKey: queryKeys.metering.supplementarySources(), queryFn: api.listSupplementarySources })
+    const { dialog, confirm, handleConfirm, handleCancel, isLoading } = useConfirmDialog()
+    if (!sources.data) return null
+    return createElement('div', null,
+        createElement(MeteringPointEnergyData, { point, source: sources.data.find((s: SupplementarySource) => s.metering_point === point.metering_point), confirm }),
+        dialog && createElement(ConfirmDialog, { ...dialog, isLoading, onConfirm: handleConfirm, onCancel: handleCancel }),
+    )
+}
+
 beforeEach(() => {
     vi.clearAllMocks()
     api.fetchEligibleOrNull.mockResolvedValue([point])
@@ -58,7 +72,7 @@ afterEach(() => cleanups.splice(0).forEach((cleanup) => cleanup()))
 
 async function mount(sources: SupplementarySource[] = []) {
     api.listSupplementarySources.mockResolvedValue(sources)
-    const view = await renderWithProviders(createElement(EnergyDataSection), cleanups)
+    const view = await renderWithProviders(createElement(Harness), cleanups)
     await waitForCondition(() => view.container.querySelector('article') !== null, 'the meter card')
     return view
 }
@@ -71,15 +85,73 @@ async function click(element: HTMLElement) {
     await act(async () => { element.click() })
 }
 
-describe('EnergyDataSection without a source', () => {
-    it('offers to connect each flagged meter and explains that the data is never billed', async () => {
+describe('MeteringPointEnergyData without a source', () => {
+    it('offers to connect the flagged meter', async () => {
         const { container } = await mount()
 
         expect(container.textContent).toContain('CH-100')
         expect(container.textContent).toContain('Sonnenhof')
         expect(container.textContent).toContain('supplementary.section.notConnected')
-        expect(container.textContent).toContain('supplementary.section.description')
         expect(buttonWith(container, 'supplementary.section.connect')).toBeDefined()
+    })
+})
+
+describe('a push source\'s one-time token', () => {
+    it('stays on screen when the refreshed source list replaces the not-connected card', async () => {
+        const created = source({ provider: 'push', external_id: '', has_credential: false, push_token_prefix: 'abcd' })
+        api.createSupplementarySource.mockResolvedValue({ ...created, push_token: 'ozs_abcd_secret' })
+        const { container } = await mount()
+        await click(buttonWith(container, 'supplementary.section.connect'))
+        const modal = dialog()!
+        await click(Array.from(modal.querySelectorAll<HTMLInputElement>('input[type="radio"]'))[1])
+        await click(modal.querySelector<HTMLInputElement>('input[type="checkbox"]')!)
+        // The list now contains the new source, as it does once the invalidation has refetched it.
+        api.listSupplementarySources.mockResolvedValue([created])
+
+        await act(async () => { buttonWith(modal, 'supplementary.modal.connect').click() })
+        await waitForCondition(() => document.querySelector('[data-testid="push-token"]') !== null, 'the token')
+        await waitForCondition(() => container.textContent?.includes('supplementary.status.ok') ?? false, 'the connected card')
+
+        expect(document.querySelector('[data-testid="push-token"]')?.textContent).toBe('ozs_abcd_secret')
+        await click(buttonWith(dialog()!, 'supplementary.push.dismiss'))
+        expect(document.querySelector('[data-testid="push-token"]')).toBeNull()
+    })
+})
+
+describe('a source that eligibility knows about but whose details are missing', () => {
+    const render = (props: { sourcesUnavailable?: 'loading' | 'error' }) =>
+        renderWithProviders(createElement(MeteringPointEnergyData, { point: { ...point, source: 'src-1' }, source: undefined, confirm: vi.fn(), ...props }), cleanups)
+
+    it.each(['loading', 'error'] as const)('does not offer Connect while the details are %s', async (state) => {
+        const { container } = await render({ sourcesUnavailable: state })
+
+        expect(buttons(container).some((b) => b.textContent?.includes('supplementary.section.connect'))).toBe(false)
+        expect(container.querySelector('a')?.getAttribute('href')).toBe('/metering/chart?metering_point=mp-1')
+    })
+
+    it('offers a retry when they failed to load', async () => {
+        const retry = vi.fn()
+        const { container } = await renderWithProviders(
+            createElement(MeteringPointEnergyData, { point: { ...point, source: 'src-1' }, source: undefined, sourcesUnavailable: 'error', onRetrySources: retry, confirm: vi.fn() }), cleanups)
+
+        await click(buttonWith(container, 'common.retry'))
+        expect(retry).toHaveBeenCalledOnce()
+    })
+
+    it('offers Connect again once the list is known not to contain the source', async () => {
+        const { container } = await render({})
+
+        expect(buttonWith(container, 'supplementary.section.connect')).toBeDefined()
+    })
+})
+
+describe('metering data link', () => {
+    it('is offered on a meter without a source and on one with a source', async () => {
+        const unconnected = await mount()
+        expect(unconnected.container.querySelector('a')?.getAttribute('href')).toBe('/metering/chart?metering_point=mp-1')
+
+        const connected = await mount([source()])
+        expect(connected.container.querySelector('a')?.getAttribute('href')).toBe('/metering/chart?metering_point=mp-1')
     })
 })
 

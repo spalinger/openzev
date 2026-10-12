@@ -15,10 +15,11 @@ import { queryKeys } from '../../lib/api/queryKeys'
 import { formatDateTime, useAppSettings } from '../../lib/appSettings'
 import { useToast } from '../../lib/toast'
 import type { EligibleMeteringPoint, SupplementarySource } from '../../types/api'
-import { CsvImport } from '../supplementary/CsvImport'
-import { PushTokenPanel } from '../supplementary/PushTokenPanel'
-import { ReconciliationSummary } from '../supplementary/ReconciliationSummary'
-import { SourceStatusBadge } from '../supplementary/SourceStatusBadge'
+import { CsvImport } from './CsvImport'
+import { MeteringDataLink } from './MeteringDataLink'
+import { PushTokenPanel } from './PushTokenPanel'
+import { ReconciliationSummary } from './ReconciliationSummary'
+import { SourceStatusBadge } from './SourceStatusBadge'
 
 type ConfirmOptions = {
     title: string
@@ -54,6 +55,8 @@ export function SupplementarySourceCard({ point, source, confirm }: Props) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.metering.supplementarySources() })
         void queryClient.invalidateQueries({ queryKey: queryKeys.metering.supplementaryEligible() })
         void queryClient.invalidateQueries({ queryKey: ['metering', 'dashboard-summary'] })
+        // The status chip on the metering-point list comes from the point itself.
+        void queryClient.invalidateQueries({ queryKey: ['metering', 'points'] })
     }
     const onError = (error: unknown) => pushToast(formatApiError(error, t('common.error')), 'error')
 
@@ -126,7 +129,10 @@ export function SupplementarySourceCard({ point, source, confirm }: Props) {
                         {source.label ? ` · ${source.label}` : ''}
                     </small>
                 </div>
-                <SourceStatusBadge status={source.status} />
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <MeteringDataLink meteringPointId={point.metering_point} />
+                    <SourceStatusBadge status={source.status} />
+                </div>
             </header>
 
             {source.status === 'reconnect_required' && (

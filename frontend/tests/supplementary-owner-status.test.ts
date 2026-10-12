@@ -20,6 +20,7 @@ const api = vi.hoisted(() => ({
     updateSupplementarySource: vi.fn(),
     purgeSupplementaryReadings: vi.fn(),
     deleteSupplementarySource: vi.fn(),
+    fetchEligibleOrNull: vi.fn(),
 }))
 vi.mock('../src/lib/api/supplementary', () => api)
 
@@ -42,6 +43,7 @@ const confirm = vi.fn()
 beforeEach(() => {
     vi.clearAllMocks()
     api.listSupplementarySources.mockResolvedValue([source])
+    api.fetchEligibleOrNull.mockResolvedValue(null) // the feature is off unless a test turns it on
 })
 afterEach(() => cleanups.splice(0).forEach((cleanup) => cleanup()))
 
@@ -62,6 +64,62 @@ describe('SupplementarySourceStatus (owner)', () => {
             createElement(SupplementarySourceStatus, { point: point(null), canManage: true, confirm }), cleanups)
 
         expect(container.querySelector('button')).toBeNull()
+    })
+
+    it('marks a flagged meter that has no source yet, quietly, while the feature is on', async () => {
+        api.fetchEligibleOrNull.mockResolvedValue([])
+        const { container } = await renderWithProviders(
+            createElement(SupplementarySourceStatus, { point: point(null), canManage: true, confirm }), cleanups)
+        await waitForCondition(() => container.querySelector('.badge') !== null, 'the marker')
+
+        const marker = container.querySelector('.badge')!
+        expect(marker.textContent).toBe('supplementary.owner.noSource')
+        expect(marker.className).toContain('badge-neutral')
+        expect(container.querySelector('button')).toBeNull()
+    })
+
+    it('links a manager who holds the flagged meter themselves to where they connect it', async () => {
+        api.fetchEligibleOrNull.mockResolvedValue([
+            { metering_point: 'mp-1', meter_id: 'CH-100', zev: 'zev-1', zev_name: 'Sonnenhof', participant: 'p-1', source: null },
+        ])
+        const { container } = await renderWithProviders(
+            createElement(SupplementarySourceStatus, { point: point(null), canManage: true, confirm }), cleanups)
+        await waitForCondition(() => container.querySelector('a') !== null, 'the link')
+
+        const link = container.querySelector('a')!
+        expect(link.getAttribute('href')).toBe('/me/metering-points')
+        expect(link.textContent).toBe('supplementary.owner.connectOwn')
+    })
+
+    it('points a manager at their own connected source to their own page instead of the read-only note', async () => {
+        api.fetchEligibleOrNull.mockResolvedValue([
+            { metering_point: 'mp-1', meter_id: 'CH-100', zev: 'zev-1', zev_name: 'Sonnenhof', participant: 'p-1', source: 'src-1' },
+        ])
+        const view = await renderWithProviders(createElement(SupplementarySourceStatus, { point: point('ok'), canManage: true, confirm }), cleanups)
+        await act(async () => { view.container.querySelector<HTMLButtonElement>('button.badge')!.click() })
+        await waitForCondition(() => dialog()?.querySelector('a') != null, 'the panel')
+
+        expect(dialog()!.querySelector('a')?.getAttribute('href')).toBe('/me/metering-points')
+        expect(dialog()!.textContent).not.toContain('supplementary.owner.readOnlyNote')
+    })
+
+    it('does not mark a meter without generation behind it', async () => {
+        api.fetchEligibleOrNull.mockResolvedValue([])
+        const { container } = await renderWithProviders(
+            createElement(SupplementarySourceStatus, { point: { ...point(null), has_behind_meter_generation: false }, canManage: true, confirm }), cleanups)
+        await waitForCondition(() => api.fetchEligibleOrNull.mock.calls.length > 0, 'the feature check')
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)) })
+
+        expect(container.querySelector('.badge')).toBeNull()
+    })
+
+    it('says nothing about energy data while the feature is off', async () => {
+        const { container } = await renderWithProviders(
+            createElement(SupplementarySourceStatus, { point: point(null), canManage: true, confirm }), cleanups)
+        await waitForCondition(() => api.fetchEligibleOrNull.mock.calls.length > 0, 'the feature check')
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)) })
+
+        expect(container.querySelector('.badge')).toBeNull()
     })
 
     it('is a button chip that names the status', async () => {

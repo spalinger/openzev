@@ -17,9 +17,10 @@ the statistics.
     your own system can at worst make a statistic wrong or empty; it cannot change
     an amount.
 
-The feature is switched on by an administrator (**Platform → Settings →
-Functions → Supplementary energy data**). Until then none of what follows is
-visible.
+The feature is on as soon as the platform administrator has set up the
+encryption key for integrations (`INTEGRATION_ENCRYPTION_KEYS`), and can be
+switched off again under **Platform → Settings → Functions → Supplementary energy
+data**. While it is off none of what follows is visible.
 
 ## Who can connect what
 
@@ -35,18 +36,26 @@ must be marked **Generation behind the meter**, and you must hold it yourself
 | See the status and your figures | yes | yes | yes (read-only) | no |
 | Switch off, disconnect, delete data, remove | yes | yes | no | no |
 
+Each metering point on that page has a **View metering data** button that opens
+the chart of its readings.
+
+If you are a ZEV manager and hold a metering point yourself, you connect it the
+same way as any participant: **My metering points** appears in your menu, and the
+metering point list links your own meter there.
+
 When you no longer hold the metering point (the assignment ends), the connection
 is switched off by itself, the key is deleted, and nothing new is collected. The
 data already collected is kept until you or a manager deletes it.
 
 ## Connect Solar Manager
 
-![Account Energy data tab](screenshots/24-energy-data-account.png)
+![My metering points](screenshots/24-energy-data-metering-points.png)
 
 1. Create an **API key** in your Solar Manager account.
-2. In OpenZEV open **Account → Energy data**. The tab appears when you hold a
-   metering point with generation behind it.
-3. Choose **Connect** next to the metering point.
+2. In OpenZEV open **My metering points** in the menu. The metering points that
+   are marked *Generation behind the meter* and that you hold yourself carry the
+   energy data setup.
+3. Choose **Connect** on the metering point.
 4. Pick **Solar Manager**, enter your **Solar Manager ID** (3 to 24 letters or
    digits) and the **API key**, and read what you agree to.
 5. Tick the consent box and choose **Connect**.
@@ -240,8 +249,10 @@ sources and readings with them.
 
 ## Troubleshooting
 
-**The Energy data tab is missing.** The feature is off, or you do not personally
-hold a metering point marked *Generation behind the meter*. Ask your ZEV manager.
+**There is no Connect button on my metering point.** The feature is off, you do
+not personally hold the metering point (a shared community allocation does not
+count), or it is not marked *Generation behind the meter*. Only a ZEV manager can
+set that mark, so ask them; **My metering points** says so too.
 
 **"Not accepted" when connecting.** The key or the Solar Manager ID is wrong. The
 ID is the one of your installation, not your login name.

@@ -27,6 +27,7 @@ export const de = {
         billing: 'Abrechnung',
         myInvoices: 'Meine Rechnungen',
         annualStatement: 'Jahresabrechnung',
+        myMeteringPoints: 'Meine Messpunkte',
         adminOverview: 'Übersicht',
         adminAccounts: 'Konten',
         adminSystemSettings: 'Einstellungen',
@@ -486,7 +487,6 @@ export const de = {
             profile: 'Profil',
             security: 'Sicherheit',
             apiKeys: 'API-Schlüssel',
-            energyData: 'Energiedaten',
         },
         emailChange: {
             button: 'E-Mail ändern',
@@ -638,6 +638,19 @@ export const de = {
         },
     },
     pages: {
+        myMeteringPoints: {
+            title: 'Meine Messpunkte',
+            description: 'Die Messpunkte, die Ihnen zugeordnet sind.',
+            loadFailed: 'Ihre Messpunkte konnten nicht geladen werden.',
+            empty: {
+                title: 'Keine Messpunkte',
+                participant: 'Ihnen ist in dieser Gemeinschaft noch kein Messpunkt zugeordnet.',
+                manager: 'Sie halten in dieser Gemeinschaft keinen Messpunkt mit Erzeugung hinter dem Zähler.',
+            },
+            flagHint: 'Steht eine PV-Anlage hinter Ihrem Zähler, der Messpunkt ist aber nicht so gekennzeichnet? Bitten Sie die Verwaltung Ihrer Gemeinschaft, ihn als «Erzeugung hinter dem Zähler» zu markieren. Danach können Sie hier Ihre eigenen Energiedaten verbinden.',
+            notHolder: 'Energiedaten kann nur die Person verbinden, die diesen Messpunkt persönlich hält.',
+            viewData: 'Messdaten ansehen',
+        },
         myInvoices: {
             title: 'Meine Rechnungen',
             allCommunities: 'Alle Ihre Gemeinschaften',
@@ -3156,6 +3169,18 @@ export const de = {
                 health: 'Systemintegrität',
             },
             health: {
+                supplementary: {
+                    title: 'Energiedaten',
+                    off: 'Ausgeschaltet.',
+                    sources_one: '{{count}} eingerichtete Quelle',
+                    sources_other: '{{count}} eingerichtete Quellen',
+                    unavailable: 'Die Prüfung konnte nicht ausgeführt werden.',
+                    noKey: 'INTEGRATION_ENCRYPTION_KEYS ist nicht gesetzt: Solar-Manager-Schlüssel können nicht gespeichert werden.',
+                    stale_one: '{{count}} Quelle wurde seit längerer Zeit nicht synchronisiert.',
+                    stale_other: '{{count}} Quellen wurden seit längerer Zeit nicht synchronisiert.',
+                    oldest: 'Älteste erfolgreiche Synchronisierung {{time}}',
+                    manage: 'In den Funktionen verwalten',
+                },
                 backups: {
                     title: 'Sicherungen',
                     notSetUp: 'Es ist kein Sicherungsziel aktiviert.',
@@ -3280,11 +3305,11 @@ export const de = {
             insufficientHint: 'Für einen Vergleich braucht es mindestens zwei Tage, die sowohl in der Quelle als auch in den offiziellen Zählerdaten vorhanden sind.',
         },
         section: {
-            title: 'Energiedaten',
             description: 'Verbinden Sie das System hinter Ihrem Zähler (z. B. Solar Manager), damit Ihre Statistiken die tatsächliche Produktion, den Verbrauch und die Autarkie zeigen können. Diese Daten dienen nur der Statistik und werden nie für die Abrechnung verwendet.',
             notConnected: 'Mit diesem Messpunkt ist noch keine Energiedatenquelle verbunden.',
             connect: 'Verbinden',
             loadError: 'Die Energiedatenquellen konnten nicht geladen werden.',
+            eligibilityError: 'Es konnte nicht geprüft werden, ob Energiedaten verfügbar sind.',
         },
         card: {
             smId: 'Solar-Manager-ID',
@@ -3377,6 +3402,11 @@ export const de = {
         owner: {
             chip: 'Energiedaten: {{status}}',
             chipHint: 'Status der Energiedatenquelle dieses Messpunkts öffnen',
+            noSource: 'Keine Energiedatenquelle',
+            noSourceHint: 'Die Teilnehmerin oder der Teilnehmer kann unter «Meine Messpunkte» eine verbinden. Energiedaten sind freiwillig.',
+            connectOwn: 'Energiedaten verbinden',
+            connectOwnHint: 'Das ist Ihr eigener Messpunkt: Die Energiedaten richten Sie unter «Meine Messpunkte» ein',
+            manageOwn: 'Unter «Meine Messpunkte» verwalten',
             title: 'Energiedatenquelle von {{meter}}',
             readOnlyNote: '{{name}} hat diese Quelle verbunden. Sie sehen den Status, nicht den Zugang, und können die Verbindung selbst nicht ändern.',
             provider: 'Quelle',
@@ -3426,6 +3456,8 @@ export const de = {
         on: 'Ein',
         off: 'Aus',
         updated: 'Feature-Flag aktualisiert.',
+        followsDefault: 'Folgt der Voreinstellung dieser Instanz. Eine Änderung macht Ihre Wahl dauerhaft.',
+        controlledByEnv: 'Gesetzt durch die Umgebungsvariable {{variable}} auf dem Server; der Schalter hier hat keine Wirkung.',
     },
     mfaGate: {
         title: 'Zwei-Faktor-Authentifizierung einrichten',
