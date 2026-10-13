@@ -828,6 +828,23 @@ class ImportView(viewsets.ViewSet):
                 return error_response
             log = import_sdatch(file, zev, request.user)
 
+        metadata = {
+            "source": source,
+            "filename": log.filename,
+            "rows_total": log.rows_total,
+            "rows_imported": log.rows_imported,
+            "rows_skipped": log.rows_skipped,
+            "timestamp_timezone": log.timestamp_timezone,
+        }
+        if source == "sdatch":
+            metadata.update(
+                {
+                    "result_status": log.result_status,
+                    "result_counts": log.result_counts,
+                    "rows_overwritten": log.rows_overwritten,
+                    "issues": len(log.issues or []),
+                }
+            )
         record_audit_event(
             request=request,
             action_category=AuditActionCategory.IMPORT,
@@ -837,14 +854,7 @@ class ImportView(viewsets.ViewSet):
             target_id=str(log.id),
             target_display=str(log.batch_id),
             summary=f"Completed {source.upper()} import for {log.rows_imported} rows.",
-            metadata={
-                "source": source,
-                "filename": log.filename,
-                "rows_total": log.rows_total,
-                "rows_imported": log.rows_imported,
-                "rows_skipped": log.rows_skipped,
-                "timestamp_timezone": log.timestamp_timezone,
-            },
+            metadata=metadata,
         )
 
         return Response(ImportLogSerializer(log).data, status=status.HTTP_201_CREATED)

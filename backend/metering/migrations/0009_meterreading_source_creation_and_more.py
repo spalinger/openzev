@@ -16,7 +16,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='meterreading',
             name='source_creation',
-            field=models.DateTimeField(blank=True, help_text='SDAT-CH InstanceDocument Creation of the delivery that wrote this reading (Q12 provenance).', null=True),
+            field=models.DateTimeField(blank=True, help_text='SDAT-CH InstanceDocument Creation of the delivery that wrote this reading.', null=True),
         ),
         migrations.AddField(
             model_name='meterreading',

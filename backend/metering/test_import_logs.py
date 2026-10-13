@@ -467,6 +467,47 @@ class ImportLogCommitVisibilityTests(TransactionTestCase):
             zev=self.zev, meter_id="CH-VIS-1", meter_type=MeteringPointType.CONSUMPTION
         )
 
+    @skipUnless(connection.vendor == "postgresql", "requires cross-connection visibility")
+    def test_sdat_log_is_not_deletable_before_readings_commit(self):
+        from metering.importers import sdatch_importer
+        from metering.test_import_sdatch_strict import build_e66, quarter_block
+        meter_id = "CH9999901234500000000000000000001"
+        self.metering_point.meter_id = meter_id
+        self.metering_point.save(update_fields=["meter_id"])
+        entered = threading.Event()
+        release = threading.Event()
+        outcome = {}
+        original = sdatch_importer._apply_plan
+
+        def pause(**kwargs):
+            entered.set()
+            self.assertTrue(release.wait(10))
+            return original(**kwargs)
+
+        def upload():
+            try:
+                content = build_e66([quarter_block(meter_id, "2025-06-10T00:00:00Z", 4)])
+                outcome["log"] = sdatch_importer.import_sdatch(SimpleUploadedFile("pending.xml", content), self.zev, self.owner)
+            except Exception as exc:
+                outcome["error"] = exc
+            finally:
+                connection.close()
+
+        with patch.object(sdatch_importer, "_apply_plan", side_effect=pause):
+            worker = threading.Thread(target=upload)
+            worker.start()
+            try:
+                self.assertTrue(entered.wait(10))
+                self.assertEqual(ImportLog.objects.count(), 0)
+                self.assertEqual(MeterReading.objects.count(), 0)
+            finally:
+                release.set()
+                worker.join(15)
+        self.assertFalse(worker.is_alive())
+        self.assertNotIn("error", outcome)
+        self.assertEqual(ImportLog.objects.count(), 1)
+        self.assertEqual(MeterReading.objects.count(), 4)
+
     @skipUnless(connection.vendor == "postgresql", "requires cross-connection transaction isolation")
     def test_successful_log_invisible_until_commit(self):
         from django.db import connection as default_connection

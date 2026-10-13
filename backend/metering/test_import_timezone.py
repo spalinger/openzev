@@ -13,7 +13,7 @@ from django.test import SimpleTestCase, TestCase
 from rest_framework.test import APIClient
 
 from accounts.models import UserRole
-from metering.importers.sdatch_importer import _parse_ts
+from metering.importers.sdatch_importer import _parse_ts_strict
 from metering.models import ImportLog, MeterReading
 from metering.testing import preview_csv, upload_csv
 from testing.helpers import authenticate as auth, make_user, create_managed_zev
@@ -237,12 +237,14 @@ class ImportTimezoneTests(TestCase):
 
 
 class SdatTimestampTests(SimpleTestCase):
-    def test_sdat_offsetless_timestamp_is_zurich_whatever_the_process_tz(self):
+    def test_sdat_offsetless_timestamp_is_rejected(self):
+        # Offset-less timestamps are rejected, never reinterpreted as wall-clock time.
         previous = os.environ.get("TZ")
         os.environ["TZ"] = "America/New_York"
         time.tzset()
         try:
-            self.assertEqual(_parse_ts("2026-01-15T14:00:00"), _utc(2026, 1, 15, 13))
+            with self.assertRaises(ValueError):
+                _parse_ts_strict("2026-01-15T14:00:00")
         finally:
             if previous is None:
                 os.environ.pop("TZ", None)
@@ -251,6 +253,6 @@ class SdatTimestampTests(SimpleTestCase):
             time.tzset()
 
     def test_sdat_offsets_are_kept(self):
-        self.assertEqual(_parse_ts("2026-07-01T00:00:00+02:00"), _utc(2026, 6, 30, 22))
-        self.assertEqual(_parse_ts("2026-07-01T00:00:00Z"), _utc(2026, 7, 1))
-        self.assertEqual(date(2026, 7, 1), _parse_ts("2026-07-01T00:00:00+02:00").astimezone(ZURICH).date())
+        self.assertEqual(_parse_ts_strict("2026-07-01T00:00:00+02:00"), _utc(2026, 6, 30, 22))
+        self.assertEqual(_parse_ts_strict("2026-07-01T00:00:00Z"), _utc(2026, 7, 1))
+        self.assertEqual(date(2026, 7, 1), _parse_ts_strict("2026-07-01T00:00:00+02:00").astimezone(ZURICH).date())

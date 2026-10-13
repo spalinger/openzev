@@ -1701,6 +1701,67 @@ export interface ImportLog {
     /** '' for batches imported before ADR 0026 (offset-less values read as UTC). */
     timestamp_timezone?: ImportTimestampTimezone | ''
     created_at: string
+    /** Machine-readable SDAT-CH outcome; blank for CSV/manual imports. */
+    result_status?: '' | SdatResultStatus
+    /** Typed SDAT-CH observation accounting (created/overwritten/held/promoted/duplicate/stale/excluded/rejected, ...). */
+    result_counts?: SdatResultCounts
+    /** Structured SDAT-CH issues with stable codes; no prose parsing needed. */
+    issues?: SdatIssue[]
+    /** Committed billable-slot changes for invoice-impact consumers (D). Empty unless the import committed writes. */
+    reading_changes?: SdatReadingChange[]
+    /** SDAT-CH delivery identity (delivery vs block identity, creation, reason, sender/receiver). */
+    source_delivery?: SdatDelivery
+}
+
+/** Machine-readable outcome of an SDAT-CH file import. */
+export type SdatResultStatus = 'accepted' | 'held' | 'unchanged' | 'rejected'
+
+export interface SdatResultCounts {
+    created: number
+    overwritten: number
+    held: number
+    promoted: number
+    duplicate: number
+    stale: number
+    excluded: number
+    rejected: number
+    /** Existing quarantine rows updated (replacement protection evidence for C). */
+    quarantine_overwritten: number
+    reading_changes_truncated?: boolean
+    [key: string]: number | boolean | undefined
+}
+
+export interface SdatIssue {
+    code: string
+    severity: 'error' | 'info'
+    message: string
+    meter_id?: string | null
+    block_id?: string | null
+    [key: string]: unknown
+}
+
+export interface SdatReadingChange {
+    metering_point: string
+    meter_id: string
+    timestamp: string
+    direction: 'in' | 'out'
+    /** availability = slot created, value = energy or resolution changed, metadata = provenance-only refresh. */
+    kind: 'availability' | 'value' | 'metadata'
+    old_energy: string | null
+    new_energy: string
+    promoted: boolean
+    source_document_id: string
+}
+
+export interface SdatDelivery {
+    delivery_id: string
+    creation: string
+    status: string
+    reason: string
+    sender_id: string
+    sender_role: string
+    receiver_id: string
+    receiver_role: string
 }
 
 export interface ImportDeletionResult {
