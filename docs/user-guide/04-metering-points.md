@@ -116,6 +116,12 @@ its meters.
 4. To bill this meter, assign a participant: click **Assign participant** on
    its entry and set the assignment's validity window — see below.
 
+Meter IDs must be unique across all communities on the instance, including any
+secondary ID configured for another meter. A duplicate is rejected when you
+create or edit a meter, or create meters through the community setup wizard.
+If an SDAT import reports an ambiguous ID in older data, ask an administrator
+to reconcile the conflicting IDs before retrying the import.
+
 > **Tip:** **Active** only tracks whether a meter is in inventory; on its own
 > it does not affect billing. To *stop billing* a meter, end its assignment
 > instead — see [Decommissioning a Meter](#decommissioning-a-meter).

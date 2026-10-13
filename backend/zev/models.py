@@ -682,6 +682,70 @@ class MeteringPointType(models.TextChoices):
     BIDIRECTIONAL = "bidirectional", "Bidirectional (Consumption + Production)"
 
 
+def normalize_secondary_meter_id(value) -> str | None:
+    """Store absent/blank aliases as NULL; trim nonblank aliases."""
+    if value is None:
+        return None
+    return str(value).strip() or None
+
+
+class AmbiguousMeterIdentity(Exception):
+    """A source ID matches several points; retain their IDs for reconciliation."""
+
+    def __init__(self, identity: str, point_ids) -> None:
+        super().__init__(f"Meter ID '{identity}' matches several metering points; refusing to guess.")
+        self.identity = identity
+        self.point_ids = list(point_ids)
+
+
+def validate_meter_identities(*, meter_id: str, secondary_meter_id=None, exclude_pk=None) -> None:
+    """Reject global identity collisions, excluding the edited point, without tenant details."""
+    secondary = normalize_secondary_meter_id(secondary_meter_id)
+    if secondary is not None and secondary == meter_id:
+        raise ValidationError({"secondary_meter_id": "The secondary ID must differ from this point's own primary ID."})
+    identities = {"meter_id": meter_id, "secondary_meter_id": secondary}
+    values = [value for value in identities.values() if value is not None]
+    matches = MeteringPoint.objects.exclude(pk=exclude_pk).filter(
+        models.Q(meter_id__in=values) | models.Q(secondary_meter_id__in=values)
+    ).values_list("meter_id", "secondary_meter_id")
+    taken = {value for pair in matches for value in pair if value is not None}
+    errors = {
+        field: "This ID is already used by another metering point."
+        for field, value in identities.items() if value is not None and value in taken
+    }
+    if errors:
+        raise ValidationError(errors)
+
+
+def resolve_metering_point(zev, source_id):
+    """Resolve either identity within a ZEV, returning None if unknown and refusing ambiguity."""
+    if not source_id:
+        return None
+    matches = list(MeteringPoint.objects.filter(zev=zev).filter(
+        models.Q(meter_id=source_id) | models.Q(secondary_meter_id=source_id)
+    ))
+    if len(matches) > 1:
+        raise AmbiguousMeterIdentity(source_id, [point.pk for point in matches])
+    return matches[0] if matches else None
+
+
+def find_ambiguous_meter_identities() -> list[dict]:
+    """Report shared or self-redundant identities instance-wide without changing data."""
+    by_identity = {}
+    for pk, primary, secondary in MeteringPoint.objects.values_list(
+        "pk", "meter_id", "secondary_meter_id"
+    ).iterator():
+        by_identity.setdefault(primary, []).append(pk)
+        secondary = normalize_secondary_meter_id(secondary)
+        if secondary is not None:
+            by_identity.setdefault(secondary, []).append(pk)
+    return [
+        {"identity": identity, "kind": "shared" if len(set(point_ids)) > 1 else "redundant",
+         "point_ids": sorted(set(point_ids))}
+        for identity, point_ids in sorted(by_identity.items()) if len(point_ids) > 1
+    ]
+
+
 class MeteringPoint(models.Model):
     """A smart meter / metering point that belongs to a ZEV and can be assigned to participants over time."""
 
@@ -721,11 +785,22 @@ class MeteringPoint(models.Model):
 
     class Meta:
         ordering = ["meter_id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(secondary_meter_id__isnull=True)
+                | ~models.Q(secondary_meter_id=models.F("meter_id")),
+                name="metering_point_secondary_differs_from_primary",
+            ),
+        ]
 
     def __str__(self):
         return self.meter_id
 
     def save(self, *args, **kwargs):
+        # Store blank aliases as NULL so they never collide under the unique constraint.
+        update_fields = kwargs.get("update_fields")
+        if update_fields is None or "secondary_meter_id" in update_fields:
+            self.secondary_meter_id = normalize_secondary_meter_id(self.secondary_meter_id)
         if self.building_id is None and self.zev_id is not None:
             from .buildings import default_building
 
@@ -736,8 +811,16 @@ class MeteringPoint(models.Model):
         super().save(*args, **kwargs)
 
     def clean(self):
+        # Normalize first so blank input validates as absent.
+        self.secondary_meter_id = normalize_secondary_meter_id(self.secondary_meter_id)
         if self.building_id and self.zev_id and self.building.zev_id != self.zev_id:
             raise ValidationError({"building": "The building belongs to another ZEV."})
+        if self.meter_id:
+            validate_meter_identities(
+                meter_id=self.meter_id,
+                secondary_meter_id=self.secondary_meter_id,
+                exclude_pk=self.pk,
+            )
         if self.has_behind_meter_generation and self.meter_type not in (
             MeteringPointType.BIDIRECTIONAL,
             MeteringPointType.PRODUCTION,

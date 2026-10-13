@@ -7,7 +7,7 @@ from .geocoding import get_cached_building_footprint
 from .grid_operators import grid_operator_ids
 from django.utils import timezone
 
-from .models import Building, Zev, Participant, Party, PartyKind, PartyTitle, MeteringPoint, MeteringPointAssignment, MeteringPointType, VatMode, PartyRole, ZevPartyRole
+from .models import Building, Zev, Participant, Party, PartyKind, PartyTitle, MeteringPoint, MeteringPointAssignment, MeteringPointType, VatMode, PartyRole, ZevPartyRole, normalize_secondary_meter_id, validate_meter_identities
 from .services import (
     account_for_email, create_zev_with_owner_setup, ensure_participant_account, existing_owner_problem,
     lock_participant_account, requires_independent_login,
@@ -143,6 +143,17 @@ class MeteringPointSerializer(serializers.ModelSerializer):
         zev = attrs.get("zev") or (self.instance.zev if self.instance is not None else None)
         if building is not None and zev is not None and building.zev_id != zev.pk:
             raise serializers.ValidationError({"building": "The building belongs to another ZEV."})
+        if "secondary_meter_id" in attrs:
+            attrs["secondary_meter_id"] = normalize_secondary_meter_id(attrs["secondary_meter_id"])
+        if "meter_id" in attrs or "secondary_meter_id" in attrs:
+            try:
+                validate_meter_identities(
+                    meter_id=resolved("meter_id"),
+                    secondary_meter_id=resolved("secondary_meter_id"),
+                    exclude_pk=self.instance.pk if self.instance is not None else None,
+                )
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError(exc.message_dict) from exc
         if self.instance is None and building is None and zev is not None:
             buildings = list(Building.objects.filter(zev=zev)[:2])
             if len(buildings) > 1:
@@ -821,4 +832,9 @@ class ZevCreateWithOwnerSerializer(BankIbanValidationMixin, serializers.Serializ
                 metering_points_data=metering_points_data,
             )
         except DjangoValidationError as exc:
-            raise django_validation_error(exc)
+            errors = django_validation_error(exc)
+            # The owner checks are already keyed `owner`; what is left comes from
+            # `MeteringPoint.full_clean()` and belongs to the nested list field.
+            if "owner" in errors.detail:
+                raise errors from exc
+            raise serializers.ValidationError({"metering_points": errors.detail}) from exc

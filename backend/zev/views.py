@@ -3,7 +3,7 @@ import tempfile
 
 from django.conf import settings as django_settings
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Max, Min, Prefetch, Q
 from django.http import FileResponse, Http404, HttpResponse
 from config.http import content_disposition, sanitize_filename
@@ -923,6 +923,21 @@ class MeteringPointViewSet(AuditedCreateDestroyMixin, AuditedUpdateMixin, ZevSco
 
     def get_audit_target_display(self, instance):
         return instance.meter_id
+
+    def perform_create(self, serializer):
+        # Recheck after rollback: identity races are 400s; unrelated integrity errors propagate.
+        try:
+            super().perform_create(serializer)
+        except IntegrityError:
+            serializer.validate(serializer.validated_data)
+            raise
+
+    def perform_update(self, serializer):
+        try:
+            super().perform_update(serializer)
+        except IntegrityError:
+            serializer.validate(serializer.validated_data)
+            raise
 
     def get_queryset(self):
         # Annotate the cascade a delete would take with it (readings +
