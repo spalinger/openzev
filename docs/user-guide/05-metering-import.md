@@ -150,7 +150,11 @@ OpenZEV supports the Swiss **SDAT-CH** metering data standard (used by utility p
    they are imported one after another; if some fail, the others stay
    imported and only the failed files remain selected so you can retry.
 
-> **Note:** SDAT-CH metadata (meter type, interval) is extracted; timestamp resolution is auto-detected.
+OpenZEV accepts the current E66 XML format with active energy in kWh,
+15-minute intervals and UTC timestamps. Invalid files are rejected as a whole;
+the protocol reports zero committed readings. Temporary and information-only
+values are held separately from billing data. XML and gzip uploads are limited
+to 50 MB, with a 100 MB limit after decompression.
 
 ## Timestamp Handling
 

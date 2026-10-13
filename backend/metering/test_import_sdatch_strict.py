@@ -1,0 +1,1559 @@
+"""Strict SDAT-CH profile, atomicity and revision tests.
+
+Reference fixture provenance
+----------------------------
+``test_fixtures/sdatch/e66_1_4_4_customer.xml`` is an unmodified copy of the
+official VSE example::
+
+    Beispiel_Messdatenaustauschprozesse_1_4_4_Lastgänge_Einspeisegänge_an_Endverbraucher_Erzeugungseinheit_1p6.xml
+
+Source archive: https://www.strom.ch/de/media/13704/download
+(``sdat_examples.zip``, SDAT-CH 2025). SHA-256 of the copied file::
+
+    02db4e971439d04ec9165162d2aa73202e0088ac8fb29da76fa8e91eb166558a
+
+All other XML in this module is derived (synthesized by ``build_e66`` to
+exercise one rule each) and labelled as such in the test names.
+"""
+
+import gzip
+import os
+import threading
+import tracemalloc
+import unittest
+from datetime import datetime, timezone, timedelta
+from decimal import Decimal
+from unittest import mock as unittest_mock
+
+from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
+from django.test import TestCase, TransactionTestCase
+from rest_framework.test import APIClient
+
+from accounts.models import UserRole
+from metering.importers import sdatch_importer
+from metering.models import ImportLog, ImportSource, MeterReading, QuarantinedReading, ReadingDirection
+from testing.helpers import authenticate as auth, make_user, create_managed_zev
+from zev.models import MeteringPoint, MeteringPointAssignment, MeteringPointType, Participant, Zev
+
+CONS_ID = "CH9999901234500000000000000000001"
+PROD_ID = "CH9999901234500000000000000000002"
+
+TS0 = datetime(2025, 6, 2, 22, 0, tzinfo=timezone.utc)
+
+ACTIVE_PRODUCT = "8716867000030"
+REACTIVE_PRODUCT = "8716867000047"
+LEG_PRODUCT = "2404050010123"
+
+
+def _obs(seq, volume, condition=None):
+    cond = f"<rsm:Condition>{condition}</rsm:Condition>" if condition else ""
+    return (
+        f"<rsm:Observation><rsm:Position><rsm:Sequence>{seq}</rsm:Sequence></rsm:Position>"
+        f"<rsm:Volume>{volume}</rsm:Volume>{cond}</rsm:Observation>"
+    )
+
+
+def _full_day_obs(temp="100", estimated="101", base=Decimal("102")):
+    """96 observations: seq1 temporary, seq2 estimated, rest measured."""
+    out = [_obs(1, temp, "21"), _obs(2, estimated, "56")]
+    for seq in range(3, 97):
+        out.append(_obs(seq, str(base + seq)))
+    return "".join(out)
+
+
+def build_e66(
+    blocks,
+    *,
+    reason_xml='<rsm:ebIXCode>E88</rsm:ebIXCode>',
+    status="9",
+    creation="2025-06-05T15:40:05Z",
+    delivery_id="DERIVED-DOC",
+    doctype="E66",
+    root="ValidatedMeteredData_16",
+    namespace="http://www.strom.ch",
+):
+    """Build a (usually schema-valid) E66 delivery. ``blocks`` are raw
+    ``<rsm:MeteringData>`` strings from ``build_block`` or literal XML."""
+    return f"""<?xml version='1.0' encoding='UTF-8'?>
+<rsm:{root} xmlns:rsm="{namespace}" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="{namespace} ValidatedMeteredData_1p6.xsd">
+\t<rsm:ValidatedMeteredData_HeaderInformation>
+\t\t<rsm:HeaderVersion>1.0</rsm:HeaderVersion>
+\t\t<rsm:Sender>
+\t\t\t<rsm:ID>
+\t\t\t\t<rsm:EICID schemeAgencyID="305">12X-PARTY-A-000K</rsm:EICID>
+\t\t\t</rsm:ID>
+\t\t\t<rsm:Role>MDR</rsm:Role>
+\t\t</rsm:Sender>
+\t\t<rsm:Receiver>
+\t\t\t<rsm:ID>
+\t\t\t\t<rsm:EICID schemeAgencyID="305">12X-PARTY-C-0008</rsm:EICID>
+\t\t\t</rsm:ID>
+\t\t\t<rsm:Role>DEC</rsm:Role>
+\t\t</rsm:Receiver>
+\t\t<rsm:InstanceDocument>
+\t\t\t<rsm:DictionaryAgencyID>260</rsm:DictionaryAgencyID>
+\t\t\t<rsm:VersionID listAgencyID="260">2007B</rsm:VersionID>
+\t\t\t<rsm:DocumentID>{delivery_id}</rsm:DocumentID>
+\t\t\t<rsm:DocumentType listAgencyID="260">
+\t\t\t\t<rsm:ebIXCode>{doctype}</rsm:ebIXCode>
+\t\t\t</rsm:DocumentType>
+\t\t\t<rsm:Creation>{creation}</rsm:Creation>
+\t\t\t<rsm:Status>{status}</rsm:Status>
+\t\t</rsm:InstanceDocument>
+\t\t<rsm:BusinessScopeProcess>
+\t\t\t<rsm:BusinessReasonType codeListAgency="260">
+\t\t\t\t{reason_xml}</rsm:BusinessReasonType>
+\t\t\t<rsm:BusinessDomainType listAgencyID="260">E02</rsm:BusinessDomainType>
+\t\t\t<rsm:BusinessSectorType>23</rsm:BusinessSectorType>
+\t\t\t<rsm:ReportPeriod>
+\t\t\t\t<rsm:StartDateTime>2025-06-02T22:00:00Z</rsm:StartDateTime>
+\t\t\t\t<rsm:EndDateTime>2025-06-03T22:00:00Z</rsm:EndDateTime>
+\t\t\t</rsm:ReportPeriod>
+\t\t\t<rsm:BusinessService>
+\t\t\t\t<rsm:ServiceTransaction isIntelligibleCheckRequired="true"/>
+\t\t\t</rsm:BusinessService>
+\t\t</rsm:BusinessScopeProcess>
+\t</rsm:ValidatedMeteredData_HeaderInformation>
+\t{''.join(blocks)}
+\t</rsm:{root}>
+""".encode()
+
+
+def build_block(
+    meter_id,
+    observations,
+    *,
+    doc="DERIVED-BLOCK",
+    point="ConsumptionMeteringPoint",
+    start="2025-06-02T22:00:00Z",
+    end="2025-06-02T23:00:00Z",
+    resolution="15",
+    resolution_unit="MIN",
+    product=ACTIVE_PRODUCT,
+    product_scheme="ebIXCode",
+    product_agency="9",
+    unit="KWH",
+    omit_resolution=False,
+    omit_interval=False,
+    omit_point=False,
+):
+    """Build one MeteringData block. ``observations`` is a raw string; the
+    caller owns interval/observation agreement (default: 4 slots, one hour)."""
+    interval = ""
+    if not omit_interval:
+        interval = (
+            f"<rsm:Interval><rsm:StartDateTime>{start}</rsm:StartDateTime>"
+            f"<rsm:EndDateTime>{end}</rsm:EndDateTime></rsm:Interval>"
+        )
+    resolution_xml = ""
+    if not omit_resolution:
+        resolution_xml = (
+            f"<rsm:Resolution><rsm:Resolution>{resolution}</rsm:Resolution>"
+            f"<rsm:Unit>{resolution_unit}</rsm:Unit></rsm:Resolution>"
+        )
+    if omit_point:
+        point_xml = ""
+    elif point == "ExchangeMeteringPoint":
+        point_xml = (
+            f"<rsm:ExchangeMeteringPoint>"
+            f"<rsm:VSENationalID schemeID=\"VSE\" schemeAgencyID=\"260\">{meter_id}</rsm:VSENationalID>"
+            f"<rsm:Direction><rsm:InArea>"
+            f"<rsm:EICID schemeAgencyID=\"305\">12Y-AREA-A-00009</rsm:EICID>"
+            f"</rsm:InArea><rsm:OutArea>"
+            f"<rsm:EICID schemeAgencyID=\"305\">12Y-AREA-C-0000W</rsm:EICID>"
+            f"</rsm:OutArea></rsm:Direction>"
+            f"</rsm:ExchangeMeteringPoint>"
+        )
+    else:
+        point_xml = (
+            f"<rsm:{point}><rsm:VSENationalID schemeID=\"VSE\" "
+            f"schemeAgencyID=\"260\">{meter_id}</rsm:VSENationalID></rsm:{point}>"
+        )
+    return (
+        f"<rsm:MeteringData><rsm:DocumentID>{doc}</rsm:DocumentID>{interval}"
+        f"{resolution_xml}{point_xml}"
+        f"<rsm:Product><rsm:ID><rsm:{product_scheme} schemeAgencyID=\"{product_agency}\">"
+        f"{product}</rsm:{product_scheme}></rsm:ID>"
+        f"<rsm:MeasureUnit>{unit}</rsm:MeasureUnit></rsm:Product>"
+        f"{observations}</rsm:MeteringData>"
+    )
+
+
+def quarter_block(meter_id, start, count, *, doc="DERIVED-BLOCK", point="ConsumptionMeteringPoint", **kwargs):
+    """A complete 15-minute block of ``count`` measured observations."""
+    start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+    end = (start_dt + timedelta(minutes=15 * count)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    obs = "".join(_obs(seq, str(100 + seq)) for seq in range(1, count + 1))
+    return build_block(meter_id, obs, doc=doc, point=point, start=start, end=end, **kwargs)
+
+
+class StrictBase(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.owner = make_user("strict_owner", UserRole.USER)
+        self.zev = create_managed_zev(name="Strict ZEV", owner=self.owner, zev_type="vzev", invoice_prefix="T")
+        # After the grant: promoting the account retires tokens minted before it.
+        auth(self.client, self.owner)
+        self.participant = Participant.objects.create(
+            zev=self.zev,
+            first_name="Strict",
+            last_name="Case",
+            email="strict.case@example.com",
+            valid_from=datetime(2026, 1, 1).date(),
+        )
+        self.cons_mp = MeteringPoint.objects.create(
+            zev=self.zev, meter_id=CONS_ID, meter_type=MeteringPointType.CONSUMPTION,
+        )
+        self.prod_mp = MeteringPoint.objects.create(
+            zev=self.zev, meter_id=PROD_ID, meter_type=MeteringPointType.PRODUCTION,
+        )
+        MeteringPointAssignment.objects.create(
+            metering_point=self.cons_mp, participant=self.participant,
+            valid_from=datetime(2026, 1, 1).date(),
+        )
+
+    def _upload(self, name, content, *, zev=None):
+        upload = SimpleUploadedFile(name, content, content_type="application/xml")
+        return self.client.post(
+            "/api/v1/metering/import/sdatch/",
+            {"file": upload, "zev_id": str((zev or self.zev).id)},
+            format="multipart",
+        )
+
+    def _import(self, content, **kwargs):
+        return self._upload("derived.xml", content, **kwargs)
+
+    def assertRejected(self, resp, code=None):
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["result_status"], "rejected")
+        self.assertEqual(resp.data["rows_imported"], 0)
+        self.assertEqual(resp.data["rows_overwritten"], 0)
+        self.assertTrue(resp.data["errors"], "rejected file must carry a failure log")
+        if code is not None:
+            self.assertTrue(
+                any(issue["code"] == code for issue in resp.data["issues"]),
+                f"expected issue code {code!r} in {resp.data['issues']}",
+            )
+FIXTURE_1_4_4 = os.path.join(
+    os.path.dirname(__file__), "test_fixtures", "sdatch", "e66_1_4_4_customer.xml"
+)
+
+
+class OfficialCustomerAcceptanceTests(StrictBase):
+    """Full official customer example 1_4_4: 190 billable / 2 held / 192 skipped."""
+
+    def test_full_customer_file_yields_expected_accounting(self):
+        with open(FIXTURE_1_4_4, "rb") as fh:
+            resp = self._upload("1_4_4.xml", fh.read())
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["result_status"], "accepted")
+        self.assertEqual(resp.data["rows_total"], 384)
+        self.assertEqual(resp.data["rows_imported"], 190)
+        self.assertEqual(resp.data["rows_overwritten"], 0)
+        self.assertEqual(resp.data["rows_skipped"], 192)
+        counts = resp.data["result_counts"]
+        self.assertEqual(
+            counts,
+            {
+                "created": 190,
+                "overwritten": 0,
+                "held": 2,
+                "promoted": 0,
+                "duplicate": 0,
+                "stale": 0,
+                "excluded": 192,
+                "rejected": 0,
+                "quarantine_overwritten": 0,
+                "reading_changes_truncated": False,
+            },
+        )
+        self.assertEqual(MeterReading.objects.count(), 190)
+        self.assertEqual(QuarantinedReading.objects.count(), 2)
+
+    def test_full_customer_file_sums_directions_quality_and_timestamps(self):
+        from django.db.models import Sum
+
+        with open(FIXTURE_1_4_4, "rb") as fh:
+            resp = self._upload("1_4_4.xml", fh.read())
+        self.assertEqual(resp.data["result_status"], "accepted")
+
+        cons_sum = MeterReading.objects.filter(
+            metering_point=self.cons_mp, direction=ReadingDirection.IN
+        ).aggregate(total=Sum("energy_kwh"))["total"]
+        prod_sum = MeterReading.objects.filter(
+            metering_point=self.prod_mp, direction=ReadingDirection.OUT
+        ).aggregate(total=Sum("energy_kwh"))["total"]
+        # Independent of the importer: active totals minus the temporary seq1.
+        self.assertEqual(cons_sum, Decimal("14060.102"))
+        self.assertEqual(prod_sum, Decimal("33060.302"))
+
+        stamps = list(MeterReading.objects.order_by("timestamp").values_list("timestamp", flat=True))
+        # seq1 (22:00) is temporary and held back, so billing starts at 22:15.
+        self.assertEqual(stamps[0], datetime(2025, 6, 2, 22, 15, tzinfo=timezone.utc))
+        self.assertEqual(stamps[-1], datetime(2025, 6, 3, 21, 45, tzinfo=timezone.utc))
+        self.assertEqual(len(set(stamps)), 95)  # seq1 held back per active block
+        # Canonical interval-start range over every observation, held included.
+        held_stamps = list(QuarantinedReading.objects.values_list("timestamp", flat=True))
+        self.assertEqual(min(stamps[0], *held_stamps), datetime(2025, 6, 2, 22, 0, tzinfo=timezone.utc))
+
+        estimated = MeterReading.objects.filter(condition="56")
+        self.assertEqual(estimated.count(), 2)  # E88/56 stays billable with quality kept
+        measured = MeterReading.objects.filter(condition="")
+        self.assertEqual(measured.count(), 188)
+
+        held = list(QuarantinedReading.objects.order_by("metering_point__meter_id"))
+        self.assertEqual([(q.energy_kwh, q.condition) for q in held],
+                         [(Decimal("100.0000"), "21"), (Decimal("300.0000"), "21")])
+        self.assertTrue(all(q.timestamp == TS0 for q in held))
+        # Temporary 400 kWh never enter billing.
+        self.assertEqual(sum(q.energy_kwh for q in held), Decimal("400.0000"))
+
+    def test_full_customer_file_provenance_and_change_signal(self):
+        with open(FIXTURE_1_4_4, "rb") as fh:
+            resp = self._upload("1_4_4.xml", fh.read())
+
+        sample = MeterReading.objects.filter(metering_point=self.cons_mp).first()
+        self.assertEqual(sample.source_creation, datetime(2025, 6, 5, 15, 40, 5, tzinfo=timezone.utc))
+        self.assertTrue(sample.source_document_id.startswith("Beispiel_Messdatenaustausch_1_4_4"))
+        self.assertEqual(sample.source_delivery_id, "Beispiel_Messdatenaustausch_1_4_4")
+        self.assertEqual(sample.business_reason, "E88")
+        self.assertEqual(sample.source_product, ACTIVE_PRODUCT)
+        self.assertEqual(sample.source_unit, "KWH")
+        self.assertEqual(sample.source_meter_id, CONS_ID)
+        self.assertEqual(sample.import_source, ImportSource.SDATCH)
+        self.assertIsNotNone(sample.import_batch)
+
+        log = ImportLog.objects.get(id=resp.data["id"])
+        self.assertEqual(log.source_delivery["delivery_id"], "Beispiel_Messdatenaustausch_1_4_4")
+        self.assertEqual(log.source_delivery["reason"], "E88")
+        self.assertEqual(log.source_delivery["status"], "9")
+        self.assertEqual(log.source_delivery["sender_role"], "MDR")
+
+        changes = resp.data["reading_changes"]
+        self.assertEqual(len(changes), 190)
+        self.assertTrue(all(c["kind"] == "availability" for c in changes))
+        self.assertTrue(all(c["old_energy"] is None for c in changes))
+
+        codes = [issue["code"] for issue in resp.data["issues"]]
+        self.assertIn("reactive_excluded", codes)
+        self.assertTrue(all({"code", "severity", "message"} <= set(issue) for issue in resp.data["issues"]))
+
+
+class StrictUnitTests(StrictBase):
+    def test_out_of_range_volumes_are_rejected_before_rounding(self):
+        for volume in ("123456789012345678901234567890", "100000000"):
+            with self.subTest(volume=volume):
+                block = build_block(CONS_ID, _obs(1, volume) + "".join(_obs(s, "10") for s in range(2, 5)))
+                resp = self._import(build_e66([block]))
+                self.assertRejected(resp, "invalid_volume")
+                self.assertEqual(MeterReading.objects.count(), 0)
+
+    def test_derived_kwt_unit_rejects_whole_file(self):
+        # P0 regression: schema-valid KWT must never be stored as kWh.
+        block = build_block(CONS_ID, "".join(_obs(s, "10") for s in range(1, 5)), unit="KWT")
+
+        resp = self._import(build_e66([block]))
+
+        self.assertRejected(resp, "unsupported_unit")
+        self.assertIn("KWT", resp.data["errors"][0]["error"])
+
+    def test_derived_kwh_unit_is_billed(self):
+        block = build_block(CONS_ID, "".join(_obs(s, "10") for s in range(1, 5)), unit="KWH")
+
+        resp = self._import(build_e66([block]))
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["result_status"], "accepted")
+        self.assertEqual(resp.data["rows_imported"], 4)
+
+    def test_derived_other_supported_product_rejects_file(self):
+        # 8716867000016 passes the XSD enumeration but has no billing meaning here.
+        block = build_block(
+            CONS_ID, "".join(_obs(s, "10") for s in range(1, 5)), product="8716867000016"
+        )
+
+        resp = self._import(build_e66([block]))
+
+        self.assertRejected(resp, "unknown_product")
+
+    def test_derived_garbage_product_is_schema_rejected(self):
+        block = build_block(
+            CONS_ID, "".join(_obs(s, "10") for s in range(1, 5)), product="9999999999999"
+        )
+
+        resp = self._import(build_e66([block]))
+
+        self.assertRejected(resp, "schema_invalid")
+        self.assertIn("Schema validation failed", resp.data["errors"][0]["error"])
+
+    def test_derived_leg_product_is_excluded_with_named_issue(self):
+        block = build_block(
+            CONS_ID,
+            "".join(_obs(s, "10") for s in range(1, 5)),
+            product=LEG_PRODUCT,
+            product_scheme="VSENationalCode",
+            product_agency="260",
+        )
+
+        resp = self._import(build_e66([block]))
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["result_status"], "unchanged")
+        self.assertEqual(resp.data["result_counts"]["excluded"], 4)
+        self.assertTrue(any(issue["code"] == "leg_excluded" for issue in resp.data["issues"]))
+        self.assertEqual(MeterReading.objects.count(), 0)
+        self.assertEqual(QuarantinedReading.objects.count(), 0)
+
+    def test_derived_nan_volume_is_schema_rejected(self):
+        # The XSD decimal type already refuses NaN; the importer additionally
+        # guards finiteness before any write. Either way: rejected, no writes.
+        block = build_block(CONS_ID, _obs(1, "NaN") + "".join(_obs(s, "10") for s in range(2, 5)))
+
+        resp = self._import(build_e66([block]))
+
+        self.assertRejected(resp, "schema_invalid")
+
+    def test_derived_negative_volume_rejects_file(self):
+        block = build_block(CONS_ID, _obs(1, "-5") + "".join(_obs(s, "10") for s in range(2, 5)))
+
+        resp = self._import(build_e66([block]))
+
+        self.assertRejected(resp, "invalid_volume")
+
+    def test_derived_bad_condition_is_schema_rejected(self):
+        block = build_block(
+            CONS_ID, _obs(1, "10", "99") + "".join(_obs(s, "10") for s in range(2, 5))
+        )
+
+        resp = self._import(build_e66([block]))
+
+        self.assertRejected(resp, "schema_invalid")
+
+
+class StrictPositionTests(StrictBase):
+    def test_long_interval_with_missing_positions_has_bounded_diagnostics(self):
+        block = build_block(CONS_ID, _obs(1, "10"), end="2099-06-02T23:00:00Z")
+        tracemalloc.start()
+        try:
+            resp = self._import(build_e66([block]))
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertRejected(resp, "missing_position")
+        self.assertLess(peak, 10 * 1024 * 1024)
+        issue = next(issue for issue in resp.data["issues"] if issue["code"] == "missing_position")
+        self.assertEqual(len(issue["missing"]), 50)
+
+    def _four_slot(self, observations, **kwargs):
+        return self._import(build_e66([build_block(CONS_ID, observations, **kwargs)]))
+
+    def test_derived_out_of_range_position_rejects_file(self):
+        # P0 regression: seq 999 in a 4-slot block must not write outside it.
+        obs = "".join(_obs(s, "10") for s in range(1, 4)) + _obs(999, "10")
+
+        resp = self._four_slot(obs)
+
+        self.assertRejected(resp, "invalid_position")
+
+    def test_derived_gap_rejects_file_without_inventing_readings(self):
+        obs = _obs(1, "10") + _obs(2, "10") + _obs(3, "10") + _obs(5, "10")
+
+        resp = self._four_slot(obs)
+
+        self.assertRejected(resp)
+        codes = [issue["code"] for issue in resp.data["issues"]]
+        self.assertTrue("invalid_position" in codes or "missing_position" in codes)
+
+    def test_derived_missing_position_rejects_file(self):
+        obs = "".join(_obs(s, "10") for s in range(1, 4))  # seq4 absent
+
+        resp = self._four_slot(obs)
+
+        self.assertRejected(resp, "missing_position")
+        self.assertIn("4", resp.data["errors"][0]["error"])
+
+    def test_derived_duplicate_position_rejects_file(self):
+        obs = "".join(_obs(s, "10") for s in range(1, 5)) + _obs(2, "10")
+
+        resp = self._four_slot(obs)
+
+        self.assertRejected(resp, "duplicate_position")
+
+    def test_derived_conflicting_overlap_rejects_file(self):
+        first = build_block(CONS_ID, "".join(_obs(s, "10") for s in range(1, 5)), doc="BLOCK-A")
+        second = build_block(CONS_ID, "".join(_obs(s, "99") for s in range(1, 5)), doc="BLOCK-B")
+
+        resp = self._import(build_e66([first, second]))
+
+        self.assertRejected(resp, "conflicting_position")
+
+    def test_derived_zero_position_is_schema_rejected(self):
+        obs = _obs(0, "10") + "".join(_obs(s, "10") for s in range(2, 5))
+
+        resp = self._four_slot(obs)
+
+        self.assertRejected(resp, "schema_invalid")
+
+    def test_derived_unaligned_interval_rejects_file(self):
+        block = build_block(
+            CONS_ID,
+            "".join(_obs(s, "10") for s in range(1, 5)),
+            start="2025-06-02T22:07:00Z",
+            end="2025-06-02T23:07:00Z",
+        )
+
+        resp = self._import(build_e66([block]))
+
+        self.assertRejected(resp, "unaligned_interval")
+
+    def test_derived_indivisible_interval_rejects_file(self):
+        block = build_block(
+            CONS_ID,
+            "".join(_obs(s, "10") for s in range(1, 5)),
+            start="2025-06-02T22:00:00Z",
+            end="2025-06-02T22:50:00Z",
+        )
+
+        resp = self._import(build_e66([block]))
+
+        self.assertRejected(resp, "unaligned_interval")
+
+    def test_valid_early_plus_invalid_late_block_rolls_back_everything(self):
+        good = quarter_block(CONS_ID, "2025-06-02T22:00:00Z", 4, doc="GOOD")
+        bad = build_block(
+            PROD_ID,
+            "".join(_obs(s, "10") for s in range(1, 4)),
+            doc="BAD",
+            point="ProductionMeteringPoint",
+        )
+
+        resp = self._import(build_e66([good, bad]))
+
+        self.assertRejected(resp, "missing_position")
+        self.assertTrue(resp.data["errors"], "failure log must be preserved")
+        self.assertEqual(MeterReading.objects.count(), 0)
+        self.assertEqual(QuarantinedReading.objects.count(), 0)
+        self.assertEqual(resp.data["result_counts"]["rejected"], 7)
+        self.assertEqual(resp.data["rows_total"], 7)
+        self.assertEqual(resp.data["reading_changes"], [])
+        log = ImportLog.objects.get(id=resp.data["id"])
+        self.assertEqual(log.result_status, "rejected")
+        self.assertTrue(log.errors)
+
+
+class StrictHeaderTests(StrictBase):
+    C38 = '<rsm:VSENationalCode>C38</rsm:VSENationalCode>'
+    C40 = '<rsm:VSENationalCode>C40</rsm:VSENationalCode>'
+    C23 = '<rsm:VSENationalCode>C23</rsm:VSENationalCode>'
+
+    def _four_slot(self, **kwargs):
+        return build_e66([quarter_block(CONS_ID, "2025-06-02T22:00:00Z", 4)], **kwargs)
+
+    def test_derived_hourly_resolution_is_rejected(self):
+        block = build_block(
+            CONS_ID,
+            "".join(_obs(s, "10") for s in range(1, 5)),
+            start="2025-06-02T22:00:00Z",
+            end="2025-06-03T02:00:00Z",
+            resolution="60",
+        )
+
+        resp = self._import(build_e66([block]))
+
+        # The 1.6 XSD fixes Resolution at 15/MIN: hourly is not normative 1.6
+        # and must never slip through a structural fallback.
+        self.assertRejected(resp)
+        self.assertEqual(MeterReading.objects.count(), 0)
+
+    def test_derived_offset_less_interval_is_rejected(self):
+        block = build_block(
+            CONS_ID,
+            "".join(_obs(s, "10") for s in range(1, 5)),
+            start="2025-06-02T22:00:00",
+            end="2025-06-02T23:00:00",
+        )
+
+        resp = self._import(build_e66([block]))
+
+        self.assertRejected(resp)
+
+    def test_derived_wrong_namespace_is_rejected(self):
+        resp = self._import(self._four_slot(namespace="http://example.com"))
+
+        self.assertRejected(resp, "unsupported_root")
+
+    def test_derived_older_schema_version_is_rejected(self):
+        resp = self._import(self._four_slot(root="ValidatedMeteredData_15"))
+
+        self.assertRejected(resp, "unsupported_schema_version")
+
+    def test_derived_unknown_status_is_schema_rejected(self):
+        resp = self._import(self._four_slot(status="7"))
+
+        self.assertRejected(resp, "schema_invalid")
+
+    def test_derived_cancellation_names_cancellation(self):
+        resp = self._import(self._four_slot(status="1"))
+
+        self.assertRejected(resp, "cancellation_rejected")
+        self.assertIn("cancellation", resp.data["errors"][0]["error"].lower())
+
+    def test_derived_missing_creation_is_rejected(self):
+        xml = self._four_slot().replace(b"<rsm:Creation>2025-06-05T15:40:05Z</rsm:Creation>", b"")
+
+        resp = self._import(xml)
+
+        self.assertRejected(resp)
+
+    def test_derived_missing_reason_is_rejected(self):
+        import re
+
+        xml = self._four_slot()
+        xml = re.sub(rb"<rsm:BusinessReasonType.*?</rsm:BusinessReasonType>", b"", xml, flags=re.S)
+
+        resp = self._import(xml)
+
+        self.assertRejected(resp)
+
+    def test_derived_missing_interval_is_rejected(self):
+        block = build_block(
+            CONS_ID, "".join(_obs(s, "10") for s in range(1, 5)), omit_interval=True
+        )
+
+        resp = self._import(build_e66([block]))
+
+        self.assertRejected(resp, "missing_interval")
+
+    def test_derived_missing_point_is_rejected(self):
+        block = build_block(
+            CONS_ID, "".join(_obs(s, "10") for s in range(1, 5)), omit_point=True
+        )
+
+        resp = self._import(build_e66([block]))
+
+        self.assertRejected(resp, "missing_meter_point")
+
+
+class StrictProfileTests(StrictBase):
+    C38 = '<rsm:VSENationalCode>C38</rsm:VSENationalCode>'
+    C40 = '<rsm:VSENationalCode>C40</rsm:VSENationalCode>'
+    C23 = '<rsm:VSENationalCode>C23</rsm:VSENationalCode>'
+    E44 = '<rsm:ebIXCode>E44</rsm:ebIXCode>'
+
+    def _four(self, **kwargs):
+        return quarter_block(CONS_ID, "2025-06-02T22:00:00Z", 4, **kwargs)
+
+    def test_derived_temporary_only_file_is_held(self):
+        obs = "".join(_obs(s, "10", "21") for s in range(1, 5))
+
+        resp = self._import(build_e66([build_block(CONS_ID, obs)]))
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["result_status"], "held")
+        self.assertEqual(resp.data["rows_imported"], 0)
+        self.assertEqual(resp.data["result_counts"]["held"], 4)
+        self.assertEqual(MeterReading.objects.count(), 0)
+        self.assertEqual(QuarantinedReading.objects.count(), 4)
+
+    def test_derived_c38_file_is_held_not_billed(self):
+        resp = self._import(build_e66([self._four()], reason_xml=self.C38))
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["result_status"], "held")
+        self.assertEqual(MeterReading.objects.count(), 0)
+        self.assertEqual(QuarantinedReading.objects.count(), 4)
+        self.assertTrue(all(q.business_reason == "C38" for q in QuarantinedReading.objects.all()))
+
+    def test_derived_c40_leg_profile_is_named_unsupported(self):
+        resp = self._import(build_e66([self._four()], reason_xml=self.C40))
+
+        self.assertRejected(resp, "unsupported_reason")
+        self.assertIn("C40", resp.data["errors"][0]["error"])
+        self.assertIn("LEG", resp.data["errors"][0]["error"])
+
+    def test_derived_query_profile_is_named_unsupported(self):
+        resp = self._import(build_e66([self._four()], reason_xml=self.C23))
+
+        self.assertRejected(resp, "unsupported_reason")
+        self.assertIn("C23", resp.data["errors"][0]["error"])
+
+    def test_derived_e66_root_alone_does_not_imply_support(self):
+        # Valid E66 root, valid blocks, unsupported market role: no writes.
+        resp = self._import(build_e66([self._four()], reason_xml=self.E44))
+
+        self.assertRejected(resp, "unsupported_reason")
+        self.assertEqual(resp.data["rows_total"], 0)
+
+    def test_derived_exchange_only_file_is_unchanged_with_named_issue(self):
+        block = build_block(
+            "CH9999901234500000000000000000033",
+            "".join(_obs(s, "10") for s in range(1, 5)),
+            point="ExchangeMeteringPoint",
+            start="2025-06-05T22:00:00Z",
+            end="2025-06-05T23:00:00Z",
+        )
+
+        resp = self._import(build_e66([block]))
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["result_status"], "unchanged")
+        self.assertEqual(resp.data["result_counts"]["excluded"], 4)
+        self.assertTrue(any(issue["code"] == "exchange_excluded" for issue in resp.data["issues"]))
+        self.assertEqual(MeterReading.objects.count(), 0)
+        self.assertEqual(QuarantinedReading.objects.count(), 0)
+
+    def test_derived_hkn_style_totals_are_rejected_without_inventing_slots(self):
+        # Irregular multi-month single-observation delivery without usable
+        # resolution: must never become quarter-hour slots.
+        block = build_block(
+            CONS_ID,
+            _obs(1, "12345"),
+            start="2025-01-01T00:00:00Z",
+            end="2025-04-01T00:00:00Z",
+            omit_resolution=True,
+        )
+
+        resp = self._import(build_e66([block]))
+
+        self.assertRejected(resp, "missing_resolution")
+        self.assertEqual(MeterReading.objects.count(), 0)
+
+    def test_derived_sparse_delivery_with_resolution_is_rejected(self):
+        block = build_block(
+            CONS_ID,
+            _obs(1, "10"),
+            start="2025-01-01T00:00:00Z",
+            end="2025-01-02T00:00:00Z",
+        )
+
+        resp = self._import(build_e66([block]))
+
+        self.assertRejected(resp, "missing_position")
+
+
+class RevisionTests(StrictBase):
+    def test_resolution_change_is_a_billing_input_change(self):
+        self._import(build_e66([self._four()]))
+        MeterReading.objects.filter(timestamp=TS0).update(resolution="hourly")
+        resp = self._import(self._replace_four(["101", "102", "103", "104"], creation="2025-06-06T10:00:00Z"))
+        changed = next(change for change in resp.data["reading_changes"] if change["timestamp"] == TS0.isoformat())
+        self.assertEqual(changed["kind"], "value")
+        self.assertEqual(changed["old_energy"], changed["new_energy"])
+
+    def _four(self, **kwargs):
+        return quarter_block(CONS_ID, "2025-06-02T22:00:00Z", 4, **kwargs)
+
+    def _replace_four(self, values, *, creation, status="5", delivery_id="DERIVED-REPL"):
+        obs = "".join(_obs(s, v) for s, v in zip(range(1, 5), values))
+        return build_e66(
+            [build_block(CONS_ID, obs, doc="DERIVED-REPL-C")],
+            status=status,
+            creation=creation,
+            delivery_id=delivery_id,
+        )
+
+    def test_newer_and_stale_replacements_in_both_orders(self):
+        for first_creation, second_creation, expected in (
+            ("2025-06-04T10:00:00Z", "2025-06-06T10:00:00Z",
+             [Decimal("210"), Decimal("211"), Decimal("212"), Decimal("213")]),
+            ("2025-06-06T10:00:00Z", "2025-06-04T10:00:00Z",
+             [Decimal("200"), Decimal("201"), Decimal("202"), Decimal("203")]),
+        ):
+            with self.subTest(first=first_creation, second=second_creation):
+                MeterReading.objects.all().delete()
+                QuarantinedReading.objects.all().delete()
+                self._import(build_e66([self._four()]))
+                self._import(self._replace_four(["200", "201", "202", "203"], creation=first_creation))
+                resp = self._import(
+                    self._replace_four(["210", "211", "212", "213"], creation=second_creation)
+                )
+                # Arrival order never wins: only Creation decides.
+                got = [
+                    r.energy_kwh
+                    for r in MeterReading.objects.filter(metering_point=self.cons_mp).order_by("timestamp")
+                ]
+                self.assertEqual(got, expected)
+                self.assertEqual(resp.status_code, 201)
+
+    def test_equal_creation_identical_replay_is_idempotent(self):
+        self._import(build_e66([self._four()]))
+        before = list(MeterReading.objects.order_by("timestamp").values_list("energy_kwh", flat=True))
+
+        resp = self._import(build_e66([self._four()], delivery_id="DERIVED-REPLAY"))
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["result_status"], "unchanged")
+        self.assertEqual(resp.data["result_counts"]["duplicate"], 4)
+        self.assertEqual(resp.data["reading_changes"], [])
+        after = list(MeterReading.objects.order_by("timestamp").values_list("energy_kwh", flat=True))
+        self.assertEqual(before, after)
+
+    def test_equal_creation_conflict_rejects_file_and_exposes_both_documents(self):
+        self._import(build_e66([self._four()], delivery_id="DERIVED-ORIG"))
+        before = {
+            (r.timestamp, r.energy_kwh)
+            for r in MeterReading.objects.filter(metering_point=self.cons_mp)
+        }
+
+        resp = self._import(
+            self._replace_four(
+                ["200", "201", "202", "203"],
+                creation="2025-06-05T15:40:05Z",  # same Creation as the original
+                delivery_id="DERIVED-CONFLICT",
+            )
+        )
+
+        self.assertRejected(resp, "equal_creation_conflict")
+        conflict = next(i for i in resp.data["issues"] if i["code"] == "equal_creation_conflict")
+        self.assertEqual(conflict["incoming_document_id"], "DERIVED-REPL-C")
+        self.assertEqual(conflict["incoming_delivery_id"], "DERIVED-CONFLICT")
+        self.assertIn("DERIVED", conflict["stored_document_id"])
+        self.assertEqual(conflict["stored_delivery_id"], "DERIVED-ORIG")
+        self.assertEqual(resp.data["reading_changes"], [])
+        after = {
+            (r.timestamp, r.energy_kwh)
+            for r in MeterReading.objects.filter(metering_point=self.cons_mp)
+        }
+        self.assertEqual(before, after)
+
+    def test_original_with_newer_creation_does_not_overwrite(self):
+        self._import(build_e66([self._four()]))
+        before = list(MeterReading.objects.order_by("timestamp").values_list("energy_kwh", flat=True))
+
+        # Status=9 originals never overwrite, even with a newer Creation:
+        # corrections arrive as Status=5.
+        resp = self._import(
+            self._replace_four(
+                ["200", "201", "202", "203"], creation="2025-06-09T10:00:00Z", status="9"
+            )
+        )
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["rows_overwritten"], 0)
+        self.assertEqual(resp.data["result_counts"]["duplicate"], 4)
+        after = list(MeterReading.objects.order_by("timestamp").values_list("energy_kwh", flat=True))
+        self.assertEqual(before, after)
+
+    def test_legacy_null_provenance_is_replaced_by_dated_delivery(self):
+        MeterReading.objects.create(
+            metering_point=self.cons_mp,
+            timestamp=datetime(2025, 6, 2, 22, 15, tzinfo=timezone.utc),
+            direction=ReadingDirection.IN,
+            energy_kwh=Decimal("9.0000"),
+            import_source=ImportSource.SDATCH,
+            source_creation=None,
+            source_document_id="LEGACY",
+        )
+        block = build_block(
+            CONS_ID,
+            _obs(1, "50") + "".join(_obs(s, str(100 + s)) for s in range(2, 5)),
+        )
+
+        resp = self._import(build_e66([block], status="5", creation="2025-06-06T10:00:00Z"))
+
+        # NULL provenance counts as older than any dated delivery.
+        self.assertEqual(resp.status_code, 201)
+        row = MeterReading.objects.get(
+            metering_point=self.cons_mp,
+            timestamp=datetime(2025, 6, 2, 22, 15, tzinfo=timezone.utc),
+        )
+        self.assertEqual(row.energy_kwh, Decimal("102.0000"))
+        self.assertIsNotNone(row.source_creation)
+
+    def test_value_availability_and_metadata_changes_are_distinguished(self):
+        self._import(build_e66([self._four()], delivery_id="DERIVED-ORIG"))
+        # Value change on two slots, identical value (metadata-only) on two.
+        resp = self._import(
+            self._replace_four(
+                ["101", "102", "999", "998"], creation="2025-06-06T10:00:00Z"
+            )
+        )
+
+        self.assertEqual(resp.data["result_status"], "accepted")
+        self.assertEqual(resp.data["rows_overwritten"], 4)
+        by_ts = {c["timestamp"]: c for c in resp.data["reading_changes"]}
+        self.assertEqual(len(by_ts), 4)
+        kinds = sorted(c["kind"] for c in by_ts.values())
+        self.assertEqual(kinds, ["metadata", "metadata", "value", "value"])
+        for change in by_ts.values():
+            if change["kind"] == "metadata":
+                self.assertEqual(change["old_energy"], change["new_energy"])
+            else:
+                self.assertNotEqual(change["old_energy"], change["new_energy"])
+
+    def test_promotion_is_an_availability_change_without_double_count(self):
+        self._import(
+            build_e66([self._four()], reason_xml='<rsm:VSENationalCode>C38</rsm:VSENationalCode>')
+        )
+        self.assertEqual(QuarantinedReading.objects.count(), 4)
+
+        resp = self._import(build_e66([self._four()], delivery_id="DERIVED-PROMOTE"))
+
+        counts = resp.data["result_counts"]
+        self.assertEqual(counts["created"], 4)
+        self.assertEqual(counts["promoted"], 4)
+        self.assertEqual(resp.data["rows_imported"], 4)  # no double count on top
+        self.assertEqual(QuarantinedReading.objects.count(), 0)
+        changes = resp.data["reading_changes"]
+        self.assertEqual(len(changes), 4)
+        self.assertTrue(all(c["kind"] == "availability" and c["promoted"] for c in changes))
+
+
+class FreshnessSeparationTests(StrictBase):
+    C38 = '<rsm:VSENationalCode>C38</rsm:VSENationalCode>'
+
+    def _four(self, **kwargs):
+        return quarter_block(CONS_ID, "2025-06-02T22:00:00Z", 4, **kwargs)
+
+    def test_newer_held_does_not_block_validated_billing(self):
+        self._import(
+            build_e66([self._four()], reason_xml=self.C38, creation="2025-06-06T10:00:00Z")
+        )
+        self.assertEqual(QuarantinedReading.objects.count(), 4)
+
+        # Older validated delivery still lands in billing; the newer held
+        # discrepancy stays visible instead of being silently deleted.
+        resp = self._import(build_e66([self._four()], creation="2025-06-04T10:00:00Z"))
+
+        self.assertEqual(resp.data["result_status"], "accepted")
+        self.assertEqual(resp.data["rows_imported"], 4)
+        self.assertEqual(resp.data["result_counts"]["promoted"], 0)
+        self.assertEqual(MeterReading.objects.count(), 4)
+        self.assertEqual(QuarantinedReading.objects.count(), 4)
+
+    def test_billable_promotes_only_predecessors(self):
+        self._import(
+            build_e66([self._four()], reason_xml=self.C38, creation="2025-06-04T10:00:00Z")
+        )
+
+        resp = self._import(build_e66([self._four()], creation="2025-06-06T10:00:00Z"))
+
+        self.assertEqual(resp.data["result_counts"]["promoted"], 4)
+        self.assertEqual(QuarantinedReading.objects.count(), 0)
+
+    def test_equal_creation_billable_wins_over_quarantine(self):
+        self._import(
+            build_e66([self._four()], reason_xml=self.C38, creation="2025-06-05T15:40:05Z")
+        )
+
+        resp = self._import(build_e66([self._four()], creation="2025-06-05T15:40:05Z"))
+
+        self.assertEqual(resp.data["rows_imported"], 4)
+        self.assertEqual(resp.data["result_counts"]["promoted"], 4)
+        self.assertEqual(QuarantinedReading.objects.count(), 0)
+
+    def test_stale_info_does_not_shadow_validated_billing(self):
+        self._import(build_e66([self._four()], creation="2025-06-06T10:00:00Z"))
+        self.assertEqual(MeterReading.objects.count(), 4)
+
+        resp = self._import(
+            build_e66([self._four()], reason_xml=self.C38, creation="2025-06-04T10:00:00Z")
+        )
+
+        self.assertEqual(resp.data["result_status"], "unchanged")
+        self.assertEqual(resp.data["result_counts"]["stale"], 4)
+        self.assertEqual(QuarantinedReading.objects.count(), 0)
+        self.assertEqual(MeterReading.objects.count(), 4)
+
+    def test_newer_info_stays_visible_next_to_billing(self):
+        self._import(build_e66([self._four()], creation="2025-06-04T10:00:00Z"))
+
+        resp = self._import(
+            build_e66([self._four()], reason_xml=self.C38, creation="2025-06-06T10:00:00Z")
+        )
+
+        self.assertEqual(resp.data["result_status"], "held")
+        self.assertEqual(resp.data["result_counts"]["held"], 4)
+        self.assertEqual(MeterReading.objects.count(), 4)
+        self.assertEqual(QuarantinedReading.objects.count(), 4)
+
+
+class QuarantineLifecycleTests(StrictBase):
+    C38 = '<rsm:VSENationalCode>C38</rsm:VSENationalCode>'
+
+    def _four(self, **kwargs):
+        return quarter_block(CONS_ID, "2025-06-02T22:00:00Z", 4, **kwargs)
+
+    def test_quarantine_replacement_is_counted_as_protection_evidence(self):
+        self._import(
+            build_e66([self._four()], reason_xml=self.C38, creation="2025-06-04T10:00:00Z")
+        )
+        obs = "".join(_obs(s, str(200 + s)) for s in range(1, 5))
+        block = build_block(CONS_ID, obs)
+
+        resp = self._import(
+            build_e66([block], reason_xml=self.C38, creation="2025-06-06T10:00:00Z")
+        )
+
+        counts = resp.data["result_counts"]
+        self.assertEqual(resp.data["result_status"], "held")
+        self.assertEqual(counts["held"], 4)
+        self.assertEqual(counts["quarantine_overwritten"], 4)
+        self.assertEqual(
+            QuarantinedReading.objects.get(
+                metering_point=self.cons_mp,
+                timestamp=datetime(2025, 6, 2, 22, 0, tzinfo=timezone.utc),
+            ).energy_kwh,
+            Decimal("201.0000"),
+        )
+
+    def test_quarantine_rows_carry_full_provenance(self):
+        self._import(
+            build_e66([self._four()], reason_xml=self.C38, delivery_id="DERIVED-INFO")
+        )
+
+        row = QuarantinedReading.objects.first()
+        self.assertEqual(row.business_reason, "C38")
+        self.assertEqual(row.source_delivery_id, "DERIVED-INFO")
+        self.assertIsNotNone(row.source_creation)
+        self.assertEqual(row.source_product, ACTIVE_PRODUCT)
+        self.assertEqual(row.source_unit, "KWH")
+        self.assertEqual(row.source_meter_id, CONS_ID)
+        self.assertIsNotNone(row.import_batch)
+
+    def test_quarantine_never_leaks_into_billing_totals(self):
+        from django.db.models import Sum
+
+        self._import(
+            build_e66([self._four()], reason_xml=self.C38, creation="2025-06-04T10:00:00Z")
+        )
+        total = MeterReading.objects.filter(metering_point=self.cons_mp).aggregate(
+            total=Sum("energy_kwh")
+        )["total"]
+        self.assertIsNone(total)
+
+
+class ResultContractTests(StrictBase):
+    def test_failure_after_writes_clears_committed_counters(self):
+        finalize = sdatch_importer._finalize_log
+
+        def failed_finalize(*args, **kwargs):
+            finalize(*args, **kwargs)
+            raise RuntimeError("Simulated failure before transaction commit")
+
+        for reason in ("<rsm:ebIXCode>E88</rsm:ebIXCode>", "<rsm:VSENationalCode>C38</rsm:VSENationalCode>"):
+            with self.subTest(reason=reason), unittest_mock.patch.object(sdatch_importer, "_finalize_log", failed_finalize):
+                resp = self._import(build_e66([quarter_block(CONS_ID, "2025-06-02T22:00:00Z", 4)], reason_xml=reason))
+            self.assertRejected(resp, "internal_error")
+            self.assertEqual(MeterReading.objects.count(), 0)
+            self.assertEqual(QuarantinedReading.objects.count(), 0)
+            self.assertEqual(resp.data["reading_changes"], [])
+            self.assertEqual(resp.data["warnings"], [])
+            self.assertEqual(resp.data["result_counts"]["created"], 0)
+            self.assertEqual(resp.data["result_counts"]["held"], 0)
+            self.assertEqual(resp.data["result_counts"]["rejected"], 4)
+
+    def test_response_carries_structured_contract_fields(self):
+        resp = self._import(
+            build_e66([quarter_block(CONS_ID, "2025-06-02T22:00:00Z", 4)])
+        )
+
+        for key in (
+            "result_status",
+            "result_counts",
+            "issues",
+            "reading_changes",
+            "source_delivery",
+        ):
+            self.assertIn(key, resp.data, f"ImportLog response must carry {key}")
+        self.assertEqual(resp.data["result_status"], "accepted")
+        self.assertEqual(
+            set(resp.data["result_counts"]),
+            {
+                "created", "overwritten", "held", "promoted", "duplicate",
+                "stale", "excluded", "rejected", "quarantine_overwritten",
+                "reading_changes_truncated",
+            },
+        )
+
+    def test_rejection_counts_unparsed_later_blocks(self):
+        bad = build_block(CONS_ID, "".join(_obs(position, "10") for position in range(1, 4)))
+        later = quarter_block(PROD_ID, "2025-06-02T22:00:00Z", 4, point="ProductionMeteringPoint")
+        resp = self._import(build_e66([bad, later]))
+        self.assertRejected(resp, "missing_position")
+        self.assertEqual(resp.data["rows_total"], 7)
+        self.assertEqual(resp.data["result_counts"]["rejected"], 7)
+
+    def test_counter_identity_for_accepted_and_rejected_files(self):
+        good = self._import(
+            build_e66([quarter_block(CONS_ID, "2025-06-02T22:00:00Z", 4)])
+        )
+        counts = good.data["result_counts"]
+        accounted = (
+            counts["created"] + counts["overwritten"] + counts["held"]
+            + counts["duplicate"] + counts["stale"] + counts["excluded"]
+        )
+        self.assertEqual(accounted, good.data["rows_total"])
+        self.assertEqual(counts["rejected"], 0)
+
+        bad_block = build_block(CONS_ID, "".join(_obs(s, "10") for s in range(1, 4)))
+        bad = self._import(build_e66([bad_block]))
+        bad_counts = bad.data["result_counts"]
+        self.assertEqual(
+            bad_counts["excluded"] + bad_counts["rejected"], bad.data["rows_total"]
+        )
+
+    def test_multi_file_uploads_stay_independent(self):
+        good_resp = self._import(
+            build_e66([quarter_block(CONS_ID, "2025-06-02T22:00:00Z", 4)])
+        )
+        self.assertEqual(good_resp.data["result_status"], "accepted")
+
+        bad_block = build_block(
+            PROD_ID,
+            "".join(_obs(s, "10") for s in range(1, 4)),
+            point="ProductionMeteringPoint",
+        )
+        bad_resp = self._import(build_e66([bad_block]))
+
+        self.assertEqual(bad_resp.data["result_status"], "rejected")
+        # The earlier file's readings are untouched by the later rejection.
+        self.assertEqual(MeterReading.objects.count(), 4)
+        self.assertEqual(ImportLog.objects.count(), 2)
+
+    def test_csv_overlap_rejects_quarantine_planned_slots_too(self):
+        MeterReading.objects.create(
+            metering_point=self.cons_mp,
+            timestamp=datetime(2025, 6, 2, 22, 0, tzinfo=timezone.utc),
+            direction=ReadingDirection.IN,
+            energy_kwh=Decimal("9.0000"),
+            import_source=ImportSource.MANUAL,
+        )
+        obs = "".join(_obs(s, "10", "21") for s in range(1, 5))
+
+        resp = self._import(
+            build_e66(
+                [build_block(CONS_ID, obs)],
+                reason_xml='<rsm:VSENationalCode>C38</rsm:VSENationalCode>',
+            )
+        )
+
+        self.assertRejected(resp, "source_conflict")
+        row = MeterReading.objects.get(
+            metering_point=self.cons_mp,
+            timestamp=datetime(2025, 6, 2, 22, 0, tzinfo=timezone.utc),
+        )
+        self.assertEqual(row.energy_kwh, Decimal("9.0000"))
+
+
+class AmbiguityTests(StrictBase):
+    def test_legacy_cross_column_collision_rejects_file(self):
+        other = MeteringPoint.objects.create(
+            zev=self.zev, meter_id="CH9999901234500000000000000000099",
+            meter_type=MeteringPointType.CONSUMPTION,
+        )
+        # Legacy / direct-DB state current validation forbids: bypass it.
+        MeteringPoint.objects.filter(pk=other.pk).update(secondary_meter_id=CONS_ID)
+
+        resp = self._import(
+            build_e66([quarter_block(CONS_ID, "2025-06-02T22:00:00Z", 4)])
+        )
+
+        self.assertRejected(resp, "ambiguous_meter")
+        self.assertIn(CONS_ID, resp.data["errors"][0]["error"])
+
+    def test_primary_plus_alias_of_same_point_is_a_within_file_duplicate(self):
+        self.cons_mp.secondary_meter_id = "CH9999901234500000000000000000098"
+        self.cons_mp.save(update_fields=["secondary_meter_id"])
+        first = build_block(
+            CONS_ID, "".join(_obs(s, "10") for s in range(1, 5)), doc="BLOCK-PRIMARY"
+        )
+        second = build_block(
+            "CH9999901234500000000000000000098",
+            "".join(_obs(s, "10") for s in range(1, 5)),
+            doc="BLOCK-ALIAS",
+        )
+
+        resp = self._import(build_e66([first, second]))
+
+        # Both identities resolve to the same point: the slot is delivered
+        # twice, which is a duplicate even though the values agree.
+        self.assertRejected(resp, "duplicate_position")
+
+
+class SecurityLimitTests(StrictBase):
+    def test_compressed_upload_without_size_hint_is_read_with_a_limit(self):
+        from io import BytesIO
+
+        content = gzip.compress(build_e66([self._four()]))
+        upload = BytesIO(content)
+        upload.name = "bounded.xml.gz"
+        with unittest_mock.patch.object(sdatch_importer, "MAX_SDAT_BYTES", 10):
+            with unittest_mock.patch.object(upload, "read", wraps=upload.read) as read:
+                log = sdatch_importer.import_sdatch(upload, self.zev, self.owner)
+        self.assertEqual(log.result_status, "rejected")
+        self.assertEqual(log.issues[0]["code"], "file_too_large")
+        read.assert_called_once_with(11)
+
+    def _four(self, **kwargs):
+        return quarter_block(CONS_ID, "2025-06-02T22:00:00Z", 4, **kwargs)
+
+    def test_truncated_gzip_is_rejected(self):
+        payload = gzip.compress(build_e66([self._four()]))[:-10]
+
+        resp = self._upload("truncated.xml.gz", payload)
+
+        self.assertRejected(resp, "gzip_error")
+        self.assertIn("decompress", resp.data["errors"][0]["error"].lower())
+
+    def test_decompressed_bomb_is_rejected(self):
+        big = build_e66([self._four()]) * 40
+        payload = gzip.compress(big)
+
+        with unittest_mock.patch.object(sdatch_importer, "MAX_SDAT_DECOMPRESSED_BYTES", 100):
+            resp = self._upload("bomb.xml.gz", payload)
+
+        self.assertRejected(resp, "decompressed_too_large")
+
+    def test_actual_size_is_enforced_without_size_hint(self):
+        upload = SimpleUploadedFile("big.xml", build_e66([self._four()]), content_type="application/xml")
+        upload.size = None  # missing hint: the real byte count still applies.
+
+        with unittest_mock.patch.object(sdatch_importer, "MAX_SDAT_BYTES", 10):
+            resp = self.client.post(
+                "/api/v1/metering/import/sdatch/",
+                {"file": upload, "zev_id": str(self.zev.id)},
+                format="multipart",
+            )
+
+        self.assertRejected(resp, "file_too_large")
+
+    def test_external_entity_payload_is_rejected_safely(self):
+        payload = (
+            b"<?xml version='1.0' encoding='UTF-8'?>\n"
+            b'<!DOCTYPE rsm:ValidatedMeteredData_16 [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>\n'
+            + build_e66([self._four()])
+        )
+
+        resp = self._import(payload)
+
+        self.assertRejected(resp)
+        self.assertNotIn("root:", "".join(e["error"] for e in resp.data["errors"]))
+
+    def test_entity_expansion_payload_does_not_hang_or_write(self):
+        laughs = (
+            b"<?xml version='1.0'?><!DOCTYPE l ["
+            b'<!ENTITY a "1234567890">'
+            b'<!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;">'
+            b'<!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;">'
+            b"]><l>&c;</l>"
+        )
+
+        resp = self._import(laughs)
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(MeterReading.objects.count(), 0)
+        self.assertEqual(QuarantinedReading.objects.count(), 0)
+
+
+class DstBoundaryTests(StrictBase):
+    """Interval-start storage across Swiss calendar boundaries.
+
+    Source timestamps describe interval ends; the backend stores interval
+    starts (``start + (seq-1) * 15min``). These tests pin the mapping at
+    92/96/100-slot days and civil boundaries.
+    """
+
+    def _day(self, start, count, **kwargs):
+        start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        end = (start_dt + timedelta(minutes=15 * count)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        obs = "".join(_obs(seq, str(100 + seq)) for seq in range(1, count + 1))
+        return build_e66(
+            [build_block(CONS_ID, obs, start=start, end=end, doc="DERIVED-DAY")], **kwargs
+        )
+
+    def test_short_dst_day_has_92_slots(self):
+        # Spring forward: 2025-03-30 is a 23-hour Swiss day.
+        resp = self._import(self._day("2025-03-29T23:00:00Z", 92))
+
+        self.assertEqual(resp.data["result_status"], "accepted")
+        self.assertEqual(resp.data["rows_imported"], 92)
+        stamps = list(
+            MeterReading.objects.order_by("timestamp").values_list("timestamp", flat=True)
+        )
+        self.assertEqual(stamps[0], datetime(2025, 3, 29, 23, 0, tzinfo=timezone.utc))
+        self.assertEqual(stamps[-1], datetime(2025, 3, 30, 21, 45, tzinfo=timezone.utc))
+        self.assertEqual(len(stamps), 92)
+
+    def test_long_dst_day_has_100_slots(self):
+        # Fall back: 2025-10-26 is a 25-hour Swiss day.
+        resp = self._import(self._day("2025-10-25T22:00:00Z", 100))
+
+        self.assertEqual(resp.data["result_status"], "accepted")
+        self.assertEqual(resp.data["rows_imported"], 100)
+        stamps = list(
+            MeterReading.objects.order_by("timestamp").values_list("timestamp", flat=True)
+        )
+        self.assertEqual(stamps[0], datetime(2025, 10, 25, 22, 0, tzinfo=timezone.utc))
+        self.assertEqual(stamps[-1], datetime(2025, 10, 26, 22, 45, tzinfo=timezone.utc))
+
+    def test_leap_day_month_and_year_boundaries(self):
+        cases = [
+            ("2024-02-29T00:00:00Z", 4),  # leap day
+            ("2025-01-31T23:00:00Z", 8),  # month boundary
+            ("2024-12-31T23:00:00Z", 8),  # year boundary
+        ]
+        for start, count in cases:
+            with self.subTest(start=start):
+                MeterReading.objects.all().delete()
+                resp = self._import(self._day(start, count))
+                self.assertEqual(resp.data["result_status"], "accepted", resp.data.get("errors"))
+                first = MeterReading.objects.order_by("timestamp").first()
+                # Interval-start convention: seq1 lands exactly on block start.
+                self.assertEqual(
+                    first.timestamp,
+                    datetime.fromisoformat(start.replace("Z", "+00:00")),
+                )
+                self.assertEqual(MeterReading.objects.count(), count)
+
+    def test_midnight_tariff_boundary_keeps_slot_identity(self):
+        resp = self._import(self._day("2025-06-02T23:00:00Z", 8))
+        self.assertEqual(resp.data["result_status"], "accepted")
+
+        stamps = sorted(
+            MeterReading.objects.values_list("timestamp", flat=True)
+        )
+        self.assertEqual(stamps[4], datetime(2025, 6, 3, 0, 0, tzinfo=timezone.utc))
+        self.assertEqual(
+            MeterReading.objects.get(timestamp=stamps[4]).energy_kwh, Decimal("105.0000")
+        )
+
+
+class InvoiceBillingRegressionTests(TestCase):
+    """End-to-end billing safety: quarantine never billed, estimated billed
+    with quality kept, promotion completes the billing input. Uses the
+    invoice engine read-only; invoice impact workflows remain D's scope."""
+
+    def setUp(self):
+        from datetime import date
+
+        from invoices.test_helpers import make_participant as _make_participant
+        from invoices.test_helpers import make_zev as _make_zev
+        from tariffs.models import BillingMode, EnergyType, Tariff, TariffCategory, TariffPeriod
+        from testing.helpers import clear_vat_rates
+
+        clear_vat_rates()
+        self.client = APIClient()
+        self.owner = make_user("bill_owner", UserRole.USER)
+        self.zev = _make_zev(self.owner, "Billing ZEV")
+        # After the grant: promoting the account retires tokens minted before it.
+        auth(self.client, self.owner)
+        self.participant = _make_participant(self.zev, first="Bill", last="Case")
+        self.participant.valid_from = date(2025, 6, 1)
+        self.participant.save(update_fields=["valid_from"])
+        self.cons_mp = MeteringPoint.objects.create(
+            zev=self.zev, meter_id=CONS_ID, meter_type=MeteringPointType.CONSUMPTION,
+        )
+        MeteringPointAssignment.objects.create(
+            metering_point=self.cons_mp, participant=self.participant,
+            valid_from=date(2025, 6, 1),
+        )
+        self.tariff = Tariff.objects.create(
+            zev=self.zev,
+            name="Billing Grid",
+            category=TariffCategory.ENERGY,
+            billing_mode=BillingMode.ENERGY,
+            energy_type=EnergyType.GRID,
+            valid_from=date(2025, 6, 1),
+        )
+        TariffPeriod.objects.create(
+            tariff=self.tariff, period_type="flat", price_chf_per_kwh=Decimal("0.20000"),
+        )
+
+    def _upload(self, content):
+        upload = SimpleUploadedFile("billing.xml", content, content_type="application/xml")
+        return self.client.post(
+            "/api/v1/metering/import/sdatch/",
+            {"file": upload, "zev_id": str(self.zev.id)},
+            format="multipart",
+        )
+
+    def test_estimated_billed_temporary_excluded_then_promotion_completes_input(self):
+        from datetime import date
+
+        from invoices.engine import generate_invoice
+
+        obs = _obs(1, "100", "21") + _obs(2, "50", "56") + _obs(3, "10") + _obs(4, "10")
+        resp = self._upload(build_e66([build_block(CONS_ID, obs)]))
+        self.assertEqual(resp.data["result_status"], "accepted")
+
+        invoice = generate_invoice(self.participant, date(2025, 6, 1), date(2025, 6, 30))
+        item = invoice.items.get(description=self.tariff.name)
+        # Estimated (56) is billable with quality kept; temporary (21) is not.
+        self.assertEqual(item.quantity_kwh, Decimal("70.0000"))
+        self.assertEqual(
+            MeterReading.objects.get(
+                metering_point=self.cons_mp,
+                timestamp=datetime(2025, 6, 2, 22, 15, tzinfo=timezone.utc),
+            ).condition,
+            "56",
+        )
+
+        # A later billable delivery promotes the temporary slot into billing.
+        promote = _obs(1, "100") + _obs(2, "50", "56") + _obs(3, "10") + _obs(4, "10")
+        resp2 = self._upload(build_e66([build_block(CONS_ID, promote, doc="PROMOTE")]))
+        self.assertEqual(resp2.data["result_counts"]["promoted"], 1)
+        self.assertEqual(
+            MeterReading.objects.filter(metering_point=self.cons_mp).count(), 4
+        )
+
+
+@unittest.skipUnless(connection.vendor == "postgresql", "PostgreSQL-only locking evidence")
+class SdatConcurrencyTests(TransactionTestCase):
+    """Concurrent revision selection on PostgreSQL.
+
+    SQLite serializes writers at the database level, so it cannot prove the
+    locking strategy; these tests are skipped anywhere but PostgreSQL and the
+    completion report must state which backend ran them.
+    """
+
+    def setUp(self):
+        self.owner = make_user("conc_owner", UserRole.USER)
+        self.zev = create_managed_zev(
+            name="Concurrency ZEV", owner=self.owner, zev_type="vzev", invoice_prefix="K"
+        )
+        self.cons_mp = MeteringPoint.objects.create(
+            zev=self.zev, meter_id=CONS_ID, meter_type=MeteringPointType.CONSUMPTION,
+        )
+        self.zev_id = self.zev.pk
+        self.owner_id = self.owner.pk
+
+    def _file(self, values, *, creation, status="9", delivery_id="DERIVED"):
+        obs = "".join(_obs(s, v) for s, v in zip(range(1, 5), values))
+        return build_e66(
+            [build_block(CONS_ID, obs, doc=f"{delivery_id}-C")],
+            status=status,
+            creation=creation,
+            delivery_id=delivery_id,
+        )
+
+    def _run_pair(self, payload_a, payload_b):
+        """Import two files on two threads with a shared start barrier."""
+        barrier = threading.Barrier(3)
+        outcomes = {}
+
+        def worker(name, payload):
+            from django.db import connections
+
+            connections.close_all()
+            try:
+                zev = Zev.objects.get(pk=self.zev_id)
+                user = get_user_model().objects.get(pk=self.owner_id)
+                barrier.wait(timeout=30)
+                try:
+                    log = sdatch_importer.import_sdatch(
+                        SimpleUploadedFile(f"{name}.xml", payload, content_type="application/xml"),
+                        zev,
+                        user,
+                    )
+                    outcomes[name] = log
+                except Exception as exc:  # noqa: BLE001 — surfaced below, never swallowed.
+                    outcomes[name] = exc
+            finally:
+                connections.close_all()
+
+        threads = [
+            threading.Thread(target=worker, args=("a", payload_a)),
+            threading.Thread(target=worker, args=("b", payload_b)),
+        ]
+        for thread in threads:
+            thread.start()
+        barrier.wait(timeout=30)
+        for thread in threads:
+            thread.join(timeout=120)
+        for thread in threads:
+            self.assertFalse(thread.is_alive(), "import thread did not finish")
+        for name, outcome in outcomes.items():
+            self.assertFalse(
+                isinstance(outcome, Exception), f"thread {name} raised {outcome!r}"
+            )
+        return outcomes["a"], outcomes["b"]
+
+    def test_concurrent_duplicate_originals_stay_idempotent(self):
+        payload = self._file(["101", "102", "103", "104"], creation="2025-06-05T15:40:05Z")
+
+        log_a, log_b = self._run_pair(payload, payload)
+
+        statuses = sorted([log_a.result_status, log_b.result_status])
+        self.assertEqual(statuses, ["accepted", "unchanged"])
+        self.assertEqual(MeterReading.objects.count(), 4)
+        self.assertEqual(
+            ImportLog.objects.filter(result_status="accepted").count(), 1
+        )
+
+    def test_concurrent_older_and_newer_replacement_converges_on_newer(self):
+        newer = self._file(
+            ["210", "211", "212", "213"], creation="2025-06-06T10:00:00Z", status="5"
+        )
+        older = self._file(
+            ["200", "201", "202", "203"], creation="2025-06-04T10:00:00Z", status="5"
+        )
+
+        self._run_pair(newer, older)
+
+        got = [
+            r.energy_kwh
+            for r in MeterReading.objects.filter(metering_point=self.cons_mp).order_by("timestamp")
+        ]
+        self.assertEqual(got, [Decimal("210"), Decimal("211"), Decimal("212"), Decimal("213")])
+        self.assertEqual(MeterReading.objects.count(), 4)
+
+    def test_concurrent_equal_creation_conflict_accepts_exactly_one(self):
+        first = self._file(
+            ["210", "211", "212", "213"],
+            creation="2025-06-06T10:00:00Z",
+            status="5",
+            delivery_id="DERIVED-RACE-A",
+        )
+        second = self._file(
+            ["310", "311", "312", "313"],
+            creation="2025-06-06T10:00:00Z",
+            status="5",
+            delivery_id="DERIVED-RACE-B",
+        )
+
+        log_a, log_b = self._run_pair(first, second)
+
+        statuses = sorted([log_a.result_status, log_b.result_status])
+        self.assertEqual(statuses, ["accepted", "rejected"])
+        winner = log_a if log_a.result_status == "accepted" else log_b
+        loser = log_b if winner is log_a else log_a
+        self.assertTrue(
+            any(i["code"] == "equal_creation_conflict" for i in loser.issues)
+        )
+        winning_values = (
+            ["210", "211", "212", "213"]
+            if winner.source_delivery.get("delivery_id") == "DERIVED-RACE-A"
+            else ["310", "311", "312", "313"]
+        )
+        got_dec = [
+            r.energy_kwh
+            for r in MeterReading.objects.filter(metering_point=self.cons_mp).order_by("timestamp")
+        ]
+        self.assertEqual(got_dec, [Decimal(v) for v in winning_values])
+        self.assertEqual(MeterReading.objects.count(), 4)
+
+    def test_concurrent_promotion_runs_once(self):
+        held_obs = "".join(_obs(s, "10", "21") for s in range(1, 5))
+        sdatch_importer.import_sdatch(
+            SimpleUploadedFile("held.xml", build_e66([build_block(CONS_ID, held_obs)]),
+                               content_type="application/xml"),
+            Zev.objects.get(pk=self.zev_id),
+            get_user_model().objects.get(pk=self.owner_id),
+        )
+        self.assertEqual(QuarantinedReading.objects.count(), 4)
+        billable = self._file(["101", "102", "103", "104"], creation="2025-06-06T10:00:00Z")
+
+        log_a, log_b = self._run_pair(billable, billable)
+
+        statuses = sorted([log_a.result_status, log_b.result_status])
+        self.assertEqual(statuses, ["accepted", "unchanged"])
+        self.assertEqual(MeterReading.objects.count(), 4)
+        self.assertEqual(QuarantinedReading.objects.count(), 0)
+        promotions = sum(
+            log.result_counts.get("promoted", 0) for log in (log_a, log_b)
+        )
+        self.assertEqual(promotions, 4)

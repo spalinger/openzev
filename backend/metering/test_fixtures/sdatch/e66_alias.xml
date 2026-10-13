@@ -57,5 +57,5 @@
 			</rsm:ID>
 			<rsm:MeasureUnit>KWH</rsm:MeasureUnit>
 		</rsm:Product>
-		<rsm:Observation><rsm:Position><rsm:Sequence>1</rsm:Sequence></rsm:Position><rsm:Volume>100</rsm:Volume><rsm:Condition>21</rsm:Condition></rsm:Observation><rsm:Observation><rsm:Position><rsm:Sequence>2</rsm:Sequence></rsm:Position><rsm:Volume>101</rsm:Volume><rsm:Condition>56</rsm:Condition></rsm:Observation></rsm:MeteringData>
+		<rsm:Observation><rsm:Position><rsm:Sequence>1</rsm:Sequence></rsm:Position><rsm:Volume>100</rsm:Volume><rsm:Condition>21</rsm:Condition></rsm:Observation><rsm:Observation><rsm:Position><rsm:Sequence>2</rsm:Sequence></rsm:Position><rsm:Volume>101</rsm:Volume></rsm:Observation><rsm:Observation><rsm:Position><rsm:Sequence>3</rsm:Sequence></rsm:Position><rsm:Volume>102</rsm:Volume></rsm:Observation><rsm:Observation><rsm:Position><rsm:Sequence>4</rsm:Sequence></rsm:Position><rsm:Volume>103</rsm:Volume></rsm:Observation></rsm:MeteringData>
 	</rsm:ValidatedMeteredData_16>

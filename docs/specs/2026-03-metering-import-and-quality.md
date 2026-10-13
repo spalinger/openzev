@@ -65,6 +65,12 @@ import and quality features from scratch.
 | `import_batch` | `UUIDField` (nullable) | Groups readings from the same import |
 | `source_creation` | `DateTimeField` (nullable) | SDAT-CH `InstanceDocument/Creation` of the delivery that wrote the row; `NULL` for CSV/manual/legacy rows (replace provenance, Q12) |
 | `source_document_id` | `CharField(40)` | SDAT-CH `MeteringData/DocumentID` of the delivery that wrote the row |
+| `source_delivery_id` | `CharField(64)` | SDAT-CH outer `InstanceDocument/DocumentID` (delivery identity, distinct from the block identity) |
+| `business_reason` | `CharField(10)` | SDAT-CH `BusinessReasonType` of the delivery (`E88` billing) |
+| `condition` | `CharField(5)` | SDAT-CH observation `Condition` (`""` measured, `56` estimated) — estimated billable rows keep their quality for audit and quality reporting |
+| `source_product` | `CharField(32)` | SDAT-CH `Product/ID` code (ebIX/VSE, e.g. `8716867000030` active energy) |
+| `source_unit` | `CharField(10)` | SDAT-CH `MeasureUnit` (`KWH` on the supported profile) |
+| `source_meter_id` | `CharField(64)` | Meter identity as observed in the delivery (`VSENationalID`), before alias resolution |
 | `created_at` | `DateTimeField` (auto) | Creation timestamp |
 
 Ordering: `["metering_point", "timestamp"]`.
@@ -100,6 +106,23 @@ Ordering: `["metering_point", "timestamp"]`.
 | `sdatch` | SDAT-CH (ebIX XML) |
 | `manual` | Manual entry |
 
+**SdatResultStatus** (machine-readable SDAT-CH outcome; blank for CSV/manual):
+
+| Value | Meaning |
+|---|---|
+| `accepted` | Billable writes committed |
+| `held` | Only quarantine writes committed |
+| `unchanged` | Valid file, no writes |
+| `rejected` | No observation writes, failure log preserved |
+
+**ReadingChangeKind** (committed billable-slot change signal for D):
+
+| Value | Meaning |
+|---|---|
+| `availability` | Slot created (with `promoted: true` when it absorbed a held predecessor) |
+| `value` | Stored energy or interval resolution changed |
+| `metadata` | Provenance-only refresh, energy identical |
+
 ### 3.3 ImportLog
 
 | Field | Type | Description |
@@ -116,10 +139,29 @@ Ordering: `["metering_point", "timestamp"]`.
 | `rows_skipped` | `IntegerField` | Skipped/duplicate count |
 | `errors` | `JSONField` (default `[]`) | Array of error objects: CSV uses `{row, meter_id?, error}` (`meter_id` attached whenever the row names a meter), SDAT-CH uses `{meter_id?, error}` or `{error}` |
 | `warnings` | `JSONField` (default `[]`) | Informational notes, never failures: CSV overwrite reports `{row: null, warning: "Overwrote N existing readings."}` and zero-energy rows in the spring DST gap report `{row: null, warning: "Skipped N rows at <date> 02:00–02:59: that hour does not exist in Swiss time (DST start)."}` here so success toasts stay success |
+| `result_status` | `CharField(16)` | Machine-readable SDAT-CH outcome: `accepted` (billable writes committed), `held` (only quarantine writes), `unchanged` (valid file, no writes), `rejected` (no observation writes, failure log preserved); blank for CSV/manual imports |
+| `result_counts` | `JSONField` (default `{}`) | Typed SDAT-CH observation accounting: `created`, `overwritten`, `held`, `promoted`, `duplicate`, `stale`, `excluded`, `rejected`, `quarantine_overwritten` (existing quarantine rows updated — replacement protection evidence), `reading_changes_truncated`. Identity: `rows_total == created+overwritten+held+duplicate+stale+excluded` on committed files (`rejected` only on rejected files); `promoted` is informational overlap, never added on top of `created`/`overwritten` |
+| `issues` | `JSONField` (default `[]`) | Structured SDAT-CH issues: `{code, severity: error|info, message, meter_id?, block_id?, position?, ...}` with stable codes (e.g. `unsupported_unit`, `missing_position`, `equal_creation_conflict`, `source_conflict`, `reactive_excluded`); the machine-readable source behind `errors`/`warnings` prose |
+| `reading_changes` | `JSONField` (default `[]`) | Committed billable-slot changes for invoice-impact consumers: `{metering_point, meter_id, timestamp, direction, kind: availability|value|metadata, old_energy, new_energy, promoted, source_document_id}`. Written in the same transaction as the readings — rolled-back imports record none |
+| `source_delivery` | `JSONField` (default `{}`) | SDAT-CH delivery identity: `{delivery_id, creation, status, reason, sender_id, sender_role, receiver_id, receiver_role}` |
 | `timestamp_timezone` | `CharField(40, blank)` (default `""`) | Zone offset-less timestamps were read in: `"Europe/Zurich"` or `"UTC"` for CSV (the import setting), `"Europe/Zurich"` for SDAT-CH. `""` marks imports from before ADR 0026, which read them as UTC — the batches `reanchor_readings` operates on (spec `2026-09-swiss-civil-time.md` §6.3). Migration `0006_importlog_timestamp_timezone` |
 | `created_at` | `DateTimeField` (auto) | Import timestamp |
 
 Ordering: `["-created_at", "id"]` (matches `metering/models.py:ImportLog.Meta.ordering`).
+
+The new SDAT-CH fields (`result_status`, `result_counts`, `issues`,
+`reading_changes`, `source_delivery`) are exposed by the import-log
+serializer (`fields = "__all__"`, so no serializer change was needed) and
+typed in `frontend/src/types/api.ts` as `ImportLog.result_status?:
+'' | SdatResultStatus`, `result_counts?: SdatResultCounts`,
+`issues?: SdatIssue[]`, `reading_changes?: SdatReadingChange[]` and
+`source_delivery?: SdatDelivery`. Migration
+`0009_importlog_issues_importlog_reading_changes_and_more` (after `0008`)
+adds them together with the `MeterReading` provenance fields
+(`source_delivery_id`, `business_reason`, `condition`, `source_product`,
+`source_unit`, `source_meter_id`) and the `QuarantinedReading` provenance
+fields (`source_delivery_id`, `source_product`, `source_unit`,
+`source_meter_id`).
 
 **ZEV assignment:** CSV import and preview require `zev_id`. `log.zev` is
 the validated target at creation (not inferred). `backend/metering/views.py:
@@ -304,67 +346,143 @@ rejected with a named error, never silently imported.
 
 **File handling:** `.xml` and `.xml.gz` (gunzip, decompressed cap
 `MAX_SDAT_DECOMPRESSED_BYTES` 100 MB). Size cap `MAX_SDAT_BYTES` (50 MB)
-applies to the upload.
+applies to the upload, including compressed bytes. Reads stop at the cap plus
+one byte, even when the file has no size hint.
 
 **Parsing logic** (`backend/metering/importers/sdatch_importer.py`):
+
+Strict support policy — only this profile writes billing data; anything else
+is a named rejection before any observation write:
+
 1. Parse XML via `lxml.etree` (hardened parser: no entities/DTD/network).
-   Malformed XML → log error and return.
-2. Root gate: local name must start with `ValidatedMeteredData_`; anything
-   else is a loud "not per-meter data" error with zero rows.
-3. XSD gate: `ValidatedMeteredData_16` files validate against the vendored
+   Malformed XML → rejected log, `malformed_xml`.
+2. Root gate: the root must be exactly `ValidatedMeteredData_16` in namespace
+   `http://www.strom.ch`. `AggregatedMeteredData` (E31), `ImbalanceData` and
+   any other root are loud `unsupported_root` rejections with zero rows;
+   other `ValidatedMeteredData_*` versions are `unsupported_schema_version`
+   rejections — there is no structural fallback. Grid sums never land on a
+   metering point.
+3. XSD gate: every accepted file validates against the vendored
    `backend/metering/importers/sdat_xsd/` bundle (54 files, offline);
-   schema-invalid files are rejected up front. Other schema versions parse
-   structurally with a warning. (The vendored schemas carry a libxml2
-   workaround: `use="prohibited"` attributes with child `simpleType`s —
-   tolerated by industry tooling, rejected by libxml2 — are stripped from
-   in-memory copies at compile time; the vendored files stay pristine.)
-4. Header: `DocumentType` must be E66; `Status` `1` (cancellation) is
-   rejected; `Status` `5` means replace (upsert), anything else means
-   original (skip-existing). `Creation` orders deliveries (Q12).
-5. `BusinessReasonType`: `E88` (billing) vs `C38` (info-only) and others.
-6. Per `MeteringData` block: `Interval` (`StartDateTime`/`EndDateTime`,
-   UTC `…Z`), `Resolution` (`<Resolution>15</…><Unit>MIN</…>`; `15` →
-   `15min`, `60` → `hourly`; missing/other → block error, Q14).
-7. Metering point: `ConsumptionMeteringPoint` → `in`,
+   schema-invalid files are rejected up front (`schema_invalid`). (The
+   vendored schemas carry a libxml2 workaround: `use="prohibited"`
+   attributes with child `simpleType`s — tolerated by industry tooling,
+   rejected by libxml2 — are stripped from in-memory copies at compile time;
+   the vendored files stay pristine.)
+4. Header: `DocumentType` must be exactly E66 (`unsupported_document_type`
+   otherwise); `Status` `1` (cancellation) is rejected with a named
+   `cancellation_rejected` error (checked before XSD, since the schema only
+   permits 9/5); `Status` `5` means replace (upsert), `9` means original
+   (skip-existing), anything else is rejected. `Creation` is mandatory and
+   must carry an explicit zone — a missing or offset-less `Creation` rejects
+   the file (`missing_creation`/`invalid_creation`/`naive_timestamp`); it is
+   never defaulted to now. `BusinessReasonType` must be `E88` (billing) or
+   `C38` (information). Every other schema-valid reason is a named
+   unsupported profile (`unsupported_reason`): `C40` LEG settlement, `C23`
+   queries, `E44`/`E89`/`E0D`/`C12`/`C37`/`C87`/`C89` — E66 root alone never
+   implies support.
+5. Per `MeteringData` block: `Interval` (`StartDateTime`/`EndDateTime`, UTC
+   `…Z`) must exist, be aligned to the 15-minute grid and span a whole
+   number of 15-minute slots (`missing_interval`/`invalid_interval`/
+   `unaligned_interval` otherwise). `Resolution` must be exactly `15`/`MIN`
+   (`missing_resolution`/`unsupported_resolution`); the 1.6 XSD already fixes
+   this, so hourly data cannot enter through a fallback and is not normative
+   1.6.
+6. Metering point: `ConsumptionMeteringPoint` → `in`,
    `ProductionMeteringPoint` → `out` (direction lives in the element name,
-   never in a tag). `VSENationalID` (33 chars) matches `meter_id` **or**
-   `secondary_meter_id` within the target ZEV (one physical meter carries
-   two IDs, one per flow direction). Unknown meters → error per meter,
-   skip. `ExchangeMeteringPoint` (grid interconnection) → skipped with a
-   note (Q13).
-8. Product filter: `8716867000030` (active energy) is imported;
-   `8716867000047` (reactive) and `2404050010123`/`2404050010124` (LEG
-   energy/rest) are skipped with a per-product note; unknown products are
-   block errors.
-9. Per `Observation`: timestamp = `start + resolution × (Sequence − 1)`
-   (`Sequence` runs 1..n; gaps are imported and flagged, never fatal —
-   one warning per block, capped at 10). Volumes are `Decimal` quantized
-   to 4 dp; negative, unparseable, unknown-`Condition` or over-range
-   values are row errors. `Condition` absent/`56` = final-grade,
+   never in a tag). The observed `VSENationalID` resolves through task A's
+   shared `zev.models.resolve_metering_point` rule: unknown identities reject the whole file
+   (`unknown_meter`); an identity matching several points raises instead of
+   letting dictionary overwrite order choose one (`ambiguous_meter`).
+   `ExchangeMeteringPoint` (grid interconnection) blocks are intentional
+   `exchange_excluded` skips with a named info issue.
+7. Product/unit filter: active energy `8716867000030` in `KWH` is the only
+   billable combination — any other unit (e.g. schema-valid `KWT`) rejects
+   the whole file (`unsupported_unit`); there is no unit conversion.
+   Reactive `8716867000047` and LEG `2404050010123`/`2404050010124` blocks
+   are intentional reported skips (`reactive_excluded`/`leg_excluded`);
+   unknown products reject the file (`unknown_product`).
+8. Per `Observation`: timestamp = `start + 15min × (Sequence − 1)`
+   (interval-start storage; source timestamps describe interval ends and the
+   left endpoint is the documented conversion, not a shift). Every supported
+   billing block must supply every position `1..n`: missing, duplicate,
+   conflicting-overlap and out-of-range positions reject the whole file
+   (`missing_position`/`duplicate_position`/`conflicting_position`/
+   `invalid_position`); readings are never invented. Volumes are `Decimal`
+   checked for finiteness, non-negativity and the storable range before
+   quantizing to 4 dp; invalid values reject the file (`invalid_volume`).
+   Missing-position diagnostics retain at most 50 positions without allocating
+   the entire declared interval. `Condition` absent/`56` = final-grade,
    `21` = temporary.
-10. Routing (Q15): `E88` + (absent|`56`) → `MeterReading`; `C38` (any
-    condition) or `21` (any reason) → `QuarantinedReading` (invisible to
-    billing, dashboards and charts).
-11. Writes: originals use `get_or_create` (skip duplicates). Replaces
-    (`Status=5`) upsert guarded by `source_creation`: stale deliveries
-    never clobber fresher data, and non-SDAT (CSV/manual) rows are never
-    overwritten — both count as skipped with notes. Replacements count in
-    `ImportLog.rows_overwritten`.
-12. Promotion (Q16): a billable delivery that is actually written deletes
-    the matching quarantined row and counts it as promoted (warning note).
-    Billable rows never land while newer quarantined data for the slot
-    exists.
+9. Routing: `E88` + (absent|`56`) → `MeterReading`, keeping `condition`
+   (`56` estimated rows stay billable with their quality for audit and
+   quality reporting); `C38` (any condition) or `21` (any reason) →
+   `QuarantinedReading` (invisible to billing, dashboards and charts).
+10. File atomicity: phases 5–9 only build a plan. Any invalid supported
+    billing data, any unknown/ambiguous meter, any overlapping CSV/manual
+    reading, or any equal-`Creation` value conflict rejects the ENTIRE file:
+    zero observation writes, prior readings unchanged, and the `ImportLog`
+    persists the rejected outcome with structured issues. Separate files in a
+    multi-file upload stay independent.
+11. Atomic compare + write: the plan commits inside one transaction under a
+    per-ZEV advisory lock (PostgreSQL; row locks alone cannot protect
+    not-yet-existing slots). Stored rows are loaded once with
+    `select_for_update`; the full plan is compared and buffered before any
+    writes. Freshness compares only `Creation` — arrival order
+    never wins. Originals (`Status=9`) never overwrite: they create or skip.
+    Replaces (`Status=5`) overwrite only when strictly newer; stale
+    deliveries skip. A `NULL` stored `Creation` (legacy rows) counts as older
+    than any dated delivery. Different values at equal `Creation` reject the
+    conflicting file and expose both document identities
+    (`equal_creation_conflict` with `incoming_document_id`, `incoming_delivery_id`,
+    `stored_document_id`, `stored_delivery_id`); identical repeats are
+    idempotent duplicates. Overlapping CSV/manual readings reject the file
+    (`source_conflict`) and are preserved. A unique-constraint race retries
+    the write phase once, then rejects truthfully — a failed transaction can
+    never leave data committed with a zero-count log.
+12. Freshness separation: validated and informational/temporary streams are
+    independent. A newer held observation never blocks validated billing —
+    the billable write lands and the newer held discrepancy stays visible.
+    Promotion deletes matching quarantine rows only when they are
+    predecessors (older, equal or legacy-NULL `Creation`) and counts them as
+    `promoted` (informational overlap, never added on top of
+    `created`/`overwritten`). Stale info deliveries never shadow validated
+    billing data. Quarantine updates of existing held rows count as `held`
+    and additionally as `quarantine_overwritten` (replacement protection
+    evidence for deletion/archives).
+13. Result contract: `result_status` is `accepted` (billable writes),
+    `held` (only quarantine writes), `unchanged` (valid file, no writes) or
+    `rejected`. `result_counts` carries the typed accounting, `issues` the
+    stable codes (error/info severities; legacy `errors`/`warnings` prose is
+    derived from them for the existing protocol display). `reading_changes`
+    records each committed billable slot as `availability` (created,
+    `promoted: true` when it absorbed a held predecessor), `value` (energy
+    or resolution changed) or `metadata` (provenance-only refresh) in the same transaction
+    — rolled-back imports record none. Rejected files clear committed counters
+    and success warnings; after header validation, `rows_total` includes all
+    observations, including blocks not reached after an early rejection. The `import.upload` audit event
+    carries `result_status`, `result_counts`, `rows_overwritten` and the
+    issue count for SDAT-CH imports.
 
 **Quarantine model:** `QuarantinedReading` (metering app) mirrors the
 `MeterReading` key (`metering_point`, `timestamp`, `direction`, unique)
 plus `business_reason`, `condition`, `source_creation`,
-`source_document_id`. Nothing in allocation, tariffs, invoices,
+`source_document_id`, `source_delivery_id`, `source_product`,
+`source_unit`, `source_meter_id`. Nothing in allocation, tariffs, invoices,
 dashboards or charts reads it — billing safety by construction, covered
 by `invoices/test_engine_edge_cases.py:
-test_quarantined_sdat_observations_are_not_billed`.
+test_quarantined_sdat_observations_are_not_billed` and the importer-side
+`test_import_sdatch_strict.py:InvoiceBillingRegressionTests` (estimated
+billable, temporary excluded, promotion completes the billing input).
 
 **Provenance model:** `MeterReading.source_creation` /
-`source_document_id` record the SDAT-CH delivery that wrote the row.
+`source_document_id` record the SDAT-CH delivery that wrote the row, and
+`source_delivery_id`, `business_reason`, `condition`, `source_product`,
+`source_unit`, `source_meter_id` retain the delivery identity, quality and
+observed meter identity. `ImportLog.source_delivery` keeps the outer
+delivery identity (sender/receiver identifiers and roles, `Creation`,
+reason) and `reading_changes` the committed per-slot change signal
+(`availability`/`value`/`metadata`) for invoice-impact consumers.
 They travel in whole-ZEV transfer archives
 (`READING_CSV_COLUMNS`) and backups so moved/restored ZEVs keep their
 replace guards; `MeteringPoint.secondary_meter_id` travels in
@@ -1081,9 +1199,9 @@ window one day early and drop the assignment holding it.
 - Timezone-aware timestamps → converted to UTC.
 - Naive CSV/Excel timestamps → wall-clock time in the import's
   `timestamp_timezone` (default Europe/Zurich), §4.1.1.
-- SDAT-CH timestamps → ISO 8601 with `Z` or offset → parsed to UTC; an
-  offset-less one is read as Europe/Zurich explicitly, independent of the
-  process timezone.
+- Current SDAT-CH E66 timestamps must use `Z`, as required by the vendored
+  XSD. The timestamp helper also supports offsets and Zurich wall-clock
+  values, but the schema gate rejects those in uploaded E66 documents.
 
 **Legacy data:** readings imported from offset-less files before ADR 0026 are
 stored as "Swiss wall clock labelled UTC". `python manage.py reanchor_readings`
@@ -1234,7 +1352,7 @@ type MeteringDashboardSummary =
 | Concurrent standard-profile duplicate | Medium | A unique-constraint `IntegrityError` is treated as the standard duplicate skip, not an uncaught 500 |
 | Overwrite has no version history | Medium | Previous values cannot be restored automatically. Overwrite imports are protected from single and bulk deletion; correct values through another overwrite import. |
 | Duplicate race errors lose exact cause | Low | Race `IntegrityError`s are currently reported using the same duplicate message as ordinary duplicates; improve classification if operational distinction is needed |
-| SDAT-CH XML format variations across VNBs | Medium | Graceful fallback for missing elements; per-meter error reporting (§4.2) |
+| SDAT-CH XML format variations across VNBs | Medium | Strict E66 schema/profile gate; unsupported or malformed files reject atomically with named issues (§4.2) |
 | Data quality severity thresholds misleading operators | Low | Deterministic integer-percent completeness with documented thresholds (§5.5) |
 
 ---
@@ -1385,7 +1503,7 @@ tests do not assert these two warnings.
 ## 13. Acceptance criteria
 
 - [x] CSV import supports both `standard` and `daily_15min` profiles with configurable column mapping; requires `zev_id` and scopes meters to the target ZEV intersection (§4.1, §5.6)
-- [x] SDAT-CH import parses Swiss ebIX XML and skips unknown metering points with per-meter errors; requires `zev_id` (§4.2, §5.6). No preview step: malformed/oversized files return a 201 log with errors, and the UI explains this upfront and auto-opens the protocol when the log contains errors
+- [x] SDAT-CH import validates the supported E66 profile and rejects the whole file for unknown or ambiguous metering points; requires `zev_id` (§4.2, §5.6). No preview step: malformed/oversized files return a 201 log with errors, and the UI explains this upfront and auto-opens the protocol when the log contains errors
 - [x] Preview endpoint requires `zev_id`, returns row-level validation without writing data, covers the whole file as unique meters with bounded `missing_meter_ids`, keeps display rows capped at `max_rows`, validates fields regardless of meter existence, stops row validation at the error cap while keeping whole-file meter coverage, and reports truncated daily rows once — matching import (§4.3, §5.6). Daily import validation is atomic for truncated/invalid rows (no readings); duplicates gap-fill per slot, fully duplicate rows write no readings
 - [x] Default write mode gap-fills per slot and skips duplicates; overwrite mode is opt-in, confirmed in the UI, and reports the count in `warnings`; import `log.zev` is always the validated target (§4.1, §8.3)
 - [x] Import log captures filename, batch ID, row counts, and per-row errors for every import (§3.3)
