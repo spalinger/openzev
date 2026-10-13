@@ -22,7 +22,7 @@ from django.db import connection, transaction
 from django.db.models import Prefetch
 
 from invoices.models import Charge, Credit, Invoice
-from metering.models import MeterReading, SupplementaryReading, SupplementarySource
+from metering.models import MeterReading, QuarantinedReading, SupplementaryReading, SupplementarySource
 from tariffs.models import Tariff, TariffPeriod
 from zev.models import Building, MeteringPoint, MeteringPointAssignment, Participant, Party, ZevPartyRole
 
@@ -46,6 +46,7 @@ from .schema import (
     PARTY_FIELDS,
     PARTY_ROLE_FIELDS,
     PARTY_ROLES_FILE,
+    QUARANTINE_DIR,
     READING_CSV_COLUMNS,
     READINGS_DIR,
     SECTION_CHARGES,
@@ -98,6 +99,10 @@ def _reading_csv_name(meter_id):
     safe = "".join(char if char.isalnum() or char in "-_." else "_" for char in meter_id)
     digest = hashlib.sha1(meter_id.encode("utf-8")).hexdigest()[:8]
     return f"{READINGS_DIR}/{safe or 'meter'}-{digest}.csv"
+
+
+def _quarantine_csv_name(meter_id):
+    return _reading_csv_name(meter_id).replace(f"{READINGS_DIR}/", f"{QUARANTINE_DIR}/", 1)
 
 
 def _supplementary_csv_name(meter_id):
@@ -269,53 +274,40 @@ def _export_invoices(zev):
 
 
 def _write_readings(archive, zev):
-    """Stream every reading of the ZEV into ``readings/<meter>.csv``.
+    """Stream billable rows, including a header-only member for empty meters."""
+    points = MeteringPoint.objects.filter(zev=zev).order_by("meter_id")
+    return _write_observation_members(archive, points, MeterReading, _reading_csv_name)
 
-    Returns the per-meter row counts; the manifest's readings count is their
-    sum. A meter with no readings still gets a header-only file, so the archive
-    says "no data" rather than leaving the importer to guess between that and a
-    dropped file.
-    """
+
+def _write_quarantine(archive, zev):
+    """Stream held rows only for meters with data; return the total row count."""
+    held_point_ids = QuarantinedReading.objects.filter(metering_point__zev=zev).values("metering_point_id")
+    points = MeteringPoint.objects.filter(zev=zev, pk__in=held_point_ids).order_by("meter_id")
+    return sum(_write_observation_members(archive, points, QuarantinedReading, _quarantine_csv_name).values())
+
+
+def _write_observation_members(archive, points, model, member_name):
     counts = {}
-    for point in MeteringPoint.objects.filter(zev=zev).order_by("meter_id"):
+    for point in points:
         rows = 0
-        with archive.open(_reading_csv_name(point.meter_id), "w") as member:
-            # ZipFile members are binary; readings are ASCII once serialised.
+        with archive.open(member_name(point.meter_id), "w") as member:
             text = io.TextIOWrapper(member, encoding="utf-8", newline="")
             writer = csv.writer(text)
             writer.writerow(READING_CSV_COLUMNS)
             queryset = (
-                MeterReading.objects.filter(metering_point=point)
+                model.objects.filter(metering_point=point)
                 .order_by("timestamp", "direction")
-                .values_list(
-                    "timestamp",
-                    "energy_kwh",
-                    "direction",
-                    "resolution",
-                    "import_source",
-                    "source_creation",
-                    "source_document_id",
-                )
+                .values_list(*READING_CSV_COLUMNS[1:])
             )
-            for timestamp, energy_kwh, direction, resolution, import_source, source_creation, source_document_id in queryset.iterator(
-                chunk_size=READING_CHUNK_SIZE
-            ):
-                writer.writerow(
-                    [
-                        point.meter_id,
-                        timestamp.astimezone(timezone.utc).isoformat(),
-                        energy_kwh,
-                        direction,
-                        resolution,
-                        import_source,
-                        source_creation.astimezone(timezone.utc).isoformat() if source_creation else "",
-                        source_document_id or "",
-                    ]
-                )
+            for values in queryset.iterator(chunk_size=READING_CHUNK_SIZE):
+                row = dict(zip(READING_CSV_COLUMNS[1:], values))
+                row["timestamp"] = row["timestamp"].astimezone(timezone.utc).isoformat()
+                creation = row["source_creation"]
+                row["source_creation"] = creation.astimezone(timezone.utc).isoformat() if creation else ""
+                writer.writerow([point.meter_id, *row.values()])
                 rows += 1
             text.flush()
-            # Detach before the member closes: TextIOWrapper closes what it
-            # wraps on garbage collection, and the ZipFile owns that.
+            # ZipFile owns the member; detaching prevents TextIOWrapper closing it.
             text.detach()
         counts[point.meter_id] = rows
     return counts
@@ -466,6 +458,7 @@ def _write_archive(zev, sections, fileobj, *, instance_name=""):
         if SECTION_READINGS in sections:
             per_meter = _write_readings(archive, zev)
             counts[SECTION_READINGS] = sum(per_meter.values())
+            counts["quarantined_readings"] = _write_quarantine(archive, zev)
 
         if SECTION_SUPPLEMENTARY in sections:
             sources = _export_supplementary_sources(zev)

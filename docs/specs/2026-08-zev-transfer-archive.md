@@ -69,7 +69,8 @@ The archive reads and writes:
 `zev.models.Zev`, `zev.models.Participant`, `zev.models.MeteringPoint`,
 `zev.models.MeteringPointAssignment`, `tariffs.models.Tariff`,
 `tariffs.models.TariffPeriod`, `invoices.models.Invoice`,
-`invoices.models.InvoiceItem`, `metering.models.MeterReading`.
+`invoices.models.InvoiceItem`, `metering.models.MeterReading`,
+`metering.models.QuarantinedReading` (held observations, format 9+).
 
 Relevant constraints the import must respect:
 
@@ -108,7 +109,29 @@ commit — a failed audit must not cause a duplicate import on client retry).
 
 ## 6. Archive format (`backend/zev/transfer/schema.py`)
 
-`FORMAT_VERSION = 8`, `SUPPORTED_FORMAT_VERSIONS = {1, 2, 3, 4, 5, 6, 7, 8}`. Version 8
+`FORMAT_VERSION = 9`, `SUPPORTED_FORMAT_VERSIONS = {1, 2, 3, 4, 5, 6, 7, 8, 9}`. Version 9
+(SDAT-CH correction lifecycle) carries the full billable provenance and the
+held observations: readings rows gain `source_delivery_id`, `business_reason`,
+`condition`, `source_product`, `source_unit` and `source_meter_id`, and
+`quarantine/<meter>-<hash>.csv` members (one per meter with held rows, same
+columns) travel under the readings section, counted as `quarantined_readings`
+(`SUBCOUNT_SECTIONS` maps it there). The bump is required because an older
+importer would otherwise restore a version-9 archive as if it had no
+correction state — a silent lossy restore; older code rejects version 9
+outright via `check_format_version`. An archive older than 9 imports with
+documented defaults for missing fields (no Creation, blank identity/quality
+fields, zero held rows); existing Creation values are preserved. Meter aliases
+(`secondary_meter_id` in `METERING_POINT_FIELDS`) and
+`source_meter_id` (stored verbatim, never resolved) travel so aliases are
+never rebound on import; metering-point creation runs the shared identity
+validation, so colliding or malformed identities reject the whole import.
+Version 9 requires the `quarantined_readings` count whenever the readings
+section is declared (including zero), and all 14 CSV header columns in both
+streams. Missing provenance columns are defaulted only for older formats.
+Invoice-impact state for the correction workflow rides the documented
+extension rule: additive optional columns or keys with defaults travel
+without a version bump; anything an older importer would silently drop
+needs one. Version 8
 (SPEC-2026-10-variable-charges §6) adds the section `charges` (`SECTION_CHARGES`, requires
 `participants`; `charges.json`, one entry per `Charge` with `CHARGE_FIELDS` and, for a charge borne by
 selected participants, the archive ids of those participants), and the optional invoice field
@@ -212,6 +235,7 @@ openzev-export-<community>-<date>.zip
                            "dynamic_evidence": [{"dynamic_source": {<DYNAMIC_SOURCE_FIELDS>},
                              "tariff_id_snapshot", "evidence_from", "evidence_to"}]}]
   readings/<meter>.csv   one file per meter
+  quarantine/<meter>.csv   one file per meter with held observations (format 9+)
   invoices/pdf/<invoice_number>.pdf   one file per invoice that has a rendered PDF
   invoices/pdf/credit-<credit_number>-<hash>.pdf   one per credit note that has one
 ```
@@ -255,9 +279,16 @@ section. A credit's PDF bytes go into the `invoice_pdfs` section under
 `credit_pdf_member_name(credit_number)` (`invoices/pdf/credit-…pdf`) and are restored by
 `_import_invoice_pdfs`.
 `READING_CSV_COLUMNS = ("meter_id", "timestamp",
-"energy_kwh", "direction", "resolution", "import_source")` — the same layout the
+"energy_kwh", "direction", "resolution", "import_source",
+"source_creation", "source_document_id", "source_delivery_id",
+"business_reason", "condition", "source_product", "source_unit",
+"source_meter_id")` — the same layout the
 normal CSV metering import reads, plus `resolution`/`import_source` so nothing is
-lost in a round trip.
+lost in a round trip, plus the SDAT-CH replace provenance (format 9) so a
+transferred ZEV keeps its freshness guards and a restored VNB delivery
+selects exactly as it would have before the transfer. `QUARANTINE_CSV_COLUMNS`
+is the same layout for `quarantine/` members. Rows from older archives omit
+the trailing provenance columns and import with documented defaults.
 
 `METERING_POINT_FIELDS` includes `has_behind_meter_generation`
 (SPEC-2026-behind-the-meter-generation §5.7), an additive boolean field with
@@ -412,7 +443,20 @@ way readings require.
   constraint, a value overflowing a column) is reported with a generic
   sentence — "The database rejected a batch of readings; the batch was
   skipped" — and the exception detail goes to the server log, never the
-  response.
+  response. Provenance columns missing from older archives default to no
+  Creation and blank fields.
+- Held observations (`_import_quarantine`, format 9+, same batch size and
+  error reporting under the readings section): `quarantine/*.csv` members
+  become `QuarantinedReading` rows on the same imported points with the same
+  batch id; `source_meter_id` is stored verbatim and never resolved, so an
+  alias can never rebind a row to another point. Metering-point creation runs
+  the shared meter-identity validation, so colliding or malformed identities
+  reject the whole import with nothing created.
+- Both streams share the CSV writer, row builder and batched insert path.
+  Provenance strings exceeding their model field lengths reject the archive
+  with a field error; they are never silently truncated. Invalid Creation
+  timestamps reject it too. Version 9 enforces the complete CSV header and
+  quarantine manifest count before accepting the restored state.
 - `_import_invoices` returns the highest numeric tail (`_trailing_number`) of
   imported invoice numbers; the ZEV counter is set past it.
 - `_import_invoice_pdfs` runs as a second pass after `_import_invoices`, once
@@ -516,6 +560,37 @@ and imports `False` when the archive predates the field
 (`test_metering_points_json_without_the_field_imports_as_false`); a name override renames the
 imported ZEV; a structure-only archive still names the ZEV.
 
+**`ProvenanceQuarantineTransferTests`** (format version 9,
+`backend/zev/test_transfer.py`): the export carries format 9 with a
+`quarantined_readings` manifest count and one `quarantine/` member per meter
+with held rows; a round trip preserves every billable provenance field
+(delivery identity, quality, product/unit, observed meter identity and
+estimated condition), the meter alias and every held row with its own
+provenance; a quarantine row naming another live meter is stored verbatim,
+never rebound.
+Missing v9 quarantine counts or provenance headers, malformed Creation
+timestamps, and oversized delivery/meter identities in either stream are
+rejected with nothing created.
+
+**`SelectionParityTransferTests`**: the same stale/new/equal-Creation
+deliveries run before the export and after the restore select identically
+(replay → unchanged/duplicates, newer replace → accepted/overwritten,
+equal-Creation conflict → rejected with both document identities, stale →
+skipped, held update → held/quarantine_overwritten), with freshness
+separation intact (a newer held row survives an older billable replace).
+
+**`LegacyArchiveTransferTests`**: a format-9 export rewritten as format 7
+(stripped provenance columns, dropped quarantine members) still imports —
+billable rows keep their values and Creation, new fields default to blank,
+zero held rows; an archive claiming an unknown version is rejected with
+nothing created. `ChargeArchiveTests.test_format_8_charges_and_readings_import_without_sdat_state`
+checks that version-8 charges and their participant selection still import alongside
+legacy readings without quarantine counts or SDAT provenance columns.
+
+**`UnsafeArchiveTransferTests`**: a malformed reading timestamp, a
+colliding secondary alias inside the archive, and an alias taken by another
+live community each reject the whole import with nothing created.
+
 **Dynamic source compatibility**: current version-2 exports retain the
 provider-neutral source descriptor; version-1 static archives remain importable,
 and a version-1 legacy adapter descriptor is translated into the current source
@@ -592,10 +667,10 @@ garbled, missing-column and unknown-meter reading; a dropped readings file caugh
 bad row rolls everything back). `SchemaParityTests` gains `SUPPLEMENTARY_SOURCE_FIELDS` against
 `SupplementarySource` with its excluded set.
 
-### Backend — `backend/zev/test_transfer_invoice_pdfs.py` (format version 7)
+### Backend — `backend/zev/test_transfer_invoice_pdfs.py` (format version 9)
 
-`FormatVersionTests`: `FORMAT_VERSION == 6`; `SUPPORTED_FORMAT_VERSIONS ==
-{1, 2, 3, 4, 5, 6}`; `invoice_pdfs` is a known section depending on `invoices`.
+`FormatVersionTests`: `FORMAT_VERSION == 9`; `SUPPORTED_FORMAT_VERSIONS ==
+{1, 2, 3, 4, 5, 6, 7, 8, 9}`; `invoice_pdfs` is a known section depending on `invoices`.
 `MemberNamingTests`: `pdf_member_name` is deterministic and collision-safe
 (same construction as reading member names), stays under `invoices/pdf/`.
 `RoundTripTests`: a PDF travels when `invoice_pdfs` is selected and does not

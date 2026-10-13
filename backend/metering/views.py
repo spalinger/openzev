@@ -9,17 +9,23 @@ from django.db.models.functions import TruncDate, TruncDay, TruncHour, TruncMont
 from django.utils.dateparse import parse_date
 from rest_framework import mixins, viewsets, status
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import SAFE_METHODS, IsAuthenticated
 from rest_framework.response import Response
 from accounts.permissions import HasZevAccess
 from accounts.throttling import ApiKeyRateThrottle, ImportThrottle
 from zev.models import Zev, Participant, MeteringPoint, MeteringPointAssignment
-from .models import MeterReading, ImportLog
+from .models import MeterReading, ImportLog, QuarantinedReading
+from .deletion import (
+    OVERWRITE_PROTECTED,
+    QUARANTINE_REPLACE_PROTECTED,
+    collect_deleted_slots,
+    protection_code,
+)
 from zev import access
 from zev.scoping import ZevScopedQuerySetMixin, assert_zev_not_disabled
-from .serializers import MeterReadingSerializer, ImportLogSerializer
+from .serializers import MeterReadingSerializer, ImportLogSerializer, ImportLogListSerializer
 from .importers.csv_detect import detect_csv_settings
 from .importers.csv_importer import ImportFileError, import_csv, preview_csv
 from .importers.sdatch_importer import import_sdatch
@@ -31,7 +37,7 @@ from .analytics import (
 )
 from .supplementary.surfaces import attach_hourly_gross, attach_owner_gross, attach_participant_gross, window_for
 from audit.models import AuditActionCategory, AuditEventStatus
-from audit.services import record_audit_event
+from audit.services import MAX_AUDIT_LIST_ITEMS, record_audit_event
 
 
 def _validated_uuid(raw, field_name):
@@ -483,9 +489,14 @@ class ImportLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.
     serializer_class = ImportLogSerializer
     permission_classes = [IsAuthenticated, HasZevAccess]
 
+    def get_serializer_class(self):
+        return ImportLogListSerializer if getattr(self, "action", None) == "list" else ImportLogSerializer
+
     def get_queryset(self):
         user = self.request.user
         base = ImportLog.objects.select_related("zev", "imported_by")
+        if getattr(self, "action", None) == "list":
+            base = base.defer("reading_changes")
         if user.is_admin:
             return base.all()
         if self.request.method in SAFE_METHODS:
@@ -497,47 +508,81 @@ class ImportLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.
         ).distinct()
 
     def _delete_import_logs(self, queryset):
-        """Delete the selected logs and their readings.
+        """Delete the selected logs and their billable and held readings.
 
         Returns ``(result, by_zev)``: ``result`` is the response payload and
         ``by_zev`` maps each affected ``Zev`` (``None`` for logs without one)
         to its own counts, so the audit trail can be scoped per community.
+        A log that replaced prior billable or held values protects the whole
+        selection: the check runs before any delete, so a bulk request
+        containing one protected import changes nothing.
         """
         with transaction.atomic():
             # Freeze and lock the selection before checking protection. Avoid
             # locking nullable select_related joins from get_queryset().
             selected_ids = list(queryset.values_list("pk", flat=True))
             logs = list(ImportLog.objects.filter(pk__in=selected_ids).order_by("pk").select_for_update())
-            if any(log.rows_overwritten > 0 for log in logs):
+            codes = {protection_code(log) for log in logs}
+            if OVERWRITE_PROTECTED in codes:
                 raise ValidationError({
-                    "code": "overwrite_import_protected",
+                    "code": OVERWRITE_PROTECTED,
                     "error": "Imports that overwrote readings cannot be deleted. No imports were deleted.",
                 })
-            zevs = Zev.objects.in_bulk({log.zev_id for log in logs if log.zev_id})
+            if QUARANTINE_REPLACE_PROTECTED in codes:
+                raise ValidationError({
+                    "code": QUARANTINE_REPLACE_PROTECTED,
+                    "error": "Imports that replaced held readings cannot be deleted. No imports were deleted.",
+                })
+            batch_ids = {log.batch_id for log in logs}
+            affected_zev_ids = {log.zev_id for log in logs if log.zev_id}
+            for model in (MeterReading, QuarantinedReading):
+                affected_zev_ids.update(
+                    model.objects.filter(import_batch__in=batch_ids)
+                    .values_list("metering_point__zev_id", flat=True).distinct()
+                )
+            zevs = Zev.objects.in_bulk(affected_zev_ids)
+            if not self.request.user.is_admin:
+                if affected_zev_ids - access.managed_zev_ids(self.request.user):
+                    raise PermissionDenied("You do not have access to all ZEVs affected by this deletion.")
             for zev in zevs.values():
                 assert_zev_not_disabled(self.request.user, zev)
             by_zev = {}
             for log in logs:
-                counts = by_zev.setdefault(zevs.get(log.zev_id), {"deleted_logs": 0, "deleted_readings": 0, "batch_ids": set()})
+                counts = by_zev.setdefault(zevs.get(log.zev_id), {"deleted_logs": 0, "deleted_readings": 0, "deleted_quarantined_readings": 0, "deleted_slots_truncated": False, "batch_ids": set()})
                 counts["deleted_logs"] += 1
                 if log.batch_id:
                     counts["batch_ids"].add(log.batch_id)
+            slots_truncated = False
             for counts in by_zev.values():
                 batch_ids = counts.pop("batch_ids")
-                if batch_ids:
-                    counts["deleted_readings"], _ = MeterReading.objects.filter(import_batch__in=batch_ids).delete()
+                if not batch_ids:
+                    continue
+                slots, truncated = collect_deleted_slots(batch_ids)
+                counts["deleted_slots"] = slots
+                counts["deleted_slots_truncated"] = truncated or len(slots) > MAX_AUDIT_LIST_ITEMS
+                slots_truncated = slots_truncated or counts["deleted_slots_truncated"]
+                deleted_billable, _ = MeterReading.objects.filter(import_batch__in=batch_ids).delete()
+                deleted_held, _ = QuarantinedReading.objects.filter(import_batch__in=batch_ids).delete()
+                counts["deleted_readings"] = deleted_billable
+                counts["deleted_quarantined_readings"] = deleted_held
             ImportLog.objects.filter(pk__in=[log.pk for log in logs]).delete()
 
         result = {
             "deleted_logs": len(logs),
             "deleted_readings": sum(counts["deleted_readings"] for counts in by_zev.values()),
+            "deleted_quarantined_readings": sum(counts["deleted_quarantined_readings"] for counts in by_zev.values()),
+            "deleted_slots_truncated": slots_truncated,
         }
         return result, by_zev
 
+    @transaction.atomic
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         zev = instance.zev
-        result, _ = self._delete_import_logs(self.get_queryset().filter(pk=instance.pk))
+        result, by_zev = self._delete_import_logs(self.get_queryset().filter(pk=instance.pk))
+        metadata = dict(result)
+        for counts in by_zev.values():
+            metadata["deleted_slots"] = counts.get("deleted_slots", [])
         record_audit_event(
             request=request,
             action_category=AuditActionCategory.METERING,
@@ -547,19 +592,17 @@ class ImportLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.
             target_display=str(instance.batch_id),
             zev=zev,
             summary=f"Deleted import log {instance.pk} and related readings.",
-            metadata=result,
+            metadata=metadata,
         )
         return Response(result, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["post"], url_path="bulk-delete")
+    @transaction.atomic
     def bulk_delete(self, request):
         """Delete import logs (and their readings) by creation date.
 
-        Period bounds are explicit UTC days: ``date_from``/``date_to`` are
-        interpreted as half-open ``[00:00Z, next-day 00:00Z)`` on
-        ``ImportLog.created_at``. History timestamps render in local time via
-        ``formatDateTime``, so the confirmation UI labels the range as UTC to
-        keep display, selection and deletion consistent.
+        Period bounds are Swiss civil days, matching the visible history.
+        Deletion and its audit events commit together.
         """
         mode = request.data.get("mode", "all")
         queryset = self.get_queryset()

@@ -521,6 +521,19 @@ zevs/<zev id>/account_refs.json    {"users": [{"id", "username", "email"}]}
 zevs/<zev id>/media/<name>         that community's invoice PDFs
 ```
 
+The `readings` section holds both `metering.MeterReading` and
+`metering.QuarantinedReading` rows. Every line is Django's own row
+serialization, so SDAT-CH provenance (`source_creation`,
+`source_document_id`, `source_delivery_id`, `business_reason`,
+`condition`, `source_product`, `source_unit`, `source_meter_id`), meter
+aliases and the import logs' `result_counts`/`issues`/`reading_changes`/
+`source_delivery` survive backup and per-ZEV restore with no per-field
+work, and a restored community selects subsequent VNB deliveries exactly
+as before the restore. Invoice-impact state for the correction workflow
+rides the same property: new columns are backed up the moment they exist;
+only a whole new model needs a registry entry (enforced by the coverage
+test).
+
 The section → model mapping is `backend/backups/registry.py` (`INSTANCE_SECTIONS`,
 `UNSCOPED_SECTIONS`, `ZEV_SECTIONS`, each `ZevPart` naming its ORM lookup to the
 ZEV and its write order). Section order is a correctness constraint for restore:
