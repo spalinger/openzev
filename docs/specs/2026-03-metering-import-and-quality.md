@@ -483,13 +483,26 @@ observed meter identity. `ImportLog.source_delivery` keeps the outer
 delivery identity (sender/receiver identifiers and roles, `Creation`,
 reason) and `reading_changes` the committed per-slot change signal
 (`availability`/`value`/`metadata`) for invoice-impact consumers.
-They travel in whole-ZEV transfer archives
-(`READING_CSV_COLUMNS`) and backups so moved/restored ZEVs keep their
-replace guards; `MeteringPoint.secondary_meter_id` travels in
-`METERING_POINT_FIELDS` for the same reason. Quarantine rows travel in
-backups; transfer archives do not carry them (transient hold data,
-re-importable from the VNB — like `ImportLog`s, which do not travel
-either).
+The full provenance set travels in whole-ZEV transfer archives
+(`READING_CSV_COLUMNS`, format 8) and backups so moved/restored ZEVs keep
+their replace guards; `MeteringPoint.secondary_meter_id` travels in
+`METERING_POINT_FIELDS` for the same reason. Held observations travel in
+`quarantine/` members with the same columns, counted as
+`quarantined_readings` under the readings section; archives older than
+format 8 hold none and import zero held rows. `ImportLog`s do not travel
+in transfer archives; backups carry them whole (Django serialization, so
+`result_counts`, `issues`, `reading_changes` and `source_delivery`
+survive restore without further work).
+
+**Retention:** held observations and provenance fields have no timed
+expiry. They are removed only by explicit import-log deletion (§5.7),
+which deletes the log's billable and held rows together, or with the
+whole ZEV. The privacy retention sweep (`2026-10-privacy-retention-sweep.md`)
+does not touch `MeterReading`, `QuarantinedReading` or `ImportLog` —
+accounting and billing evidence is its documented out-of-scope floor, not
+a privacy ceiling. Backup retention follows the backup spec; any future
+timed purge of freshness, audit or billing evidence needs a separate
+explicit retention policy.
 
 **Permission:** non-admins must manage the ZEV (`zev.access.can_manage`, an active manager grant; #761).
 
@@ -1106,21 +1119,62 @@ and missing meters still block the wizard.
 **Queryset scoping:**
 - `admin` → all import logs.
 - otherwise, reads → logs of ZEVs the caller holds a manager or viewer grant for, OR `imported_by == user`; deletes (single and bulk) → logs of ZEVs the caller manages, OR logs it imported that belong to no ZEV (#761).
+- Before deletion, managers must also manage every community reached through
+  the batch's billable and held rows, including legacy logs without a ZEV.
+  Disabled communities reject the entire selection with 400; admins are exempt.
 
 **Deletion semantics:**
-- Imports with `rows_overwritten > 0` cannot be deleted. Both endpoints return **400** with `{code: "overwrite_import_protected", error: "Imports that overwrote readings cannot be deleted. No imports were deleted."}` when any selected log is protected. The entire bulk operation is rejected without deleting any log or reading; this is not a rollback API and previous values are not restored.
+- An import is deletable only when it added values without replacing prior
+  billable or held data. Replacement is read from persisted counters —
+  `rows_overwritten` for billable slots, `result_counts.quarantine_overwritten`
+  for held slots — so protection survives promotion and import-batch
+  reassignment. A log with zero billable overwrites may still be protected
+  because it replaced held data. Malformed persisted replacement counters
+  protect the import rather than being treated as zero replacements.
+- Both endpoints return **400** with `{code, error}` and change nothing when
+  any selected log is protected: `overwrite_import_protected` ("Imports that
+  overwrote readings cannot be deleted. No imports were deleted.") for
+  billable replacements, `quarantine_replace_protected` ("Imports that
+  replaced held readings cannot be deleted. No imports were deleted.") for
+  held-only replacements. The entire bulk operation is rejected without
+  deleting any log or reading; this is not a rollback API and previous values
+  are not restored.
+- An unprotected single-log delete removes the selected `ImportLog` and all
+  `MeterReading` **and** `QuarantinedReading` rows with
+  `import_batch == batch_id`. Deleting a held-only batch removes its held
+  rows, so no orphaned held data remains to affect later delivery selection;
+  re-importing the same delivery afterwards is held again, not skipped.
+  Promoting a held row deletes the quarantine predecessor at import time, so
+  deleting the earlier held log afterwards removes zero rows while the
+  promoting billable log stays deletable as an additive import.
+- Every `ImportLog` carries structured deletion eligibility for the UI:
+  `deletable: boolean` and `deletion_protection_code:
+  'overwrite_import_protected' | 'quarantine_replace_protected' | null`
+  (typed in `frontend/src/types/api.ts`). Delete responses return
+  `deleted_logs`, `deleted_readings`, `deleted_quarantined_readings` and
+  `deleted_slots_truncated`.
+- Deletion evidence for invoice-impact consumers: the audit events
+  (`import_log.delete`, `import_log.bulk_delete`) carry the per-ZEV counts
+  plus `deleted_slots` — the removed slots as `{metering_point, meter_id,
+  timestamp, direction, energy_kwh, stream: billable|held}`. The collector
+  locks captured reading rows and retains at most 500 slots
+  (`DELETION_EVIDENCE_CAP`); audit redaction retains the first 20 plus an
+  overflow marker (`MAX_AUDIT_LIST_ITEMS`). Each audit event and the response
+  mark `deleted_slots_truncated` if either limit is exceeded. Deletion and
+  its audit events commit together, so an audit failure rolls back the deletion.
+  `metering/deletion.py:collect_deleted_slots` collects the evidence;
+  `protection_code` defines replacement protection.
 - CSV import runs in one transaction, publishing its readings and finalized overwrite count together. The successful log is created inside that transaction, so no half-finished import is ever visible or deletable. An unexpected failure rolls everything back and is then recorded as a separate failed-attempt log outside the transaction, before an `ImportFileError` propagates (400 with an actionable message, never an untraced 500). Deletion freezes the visible selection, locks its logs in primary-key order, checks protection, and deletes only that selection in one transaction.
 - Migration `0005_importlog_rows_overwritten` backfills the count from exact `Overwrote N existing readings.` notes in both legacy `errors` and newer `warnings`; other logs keep zero. The field is exposed by the import-log serializer and represented by `ImportLog.rows_overwritten: number` in TypeScript. Counts include repeated writes within the same file, so those overwrite imports are conservatively protected too.
-- The frontend disables the protected row's delete action, explains the policy in its protocol and bulk-delete dialog, and maps server rejections to the same localized message. The bulk dialog additionally lists the blocking protected imports (filename + creation time) and disables review/confirmation while any is in scope; the server stays authoritative. Correct a protected import by uploading corrected readings with overwrite enabled.
+- The frontend disables the protected row's delete action, explains the policy in its protocol and bulk-delete dialog, and maps server rejections to the same localized message. The bulk dialog additionally lists the blocking protected imports (filename + creation time) and disables review/confirmation while any is in scope; the server stays authoritative. Correct a protected import by uploading corrected readings with overwrite enabled. (`quarantine_replace_protected` currently falls back to the generic delete-failure message until the import-protocol work renders it.)
 - `ImportLog` is read-only in Django admin (no add/change/delete): deletion, with its overwrite protection and batch cleanup, happens only through the application's protected workflow. Whole-ZEV deletion still removes the community's meters, readings and logs together.
-- An unprotected single-log delete removes the selected `ImportLog` and all `MeterReading` rows with `import_batch == batch_id`.
-- Bulk delete operates on the same scoped queryset as the list endpoint.
+- Bulk delete uses the same manager/importer write scope as single deletion.
 - Bulk delete accepts `mode = all | period`.
 - `mode = period` requires `date_from` and `date_to` and filters `ImportLog.created_at` with `period_window(date_from, date_to)` — Swiss calendar days, the same days the history shows.
 - Bulk delete validates an optional `zev_id` as a UUID before filtering. Invalid calendar dates, non-string dates, reversed ranges, and `date_to=9999-12-31` return 400 rather than overflowing the exclusive end bound.
 - History table filename/source filters are client-side only and never narrow bulk delete: the UI copy names the selected ZEV (or "all visible ZEVs" when none is selected), and the count uses the same instants as the backend (`businessDayStartMs(from)` to `businessDayStartMs(nextIsoDate(to))`).
-- Both endpoints write an audit event (`import_log.delete`, `import_log.bulk_delete`) scoped to the ZEV of the deleted logs, so the owning ZEV owner sees it in their audit log. Bulk delete writes one event per affected ZEV (metadata carries the request filters plus that ZEV's `deleted_logs`/`deleted_readings`). The ZEV is taken from the deleted logs, never from the request's `zev_id`; a bulk delete that removes nothing, or removes only logs without a ZEV, writes a single unscoped (admin-only) event.
-- Delete responses return counts for both deleted logs and deleted readings; bulk deletion also returns `timezone: "Europe/Zurich"` (also in its audit metadata); the frontend invalidates both import-log and metering queries so charts/quality refresh.
+- Both endpoints write an audit event (`import_log.delete`, `import_log.bulk_delete`) scoped to the ZEV of the deleted logs, so the owning ZEV owner sees it in their audit log. Bulk delete writes one event per affected ZEV (metadata carries the request filters plus that ZEV's `deleted_logs`/`deleted_readings`/`deleted_quarantined_readings` and its `deleted_slots` evidence). The ZEV is taken from the deleted logs, never from the request's `zev_id`; a bulk delete that removes nothing, or removes only logs without a ZEV, writes a single unscoped (admin-only) event.
+- Delete responses return counts for deleted logs, billable readings and held readings (`deleted_logs`, `deleted_readings`, `deleted_quarantined_readings`); bulk deletion also returns `timezone: "Europe/Zurich"` (also in its audit metadata); the frontend invalidates both import-log and metering queries so charts/quality refresh.
 
 ---
 
@@ -1429,6 +1483,11 @@ day/hour/month chart buckets:
 | `TransferArchiveLimitTests` | §4.4: transfer archives with traversal member paths (`/`- and `\`-separated, plus Windows drive letters), absolute paths, too many members, over the compressed or decompressed caps, or a high-ratio member are rejected; non-ZIP archives are rejected; the decompressed cap cannot drop below the documented 2M-row archive scale |
 
 Deletion policy regressions in `ImportLogDeletionTests` cover both CSV profiles, retaining the replacement when the predecessor is deleted, all-or-nothing rejection of period/all bulk deletion, backfilling legacy error/warning notes, and invalid date bounds.
+`SdatHeldDeletionTests` covers mixed and held-only batches, persistent held
+replacement protection, disabled communities, legacy batches reaching foreign
+communities, malformed counters, audit-failure rollback and truncated audit
+evidence. The PostgreSQL visibility tests also verify that captured slots in
+both streams stay locked until the transaction commits.
 
 ### Frontend
 

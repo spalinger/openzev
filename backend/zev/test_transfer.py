@@ -7,6 +7,7 @@ cannot link an account it does not own, cannot half-create a ZEV, and cannot be
 read at all when its format version is one this instance does not understand.
 """
 
+import csv
 import io
 import json
 import struct
@@ -20,7 +21,9 @@ from rest_framework.test import APIClient
 
 from accounts.models import UserRole
 from invoices.models import Invoice, InvoiceItem, InvoiceStatus
-from metering.models import ImportLog, MeterReading, ReadingResolution, SupplementarySource
+from metering.models import ImportLog, MeterReading, QuarantinedReading, ReadingResolution, SupplementarySource
+from metering.importers.sdatch_importer import import_sdatch
+from metering.test_import_sdatch_strict import build_block, build_e66
 from tariffs.dynamic.models import DynamicTariffSource
 from tariffs.models import BillingMode, EnergyType, PeriodType, Tariff, TariffCategory, TariffPeriod
 from testing.helpers import authenticate as auth, make_user, create_managed_zev
@@ -40,9 +43,14 @@ from zev.models import (
 from zev import access
 from zev.parties import assign_role, issuer_on
 from zev.transfer import ArchiveError, ImportFailed, build_archive, import_archive
-from zev.transfer.schema import FORMAT_VERSION, MANIFEST_NAME, OPT_IN_SECTIONS, SECTIONS, missing_dependencies
+from zev.transfer.schema import FORMAT_VERSION, MANIFEST_NAME, OPT_IN_SECTIONS, QUARANTINE_DIR, SECTIONS, missing_dependencies
+from django.core.files.uploadedfile import SimpleUploadedFile
 
 ZEV_URL = "/api/v1/zev/zevs"
+READING_CSV_HEADER = (
+    b"meter_id,timestamp,energy_kwh,direction,resolution,import_source,source_creation,"
+    b"source_document_id,source_delivery_id,business_reason,condition,source_product,source_unit,source_meter_id\n"
+)
 
 
 def build_populated_zev(owner, *, name="Transfer ZEV", meter_prefix="TR"):
@@ -603,7 +611,7 @@ class RejectedArchiveTests(TestCase):
         raw = self._archive(
             replace={
                 reading_member("REJ-CONS-1"): (
-                    b"meter_id,timestamp,energy_kwh,direction,resolution,import_source\n"
+                    READING_CSV_HEADER +
                     b"REJ-CONS-1,2026-01-01T00:00:00+00:00,notanumber,in,hourly,csv\n"
                 )
             }
@@ -619,7 +627,7 @@ class RejectedArchiveTests(TestCase):
         raw = self._archive(
             replace={
                 reading_member("REJ-CONS-1"): (
-                    b"meter_id,timestamp,energy_kwh,direction,resolution,import_source\n" + row + row
+                    READING_CSV_HEADER + row + row
                 )
             }
         )
@@ -688,7 +696,7 @@ class RejectedArchiveTests(TestCase):
         raw = self._archive(
             replace={
                 reading_member("REJ-CONS-1"): (
-                    b"meter_id,timestamp,energy_kwh,direction,resolution,import_source\n"
+                    READING_CSV_HEADER +
                     b"REJ-CONS-1,2026-01-01T00:00:00+00:00,1.0,in,hourly,csv\n"
                     b"\xff\xfe\x00\x80garbage\n"
                 )
@@ -707,7 +715,7 @@ class RejectedArchiveTests(TestCase):
         raw = self._archive(
             replace={
                 reading_member("REJ-CONS-1"): (
-                    b"meter_id,timestamp,energy_kwh,direction,resolution,import_source\n"
+                    READING_CSV_HEADER +
                     b"REJ-CONS-1,2026-01-01T00:00:00+00:00,99999999.99995,in,hourly,csv\n"
                 )
             }
@@ -722,7 +730,7 @@ class RejectedArchiveTests(TestCase):
         """The dedup set spans every readings member: two members naming the
         same meter must not slip past it and die on the unique constraint."""
         rows = (
-            b"meter_id,timestamp,energy_kwh,direction,resolution,import_source\n"
+            READING_CSV_HEADER +
             b"REJ-CONS-1,2026-01-01T00:00:00+00:00,1.2500,in,hourly,csv\n"
             b"REJ-CONS-1,2026-01-01T01:00:00+00:00,2.5000,in,hourly,csv\n"
         )
@@ -1605,3 +1613,366 @@ class BuildingTransferTests(TestCase):
         copy = Zev.objects.get(pk=result["zev_id"])
         self.assertEqual(copy.metering_points.count(), 2)
         self.assertEqual(copy.buildings.count(), 2)
+
+
+SEL_CONS_ID = "CH9999901234500000000000000000042"
+SEL_ALIAS_ID = "CH9999901234500000000000000000099"
+SEL_OTHER_ID = "CH9999901234500000000000000000077"
+SEL_C38 = '<rsm:VSENationalCode>C38</rsm:VSENationalCode>'
+SEL_CREATION = "2025-06-05T15:40:05+00:00"
+
+
+def _sdat_file(content, name="delivery.xml"):
+    return SimpleUploadedFile(name, content, content_type="application/xml")
+
+
+class ProvenanceQuarantineTransferTests(TestCase):
+    """Format 8: billable provenance, aliases and held observations round-trip."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = make_user("pq_owner", UserRole.USER)
+        cls.importer = make_user("pq_importer", UserRole.ADMIN)
+
+    def _build_zev(self, prefix="PQ"):
+        zev = create_managed_zev(name=f"{prefix} ZEV", owner=self.owner, zev_type="vzev", invoice_prefix="PQ")
+        Participant.objects.create(
+            zev=zev, first_name="Provenance", last_name="Case", email=f"{prefix.lower()}@example.com",
+            valid_from=date(2026, 1, 1),
+        )
+        cons = MeteringPoint.objects.create(
+            zev=zev, meter_id=f"{prefix}-CONS-1", secondary_meter_id=SEL_ALIAS_ID,
+            meter_type=MeteringPointType.CONSUMPTION,
+        )
+        other = MeteringPoint.objects.create(
+            zev=zev, meter_id=f"{prefix}-OTHER-1", meter_type=MeteringPointType.CONSUMPTION,
+        )
+        MeterReading.objects.create(
+            metering_point=cons, timestamp=datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc),
+            energy_kwh=Decimal("1.2500"), direction="in", resolution="15min",
+            import_source="sdatch",
+            source_creation=datetime.fromisoformat(SEL_CREATION),
+            source_document_id="PROV-BLK", source_delivery_id="PROV-DEL",
+            business_reason="E88", condition="56",
+            source_product="8716867000030", source_unit="KWH",
+            source_meter_id=SEL_ALIAS_ID,
+        )
+        QuarantinedReading.objects.create(
+            metering_point=cons, timestamp=datetime(2026, 1, 2, 0, 0, tzinfo=timezone.utc),
+            energy_kwh=Decimal("9.5000"), direction="in", resolution="15min",
+            import_source="sdatch",
+            source_creation=datetime.fromisoformat(SEL_CREATION),
+            source_document_id="HELD-BLK", source_delivery_id="HELD-DEL",
+            business_reason="C38", condition="21",
+            source_product="8716867000030", source_unit="KWH",
+            source_meter_id=f"{prefix}-CONS-1",
+        )
+        return zev, cons, other
+
+    def test_export_carries_format_8_with_quarantine_counts(self):
+        zev, cons, other = self._build_zev()
+        with zipfile.ZipFile(io.BytesIO(export_to_bytes(zev))) as archive:
+            manifest = json.loads(archive.read(MANIFEST_NAME))
+            names = archive.namelist()
+        self.assertEqual(manifest["format_version"], FORMAT_VERSION)
+        self.assertEqual(manifest["counts"]["quarantined_readings"], 1)
+        quarantine_members = [name for name in names if name.startswith(f"{QUARANTINE_DIR}/")]
+        self.assertEqual(len(quarantine_members), 1)
+        reading_members = [name for name in names if name.startswith("readings/")]
+        self.assertEqual(len(reading_members), 2)
+
+    def test_round_trip_preserves_provenance_aliases_and_held_rows(self):
+        zev, cons, other = self._build_zev()
+        result = import_archive(io.BytesIO(export_and_clear(zev)), owner=self.importer)
+        copy = Zev.objects.get(pk=result["zev_id"])
+
+        point = copy.metering_points.get(meter_id="PQ-CONS-1")
+        self.assertEqual(point.secondary_meter_id, SEL_ALIAS_ID)
+        reading = MeterReading.objects.get(metering_point=point)
+        self.assertEqual(reading.energy_kwh, Decimal("1.2500"))
+        self.assertEqual(reading.source_creation, datetime.fromisoformat(SEL_CREATION))
+        self.assertEqual(reading.source_document_id, "PROV-BLK")
+        self.assertEqual(reading.source_delivery_id, "PROV-DEL")
+        self.assertEqual(reading.business_reason, "E88")
+        self.assertEqual(reading.condition, "56")
+        self.assertEqual(reading.source_product, "8716867000030")
+        self.assertEqual(reading.source_unit, "KWH")
+        self.assertEqual(reading.source_meter_id, SEL_ALIAS_ID)
+
+        held = QuarantinedReading.objects.get(metering_point=point)
+        self.assertEqual(held.energy_kwh, Decimal("9.5000"))
+        self.assertEqual(held.business_reason, "C38")
+        self.assertEqual(held.condition, "21")
+        self.assertEqual(held.source_document_id, "HELD-BLK")
+        self.assertEqual(held.source_delivery_id, "HELD-DEL")
+        self.assertEqual(held.source_creation, datetime.fromisoformat(SEL_CREATION))
+        self.assertEqual(held.source_meter_id, "PQ-CONS-1")
+
+    def test_v8_requires_quarantine_count(self):
+        zev, _, _ = self._build_zev()
+        raw = export_and_clear(zev)
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            manifest = json.loads(archive.read(MANIFEST_NAME))
+        del manifest["counts"]["quarantined_readings"]
+        raw = rewrite_archive(raw, replace={MANIFEST_NAME: manifest})
+        with self.assertRaisesRegex(ArchiveError, "quarantined_readings"):
+            import_archive(io.BytesIO(raw), owner=self.importer)
+        self.assertFalse(Zev.objects.filter(access_grants__user=self.importer).exists())
+
+    def test_bad_provenance_in_either_stream_rejects_the_entire_archive(self):
+        zev, _, _ = self._build_zev()
+        raw = export_and_clear(zev)
+        for directory in ("readings", QUARANTINE_DIR):
+            with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                name = next(name for name in archive.namelist() if name.startswith(f"{directory}/PQ-CONS-1-"))
+                reader = csv.DictReader(io.StringIO(archive.read(name).decode()))
+                rows = list(reader)
+                columns = reader.fieldnames
+            for field, value in (("source_creation", "not-a-date"), ("source_delivery_id", "D" * 65), ("source_meter_id", "M" * 65)):
+                with self.subTest(directory=directory, field=field):
+                    edited = io.StringIO()
+                    writer = csv.DictWriter(edited, fieldnames=columns)
+                    writer.writeheader()
+                    writer.writerows([{**row, field: value} for row in rows])
+                    damaged = rewrite_archive(raw, replace={name: edited.getvalue().encode()})
+                    with self.assertRaises(ImportFailed) as caught:
+                        import_archive(io.BytesIO(damaged), owner=self.importer)
+                    self.assertIn(field, caught.exception.errors[0]["errors"])
+                    self.assertFalse(Zev.objects.filter(access_grants__user=self.importer).exists())
+
+    def test_v8_missing_provenance_header_is_rejected(self):
+        zev, _, _ = self._build_zev()
+        raw = export_and_clear(zev)
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            name = next(name for name in archive.namelist() if name.startswith("readings/PQ-CONS-1-"))
+            reader = csv.DictReader(io.StringIO(archive.read(name).decode()))
+            rows = list(reader)
+            columns = [column for column in reader.fieldnames if column != "source_creation"]
+        edited = io.StringIO()
+        writer = csv.DictWriter(edited, fieldnames=columns, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+        damaged = rewrite_archive(raw, replace={name: edited.getvalue().encode()})
+        with self.assertRaises(ImportFailed) as caught:
+            import_archive(io.BytesIO(damaged), owner=self.importer)
+        self.assertIn("source_creation", str(caught.exception.errors))
+        self.assertFalse(Zev.objects.filter(access_grants__user=self.importer).exists())
+
+    def test_quarantine_row_naming_another_meter_is_stored_not_rebound(self):
+        zev, cons, other = self._build_zev()
+        raw = export_to_bytes(zev)
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            names = [name for name in archive.namelist() if name.startswith(f"{QUARANTINE_DIR}/")]
+            self.assertEqual(len(names), 1)
+            payload = archive.read(names[0]).decode()
+        lines = payload.splitlines()
+        header = lines[0].split(",")
+        source_idx = header.index("source_meter_id")
+        rewritten = [lines[0]]
+        for line in lines[1:]:
+            cells = line.split(",")
+            cells[source_idx] = "PQ-OTHER-1"
+            rewritten.append(",".join(cells))
+        raw = rewrite_archive(raw, replace={names[0]: ("\n".join(rewritten) + "\n").encode()})
+        Invoice.objects.filter(zev=zev).delete()
+        zev.delete()
+        result = import_archive(io.BytesIO(raw), owner=self.importer)
+        copy = Zev.objects.get(pk=result["zev_id"])
+        held = QuarantinedReading.objects.get(metering_point__zev=copy)
+        self.assertEqual(held.metering_point.meter_id, "PQ-CONS-1")
+        self.assertEqual(held.source_meter_id, "PQ-OTHER-1")
+
+
+class SelectionParityTransferTests(TestCase):
+    """Stale/new/equal-Creation deliveries select identically after restore."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = make_user("sel_owner", UserRole.USER)
+        cls.importer = make_user("sel_importer", UserRole.ADMIN)
+
+    def _delivery(self, zev, values, *, creation, status="9", reason="E88", delivery_id, doc="SEL-BLK", meter=SEL_CONS_ID):
+        obs = "".join(
+            f"<rsm:Observation><rsm:Position><rsm:Sequence>{seq}</rsm:Sequence></rsm:Position>"
+            f"<rsm:Volume>{value}</rsm:Volume></rsm:Observation>"
+            for seq, value in zip(range(1, 5), values)
+        )
+        reason_xml = SEL_C38 if reason == "C38" else '<rsm:ebIXCode>E88</rsm:ebIXCode>'
+        content = build_e66(
+            [build_block(meter, obs, doc=doc)],
+            status=status, creation=creation, delivery_id=delivery_id, reason_xml=reason_xml,
+        )
+        return import_sdatch(_sdat_file(content), zev, self.owner)
+
+    def test_replay_new_stale_and_conflict_match_before_and_after_restore(self):
+        zev = create_managed_zev(name="Sel ZEV", owner=self.owner, zev_type="vzev", invoice_prefix="SL")
+        MeteringPoint.objects.create(zev=zev, meter_id=SEL_CONS_ID, meter_type=MeteringPointType.CONSUMPTION)
+        base = self._delivery(zev, ["101", "102", "103", "104"], creation="2025-06-04T10:00:00Z", delivery_id="SEL-D0")
+        self.assertEqual(base.result_status, "accepted")
+        held_base = self._delivery(zev, ["50", "51", "52", "53"], creation="2025-06-05T10:00:00Z",
+                                   reason="C38", delivery_id="SEL-H0", doc="SEL-H0-BLK")
+        self.assertEqual(held_base.result_status, "held")
+
+        before = self._delivery(zev, ["101", "102", "103", "104"], creation="2025-06-04T10:00:00Z", delivery_id="SEL-D0R")
+        self.assertEqual(before.result_status, "unchanged")
+        before_held = self._delivery(zev, ["50", "51", "52", "53"], creation="2025-06-05T10:00:00Z",
+                                     reason="C38", delivery_id="SEL-H0R", doc="SEL-H0-BLK")
+        self.assertEqual(before_held.result_status, "unchanged")
+
+        result = import_archive(io.BytesIO(export_and_clear(zev)), owner=self.importer)
+        copy = Zev.objects.get(pk=result["zev_id"])
+
+        after = self._delivery(copy, ["101", "102", "103", "104"], creation="2025-06-04T10:00:00Z", delivery_id="SEL-D0R2")
+        self.assertEqual(after.result_status, before.result_status)
+        self.assertEqual(after.result_counts["duplicate"], before.result_counts["duplicate"])
+        self.assertEqual(after.reading_changes, [])
+        after_held = self._delivery(copy, ["50", "51", "52", "53"], creation="2025-06-05T10:00:00Z",
+                                    reason="C38", delivery_id="SEL-H0R2", doc="SEL-H0-BLK")
+        self.assertEqual(after_held.result_status, before_held.result_status)
+        self.assertEqual(after_held.result_counts["duplicate"], before_held.result_counts["duplicate"])
+
+        held_update = self._delivery(copy, ["60", "61", "62", "63"], creation="2025-06-07T10:00:00Z",
+                                     reason="C38", delivery_id="SEL-H1", doc="SEL-H1-BLK")
+        self.assertEqual(held_update.result_status, "held")
+        self.assertEqual(held_update.result_counts["quarantine_overwritten"], 4)
+
+        newer = self._delivery(copy, ["201", "202", "203", "204"], creation="2025-06-06T10:00:00Z",
+                               status="5", delivery_id="SEL-D1", doc="SEL-D1-BLK")
+        self.assertEqual(newer.result_status, "accepted")
+        self.assertEqual(newer.result_counts["overwritten"], 4)
+        self.assertEqual(newer.result_counts["promoted"], 0)
+        held_kept = list(QuarantinedReading.objects.filter(metering_point__zev=copy).order_by("timestamp").values_list("energy_kwh", flat=True))
+        self.assertEqual(held_kept, [Decimal("60"), Decimal("61"), Decimal("62"), Decimal("63")])
+
+        conflict = self._delivery(copy, ["301", "302", "303", "304"], creation="2025-06-06T10:00:00Z",
+                                  status="5", delivery_id="SEL-D1X", doc="SEL-D1X-BLK")
+        self.assertEqual(conflict.result_status, "rejected")
+        self.assertTrue(any(issue["code"] == "equal_creation_conflict" for issue in conflict.issues))
+        kept = list(MeterReading.objects.filter(metering_point__zev=copy).order_by("timestamp").values_list("energy_kwh", flat=True))
+        self.assertEqual(kept, [Decimal("201"), Decimal("202"), Decimal("203"), Decimal("204")])
+
+        stale = self._delivery(copy, ["1", "2", "3", "4"], creation="2025-06-02T10:00:00Z",
+                               status="5", delivery_id="SEL-STALE", doc="SEL-STALE-BLK")
+        self.assertEqual(stale.result_counts["stale"], 4)
+        kept = list(MeterReading.objects.filter(metering_point__zev=copy).order_by("timestamp").values_list("energy_kwh", flat=True))
+        self.assertEqual(kept, [Decimal("201"), Decimal("202"), Decimal("203"), Decimal("204")])
+
+
+class LegacyArchiveTransferTests(TestCase):
+    """Format 7 archives restore with documented defaults and no held rows."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = make_user("leg_owner", UserRole.USER)
+        cls.importer = make_user("leg_importer", UserRole.ADMIN)
+
+    def _downgrade_to_v7(self, raw):
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            manifest = json.loads(archive.read(MANIFEST_NAME))
+            names = archive.namelist()
+            replace = {}
+            for name in names:
+                if name.startswith("readings/"):
+                    lines = archive.read(name).decode().splitlines()
+                    replace[name] = ("\n".join(",".join(line.split(",")[:8]) for line in lines) + "\n").encode()
+            manifest["format_version"] = 7
+            manifest["counts"].pop("quarantined_readings", None)
+            replace[MANIFEST_NAME] = manifest
+            drop = tuple(name for name in names if name.startswith(f"{QUARANTINE_DIR}/"))
+        return rewrite_archive(raw, replace=replace, drop=drop)
+
+    def test_v7_archive_restores_billable_with_defaults_and_no_held_rows(self):
+        zev = create_managed_zev(name="Leg ZEV", owner=self.owner, zev_type="vzev", invoice_prefix="LG")
+        point = MeteringPoint.objects.create(
+            zev=zev, meter_id="LEG-CONS-1", secondary_meter_id=SEL_ALIAS_ID,
+            meter_type=MeteringPointType.CONSUMPTION,
+        )
+        MeterReading.objects.create(
+            metering_point=point, timestamp=datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc),
+            energy_kwh=Decimal("1.2500"), direction="in", resolution="15min",
+            import_source="sdatch", source_creation=datetime.fromisoformat(SEL_CREATION),
+            source_document_id="LEG-BLK",
+        )
+        QuarantinedReading.objects.create(
+            metering_point=point, timestamp=datetime(2026, 1, 2, 0, 0, tzinfo=timezone.utc),
+            energy_kwh=Decimal("9.5000"), direction="in", resolution="15min",
+            business_reason="C38", condition="21",
+        )
+        raw = self._downgrade_to_v7(export_and_clear(zev))
+        result = import_archive(io.BytesIO(raw), owner=self.importer)
+        copy = Zev.objects.get(pk=result["zev_id"])
+        reading = MeterReading.objects.get(metering_point__zev=copy)
+        self.assertEqual(reading.energy_kwh, Decimal("1.2500"))
+        self.assertEqual(reading.source_creation, datetime.fromisoformat(SEL_CREATION))
+        self.assertEqual(reading.source_document_id, "LEG-BLK")
+        self.assertEqual(reading.source_delivery_id, "")
+        self.assertEqual(reading.business_reason, "")
+        self.assertEqual(reading.condition, "")
+        self.assertEqual(QuarantinedReading.objects.filter(metering_point__zev=copy).count(), 0)
+        self.assertEqual(copy.metering_points.get().secondary_meter_id, SEL_ALIAS_ID)
+
+    def test_unknown_format_version_is_rejected(self):
+        zev = create_managed_zev(name="LegV ZEV", owner=self.owner, zev_type="vzev", invoice_prefix="LV")
+        raw = export_to_bytes(zev)
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            manifest = json.loads(archive.read(MANIFEST_NAME))
+        manifest["format_version"] = 99
+        raw = rewrite_archive(raw, replace={MANIFEST_NAME: manifest})
+        with self.assertRaises(ArchiveError):
+            import_archive(io.BytesIO(raw), owner=self.importer)
+        self.assertFalse(Zev.objects.filter(name="LegV ZEV").exclude(pk=zev.pk).exists())
+
+
+class UnsafeArchiveTransferTests(TestCase):
+    """Malformed rows and cross-tenant identities fail safe with nothing created."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = make_user("unsafe_owner", UserRole.USER)
+        cls.importer = make_user("unsafe_importer", UserRole.ADMIN)
+
+    def test_malformed_reading_timestamp_fails_safe(self):
+        zev = create_managed_zev(name="Unsafe ZEV", owner=self.owner, zev_type="vzev", invoice_prefix="US")
+        point = MeteringPoint.objects.create(zev=zev, meter_id="US-CONS-1", meter_type=MeteringPointType.CONSUMPTION)
+        MeterReading.objects.create(
+            metering_point=point, timestamp=datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc),
+            energy_kwh=Decimal("1.2500"), direction="in",
+        )
+        raw = export_and_clear(zev)
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            names = [name for name in archive.namelist() if name.startswith("readings/")]
+            payload = archive.read(names[0]).decode()
+        lines = payload.splitlines()
+        bad = lines[1].split(",")
+        bad[1] = "not-a-timestamp"
+        raw = rewrite_archive(raw, replace={names[0]: ("\n".join([lines[0], ",".join(bad)]) + "\n").encode()})
+        before = Zev.objects.count()
+        with self.assertRaises(ImportFailed):
+            import_archive(io.BytesIO(raw), owner=self.importer)
+        self.assertEqual(Zev.objects.count(), before)
+
+    def test_colliding_alias_is_rejected_and_nothing_is_created(self):
+        zev = create_managed_zev(name="Alias ZEV", owner=self.owner, zev_type="vzev", invoice_prefix="AX")
+        MeteringPoint.objects.create(zev=zev, meter_id="AX-CONS-1", meter_type=MeteringPointType.CONSUMPTION)
+        MeteringPoint.objects.create(zev=zev, meter_id="AX-CONS-2", meter_type=MeteringPointType.CONSUMPTION)
+        raw = export_to_bytes(zev)
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            points = json.loads(archive.read("metering_points.json"))
+        points[1]["secondary_meter_id"] = "AX-CONS-1"
+        raw = rewrite_archive(raw, replace={"metering_points.json": points})
+        before = Zev.objects.count()
+        with self.assertRaises(ImportFailed):
+            import_archive(io.BytesIO(raw), owner=self.importer)
+        self.assertEqual(Zev.objects.count(), before)
+
+    def test_archive_alias_taken_by_another_community_is_rejected(self):
+        live = create_managed_zev(name="Live ZEV", owner=self.owner, zev_type="vzev", invoice_prefix="LZ")
+        MeteringPoint.objects.create(zev=live, meter_id="LZ-CONS-1", meter_type=MeteringPointType.CONSUMPTION)
+        zev = create_managed_zev(name="AliasLive ZEV", owner=self.owner, zev_type="vzev", invoice_prefix="AL")
+        MeteringPoint.objects.create(zev=zev, meter_id="AL-CONS-1", secondary_meter_id="LZ-CONS-1",
+                                     meter_type=MeteringPointType.CONSUMPTION)
+        raw = export_to_bytes(zev)
+        before = Zev.objects.count()
+        with self.assertRaises(ImportFailed):
+            import_archive(io.BytesIO(raw), owner=self.importer)
+        self.assertEqual(Zev.objects.count(), before)

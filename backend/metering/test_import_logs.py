@@ -11,16 +11,18 @@ from decimal import Decimal
 
 from django.test import TestCase, TransactionTestCase
 from django.apps import apps
-from django.db import connection
+from django.db import connection, OperationalError, transaction
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIClient
 
 from accounts.models import UserRole
 from audit.models import AuditEvent
 from metering.importers import csv_importer
-from metering.models import ImportLog, ImportSource, MeterReading, ReadingDirection, ReadingResolution
+from metering.deletion import collect_deleted_slots
+from metering.models import ImportLog, ImportSource, MeterReading, QuarantinedReading, ReadingDirection, ReadingResolution
 from metering.testing import upload_csv
 from metering.importers.csv_importer import ImportFileError, import_csv, _upsert_reading
+from metering.test_import_sdatch_strict import build_block, build_e66, quarter_block
 from testing.helpers import authenticate as auth, make_user, create_managed_zev
 from zev.models import MeteringPoint, MeteringPointType, Participant
 
@@ -512,3 +514,333 @@ class ImportLogCommitVisibilityTests(TransactionTestCase):
         self.assertEqual(ImportLog.objects.count(), 1)
         self.assertEqual(MeterReading.objects.count(), 1)
         self.assertEqual(outcome["log"].rows_imported, 1)
+
+    @skipUnless(connection.vendor == "postgresql", "requires row locks across connections")
+    def test_captured_deletion_evidence_stays_locked_until_commit(self):
+        batch_id = uuid.uuid4()
+        models = (MeterReading, QuarantinedReading)
+        for model in models:
+            model.objects.create(
+                metering_point=self.metering_point, import_batch=batch_id,
+                timestamp=datetime(2026, 2, 10, tzinfo=timezone.utc), energy_kwh=Decimal("1"),
+            )
+        errors = []
+
+        def overwrite():
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SET lock_timeout = '100ms'")
+                for model in models:
+                    try:
+                        model.objects.filter(import_batch=batch_id).update(energy_kwh=Decimal("2"))
+                    except OperationalError as exc:
+                        errors.append(str(exc))
+            finally:
+                connection.close()
+
+        with transaction.atomic():
+            slots, truncated = collect_deleted_slots([batch_id])
+            self.assertEqual(len(slots), 2)
+            self.assertFalse(truncated)
+            worker = threading.Thread(target=overwrite)
+            worker.start()
+            worker.join(timeout=10)
+            self.assertFalse(worker.is_alive(), "concurrent writer did not finish")
+            self.assertEqual(len(errors), 2)
+            self.assertTrue(all("lock timeout" in error for error in errors), errors)
+        for model in models:
+            self.assertEqual(model.objects.get(import_batch=batch_id).energy_kwh, Decimal("1"))
+
+
+SDAT_CONS_ID = "CH9999901234500000000000000000001"
+C38_REASON = '<rsm:VSENationalCode>C38</rsm:VSENationalCode>'
+
+
+class SdatHeldDeletionTests(TestCase):
+    """Single/period/all deletion over billable and held (quarantine) streams."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.owner = make_user("sdat_delete_owner", UserRole.USER)
+        self.zev = create_managed_zev(name="SDAT Delete ZEV", owner=self.owner, zev_type="vzev", invoice_prefix="SD")
+        # After the grant: promoting the account retires tokens minted before it.
+        auth(self.client, self.owner)
+        self.metering_point = MeteringPoint.objects.create(
+            zev=self.zev, meter_id=SDAT_CONS_ID, meter_type=MeteringPointType.CONSUMPTION,
+        )
+
+    def _sdat_log(self, *, rows_overwritten=0, quarantine_overwritten=0, filename="sdat.xml"):
+        batch_id = uuid.uuid4()
+        return ImportLog.objects.create(
+            batch_id=batch_id,
+            zev=self.zev,
+            imported_by=self.owner,
+            source=ImportSource.SDATCH,
+            filename=filename,
+            rows_total=4,
+            rows_imported=4,
+            rows_overwritten=rows_overwritten,
+            rows_skipped=0,
+            result_status="accepted",
+            result_counts={"created": 4, "overwritten": rows_overwritten, "quarantine_overwritten": quarantine_overwritten},
+        )
+
+    def _add_rows(self, batch_id, *, billable=0, held=0, day=10):
+        for index in range(billable):
+            MeterReading.objects.create(
+                metering_point=self.metering_point,
+                timestamp=datetime(2026, 2, day, index, tzinfo=timezone.utc),
+                energy_kwh=Decimal("1.0000"),
+                direction=ReadingDirection.IN,
+                resolution=ReadingResolution.FIFTEEN_MIN,
+                import_source=ImportSource.SDATCH,
+                import_batch=batch_id,
+            )
+        for index in range(held):
+            QuarantinedReading.objects.create(
+                metering_point=self.metering_point,
+                timestamp=datetime(2026, 3, day, index, tzinfo=timezone.utc),
+                energy_kwh=Decimal("2.0000"),
+                direction=ReadingDirection.IN,
+                resolution=ReadingResolution.FIFTEEN_MIN,
+                import_batch=batch_id,
+                business_reason="C38",
+                condition="21",
+            )
+
+    def _import(self, content):
+        upload = SimpleUploadedFile("derived.xml", content, content_type="application/xml")
+        return self.client.post(
+            "/api/v1/metering/import/sdatch/",
+            {"file": upload, "zev_id": str(self.zev.id)},
+            format="multipart",
+        )
+
+    def test_mixed_billable_and_held_delete_removes_both_streams(self):
+        log = self._sdat_log()
+        self._add_rows(log.batch_id, billable=2, held=2)
+        other = self._sdat_log(filename="other.xml")
+        self._add_rows(other.batch_id, billable=1, held=1, day=12)
+
+        resp = self.client.delete(f"/api/v1/metering/import-logs/{log.id}/")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["deleted_logs"], 1)
+        self.assertEqual(resp.data["deleted_readings"], 2)
+        self.assertEqual(resp.data["deleted_quarantined_readings"], 2)
+        self.assertFalse(ImportLog.objects.filter(pk=log.id).exists())
+        self.assertEqual(MeterReading.objects.filter(import_batch=log.batch_id).count(), 0)
+        self.assertEqual(QuarantinedReading.objects.filter(import_batch=log.batch_id).count(), 0)
+        self.assertEqual(MeterReading.objects.filter(import_batch=other.batch_id).count(), 1)
+        self.assertEqual(QuarantinedReading.objects.filter(import_batch=other.batch_id).count(), 1)
+
+    def test_disabled_community_blocks_single_and_bulk_deletion(self):
+        log = self._sdat_log()
+        self._add_rows(log.batch_id, billable=1, held=1)
+        self.zev.disabled_at = datetime(2026, 10, 1, tzinfo=timezone.utc)
+        self.zev.save(update_fields=["disabled_at"])
+        for bulk in (False, True):
+            with self.subTest(bulk=bulk):
+                response = (
+                    self.client.post("/api/v1/metering/import-logs/bulk-delete/", {"mode": "all"}, format="json")
+                    if bulk else self.client.delete(f"/api/v1/metering/import-logs/{log.id}/")
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertTrue(ImportLog.objects.filter(pk=log.pk).exists())
+                self.assertEqual(MeterReading.objects.count(), 1)
+                self.assertEqual(QuarantinedReading.objects.count(), 1)
+
+        auth(self.client, make_user("disabled_delete_admin", UserRole.ADMIN))
+        response = self.client.delete(f"/api/v1/metering/import-logs/{log.id}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["deleted_quarantined_readings"], 1)
+
+    def test_audit_failure_rolls_back_single_and_bulk_deletion(self):
+        log = self._sdat_log()
+        self._add_rows(log.batch_id, billable=1, held=1)
+        for bulk in (False, True):
+            with self.subTest(bulk=bulk), patch("metering.views.record_audit_event", side_effect=RuntimeError("audit failed")):
+                with self.assertRaisesRegex(RuntimeError, "audit failed"):
+                    if bulk:
+                        self.client.post("/api/v1/metering/import-logs/bulk-delete/", {"mode": "all"}, format="json")
+                    else:
+                        self.client.delete(f"/api/v1/metering/import-logs/{log.id}/")
+                self.assertTrue(ImportLog.objects.filter(pk=log.pk).exists())
+                self.assertEqual(MeterReading.objects.count(), 1)
+                self.assertEqual(QuarantinedReading.objects.count(), 1)
+
+    def test_held_only_delete_leaves_no_orphans_and_frees_selection(self):
+        held = self._import(build_e66(
+            [quarter_block(SDAT_CONS_ID, "2025-06-02T22:00:00Z", 4)],
+            reason_xml=C38_REASON, creation="2025-06-04T10:00:00Z", delivery_id="HELD-ONLY",
+        ))
+        self.assertEqual(held.status_code, 201)
+        self.assertEqual(held.data["result_status"], "held")
+        log_id = held.data["id"]
+
+        resp = self.client.delete(f"/api/v1/metering/import-logs/{log_id}/")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["deleted_quarantined_readings"], 4)
+        self.assertEqual(QuarantinedReading.objects.count(), 0)
+        replay = self._import(build_e66(
+            [quarter_block(SDAT_CONS_ID, "2025-06-02T22:00:00Z", 4)],
+            reason_xml=C38_REASON, creation="2025-06-04T10:00:00Z", delivery_id="HELD-ONLY",
+        ))
+        self.assertEqual(replay.data["result_status"], "held")
+        self.assertEqual(replay.data["result_counts"]["held"], 4)
+
+    def test_held_replacement_without_billable_overwrites_is_protected(self):
+        log = self._sdat_log(quarantine_overwritten=2)
+        self._add_rows(log.batch_id, held=2)
+
+        resp = self.client.delete(f"/api/v1/metering/import-logs/{log.id}/")
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["code"], "quarantine_replace_protected")
+        self.assertTrue(ImportLog.objects.filter(pk=log.id).exists())
+        self.assertEqual(QuarantinedReading.objects.filter(import_batch=log.batch_id).count(), 2)
+
+    def test_mixed_bulk_with_held_protected_rolls_back_entirely(self):
+        additive = self._sdat_log(filename="additive.xml")
+        self._add_rows(additive.batch_id, billable=1, held=1)
+        protected = self._sdat_log(filename="replacer.xml", quarantine_overwritten=1)
+        self._add_rows(protected.batch_id, held=1, day=12)
+
+        resp = self.client.post("/api/v1/metering/import-logs/bulk-delete/", {"mode": "all"}, format="json")
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["code"], "quarantine_replace_protected")
+        self.assertEqual(ImportLog.objects.count(), 2)
+        self.assertEqual(MeterReading.objects.count(), 1)
+        self.assertEqual(QuarantinedReading.objects.count(), 2)
+
+    def test_billable_overwrite_reports_overwrite_code(self):
+        log = self._sdat_log(rows_overwritten=3)
+        self._add_rows(log.batch_id, billable=3)
+
+        resp = self.client.delete(f"/api/v1/metering/import-logs/{log.id}/")
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data["code"], "overwrite_import_protected")
+
+    def test_quarantine_update_replacer_is_protected_and_predecessor_frees_nothing(self):
+        first = self._import(build_e66(
+            [quarter_block(SDAT_CONS_ID, "2025-06-02T22:00:00Z", 4)],
+            reason_xml=C38_REASON, creation="2025-06-04T10:00:00Z", delivery_id="HELD-V1",
+        ))
+        second = self._import(build_e66(
+            [quarter_block(SDAT_CONS_ID, "2025-06-02T22:00:00Z", 4, doc="HELD-V2-BLK")],
+            reason_xml=C38_REASON, creation="2025-06-05T10:00:00Z", delivery_id="HELD-V2",
+        ))
+        self.assertEqual(second.data["result_counts"]["quarantine_overwritten"], 4)
+
+        blocked = self.client.delete(f"/api/v1/metering/import-logs/{second.data['id']}/")
+        self.assertEqual(blocked.status_code, 400)
+        self.assertEqual(blocked.data["code"], "quarantine_replace_protected")
+
+        freed = self.client.delete(f"/api/v1/metering/import-logs/{first.data['id']}/")
+        self.assertEqual(freed.status_code, 200)
+        self.assertEqual(freed.data["deleted_quarantined_readings"], 0)
+        self.assertEqual(QuarantinedReading.objects.count(), 4)
+
+    def test_promotion_keeps_association_and_neither_log_is_protected(self):
+        held = self._import(build_e66(
+            [quarter_block(SDAT_CONS_ID, "2025-06-02T22:00:00Z", 4)],
+            reason_xml=C38_REASON, creation="2025-06-04T10:00:00Z", delivery_id="PROM-HELD",
+        ))
+        billed = self._import(build_e66(
+            [quarter_block(SDAT_CONS_ID, "2025-06-02T22:00:00Z", 4, doc="PROM-BILL")],
+            creation="2025-06-05T10:00:00Z", delivery_id="PROM-BILL",
+        ))
+        self.assertEqual(billed.data["result_status"], "accepted")
+        self.assertEqual(billed.data["result_counts"]["promoted"], 4)
+        self.assertEqual(QuarantinedReading.objects.count(), 0)
+
+        listed = self.client.get("/api/v1/metering/import-logs/")
+        by_id = {entry["id"]: entry for entry in listed.data["results"]}
+        self.assertTrue(by_id[str(held.data["id"])]["deletable"])
+        self.assertIsNone(by_id[str(held.data["id"])]["deletion_protection_code"])
+        self.assertTrue(by_id[str(billed.data["id"])]["deletable"])
+
+        drop_held = self.client.delete(f"/api/v1/metering/import-logs/{held.data['id']}/")
+        self.assertEqual(drop_held.status_code, 200)
+        self.assertEqual(drop_held.data["deleted_quarantined_readings"], 0)
+        self.assertEqual(MeterReading.objects.count(), 4)
+        drop_billed = self.client.delete(f"/api/v1/metering/import-logs/{billed.data['id']}/")
+        self.assertEqual(drop_billed.status_code, 200)
+        self.assertEqual(drop_billed.data["deleted_readings"], 4)
+        self.assertEqual(MeterReading.objects.count(), 0)
+        self.assertEqual(QuarantinedReading.objects.count(), 0)
+
+    def test_billable_replace_replacer_is_protected_and_predecessor_keeps_new_values(self):
+        original = self._import(build_e66([quarter_block(SDAT_CONS_ID, "2025-06-02T22:00:00Z", 4)]))
+        obs = "".join(
+            f"<rsm:Observation><rsm:Position><rsm:Sequence>{seq}</rsm:Sequence></rsm:Position>"
+            f"<rsm:Volume>{200 + seq}</rsm:Volume></rsm:Observation>"
+            for seq in range(1, 5)
+        )
+
+        replacer = self._import(build_e66(
+            [build_block(SDAT_CONS_ID, obs, doc="REPL-BLK")],
+            status="5", creation="2025-06-06T10:00:00Z", delivery_id="REPL-1",
+        ))
+        self.assertEqual(replacer.data["rows_overwritten"], 4)
+
+        blocked = self.client.delete(f"/api/v1/metering/import-logs/{replacer.data['id']}/")
+        self.assertEqual(blocked.status_code, 400)
+        self.assertEqual(blocked.data["code"], "overwrite_import_protected")
+
+        freed = self.client.delete(f"/api/v1/metering/import-logs/{original.data['id']}/")
+        self.assertEqual(freed.status_code, 200)
+        self.assertEqual(freed.data["deleted_readings"], 0)
+        kept = list(MeterReading.objects.order_by("timestamp").values_list("energy_kwh", flat=True))
+        self.assertEqual(kept, [Decimal("201"), Decimal("202"), Decimal("203"), Decimal("204")])
+
+    def test_deletion_audit_carries_held_counts_and_slot_evidence(self):
+        log = self._sdat_log()
+        self._add_rows(log.batch_id, billable=1, held=1)
+
+        self.client.delete(f"/api/v1/metering/import-logs/{log.id}/")
+
+        event = AuditEvent.objects.get(action_type="import_log.delete")
+        self.assertEqual(event.metadata_json["deleted_quarantined_readings"], 1)
+        streams = sorted(slot["stream"] for slot in event.metadata_json["deleted_slots"])
+        self.assertEqual(streams, ["billable", "held"])
+        self.assertFalse(event.metadata_json["deleted_slots_truncated"])
+
+    def test_bulk_audit_marks_evidence_limited_by_audit_redaction(self):
+        log = self._sdat_log()
+        self._add_rows(log.batch_id, held=21)
+        response = self.client.post("/api/v1/metering/import-logs/bulk-delete/", {"mode": "all"}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["deleted_slots_truncated"])
+        event = AuditEvent.objects.get(action_type="import_log.bulk_delete")
+        self.assertTrue(event.metadata_json["deleted_slots_truncated"])
+        self.assertEqual(event.metadata_json["deleted_slots"][-1], "...(+1 more)")
+
+    def test_malformed_replacement_evidence_does_not_allow_deletion(self):
+        log = self._sdat_log()
+        self._add_rows(log.batch_id, held=1)
+        for counts in ({"quarantine_overwritten": "bad"}, {"quarantine_overwritten": -1}, []):
+            with self.subTest(counts=counts):
+                ImportLog.objects.filter(pk=log.pk).update(result_counts=counts)
+                response = self.client.delete(f"/api/v1/metering/import-logs/{log.id}/")
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.data["code"], "quarantine_replace_protected")
+                self.assertEqual(QuarantinedReading.objects.count(), 1)
+
+    def test_legacy_log_cannot_delete_readings_in_a_community_no_longer_managed(self):
+        log = self._sdat_log()
+        log.zev = None
+        log.save(update_fields=["zev"])
+        self._add_rows(log.batch_id, billable=1, held=1)
+        other_owner = make_user("legacy_delete_other", UserRole.USER)
+        other_zev = create_managed_zev(name="Legacy foreign community", owner=other_owner)
+        self.metering_point.zev = other_zev
+        self.metering_point.save(update_fields=["zev"])
+        response = self.client.delete(f"/api/v1/metering/import-logs/{log.id}/")
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(ImportLog.objects.filter(pk=log.pk).exists())
+        self.assertEqual(MeterReading.objects.count(), 1)
+        self.assertEqual(QuarantinedReading.objects.count(), 1)

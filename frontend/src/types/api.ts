@@ -1527,6 +1527,10 @@ export interface ImportLog {
     reading_changes?: SdatReadingChange[]
     /** SDAT-CH delivery identity (delivery vs block identity, creation, reason, sender/receiver). */
     source_delivery?: SdatDelivery
+    /** False when the import replaced prior billable or held values and is protected from deletion. */
+    deletable?: boolean
+    /** Stable protection code when `deletable` is false; null when deletable. */
+    deletion_protection_code?: 'overwrite_import_protected' | 'quarantine_replace_protected' | null
 }
 
 /** Machine-readable outcome of an SDAT-CH file import. */
@@ -1583,6 +1587,8 @@ export interface SdatDelivery {
 export interface ImportDeletionResult {
     deleted_logs: number
     deleted_readings: number
+    /** Held (quarantine) readings removed alongside the billable ones. */
+    deleted_quarantined_readings?: number
     mode?: 'all' | 'period'
     timezone?: 'Europe/Zurich'
 }

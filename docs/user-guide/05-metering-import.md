@@ -318,14 +318,17 @@ If you find errors in imported data:
 ## Deleting imports
 
 Single and bulk deletion remove eligible import logs plus all readings still
-linked to their batches, then refresh metering data. **Imports that overwrote
-readings cannot be deleted**, because their previous values cannot be restored.
+linked to their batches, including held SDAT-CH values, then refresh metering
+data. **Imports that replaced billable or held values cannot be deleted**,
+because their previous values cannot be restored.
 The delete action is disabled for these imports; their protocol explains why.
 If a bulk selection includes a protected import, the entire deletion is rejected
 and nothing is removed. The bulk dialog lists the blocking protected imports
 (filename and creation time) and disables confirmation while any is included.
 To correct an overwrite import, upload corrected values
-with overwrite enabled. Period bulk-delete matches imports created from
+with overwrite enabled; for SDAT-CH, request a newer correction delivery from
+your provider. Managers cannot delete imports from a disabled community.
+Period bulk-delete matches imports created from
 00:00 Swiss time on the first day up to midnight after the last day — the
 visible-count preview counts exactly the same imports.
 

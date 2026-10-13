@@ -11,7 +11,11 @@ break every archive already sitting on someone's disk.
 """
 
 # Bumped whenever the archive layout changes in a way an older importer cannot
-# read. Version 7 adds the opt-in supplementary_data section (a participant's
+# read. Version 8 carries the SDAT-CH replace provenance and held
+# observations: readings rows gain the delivery-identity, quality and
+# observed-meter columns, and quarantined rows travel in ``quarantine/``.
+# Older importers reject version 8 outright rather than restoring it without
+# that state. Version 7 adds the opt-in supplementary_data section (a participant's
 # own energy data sources and readings, never their credentials). Version 6 carries the ZEV's buildings (#890): metering points and
 # landowner roles point at one. Version 5 carries the ZEV's parties and their dated roles (#761):
 # participants point at a party instead of carrying its name and address.
@@ -22,11 +26,12 @@ break every archive already sitting on someone's disk.
 # provenance. Version 1 remains readable for static exports and legacy
 # adapter-based dynamic descriptors. An archive naming a version that is not
 # listed here is rejected outright rather than imported half-understood.
-FORMAT_VERSION = 7
-SUPPORTED_FORMAT_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, 7})
+FORMAT_VERSION = 8
+SUPPORTED_FORMAT_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, 7, 8})
 
 MANIFEST_NAME = "manifest.json"
 READINGS_DIR = "readings"
+QUARANTINE_DIR = "quarantine"
 SUPPLEMENTARY_READINGS_DIR = "supplementary_readings"
 INVOICE_PDFS_DIR = "invoices/pdf"
 
@@ -114,6 +119,7 @@ SUBCOUNT_SECTIONS = {
     "party_roles": SECTION_PARTICIPANTS,
     "buildings": SECTION_METERING_POINTS,
     "supplementary_readings": SECTION_SUPPLEMENTARY,
+    "quarantined_readings": SECTION_READINGS,
 }
 
 # ── Field lists ────────────────────────────────────────────────────────────
@@ -376,9 +382,23 @@ INVOICE_ITEM_FIELDS = (
 # archive carries them and the archive's own reader restores them.
 #
 # ``source_creation``/``source_document_id`` are the SDAT-CH replace provenance
-# (grill Q12): without them a transferred ZEV would treat every pre-transfer
+# (metering import and quality spec §4.2): without them a transferred ZEV would treat every pre-transfer
 # reading as the oldest delivery and let the next VNB replacement overwrite
-# unconditionally.
+# unconditionally. Format 8 carries the full provenance set, so a restored ZEV
+# keeps its freshness guards: delivery identity (``source_delivery_id``),
+# quality (``business_reason``, ``condition``), product/unit and the observed
+# meter identity (``source_meter_id``, stored as data, never resolved).
+# Archives older than 8 carry only the first two and import with documented
+# defaults (no Creation, blank identity/quality fields).
+#
+# Held (quarantined) observations travel in ``quarantine/`` members with the
+# same columns, counted as ``quarantined_readings`` under the readings
+# section; older archives hold none and import zero held rows. Only meters
+# with held rows get a member (unlike readings, where every meter gets one).
+#
+# Invoice-impact state rides the same extension rule: additive
+# optional columns or keys with documented defaults travel without a version
+# bump; anything an older importer would silently drop needs one.
 READING_CSV_COLUMNS = (
     "meter_id",
     "timestamp",
@@ -388,7 +408,17 @@ READING_CSV_COLUMNS = (
     "import_source",
     "source_creation",
     "source_document_id",
+    "source_delivery_id",
+    "business_reason",
+    "condition",
+    "source_product",
+    "source_unit",
+    "source_meter_id",
 )
+
+# Held observations share the billable column layout: same provenance,
+# same defaults for older archives.
+QUARANTINE_CSV_COLUMNS = READING_CSV_COLUMNS
 
 
 class ArchiveError(ValueError):
