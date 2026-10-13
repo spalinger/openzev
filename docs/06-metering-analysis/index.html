@@ -1916,10 +1916,10 @@ hourly chart over e.g. a full year would be thousands of bars.</p>
 <li><strong>X-axis:</strong> Time periods</li>
 <li><strong>Y-axis:</strong> Energy (kWh)</li>
 <li><strong>Grouped bars</strong> (side by side, not stacked):<ul>
-<li>🟢 <strong>Green:</strong> Production or feed-in (<code>OUT</code>) — only shown when the meter
+<li><strong>Green:</strong> Production or feed-in (<code>OUT</code>) — only shown when the meter
   has exported energy in the period. The label reads "Production" for a
   pure production meter and "Feed-in" for a bidirectional one.</li>
-<li>🔵 <strong>Blue:</strong> Consumption (<code>IN</code>)</li>
+<li><strong>Grey:</strong> Consumption (<code>IN</code>)</li>
 </ul>
 </li>
 <li><strong>Tooltips:</strong> Hover to see exact values</li>
@@ -1996,8 +1996,8 @@ reach a card and <strong>Enter</strong> or <strong>Space</strong> to toggle it.<
 to inspect them. Managers can add points there; viewers can ask a manager to
 add them. A point with no readings appears in the <strong>Missing</strong> group.</p>
 <h3 id="status-table">Status Table<a class="headerlink" href="#status-table" title="Permanent link">&para;</a></h3>
-<p>Below the summary cards, a table shows per-metering-point details. Any
-column can be sorted by clicking its header (the Status column sorts worst
+<p>Below the summary cards, a table shows per-metering-point details. Click a
+column header to sort, except for Missing Days (the Status column sorts worst
 severity first).</p>
 <table>
 <thead>
@@ -2025,10 +2025,16 @@ severity first).</p>
 </tr>
 <tr>
 <td><strong>Missing Days</strong></td>
-<td>The first missing date range; click "+N more" to expand the full list in place</td>
+<td>The number of missing days; click it to open a drawer with the missing date ranges and their duration</td>
 </tr>
 </tbody>
 </table>
+<p>The drawer identifies the meter and holder for the selected period. It shows
+the first three gap ranges; click <strong>And N more gaps</strong> to reveal the rest.
+<strong>Go to imports</strong> opens the <strong>Import history</strong> tab with the current period and
+filters preserved. Managers can import a metering file covering the missing
+dates; files may contain readings for several meters. Viewers can inspect import
+history and ask a manager to import the data.</p>
 <p>Two additional warnings can appear under a meter's status, independent of
 its coverage:</p>
 <ul>

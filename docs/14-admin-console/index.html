@@ -2451,7 +2451,7 @@
 <p>This guide retains its historical filename (<code>14-admin-console.md</code>) and old
 anchor links; the product term is now <strong>Platform</strong>.</p>
 </blockquote>
-<p>This guide covers all administration features available to users with the <strong>Admin</strong> role. The platform tooling lives in the sidebar under <strong>Platform</strong> (routes <code>/admin/*</code>). While there, the shell shows a persistent <strong>Platform administration</strong> indicator and no tenant context is displayed — the ZEV switcher is hidden until you re-enter a community via <strong>Overview → ZEVs → Manage</strong> (your previously selected community is preserved).</p>
+<p>This guide covers all administration features available to users with the <strong>Admin</strong> role. The platform tooling lives in the sidebar under <strong>Platform</strong> (routes <code>/admin/*</code>). While there, every page shows <strong>Platform administration</strong> above its title and no community is displayed or chosen — re-enter a community via <strong>Overview → ZEVs → Manage</strong> (your previously selected community is preserved).</p>
 <p>The Platform group has four entries (hubs with tabs-as-routes):</p>
 <ul>
 <li><strong>Overview</strong> (<code>/admin</code>) — KPIs · ZEVs · All invoices · Dynamic price sources · Platform audit log · System health</li>
@@ -2635,7 +2635,7 @@ billing-relevant, and destructive actions.</p>
   and viewers see the events of the currently selected community.
   Managers and viewers only see events for communities they can access;
   they cannot see global or other-community events.
-  There is no community selector here (it follows the sidebar switcher) and no
+  There is no community selector here (it follows the community chosen above the page title) and no
   text search; the filters are date range, actor, category, action type,
   target type, target ID, and status. (The legacy route <code>/audit-logs</code> redirects here.)</li>
 </ul>
@@ -2706,6 +2706,11 @@ snapshot of platform infrastructure:</p>
   depth; <code>unknown</code> means no broker is reachable (local development without
   Redis reports unknown, which is a valid state, not an outage)</li>
 <li><strong>Email</strong> — the configured backend mode (SMTP, console, in-memory, custom)</li>
+<li><strong>Energy data</strong> — whether participants' <a href="../20-energy-data/">own energy data</a> is
+  switched on, how many sources are configured (disconnected ones included),
+  whether the encryption key is set, and sources that have not synced for a long
+  time; <code>unknown</code> means either that the feature is switched off or that the check
+  itself could not run, and the card says which</li>
 </ul>
 <p>The snapshot is taken when the tab is opened (no auto-refresh). Probes are
 best-effort — a failing probe never breaks the page.</p>
@@ -2759,6 +2764,26 @@ active for an invoice period, VAT defaults to <strong>0%</strong> in every mode.
 For custom templates, insert this after the first address line, or reset the
 template to the default:</p>
 <div class="highlight"><pre><span></span><code>{% if participant.address_line2 %}{{ participant.address_line2 }}<span class="p">&lt;</span><span class="nt">br</span><span class="p">&gt;</span>{% endif %}
+</code></pre></div>
+<p>For a VAT-registered ZEV that pays producers for their electricity, the VAT is
+charged on what the ZEV supplies, not on the subtotal net of the producer
+credit. A custom template prints "Subtotal" and "VAT" side by side and so shows
+a VAT amount that does not match the subtotal. Show <code>producer_credit_chf</code> as its
+own row after the VAT, with <code>invoice.vat_base_chf</code> as the supplies subtotal, or
+reset the template to the default:</p>
+<div class="highlight"><pre><span></span><code><span class="p">&lt;</span><span class="nt">tr</span><span class="p">&gt;</span>
+  {% if producer_credit_chf %}
+  <span class="p">&lt;</span><span class="nt">td</span><span class="p">&gt;</span>{{ tr.supplies_subtotal }}<span class="p">&lt;/</span><span class="nt">td</span><span class="p">&gt;&lt;</span><span class="nt">td</span><span class="p">&gt;</span>CHF {{ invoice.vat_base_chf|floatformat:2 }}<span class="p">&lt;/</span><span class="nt">td</span><span class="p">&gt;</span>
+  {% else %}
+  <span class="p">&lt;</span><span class="nt">td</span><span class="p">&gt;</span>{{ tr.subtotal }}<span class="p">&lt;/</span><span class="nt">td</span><span class="p">&gt;&lt;</span><span class="nt">td</span><span class="p">&gt;</span>CHF {{ invoice.subtotal_chf|floatformat:2 }}<span class="p">&lt;/</span><span class="nt">td</span><span class="p">&gt;</span>
+  {% endif %}
+<span class="p">&lt;/</span><span class="nt">tr</span><span class="p">&gt;</span>
+{% if invoice.vat_rate &gt; 0 %}
+<span class="p">&lt;</span><span class="nt">tr</span><span class="p">&gt;&lt;</span><span class="nt">td</span><span class="p">&gt;</span>{{ tr.vat }} ({{ vat_rate_percent|floatformat:1 }}%)<span class="p">&lt;/</span><span class="nt">td</span><span class="p">&gt;&lt;</span><span class="nt">td</span><span class="p">&gt;</span>CHF {{ invoice.vat_chf|floatformat:2 }}<span class="p">&lt;/</span><span class="nt">td</span><span class="p">&gt;&lt;/</span><span class="nt">tr</span><span class="p">&gt;</span>
+{% endif %}
+{% if producer_credit_chf %}
+<span class="p">&lt;</span><span class="nt">tr</span><span class="p">&gt;&lt;</span><span class="nt">td</span><span class="p">&gt;</span>{{ tr.producer_credit }}<span class="p">&lt;/</span><span class="nt">td</span><span class="p">&gt;&lt;</span><span class="nt">td</span><span class="p">&gt;</span>CHF {{ producer_credit_chf|floatformat:2 }}<span class="p">&lt;/</span><span class="nt">td</span><span class="p">&gt;&lt;/</span><span class="nt">tr</span><span class="p">&gt;</span>
+{% endif %}
 </code></pre></div>
 <h2 id="email-templates">Email Templates<a class="headerlink" href="#email-templates" title="Permanent link">&para;</a></h2>
 <p>Admins manage system-wide default email templates in <strong>Platform → Templates → Email templates</strong> (<code>/admin/templates/email</code>).</p>
@@ -3000,8 +3025,8 @@ message when available, so you can correct the template and retry.</p>
 </tr>
 <tr>
 <td><code>supplementary_energy_data_enabled</code></td>
-<td><code>false</code></td>
-<td>Lets participants with a PV system behind their meter connect their <a href="../20-energy-data/">own energy data</a> (Solar Manager, push or file) for statistics, never for billing; Solar Manager sources call the vendor's cloud and need <code>INTEGRATION_ENCRYPTION_KEYS</code></td>
+<td><code>true</code> once <code>INTEGRATION_ENCRYPTION_KEYS</code> is set, otherwise <code>false</code></td>
+<td>Lets participants with a PV system behind their meter connect their <a href="../20-energy-data/">own energy data</a> (Solar Manager, push or file) for statistics, never for billing; Solar Manager sources call the vendor's cloud and need <code>INTEGRATION_ENCRYPTION_KEYS</code>. Switching it off here stays off, whatever the key</td>
 </tr>
 <tr>
 <td><code>mcp_server_enabled</code></td>
@@ -3015,7 +3040,7 @@ message when available, so you can correct the template and retry.</p>
 <ol>
 <li>Environment variable <code>FEATURE_&lt;FLAG_NAME_IN_UPPERCASE&gt;</code></li>
 <li>Value stored in database (set via Platform → Settings → Functions)</li>
-<li>Code default</li>
+<li>Code default (for <code>supplementary_energy_data_enabled</code>: on when <code>INTEGRATION_ENCRYPTION_KEYS</code> is set, until you change it in Functions)</li>
 <li><code>false</code> fallback</li>
 </ol>
 <p>For <code>zev_self_registration_enabled</code>, the environment variable key is:</p>
@@ -3031,7 +3056,7 @@ message when available, so you can correct the template and retry.</p>
 </ul>
 <p>When you toggle a flag, OpenZEV applies the new value immediately.</p>
 <h3 id="environment-variable-override">Environment Variable Override<a class="headerlink" href="#environment-variable-override" title="Permanent link">&para;</a></h3>
-<p>Use environment variables when you want an ops-level override that should win over UI settings.</p>
+<p>Use environment variables when you want an ops-level override that should win over UI settings. A flag set this way shows the variable's name in <strong>Functions</strong> and its switch is disabled, because changing it there would have no effect.</p>
 <p>Example:</p>
 <div class="highlight"><pre><span></span><code>FEATURE_ZEV_SELF_REGISTRATION_ENABLED=false
 </code></pre></div>
