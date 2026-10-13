@@ -152,21 +152,41 @@ export function isMeteringPointHolderLess(
   return !assignments.some((assignment) => isAssignmentCurrent(assignment, todayIso))
 }
 
-/** Whether a meter should be surfaced by the "needs attention" filter before a billing run. Always `false` for an inactive meter — it is out of billing scope. */
-export function meteringPointNeedsAttention(
-  point: Pick<MeteringPoint, 'is_active'>,
-  health: MeteringPointHealth,
-  holderLess: boolean,
-): boolean {
-  return point.is_active && (health !== 'green' || holderLess)
-}
-
-
 export function meteringPointHealthBadgeClass(health: MeteringPointHealth): string {
   if (health === 'green') return 'badge badge-success'
   if (health === 'yellow') return 'badge badge-warning'
   if (health === 'red') return 'badge badge-danger'
   return 'badge badge-neutral'
+}
+
+// ── Sort ────────────────────────────────────────────────────────────────────
+
+export type MeteringPointSort = 'meter_id' | 'location' | 'last_reading'
+
+export function readMeteringPointSort(value: string | null): MeteringPointSort {
+  return value === 'location' || value === 'last_reading' ? value : 'meter_id'
+}
+
+/** A new array: `last_reading` puts the stalest first (a meter that never reported leads), because that is the one to look at. */
+export function sortMeteringPoints(points: MeteringPoint[], sort: MeteringPointSort): MeteringPoint[] {
+  const byMeterId = (left: MeteringPoint, right: MeteringPoint) =>
+    left.meter_id.localeCompare(right.meter_id, undefined, { numeric: true })
+  const compare = (left: MeteringPoint, right: MeteringPoint): number => {
+    if (sort === 'location') {
+      const leftLocation = left.location_description?.trim() ?? ''
+      const rightLocation = right.location_description?.trim() ?? ''
+      // An unset location sorts last, not first.
+      if (!leftLocation !== !rightLocation) return leftLocation ? -1 : 1
+      return leftLocation.localeCompare(rightLocation, undefined, { numeric: true }) || byMeterId(left, right)
+    }
+    if (sort === 'last_reading') {
+      const leftAt = left.last_reading_at ?? ''
+      const rightAt = right.last_reading_at ?? ''
+      return leftAt.localeCompare(rightAt) || byMeterId(left, right)
+    }
+    return byMeterId(left, right)
+  }
+  return [...points].sort(compare)
 }
 
 // ── Filters as URL state (#625) ─────────────────────────────────────────────
@@ -183,6 +203,9 @@ export const METERING_POINT_FILTER_KEYS = {
   building: 'building',
 } as const
 
+/** Not one of the filters: "Clear filters" leaves the sort as it is. */
+export const METERING_POINT_SORT_KEY = 'sort'
+
 export function readMeteringPointBuildingFilter(value: string | null): MeteringPointBuildingFilter {
   return value || 'all'
 }
@@ -192,12 +215,11 @@ export function readMeteringPointTypeFilter(value: string | null): MeteringPoint
 }
 
 /**
- * The list's one counted view (`FilterTabs`): a status, the meters without a
- * holder today (as `getMeteringPointCounts`' `assignedCount` counts them), or
- * those needing attention.
+ * The list's one counted view (`FilterTabs`): a status, or the meters without a
+ * holder today (as `getMeteringPointCounts`' `assignedCount` counts them).
  */
-export type MeteringPointView = 'all' | 'active' | 'inactive' | 'unassigned' | 'attention'
+export type MeteringPointView = 'all' | 'active' | 'inactive' | 'unassigned'
 
 export function readMeteringPointView(value: string | null): MeteringPointView {
-  return value === 'active' || value === 'inactive' || value === 'unassigned' || value === 'attention' ? value : 'all'
+  return value === 'active' || value === 'inactive' || value === 'unassigned' ? value : 'all'
 }

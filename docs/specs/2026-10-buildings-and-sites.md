@@ -25,7 +25,7 @@ location, and a vZEV with several landowners cannot say who owns which building.
 - Every metering point belongs to one building; `location_description` is the unit within it.
 - A landowner role can name the building it owns.
 - Buildings are managed on the metering points page, which groups metering points by building;
-  the simple one-building ZEV shows one compact building line and no new form field.
+  a one-building ZEV shows the same building header and no new form field.
 - Existing data migrates: one building per ZEV, one per distinct participant address in a vZEV.
 
 ## 2. Scope
@@ -268,17 +268,16 @@ ZEV settings.
 
 - **Toolbar** (`MeteringPointsToolbar`): "Add building" as a secondary action next to the primary
   "Add metering point" (managers only); a building filter when the ZEV has more than one building.
-- **One building:** a compact building line above the metering-point list (`BuildingHeader`):
-  name, address on one line, EGID when set, landowners whose role names it, and an edit action
-  for managers. The cards are otherwise unchanged.
-- **Several buildings:** `MeteringPointsList` groups the cards by building (ordered by building
-  name). Each group starts with a `BuildingHeader` (name, address, EGID, landowners, metering-point
-  count) with "Add metering point" and edit actions for managers; delete sits in an
-  `ActionMenu` ("More" → "Delete building", confirm) that appears only while the building has
-  no metering points. A building with no metering points still shows its header with
-  "No metering points in this building yet". Filtering by building shows only that group; search
-  and the other filters apply within groups, and a group with no matching card is hidden unless
-  it has no metering points at all and no filter is active.
+- **Every building is a group with the same header**, one building or several
+  (`MeteringPointsList`, SPEC-2026-08-ui-redesign-pdf-style §15.4): its own sheet, ordered by
+  building name, starting with a `BuildingHeader`: name, address, EGID, landowners whose
+  role names it and the metering-point count, with "Add metering point" and an
+  `ActionMenu` ("More") for managers: "Edit building" and, only while the building has no
+  metering points, "Delete building" (confirm). Buildings do not fold. A building with no
+  metering points still shows its header with "No metering points in this building yet".
+  Filtering by building shows only that group; search and the other filters apply within groups,
+  and a group with no matching meter is hidden unless it has no metering points at all and no
+  filter is active. The rows do not name their building, the header does.
 - **Building form** (`BuildingFormModal`): name, address (line 1, line 2, postal code, city),
   EGID (number input), notes; on create, a "Copy address from participant" select (participants'
   parties with an address) that fills the address and, when the name is empty, the name. A short
