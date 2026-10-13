@@ -378,7 +378,7 @@ Required functions:
 | `build_diff(before, after, allowed_fields)` | Build field-level diff object |
 | `infer_zev(obj)` | Resolve ZEV from heterogeneous target objects |
 | `redact_metadata(metadata)` | Apply omission/masking policy |
-| `snapshot_actor(user)` | Freeze actor display + role at event time |
+| `snapshot_actor(user)` | Freeze actor display + role at event time; omit the actor FK when `user.pk` is `None` |
 
 `record_audit_event(...)` must accept either explicit request context or
 explicit metadata for Celery/system workflows.
@@ -401,8 +401,15 @@ rolls back its password, session and link/code retirement. Initial setup records
 events distinguish `first_factor` (`password`/`participant_link`) and `second_factor`
 (`totp`/`recovery_code`); the existing `method` key is retained, with
 `participant_link+totp` for link/TOTP logins.
-Other hand-written `record_audit_event` call sites outside these mixins (invoice workflow transitions, user CRUD, account link/unlink)
-are follow-up work and are not yet transactional.
+Grant PATCH/DELETE, party-role changes, account deletion and participant account
+link/unlink keep the mutation and success audit in one transaction. Denied account
+deletion events are recorded after rollback. If authorization refresh discovers
+that the caller was deleted during a lock wait, it clears the stale in-memory
+primary key; the denied event keeps the caller's display and role snapshot with
+`actor_user = null`, and the request returns 403. Grant POST and invitation resend
+record delivery outcomes after committing access/token changes; those audit failures
+cannot roll back the earlier commit. Other manual workflow audit boundaries remain
+follow-up work unless their feature spec defines an atomic transaction.
 
 ### 6.3 Initial workflow coverage matrix
 
@@ -720,12 +727,13 @@ the event rows themselves is still not implemented.
 
 ### Backend — `backend/audit/tests.py`
 
-**`AuditEventModelTests`** (9 tests):
+**`AuditEventModelTests`** (10 tests):
 
 | Test | Asserts |
 |---|---|
 | `test_audit_event_orders_by_newest_first` | Default ordering is descending by `created_at` |
 | `test_audit_event_persists_actor_and_target_snapshots` | Snapshot fields remain populated independently of related object display changes |
+| `test_audit_event_preserves_deleted_actor_snapshot` | A deleted actor's display and role persist with no user FK |
 | `test_redaction_omits_secret_fields` | Secrets and masked fields are redacted before persistence |
 | `test_redaction_truncates_large_strings_and_caps_collections` | Oversized values are capped before persistence |
 | `test_record_audit_event_truncates_reason` | Long free-text reasons are truncated |

@@ -337,7 +337,8 @@ response. Missing target parties/accounts produce field validation errors on sav
 `link-account` remains admin-only. The Participants page's "copy onboarding
 link" action calls `onboarding-link`.
 
-`unlink-account` detaches the account and revokes its active token in one transaction.
+`unlink-account` locks and rereads the participant's links before refreshing admin
+authority. Detachment, token revocation and the success audit share one transaction.
 A consume request that resolved the token before unlink must recheck it under lock;
 it cannot recreate an account or issue a session after revocation commits.
 

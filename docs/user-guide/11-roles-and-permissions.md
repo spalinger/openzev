@@ -337,7 +337,8 @@ Open **More** on an account row for:
 - **Delete** — only available for accounts that do not belong to a community.
   Unlink the account from its participant first. An account that is a
   community's last manager cannot be deleted either: give someone else manager
-  access first.
+  access first. If the account's relationships change while deletion is waiting,
+  OpenZEV refuses the deletion; review its community access and retry.
 
 ## Data Privacy and Scoping
 

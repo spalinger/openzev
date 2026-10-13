@@ -274,7 +274,10 @@ never answers from stale rows; `invalidate(user)` drops it outright. Bulk
 | `grant_manager(zev, user, *, by=None)` | an active manager grant from today; returns one the account already holds, promotes an open grant of another role (what a transfer import does for the importing account) |
 | `grant_manager_until_role(zev, user, role_start)` | bridges the days before a managing role starts: a manager grant from today to the day before `role_start`; `None` when the role already applies today |
 | `revoke(grant, *, today=None)` / `change_role(grant, role, *, by=None)` | §4.2; `revoke` leaves an already-ended grant alone |
-| `is_last_manager(grant) -> bool` | the grant is `manager` and no other active manager grant exists on its ZEV |
+| `is_last_manager(grant) -> bool` | the grant is `manager` and no other manager exists on its ZEV through an active grant or managing party role |
+| `lock_zevs(*zevs) -> None` | Inside the caller's transaction, locks matching ZEV rows in primary-key order before any operation-specific row locks; PostgreSQL uses `FOR NO KEY UPDATE` |
+| `keeping_a_manager(*zevs, account=None)` | Locks affected ZEVs before checking managers today; rolls back a change that removes the last one. Account deletion also stabilizes its relationships (§7.1), yielding the locked account |
+| `refresh_write_access(user, zev=None)` | After waiting, invalidates the caller's access memo and refreshes platform role/active flags and the ZEV's disabled state; deleted/inactive callers are denied (a deleted caller's stale `pk` is cleared for audit snapshots), a deleted ZEV returns 404 |
 | `invalidate(user)` | drop the per-request memo after a write |
 
 `zev` arguments accept a `Zev`, a `UUID` or an id string (as query parameters
@@ -462,11 +465,50 @@ to start (an ended grant is history, 404).
 `valid_to` in the past → 400. The response is the grant plus
 `"email_sent": bool`; a failed send leaves the grant and pending inactive account in place. An invited participant account is deactivated before the send, so its participant links stop working until the invitation is resent and accepted. The access list exposes `pending_invitation`; resend returns 202 and replaces the failed invitation token. The audit event is `FAILED`, distinguishing delivery failure from rollback.
 
+If the selected party or existing recipient is deleted during POST's lock wait,
+the request returns 404 rather than recreating the recipient. PATCH/DELETE mutations
+and success audits share a transaction. POST and resend retain their post-commit
+delivery-outcome audits: an audit failure cannot undo the committed grant/invitation.
+
 **Refusals on PATCH/DELETE:** downgrading or revoking the last active manager → 400
 `{"detail": "A ZEV needs at least one manager."}` (also when a manager revokes
 themself). A planned `valid_to` on the last manager is refused the same way. A
 `valid_to` before the start that applies (today when the role also changes) →
 400, checked before anything is written.
+
+**Concurrent removals.** Grant PATCH/DELETE, managing-role assignment/end,
+account deletion and participant unlink/deletion lock affected ZEVs in primary-key
+order before operation-specific locks and manager checks. PostgreSQL uses
+`FOR NO KEY UPDATE` to allow concurrent foreign-key inserts; MariaDB uses its
+normal row lock. SQLite provides no equivalent guarantee. Waiting grant, role and
+participant removal writes reread their targets; a revoked grant or deleted
+participant returns 404, a removed role 400. Unlinking an already unlinked
+participant returns 400. Participant link/removal actions use the existing
+party → user → participant lock order after the ZEV lock, and audit the current links.
+
+Grant POST/PATCH/DELETE, invitation resend and participant link/unlink/deletion refresh caller authority
+and the disabled state after relationship-lock waits; account deletion rechecks
+admin eligibility. Role writes acquire their role/party/account locks before
+rechecking authorization and changing the role. These checks reject
+revocations, demotions and deactivations committed while waiting; they do not
+freeze the actor's platform authority throughout the transaction. Grant POST keeps
+its party/user locks without acquiring a ZEV lock after them.
+
+Account deletion passes `account=user` to `keeping_a_manager`. Discovery includes
+all grant, party and participant ZEVs regardless of dates. It locks ZEVs, then
+the account's own parties in primary-key order, then the user. New management
+relationships serialize on that user lock; existing role dates are protected by
+the related ZEV locks. If rediscovery finds a new ZEV or party outside the locks,
+deletion is refused with 400 `{"detail": "This account's relationships changed.
+Retry deletion."}` and a denied `user.delete` event. No deletion is attempted;
+the caller can review the relationships and retry. Last-admin and linked-account
+checks use the locked account; manager checks run after relationship validation.
+Denied deletion audits are written outside the rolled-back transaction. The platform-wide
+last-admin check remains separate and does not serialize concurrent admin removals.
+
+The guard counts today's dated relationships, including inactive invitation
+accounts. It does not repair unmanaged ZEVs or guarantee future expiry coverage.
+Django admin and direct database/script writes bypass these API guards.
 
 **Serializer `ZevAccessGrantSerializer`** — fields: `id`, `zev`, `role`,
 `valid_from`, `valid_to`, `is_active`, `granted_by` (`{id, full_name}` or null),
@@ -1068,9 +1110,9 @@ backdate the owner grant before patching "today" into the past.
 
 ### Backend — current coverage of PR 5 and later corrections
 
-`zev/test_access_api.py` (35 tests):
+`zev/test_access_api.py` (38 tests):
 
-**`ZevAccessGrantApiTests`** (12): managers, viewers and admins list the
+**`ZevAccessGrantApiTests`** (15): managers, viewers and admins list the
 grants, a stranger gets 404; ended grants only with `include_ended`; a manager
 gives an existing account access (case-insensitive email, notice in the ZEV's
 language, audited); the grantee sees the ZEV at once; viewers get 403 (audited
@@ -1079,7 +1121,8 @@ already has access, a past end date, an unknown role); a disabled ZEV refuses
 changes except by an admin; a role change keeps the history (two rows); the
 last manager cannot be downgraded, given an end date or revoked; with a second
 manager the first may leave; revoking a viewer ends its access; a planned end
-date keeps access until then.
+date keeps access until then; an unknown grant returns 404 before PATCH payload validation.
+Audit failure rolls back PATCH and DELETE.
 
 **`ZevAccessInvitationTests`** (16): an unknown email gets an inactive account
 without password or `may_create_zev`, a grant and an `invitation` token, and
@@ -1105,6 +1148,14 @@ survives `ensure_participant_account`; a manager cannot edit a participant row
 of an account with its own login (its email stays); a manager's party edit never
 reaches a login of its own; a participant-only account still follows its
 participant record.
+
+`zev/test_manager_concurrency.py` — PostgreSQL regressions cover competing removals,
+multi-ZEV rollback, stale targets/audit links, authority changes during parent and
+relationship-lock waits (including a deleted caller returning 403 with a denied
+audit snapshot and no actor FK), onboarding consumption after unlink, changing account
+relationships, lock ordering and concurrent FK insertion. Workers have SQL timeouts;
+blocking assertions identify the intended holder. SQLite skips these cases;
+PostgreSQL CI runs them.
 
 `accounts/test_access_migration.py` — **`AccessGrantsAccountsMigrationTests`**
 (3, `TransactionTestCase`): a role list turns the switch on and restarts the

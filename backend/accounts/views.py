@@ -16,7 +16,9 @@ from django.db.models import Prefetch, Q
 from django.utils.text import slugify
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
 from django.core.mail import EmailMessage
+from django.http import Http404
 from django.utils import timezone
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
@@ -412,37 +414,16 @@ class UserDetailView(AuditedUpdateMixin, generics.RetrieveUpdateDestroyAPIView):
 
     def perform_destroy(self, instance):
         user_display = instance.email or instance.username
-        if instance.is_admin and not User.objects.filter(role=UserRole.ADMIN).exclude(pk=instance.pk).exists():
-            record_audit_event(
-                request=self.request,
-                action_category=AuditActionCategory.AUTH,
-                action_type="user.delete",
-                target_type="accounts.User",
-                target=instance,
-                target_id=str(instance.pk),
-                target_display=user_display,
-                summary=f"Denied deletion of last admin {user_display}.",
-                status=AuditEventStatus.DENIED,
-            )
-            raise PermissionDenied("Cannot delete the last admin account.")
-        if instance.participations.exists():
-            record_audit_event(
-                request=self.request,
-                action_category=AuditActionCategory.AUTH,
-                action_type="user.delete",
-                target_type="accounts.User",
-                target=instance,
-                target_id=str(instance.pk),
-                target_display=user_display,
-                summary=f"Denied deletion of linked user {user_display}.",
-                status=AuditEventStatus.DENIED,
-            )
-            raise PermissionDenied("Linked participant accounts cannot be deleted.")
         user_id = str(instance.pk)
         try:
-            # Its manager grants and its party's login go with the account; a
-            # ZEV it alone manages would be left without a manager.
-            with zev_access.keeping_a_manager(*zev_access.managed_zev_ids(instance)):
+            with zev_access.keeping_a_manager(account=instance) as instance:
+                zev_access.refresh_write_access(self.request.user)
+                self.check_permissions(self.request)
+                user_display = instance.email or instance.username
+                if instance.is_admin and not User.objects.filter(role=UserRole.ADMIN).exclude(pk=instance.pk).exists():
+                    raise PermissionDenied("Cannot delete the last admin account.")
+                if instance.participations.exists():
+                    raise PermissionDenied("Linked participant accounts cannot be deleted.")
                 # Record before delete so the actor FK is valid;
                 # on_delete=SET_NULL nullifies it when the user row goes.
                 record_audit_event(
@@ -455,7 +436,17 @@ class UserDetailView(AuditedUpdateMixin, generics.RetrieveUpdateDestroyAPIView):
                     summary=f"Deleted user {user_display}.",
                 )
                 instance.delete()
-        except zev_access.NoManagerLeft:
+        except User.DoesNotExist as exc:
+            raise Http404 from exc
+        except (zev_access.NoManagerLeft, zev_access.AccountRelationshipsChanged,
+                PermissionDenied, DjangoPermissionDenied) as exc:
+            changed = isinstance(exc, zev_access.AccountRelationshipsChanged)
+            if changed:
+                detail = "This account's relationships changed. Retry deletion."
+            elif isinstance(exc, zev_access.NoManagerLeft):
+                detail = zev_access.NO_MANAGER_LEFT
+            else:
+                detail = str(exc)
             record_audit_event(
                 request=self.request,
                 action_category=AuditActionCategory.AUTH,
@@ -463,10 +454,14 @@ class UserDetailView(AuditedUpdateMixin, generics.RetrieveUpdateDestroyAPIView):
                 target_type="accounts.User",
                 target_id=user_id,
                 target_display=user_display,
-                summary=f"Denied deletion of {user_display}, the last manager of a ZEV.",
+                summary=f"Denied deletion of {user_display}: {detail}",
                 status=AuditEventStatus.DENIED,
             )
-            raise PermissionDenied(zev_access.NO_MANAGER_LEFT)
+            if changed:
+                raise ValidationError({"detail": detail}) from exc
+            if isinstance(exc, zev_access.NoManagerLeft):
+                raise PermissionDenied(detail) from exc
+            raise
 
 
 class VatRateListCreateView(generics.ListCreateAPIView):
