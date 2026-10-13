@@ -13,6 +13,6 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='meteringpoint',
             name='secondary_meter_id',
-            field=models.CharField(blank=True, default=None, help_text='Second 33-char VSENationalID of the same physical meter (SDAT-CH assigns one per flow direction: Bezug and Abgabe). Either ID matches on SDAT-CH import.', max_length=100, null=True, unique=True),
+            field=models.CharField(blank=True, default=None, help_text='Alternative identity of the same physical meter, for example its second 33-character SDAT-CH VSENationalID. Either ID matches on SDAT-CH import.', max_length=100, null=True, unique=True),
         ),
     ]

@@ -3,7 +3,7 @@ import tempfile
 
 from django.conf import settings as django_settings
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Max, Min, Prefetch, Q
 from django.http import FileResponse, Http404, HttpResponse
 from config.http import content_disposition, sanitize_filename
@@ -19,7 +19,7 @@ from accounts.permissions import IsAdmin
 from accounts.throttling import ApiKeyRateThrottle, TransferArchiveThrottle
 from accounts.models import FeatureFlag, User
 from allocation.validity import period_window
-from metering.models import MeterReading
+from metering.models import MeterReading, QuarantinedReading, SupplementaryReading, SupplementarySource
 from . import access, onboarding
 from .models import MANAGING_ROLES, Building, Zev, Participant, Party, PartyRole, MeteringPoint, MeteringPointAssignment, ZevPartyRole
 from .buildings import ensure_initial_building
@@ -955,6 +955,21 @@ class MeteringPointViewSet(AuditedCreateDestroyMixin, AuditedUpdateMixin, ZevSco
     def get_audit_target_display(self, instance):
         return instance.meter_id
 
+    def perform_create(self, serializer):
+        # Recheck after rollback: identity races are 400s; unrelated integrity errors propagate.
+        try:
+            super().perform_create(serializer)
+        except IntegrityError:
+            serializer.validate(serializer.validated_data)
+            raise
+
+    def perform_update(self, serializer):
+        try:
+            super().perform_update(serializer)
+        except IntegrityError:
+            serializer.validate(serializer.validated_data)
+            raise
+
     def get_queryset(self):
         # Annotate the cascade a delete would take with it (readings +
         # assignment history), so the serializer can surface it without an
@@ -973,6 +988,10 @@ class MeteringPointViewSet(AuditedCreateDestroyMixin, AuditedUpdateMixin, ZevSco
             qs = qs.filter(building_id=building)
         return qs.annotate(
             reading_count=Count("readings", distinct=True),
+            history_protected=Exists(MeterReading.objects.filter(metering_point_id=OuterRef("pk")))
+            | Exists(QuarantinedReading.objects.filter(metering_point_id=OuterRef("pk")))
+            | Exists(SupplementaryReading.objects.filter(metering_point_id=OuterRef("pk")))
+            | Exists(SupplementarySource.objects.filter(metering_point_id=OuterRef("pk"))),
             assignment_count=Count("assignments", distinct=True),
             first_reading_at=Min("readings__timestamp"),
             last_reading_at=Max("readings__timestamp"),

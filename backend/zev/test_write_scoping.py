@@ -170,7 +170,7 @@ class MoveIntoAnotherCommunityTests(_TwoCommunities):
     def test_metering_point(self):
         response = self.client.patch(
             f"{METERING_POINTS}{self.attacker_meter.id}/",
-            {"zev": str(self.victim_zev.id)}, format="json",
+            {"zev": str(self.victim_zev.id), "building": str(self.victim_meter.building_id)}, format="json",
         )
         self.assertRefused(response, "zev")
         self.attacker_meter.refresh_from_db()

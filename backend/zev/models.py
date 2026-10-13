@@ -702,6 +702,73 @@ class MeteringPointType(models.TextChoices):
     BIDIRECTIONAL = "bidirectional", "Bidirectional (Consumption + Production)"
 
 
+def normalize_secondary_meter_id(value) -> str | None:
+    """Store absent/blank aliases as NULL; trim nonblank aliases."""
+    if value is None:
+        return None
+    return str(value).strip() or None
+
+
+class AmbiguousMeterIdentity(Exception):
+    """A source ID matches several points; retain their IDs for reconciliation."""
+
+    def __init__(self, identity: str, point_ids) -> None:
+        super().__init__(f"Meter ID '{identity}' matches several metering points; refusing to guess.")
+        self.identity = identity
+        self.point_ids = list(point_ids)
+
+
+def validate_meter_identities(*, meter_id: str, secondary_meter_id=None, exclude_pk=None) -> None:
+    """Reject global identity collisions, excluding the edited point, without tenant details."""
+    secondary = normalize_secondary_meter_id(secondary_meter_id)
+    if secondary is not None and secondary == meter_id:
+        raise ValidationError({"secondary_meter_id": "The secondary ID must differ from this point's own primary ID."})
+    identities = {"meter_id": meter_id, "secondary_meter_id": secondary}
+    values = [value for value in identities.values() if value is not None]
+    matches = MeteringPoint.objects.exclude(pk=exclude_pk).filter(
+        models.Q(meter_id__in=values) | models.Q(secondary_meter_id__in=values)
+    ).values_list("meter_id", "secondary_meter_id")
+    taken = {value for pair in matches for value in pair if value is not None}
+    errors = {
+        field: "This ID is already used by another metering point."
+        for field, value in identities.items() if value is not None and value in taken
+    }
+    if errors:
+        raise ValidationError(errors)
+
+
+def resolve_metering_point(zev, source_id, *, for_update=False):
+    """Resolve either identity within a ZEV, returning None if unknown and refusing ambiguity."""
+    if not source_id:
+        return None
+    queryset = MeteringPoint.objects.filter(zev=zev).filter(
+        models.Q(meter_id=source_id) | models.Q(secondary_meter_id=source_id)
+    ).order_by("pk")
+    if for_update:
+        queryset = queryset.select_for_update()
+    matches = list(queryset)
+    if len(matches) > 1:
+        raise AmbiguousMeterIdentity(source_id, [point.pk for point in matches])
+    return matches[0] if matches else None
+
+
+def find_ambiguous_meter_identities() -> list[dict]:
+    """Report shared or self-redundant identities instance-wide without changing data."""
+    by_identity = {}
+    for pk, primary, secondary in MeteringPoint.objects.values_list(
+        "pk", "meter_id", "secondary_meter_id"
+    ).iterator():
+        by_identity.setdefault(primary, []).append(pk)
+        secondary = normalize_secondary_meter_id(secondary)
+        if secondary is not None:
+            by_identity.setdefault(secondary, []).append(pk)
+    return [
+        {"identity": identity, "kind": "shared" if len(set(point_ids)) > 1 else "redundant",
+         "point_ids": sorted(set(point_ids))}
+        for identity, point_ids in sorted(by_identity.items()) if len(point_ids) > 1
+    ]
+
+
 class MeteringPoint(models.Model):
     """A smart meter / metering point that belongs to a ZEV and can be assigned to participants over time."""
 
@@ -715,8 +782,8 @@ class MeteringPoint(models.Model):
         blank=True,
         default=None,
         help_text=(
-            "Second 33-char VSENationalID of the same physical meter (SDAT-CH assigns one "
-            "per flow direction: Bezug and Abgabe). Either ID matches on SDAT-CH import."
+            "Alternative identity of the same physical meter, for example its second "
+            "33-character SDAT-CH VSENationalID. Either ID matches on SDAT-CH import."
         ),
     )
     meter_type = models.CharField(
@@ -741,11 +808,27 @@ class MeteringPoint(models.Model):
 
     class Meta:
         ordering = ["meter_id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(secondary_meter_id__isnull=True)
+                | ~models.Q(secondary_meter_id=models.F("meter_id")),
+                name="metering_point_secondary_differs_from_primary",
+            ),
+        ]
 
     def __str__(self):
         return self.meter_id
 
+    @transaction.atomic
     def save(self, *args, **kwargs):
+        from .locks import lock_meter_identities
+
+        lock_meter_identities()
+        previous = type(self).objects.select_for_update().filter(pk=self.pk).first()
+        # Store blank aliases as NULL so they never collide under the unique constraint.
+        update_fields = kwargs.get("update_fields")
+        if update_fields is None or "secondary_meter_id" in update_fields:
+            self.secondary_meter_id = normalize_secondary_meter_id(self.secondary_meter_id)
         if self.building_id is None and self.zev_id is not None:
             from .buildings import default_building
 
@@ -753,11 +836,64 @@ class MeteringPoint(models.Model):
             update_fields = kwargs.get("update_fields")
             if update_fields is not None and "building" not in update_fields:
                 kwargs["update_fields"] = [*update_fields, "building"]
+        def persisted(field):
+            if previous is not None and update_fields is not None and field not in update_fields:
+                return getattr(previous, field)
+            return getattr(self, field)
+
+        validate_meter_identities(
+            meter_id=persisted("meter_id"),
+            secondary_meter_id=persisted("secondary_meter_id"),
+            exclude_pk=self.pk,
+        )
+        self.validate_history_changes(previous, update_fields)
+        building_is_written = update_fields is None or bool({"building", "building_id", "zev", "zev_id"} & set(update_fields))
+        if building_is_written and self.building_id and self.building.zev_id != self.zev_id:
+            raise ValidationError({"building": "The building belongs to another ZEV."})
         super().save(*args, **kwargs)
 
+    def has_reading_history(self):
+        return (self.readings.exists() or self.quarantined_readings.exists()
+                or self.supplementary_readings.exists() or hasattr(self, "supplementary_source"))
+
+    def validate_history_changes(self, previous, update_fields=None):
+        if previous is None:
+            return
+        changed = {
+            field: "Reading history must be removed before changing this field."
+            for field in ("zev", "meter_type")
+            if (update_fields is None or field in update_fields or f"{field}_id" in update_fields)
+            and getattr(previous, f"{field}_id" if field == "zev" else field)
+            != getattr(self, f"{field}_id" if field == "zev" else field)
+        }
+        if changed and previous.has_reading_history():
+            raise ValidationError(changed)
+        if "zev" in changed and previous.assignments.exists():
+            raise ValidationError({"zev": "Remove assignment history before moving this metering point."})
+
+    @transaction.atomic
+    def delete(self, *args, **kwargs):
+        from .locks import lock_meter_identities
+
+        lock_meter_identities()
+        point = type(self).objects.select_for_update().get(pk=self.pk)
+        if point.has_reading_history():
+            raise ValidationError("Remove the metering point's reading history before deleting it.")
+        return super().delete(*args, **kwargs)
+
     def clean(self):
+        # Normalize first so blank input validates as absent.
+        self.secondary_meter_id = normalize_secondary_meter_id(self.secondary_meter_id)
+        if not self._state.adding:
+            self.validate_history_changes(type(self).objects.filter(pk=self.pk).first())
         if self.building_id and self.zev_id and self.building.zev_id != self.zev_id:
             raise ValidationError({"building": "The building belongs to another ZEV."})
+        if self.meter_id:
+            validate_meter_identities(
+                meter_id=self.meter_id,
+                secondary_meter_id=self.secondary_meter_id,
+                exclude_pk=self.pk,
+            )
         if self.has_behind_meter_generation and self.meter_type not in (
             MeteringPointType.BIDIRECTIONAL,
             MeteringPointType.PRODUCTION,
