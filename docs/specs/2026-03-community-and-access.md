@@ -65,6 +65,7 @@ Extends `AbstractUser` (Django `accounts.models`).
 | `role` | `CharField(20)` choices `UserRole` | `admin` or `user` (default `user`); migration `accounts.0021` mapped the old `zev_owner` / `participant` / `guest` to `user` |
 | `may_create_zev` | `BooleanField` (default `False`) | May set up a ZEV of its own through self-setup (§7.3); set by self-registration |
 | `independent_login_required` | `BooleanField` (default `False`, `editable=False`) | Preserves independent authentication after access revocation; account policy in onboarding spec §4; schema migration `accounts.0024`, existing independent accounts backfilled by `accounts.0025` without revoking credentials or sessions |
+| `password_from_participant_link` | `BooleanField` (default `False`, `editable=False`) | Password enrollment origin; lifecycle and upgrade policy in onboarding spec §4 |
 | `must_change_password` | `BooleanField` (default `False`) | Set `True` for temporary-password/admin-created or self-registered accounts; participant-only and access-invited accounts start `False` |
 | `is_active` | `BooleanField` | `False` until email verification for self-registered users |
 | `preferred_zev` | `ForeignKey('zev.Zev')`, null, `SET_NULL` | Account-level default community: an account with several communities lands here on login. `None` = first managed by name. Set by the frontend via `/auth/me/` |
@@ -516,7 +517,7 @@ Two consequences for anything added later:
 
 **Two-factor challenge:** if the account has a second factor (a confirmed `TotpDevice` or a registered passkey), the password step returns `200 {"mfa_required": true, "mfa_token": "<signed>", "methods": ["totp", "recovery_code"]}` and sets **no** cookies. `POST /api/v1/auth/token/mfa/` `{mfa_token, code}` then completes the login (TOTP code or one-time recovery code). Magic-link consume and onboarding-link consume return the same challenge shape; the OAuth door honours an IdP `amr` claim instead (`OAuthProvider.require_mfa_claim`, default `False`). `methods` is `["recovery_code"]` for an account whose only factor is a passkey. A passkey (WebAuthn) itself signs in on its own via `POST /auth/passkeys/authenticate/{begin,complete}/` with no password and is never challenged. Accounts without a factor see the pre-2FA behaviour unchanged. Full contract: `2026-09-two-factor-authentication.md` §5.
 
-Helper `accounts.jwt_utils.make_jwt_for_user(user, *, impersonated_by=None, participant_link=False) -> dict` and `add_custom_claims(token, user)` set the custom claims used by `CustomTokenObtainPairSerializer`, email verification, password writes, magic/onboarding links, OAuth, passkeys and impersonation:
+Helper `accounts.jwt_utils.make_jwt_for_user(user, *, impersonated_by=None, participant_link=False, password_recovery=False) -> dict` and `add_custom_claims(token, user)` set the custom claims used by `CustomTokenObtainPairSerializer`, email verification, password writes, magic/onboarding links, OAuth, passkeys and impersonation:
 
 | Claim | Value |
 |---|---|
@@ -526,7 +527,8 @@ Helper `accounts.jwt_utils.make_jwt_for_user(user, *, impersonated_by=None, part
 | `must_change_password` | `user.must_change_password` |
 | `sv` | `user.session_version` — the account's session version when the token was issued (§5.6b) |
 | `impersonated_by` | admin id; only on impersonation sessions |
-| `password_recovery_until` | absolute Unix deadline, 15 minutes after completed participant-link login; preserved without extension by refresh, absent after recovery |
+| `src` | `"participant_link"` when `participant_link=True`; retains participant origin through credential login and session renewal, independently of recovery authority |
+| `password_recovery_until` | set only with `password_recovery=True`: absolute Unix deadline, 15 minutes after completed participant-link login; preserved without extension by refresh, absent after recovery |
 
 **Session version check:** `CookieJWTAuthentication.get_user` refuses an access token whose `sv` (a missing claim reads as `0`) differs from `user.session_version` (`401`, code `session_revoked`) — see §5.6b. That check, and token validation generally, applies to an `Authorization: Bearer` header as before; an invalid, expired or signed-out **`openzev_access` cookie** is instead treated as no credentials (the browser sends it unprompted), so public `AllowAny` endpoints — the login page's `registration-enabled/` and `oauth/providers/` — keep answering `200`, while protected views answer `401` and drive the client's refresh.
 **MFA policy enforcement:** `CookieJWTAuthentication.authenticate` also refuses (`403`) an unsafe request from an account whose role requires two-factor authentication and is past its grace period with no factor enrolled, with a short exemption list for self-service security actions and every admin action on another account excluded — see `2026-09-two-factor-authentication.md` §7.3a. Not reached by `ApiKeyAuthentication` at all.
@@ -657,19 +659,28 @@ would need a duplicate-data and blank-address policy across all provisioning pat
    `openzev_refresh` cookies (+ `csrftoken`) to sign in. A later admin cancellation
    revokes sessions using the version counter (§5.6b).
 
+OAuth exchange codes are consumed under a user lock followed by the code lock.
+Redemption requires an active account and a valid 60-second code; concurrent
+redemptions allow one success. Callback issuance locks/rechecks the active user's
+session version before creating a code. Any session revocation discards pending
+codes, so an exchange racing recovery either precedes revocation (its JWT is
+then invalid) or fails. Account deactivation refuses redemption.
+
 ### 5.4 Initial password set
 
 **Endpoint:** `POST /api/v1/auth/me/set-initial-password/` (IsAuthenticated)
 
 **Payload:** `{ new_password }`
 
-**Guard:** only allowed if `must_change_password == True` or user has no usable
-password. Otherwise returns 400 ("Use the change-password endpoint instead.").
+**Guard:** allowed only if `must_change_password == True` or no usable password exists.
+An established password requires the old password or the separate, timed
+`reset-password` permission. Other requests return 400
+("Use the change-password endpoint instead.").
 
 **Flow:**
 1. Validate password via Django password validators.
-2. Set password, clear `must_change_password`, then `_finish_password_change` revokes other sessions and all onboarding/magic links across the account's communities. API keys are retained.
-3. `keep_current_session` sets fresh auth cookies without recovery permission (preserving impersonation); schedule `password_changed` after commit. Audit `password.set_initial` carries both link-retirement counts and the actual prior `must_change_password` value (no invented diff when already false).
+2. Set password and its participant origin from the authenticated session, clear `must_change_password`, then `_finish_password_change` revokes other sessions and all onboarding/magic links across communities. API keys are retained.
+3. `keep_current_session` sets fresh cookies retaining credential origin but without recovery permission; schedule `password_changed` after commit. Audit `password.set_initial` records both link-retirement counts and the actual prior pending-change flag.
 
 ### 5.5 Password change
 
@@ -691,18 +702,9 @@ a failing audit insert rolls back credentials, sessions and links and schedules 
 - GET additionally carries `memberships` — every community the account relates
   to, in the shape of §6.4's `memberships` — and `may_create_zev: boolean`
   (#761).
-- GET additionally carries `has_usable_password: boolean` — whether the account
-  can re-authenticate with a password; participants may choose one in Account →
-  Security.
-- GET/PATCH carries `can_change_email: boolean`: usable password and no
-  manager-maintained participant identity (`email_change.is_managed`, reusing
-  participation presence from `memberships`). The email-change form (§5.6a) is offered only when true.
-- GET/PATCH carries `password_recovery_expires_at: ISO datetime | null`, derived
-  from the current link sign-in. Account → Security offers explicit
-  password replacement without the old password during that 15-minute window.
-  See [setup and recovery](2026-09-participant-onboarding-link.md#password-setup-and-explicit-recovery)
-  for eligibility, single use, retirement and failure behavior. Passwordless
-  accounts use the existing initial-password endpoint without an old-password field.
+- GET carries `has_usable_password: boolean`, including participant-created passwords.
+- GET/PATCH carries `can_change_email: boolean`: a usable, independently established password and no manager-maintained participant identity (`email_change.is_managed`). The form is offered only when true.
+- GET/PATCH carries `password_recovery_expires_at: ISO datetime | null` from completed link sign-in. PasswordCard offers explicit replacement without the old password during that fixed 15-minute window; credential provenance alone does not authorize it. Passwordless accounts use initial setup. See [setup and recovery](2026-09-participant-onboarding-link.md#password-setup-and-explicit-recovery).
 - PATCH → partial update of **first name, last name and `preferred_zev` only**
   (`SelfUserSerializer`). A payload that tries to *change* `email`, `username`,
   `role`, `must_change_password` or `is_active` is rejected `400` naming the
@@ -733,8 +735,8 @@ a session holder).
 | Outcome | Response |
 |---|---|
 | Impersonation session | `403` |
-| Participant-only account, including one with a chosen password (`email_change.is_managed`: has participations and does not require independent login) | `403` `{code: "managed_email"}`; the manager maintains its participant email |
-| Other account has no usable password | `403` `{code: "no_password"}` |
+| Participant-only account with a manager-maintained participant identity, including one with a chosen password | `403` `{code: "managed_email"}` |
+| Other account has no usable password or its password is participant-derived | `403` `{code: "no_password"}` |
 | Malformed address / same as current / missing or wrong password | `400` (wrong password audited `auth.email_change.failed`, reason `bad_password`) |
 | Address held by another account (case-insensitive) | `202`, **same body as success**, no mail sent — cannot be used to find which addresses have accounts; audited `auth.email_change.failed` (`DENIED`, reason `address_in_use`) |
 | Otherwise | `202`; a confirmation link is emailed to the **new** address; audited `auth.email_change.requested`. A mail failure returns the same `202` body, is logged and audited as `auth.email_change.failed` (`FAILED`, reason `mail_failed`), and is not recorded as requested. |
@@ -760,10 +762,16 @@ shows only a masked new address), audit `auth.email_change.confirmed` (actor =
 the account, diff of `email`). No session is minted; the person signs in again
 with the new address.
 
-Frontend: `EmailChangeForm` (Profile tab; "managed by your administrator" hint
-when `can_change_email` is false) and the public `/confirm-email-change`
-page (`ConfirmEmailChangePage`, spends the single-use link exactly once even
-under React StrictMode). The mails are fixed system messages
+Resolution also refuses a token while the account password is participant-derived,
+including a token issued before credential provenance was recorded on upgrade.
+Confirmation repeats the active-account, password/hash, provenance and email checks
+under the user lock before applying the new address.
+
+Frontend: `EmailChangeForm` (Profile tab; read-only guidance to contact the administrator
+when `can_change_email` is false). `no_password` and `managed_email` submission failures
+show that guidance too (`email-change-capability.test.ts`, 4 cases). Public route
+`/confirm-email-change` renders `ConfirmEmailChangePage`, which spends the single-use
+link exactly once even under React StrictMode. The mails are fixed system messages
 (`accounts/emails.py`), deliberately not `EMAIL_TEMPLATE_DEFAULTS` entries: a
 security notice an admin can reword can be made to stop saying what happened.
 
@@ -787,15 +795,16 @@ else. A mail failure is logged, releases the cooldown and returns the same answe
 
 **Token:** `accounts/password_reset.py`, modelled on `email_change.py`: a `django.core.signing` token (salt
 `accounts.password-reset`, 1 h) carrying `{u: user id, f: fingerprint}`, the fingerprint a keyed MAC of the
-account's *current* address and password hash. Using it changes the hash, so it is single-use without a
-table; a password or address change, deactivation, or losing the password also kills it. The link is
+account's *current* address, password hash and session version. Using it changes the hash, so it is single-use without a
+table; a password or address change, session revocation, deactivation, or losing the password also kills it. The link is
 `{FRONTEND_URL}/reset-password?token=…`.
 
 **Confirm:** `POST /api/v1/auth/password-reset/confirm/` `{ token, new_password }` (AllowAny,
 `AuthVerifyThrottle`). An unusable token is `400 "This link is invalid or has expired."`; a missing
 or weak password (`validate_password` with the account) is `400 {detail}` and leaves the token valid.
 Otherwise, under the user lock, `password_reset.resolve_token(token, user=locked)`
-rechecks signed expiry, account activity, address and password hash. Set the password, clear
+rechecks signed expiry, activity, address, password hash and session version. Set an
+independent password (`password_from_participant_link=False`), clear
 `must_change_password`, **revoke all sessions** (§5.6b), revoke the account's participant onboarding
 and outstanding magic links, and audit `password.reset` (actor = the account;
 `metadata.onboarding_links_revoked` and `metadata.magic_links_revoked`) inside the same transaction.
@@ -828,16 +837,31 @@ or raises `TokenError`. Both ordinary refresh and stop-impersonation use it.
 `OAuthExchangeCode` rows, then a reload so tokens
 minted straight afterwards carry the new value; `keep_current_session(request,
 response, user)` — hand the caller a fresh pair so revoking *other* sessions
-does not sign them out. Plain `User.save()` excludes `session_version`,
-`independent_login_required` and the loaded password, so stale profile writes cannot
-revive sessions, clear independent-authentication protection or restore an old
-password. Intentional `set_password()` and `set_unusable_password()` writes still
-persist; the unusable-password marker is cleared after saving. User serializers save
-only supplied fields, preserving a pending-change flag changed by a concurrent
-credential write. Synchronous and asynchronous password checks upgrade hashes with
-a compare-and-swap on the verified hash; a concurrent replacement refuses the upgrade
-and makes verification fail. Explicit updates and admin/self-setup promotion persist
-the lifecycle flag; session revocation uses the atomic update.
+does not sign them out. Plain `User.save()` excludes session/protection and
+password/provenance fields. `set_password()` and `set_unusable_password()` record
+intentional password writes, so either followed by plain `save()` persists; later profile saves do not
+replay that intent. Explicit hash writes require `update_fields`.
+Profile serializers save only submitted writable fields. Admin/self-setup promotion
+preserves independent password/requirement changes and synchronizes retired credential
+state; combining a marked password write with promotion raises `ValidationError`.
+Trusted recovery: `python manage.py recover_password <username>` prompts twice,
+validates the password, and calls `accounts.passwords.recover_password` under the user
+lock. It writes the password, clears `password_from_participant_link` and
+`must_change_password`, and revokes sessions, onboarding links and outstanding magic tokens. Invalid input leaves the account
+unchanged. Password-hash upgrades use a conditional update against the verified
+hash, preserve provenance, and refuse authentication if a concurrent credential
+write wins. `acheck_password` delegates to the same protected synchronous path
+through `sync_to_async`, including its conditional hash upgrade. The command records `auth.password.recovered` with management-command
+source in the recovery transaction; audit failure rolls back credentials and
+session/link/code retirement. Django admin's `IndependentPasswordChangeForm` uses the same service, including
+password disabling; Django admin records its normal change log. `commit=False` only
+stages the hash: deferred callers must use the recovery service to establish independent
+ownership and revoke sessions/links. Ordinary
+`set_password()` and password-hash upgrades never clear provenance automatically.
+
+Participant-derived JWTs are rejected when independent login is required.
+Credential provenance, promotion cleanup and upgrade behavior are defined in
+[onboarding spec §4](2026-09-participant-onboarding-link.md#no-link-signs-in-an-account-with-its-own-login).
 
 `lock_current_session(request)` reloads and locks the account within the caller's
 transaction and rejects deleted/inactive accounts or a mismatched session version
@@ -1427,7 +1451,7 @@ no password was created or changed.
   participant, not the account.
 - The account is refused with `400` on `owner.account` when it does not exist, is an
   admin (already sees every ZEV and cannot be linked to a participant), is
-  deactivated, or has no login (`has_login_credentials`) and no pending invitation.
+  deactivated, or has no login (`has_independent_login_credentials`) and no pending invitation.
   An account with a pending invitation is accepted. The check is
   `existing_owner_problem()` (`zev/services.py`), run in the serializer and again under the
   account's row lock in the service.
@@ -1683,6 +1707,11 @@ reaches every ZEV-scope route and sees its pages read-only
 | `/join/:prefix` | public | `ParticipantOnboardingPage` (onboarding bearer link) |
 | `/signin/:token` | public | `MagicSignInPage` (magic sign-in link) |
 | `/i/:prefix` | public | `PublicInvoicePage` (invoice bearer link) |
+
+`AccountProfilePage` handles OAuth linking feedback once under React StrictMode,
+shows the result on the Security tab, and removes callback query parameters.
+Unverified mailbox refusals have a specific message; revoked authorization uses
+the generic OAuth error (`account-oauth-feedback.test.ts`, 3 cases).
 
 Legacy admin routes `/admin/settings/regional`, `/admin/settings/vat`,
 `/admin/features`, and `/admin/oauth` redirect into tabs on
@@ -2205,16 +2234,17 @@ lists the test classes per module (test counts are the `test_*` methods).
 
 | Module | Classes | Tests | Coverage |
 |---|---|---|---|
-| `test_session_hardening.py` | 7 | 57 | Self-service profile lockdown (protected fields rejected, repeats accepted, names/preferred community still editable); session revocation (revoked/new/legacy tokens, dead access cookie leaves public endpoints working, refresh refusal, deactivation, stale-instance save cannot revive, API keys and impersonation); password change and revoke endpoints; verified email change (request/confirm, single-use, dies on password/address/deactivation/expiry, no enumeration, throttle, mail failure, API keys); PostgreSQL confirmation lock-wait revalidation for password/activity/expiry/destination/policy/deletion |
+| `test_session_hardening.py` | 7 | 60 | Profile lockdown, session revocation, verified email changes, PostgreSQL lock-wait revalidation and source/credential retirement |
+| `test_independent_password_recovery.py` | 1 | 18 | Operator/admin recovery and password disabling, provenance, stale writes, source containment and OAuth exchange-code retirement |
 | `test_security_notifications.py` | 5 | 26 | Every event composes (subject, body, `{detail}` filled, admin vs. self advice, no-turn-off line); guards (no address, inactive, gone/deactivated by send time); hooked into passkey add/remove, TOTP enable/disable (not for an abandoned enrolment), recovery-code regeneration, password change (not on failure), admin MFA reset (not when nothing was removed) and admin session revocation (not for the self-service one); a broker or mail failure never fails the triggering request |
 | `test_admin_users_list.py` | 2 | 13 | Admin user list: memberships per relationship (participant, owner-who-is-also-participant merged into one, owner of several communities sorted by name), confirmed-only `mfa_methods`, `last_login` exposed and `null` before the first sign-in, fixed query count, `/auth/me/` unaffected; `mfa_compliance` (`null` outside the policy, `"grace"` before the deadline, `"overdue"` after it, `"compliant"` once enrolled regardless of the deadline, no added query per account) |
 | `test_last_login.py` | 4 | 7 | `last_login` stamped by a plain password login (not by a failed one, not by the password step of a two-step login until `/token/mfa/` completes it) and by the auto-login after email verification; not restamped by a password change or by setting your initial password moments after verifying; untouched on either side of an impersonation session |
 | `test_password_writes.py` | 1 | 4 | Stale profile saves, intentional usable/unusable writes, synchronous/asynchronous hash upgrades and concurrent password replacement |
-| `test_password_recovery.py` | 2 | 29 | Password preservation, real TOTP/provenance, legacy challenges, recovery, retirement, managed email, audit accuracy/rollback, stale profile writes, OAuth retirement and PostgreSQL consumption/reset/issuance races |
+| `test_password_recovery.py` | 2 | 30 | Password preservation, real TOTP/provenance, legacy challenges, recovery, retirement, managed email, audit accuracy/rollback, stale profile writes, OAuth retirement and PostgreSQL consumption/reset/issuance races |
 | `test_admin_account_actions.py` | 2 | 12 | Account creation (generated password when omitted, returned once and never re-listed, two accounts get different passwords, a supplied password is still accepted, mismatched/weak supplied passwords rejected, generated password passes the validators anyway, response carries the new id, non-admin blocked); self-deactivation guard (blocked with a field error, deactivating someone else works and is audited, reactivating your own account is unaffected, deactivating someone else still revokes their sessions) |
 | `test_api_keys.py` | 10 | 81 | Generation, hashing, auth, read-only keys, scope deny-list, audit, throttling, CRUD, admin management |
-| `test_oauth.py` | 15 | 78 | Public endpoint validation, bounded JSON object responses, access-token/profile field types and model limits, numeric fallback IDs and linked login without email, redirect/credential containment, verified-email provisioning and linking, admin-only audited exception for trusted providers with an absent claim (new accounts only); provider listing, initiate, callback guards/redirects, link flow, social accounts, audit, `require_mfa_claim` (`OAuthMfaClaimTests`); callback issuance revalidation, OAuth exchange revocation and PostgreSQL single-use/revocation races |
-| `test_passkeys.py` | 8 | 64 | Passkey registration and passwordless sign-in against a software authenticator, MFA policy and grace arithmetic, removal guard, admin reset, RP-ID/origin system checks |
+| `test_oauth.py` | 16 | 91 | Public endpoint validation and bounded provider data; provider configuration, callback guards, verified-email provisioning/linking and MFA claims; linking-session revocation before/during provider I/O, deleted/unbound state refusal, identity-owner and PostgreSQL competing-link races; exchange single-use/revocation |
+| `test_passkeys.py` | 8 | 65 | Passkey registration and passwordless sign-in against a software authenticator, MFA policy and grace arithmetic, removal guard, admin reset, RP-ID/origin system checks |
 | `test_mfa.py` | 4 | 28 | TOTP enrolment/removal/recovery codes, two-step login, MFA at the magic-link/onboarding/OAuth/impersonation/email-verification doors, per-account throttle (`SPEC-2026-09-two-factor-authentication`) |
 | `test_registration_concurrency.py` | — (3 functions) | 7 cases | PostgreSQL cancellation/verification/resend row-lock ordering; SMTP outside transactions; transitions during delivery; late cleanup preserves newer links |
 | `test_cookie_oauth.py` | — (7 module-level test functions) | 7 | Refresh/logout cookie handling; token exchange sets cookies, consumes codes, and stamps `last_login` |

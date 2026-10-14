@@ -230,6 +230,10 @@ See [Creating the first admin account](#creating-the-first-admin-account) below.
 
 ### 6. Back up and update
 
+> **Credential-provenance upgrade:** when upgrading across `accounts.0028`/`0029`,
+> use the [maintenance rollout](../credential-provenance-upgrade.md) instead of
+> the ordinary restart commands below. Old and new authentication workers must not overlap.
+
 - Set up backups of the database **and** the `backend_media` volume (invoice
   PDFs) before billing real participants — see [Backups](18-backups.md).
 - To update, download `docker-compose.yml` of the new release over the old
@@ -292,7 +296,8 @@ Things that differ from a plain Linux server:
   to `http://localhost:8080`. Set `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`,
   `FRONTEND_URL` and the passkey settings in `.env` to that address as in
   step 2, and forward the name and ports from your router.
-- **Updating.** Replace `docker-compose.yml` with the new release's file (or
+- **Updating.** Follow the [upgrade warning](#6-back-up-and-update) before restarting.
+  Replace `docker-compose.yml` with the new release's file (or
   set `OPENZEV_VERSION` in `.env`), then over SSH run `sudo docker compose pull`
   followed by `sudo docker compose up -d` in the project folder. Make a backup
   first.
@@ -320,7 +325,7 @@ also contains `docker-compose.yml`, which builds the frontend (nginx) and the
 backend as two containers — use the service name `backend` instead of `app`
 there. Pass `-f docker-compose.fullstack.yml` to every `docker compose` command
 for the fullstack stack. To update, check out the new tag and run the `up`
-command again.
+command again, subject to the [upgrade warning](#6-back-up-and-update).
 
 ## Production on Kubernetes (Helm)
 
@@ -345,6 +350,10 @@ chart).
    ```
 
 4. [Create the first admin account](#creating-the-first-admin-account).
+
+For an existing installation crossing the credential-provenance boundary, follow
+the [maintenance rollout](../credential-provenance-upgrade.md); a normal rolling
+Helm upgrade is insufficient.
 
 The ingress needs TLS for the same reason as above (`Secure` cookies), and the
 backend runs the same configuration check on start. For every chart value,

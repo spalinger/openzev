@@ -49,7 +49,7 @@ from .serializers import (
     WebAuthnCredentialSerializer,
 )
 from .authentication import enforce_csrf
-from .jwt_utils import make_jwt_for_user, password_recovery_deadline, record_login
+from .jwt_utils import is_participant_link_session, make_jwt_for_user, password_recovery_deadline, record_login
 from .session_revocation import (
     is_session_current,
     keep_current_session,
@@ -109,7 +109,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             # 2026-09-two-factor-authentication.md §5.1.
             return Response({
                 "mfa_required": True,
-                "mfa_token": mfa.issue_challenge(user),
+                "mfa_token": mfa.issue_challenge(user, participant_link=user.password_from_participant_link),
                 "methods": mfa.challenge_methods(user),
             })
 
@@ -164,7 +164,7 @@ class TokenMfaView(APIView):
         code = str(request.data.get("code") or "")
 
         try:
-            user, participant_link = mfa.resolve_challenge(mfa_token, lock=True)
+            user, participant_link, password_recovery = mfa.resolve_challenge(mfa_token, lock=True)
             if participant_link:
                 from zev.services import requires_independent_login
 
@@ -179,14 +179,14 @@ class TokenMfaView(APIView):
             self._record_challenge_failed(request, reason=reason, user=user)
             return Response({"detail": "Invalid or expired code."}, status=status.HTTP_400_BAD_REQUEST)
 
-        if participant_link:
+        if password_recovery:
             magic_links.retire_pending_password(user)
-        tokens = make_jwt_for_user(user, participant_link=participant_link)
+        tokens = make_jwt_for_user(user, participant_link=participant_link, password_recovery=password_recovery)
         response = Response({"detail": "Login successful."})
         set_auth_cookies(request, response, access=tokens["access"], refresh=tokens["refresh"])
         record_login(user)
 
-        first_factor = "participant_link" if participant_link else "password"
+        first_factor = "participant_link" if password_recovery else "password"
         record_audit_event(
             request=request,
             action_category=AuditActionCategory.AUTH,
@@ -557,8 +557,11 @@ def _serialize_me(user, token=None):
     # Every ZEV the account relates to, with its grant and participant rows
     # there — what the frontend's community switcher lists (#761).
     data["memberships"] = zev_access.memberships_for(user)
-    data["can_change_email"] = user.has_usable_password() and not email_change.is_managed(
-        user, has_participations=any(row["participants"] for row in data["memberships"]),
+    data["can_change_email"] = (
+        user.has_usable_password() and not user.password_from_participant_link
+        and not email_change.is_managed(
+            user, has_participations=any(row["participants"] for row in data["memberships"]),
+        )
     )
     data["may_create_zev"] = user.may_create_zev
     return data
@@ -661,8 +664,9 @@ def reset_password(request):
         except DjangoValidationError as exc:
             return Response({"detail": exc.messages}, status=status.HTTP_400_BAD_REQUEST)
         user.set_password(new_password)
+        user.password_from_participant_link = True
         user.must_change_password = False
-        user.save(update_fields=["password", "must_change_password"])
+        user.save(update_fields=["password", "password_from_participant_link", "must_change_password"])
         response, metadata = _finish_password_change(request, user)
         record_audit_event(
             request=request, action_category=AuditActionCategory.AUTH, action_type="password.reset",
@@ -1027,7 +1031,7 @@ def verify_email(request):
     if mfa.requires_challenge(user):
         return Response({
             "mfa_required": True,
-            "mfa_token": mfa.issue_challenge(user),
+            "mfa_token": mfa.issue_challenge(user, participant_link=user.password_from_participant_link),
             "methods": mfa.challenge_methods(user),
             "purpose": token.purpose,
         })
@@ -1073,8 +1077,9 @@ def set_initial_password(request):
 
     was_pending = user.must_change_password
     user.set_password(new_password)
+    user.password_from_participant_link = is_participant_link_session(request.auth)
     user.must_change_password = False
-    user.save(update_fields=["password", "must_change_password"])
+    user.save(update_fields=["password", "password_from_participant_link", "must_change_password"])
     response, metadata = _finish_password_change(request, user)
 
     record_audit_event(
@@ -1148,7 +1153,7 @@ class TotpDeviceView(APIView):
             existing.delete()
 
         secret = pyotp.random_base32()
-        device = TotpDevice(user=request.user)
+        device = TotpDevice(user=request.user, from_participant_link=is_participant_link_session(request.auth))
         try:
             device.set_secret(secret)
         except mfa_crypto.MfaNotConfigured:
@@ -1227,8 +1232,12 @@ class TotpEnrolConfirmView(APIView):
         # kill the printout they are holding. Only a first factor issues.
         first_factor = not mfa.has_any_factor(request.user)
         device.confirmed_at = timezone.now()
-        device.save(update_fields=["confirmed_at"])
-        recovery_codes = mfa.issue_recovery_codes(request.user) if first_factor else []
+        # Either ceremony step can expose the factor to a participant-link holder.
+        device.from_participant_link = device.from_participant_link or is_participant_link_session(request.auth)
+        device.save(update_fields=["confirmed_at", "from_participant_link"])
+        recovery_codes = []
+        if first_factor:
+            recovery_codes = mfa.issue_recovery_codes(request.user, participant_link=device.from_participant_link)
 
         record_audit_event(
             request=request,
@@ -1258,7 +1267,9 @@ class MfaRecoveryCodesView(APIView):
         if not mfa.has_any_factor(request.user):
             return Response({"detail": "Two-factor authentication is not enabled."}, status=status.HTTP_400_BAD_REQUEST)
 
-        recovery_codes = mfa.issue_recovery_codes(request.user)
+        recovery_codes = mfa.issue_recovery_codes(
+            request.user, participant_link=is_participant_link_session(request.auth),
+        )
 
         record_audit_event(
             request=request,

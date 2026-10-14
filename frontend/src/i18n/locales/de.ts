@@ -510,6 +510,7 @@ export const de = {
         unlinkAccount: 'Verknüpfung aufheben',
         linkedSince: 'Verknüpft seit {{date}}',
         noProviders: 'Keine OAuth-Anbieter konfiguriert.',
+        linkEmailNotVerified: 'Der Anbieter muss die E-Mail-Adresse dieses Kontos bestätigen, bevor er verknüpft werden kann.',
         linkSuccess: 'Konto erfolgreich verknüpft.',
         unlinkConfirmTitle: 'Verknüpfung aufheben?',
         unlinkConfirmMessage: 'Verknüpfung mit {{provider}} entfernen? Sie können sie jederzeit wiederherstellen.',
@@ -527,7 +528,7 @@ export const de = {
             submit: 'Bestätigungslink senden',
             sent: 'Falls {{email}} verwendet werden kann, haben wir einen Bestätigungslink dorthin gesendet.',
             failed: 'Die E-Mail-Änderung konnte nicht angefordert werden.',
-            managed: 'Ihre E-Mail-Adresse wird von Ihrer Administration verwaltet. Wenden Sie sich dorthin, wenn sie geändert werden muss.',
+            managed: 'Ihre E-Mail-Adresse kann hier nicht geändert werden. Wenden Sie sich bei Bedarf an Ihre Administration.',
         },
         sessions: {
             title: 'Sitzungen',

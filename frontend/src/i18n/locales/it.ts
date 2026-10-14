@@ -510,6 +510,7 @@ export const it = {
         unlinkAccount: 'Scollega',
         linkedSince: 'Collegato dal {{date}}',
         noProviders: 'Nessun provider OAuth configurato.',
+        linkEmailNotVerified: 'Il provider deve verificare l’indirizzo e-mail di questo account prima di poter essere collegato.',
         linkSuccess: 'Account collegato con successo.',
         unlinkConfirmTitle: 'Scollegare l\'account?',
         unlinkConfirmMessage: 'Rimuovere il collegamento con {{provider}}? Puoi ricrearlo in qualsiasi momento.',
@@ -527,7 +528,7 @@ export const it = {
             submit: 'Invia link di conferma',
             sent: 'Se {{email}} può essere usato, vi abbiamo inviato un link di conferma.',
             failed: 'Impossibile richiedere la modifica dell\'e-mail.',
-            managed: 'Il tuo indirizzo e-mail è gestito dal tuo amministratore. Rivolgiti a lui se deve essere cambiato.',
+            managed: 'Il tuo indirizzo e-mail non può essere modificato qui. Contatta il tuo amministratore se deve essere cambiato.',
         },
         sessions: {
             title: 'Sessioni',

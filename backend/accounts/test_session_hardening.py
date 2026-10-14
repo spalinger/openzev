@@ -87,6 +87,17 @@ class SelfServiceProfileTests(TestCase):
         self.assertEqual(self.user.first_name, "Ada")
         self.assertEqual(self.user.email, "ss_user@example.com")  # untouched, not re-cased
 
+    def test_email_change_capability_distinguishes_independent_and_participant_passwords(self):
+        self.assertTrue(self.client.get(ME).data["can_change_email"])
+        self.user.password_from_participant_link = True
+        self.user.save(update_fields=["password_from_participant_link"])
+        response = self.client.get(ME)
+        self.assertTrue(response.data["has_usable_password"])
+        self.assertFalse(response.data["can_change_email"])
+        self.user.set_unusable_password()
+        self.user.save()
+        self.assertFalse(self.client.get(ME).data["can_change_email"])
+
     def test_names_can_still_be_edited(self):
         response = self.client.patch(ME, {"first_name": "Ada", "last_name": "Lovelace"}, format="json")
         self.assertEqual(response.status_code, 200)
@@ -542,6 +553,32 @@ class EmailChangeTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["code"], "no_password")
         self.assertEqual(len(mail.outbox), 0)
+
+    def test_an_email_change_token_cannot_promote_a_participant_derived_password(self):
+        from . import email_change
+
+        token = email_change.issue_token(self.user, "link-holder@example.com")
+        self.user.password_from_participant_link = True
+        self.user.save(update_fields=["password_from_participant_link"])
+        with self.assertRaises(email_change.EmailChangeError):
+            email_change.resolve_token(token)
+
+    def test_email_confirmation_rechecks_password_origin_under_the_user_lock(self):
+        from . import email_change
+
+        token = email_change.issue_token(self.user, "link-holder@example.com")
+        resolve = email_change.resolve_token
+
+        def mark_after_resolution(value, **kwargs):
+            result = resolve(value, **kwargs)
+            User.objects.filter(pk=self.user.pk).update(password_from_participant_link=True)
+            return result
+
+        with mock.patch("accounts.views_security.email_change.resolve_token", side_effect=mark_after_resolution):
+            response = APIClient().post(EMAIL_CONFIRM, {"token": token}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "ec_user@example.com")
 
     def test_an_address_held_by_another_account_looks_like_success_but_sends_nothing(self):
         make_user("ec_taken", UserRole.USER)

@@ -510,6 +510,7 @@ export const fr = {
         unlinkAccount: 'Délier',
         linkedSince: 'Lié depuis le {{date}}',
         noProviders: 'Aucun fournisseur OAuth configuré.',
+        linkEmailNotVerified: 'Le fournisseur doit vérifier l’adresse e-mail de ce compte avant de pouvoir être associé.',
         linkSuccess: 'Compte lié avec succès.',
         unlinkConfirmTitle: 'Délier le compte ?',
         unlinkConfirmMessage: 'Supprimer le lien avec {{provider}} ? Vous pouvez le rétablir à tout moment.',
@@ -527,7 +528,7 @@ export const fr = {
             submit: 'Envoyer le lien de confirmation',
             sent: 'Si {{email}} peut être utilisée, nous lui avons envoyé un lien de confirmation.',
             failed: 'Impossible de demander le changement d\'e-mail.',
-            managed: 'Votre adresse e-mail est gérée par votre administrateur. Adressez-vous à lui si elle doit changer.',
+            managed: 'Votre adresse e-mail ne peut pas être modifiée ici. Contactez votre administrateur si elle doit changer.',
         },
         sessions: {
             title: 'Sessions',

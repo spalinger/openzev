@@ -81,7 +81,8 @@ def resolve_token(token: str, *, user: User | None = None) -> tuple[User, str]:
     if user is None:
         user = User.objects.filter(pk=user_id).first()
     if (user is None or user.pk != user_id or not user.is_active
-            or is_managed(user) or _state_fingerprint(user) != fingerprint):
+            or is_managed(user) or user.password_from_participant_link
+            or _state_fingerprint(user) != fingerprint):
         raise EmailChangeError
     if address_in_use(new, excluding=user):
         raise EmailChangeError

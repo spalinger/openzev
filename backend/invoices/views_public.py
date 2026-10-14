@@ -279,12 +279,12 @@ def magic_link_consume(request):
         # password. See spec 2026-09-two-factor-authentication.md §5.4 door 5.
         return Response({
             "mfa_required": True,
-            "mfa_token": mfa.issue_challenge(user, participant_link=True),
+            "mfa_token": mfa.issue_challenge(user, participant_link=True, password_recovery=True),
             "methods": mfa.challenge_methods(user),
         })
 
     magic_links.retire_pending_password(user)
-    tokens = make_jwt_for_user(user, participant_link=True)
+    tokens = make_jwt_for_user(user, participant_link=True, password_recovery=True)
     response = Response({"detail": "Signed in."})
     set_auth_cookies(request, response, access=tokens["access"], refresh=tokens["refresh"])
     record_login(user)

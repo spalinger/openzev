@@ -7,6 +7,7 @@ Spec: docs/specs/2026-03-community-and-access.md §5.6c.
 from unittest import mock
 
 import pyotp
+from cryptography.fernet import Fernet
 from django.core import mail
 from django.test import TestCase
 from django.test.utils import override_settings
@@ -18,14 +19,15 @@ from . import notifications
 from .models import TotpDevice, UserRole
 from .tasks import send_security_notification
 from .test_mfa import RECOVERY_CODES_URL, TOTP_CONFIRM_URL, TOTP_DEVICE_URL
-from .test_passkeys import (
+from testing.passkeys import (
     ORIGIN,
     PASSKEYS_URL,
     RP_ID,
-    TEST_KEY,
     SoftAuthenticator,
     register_passkey,
 )
+
+TEST_KEY = Fernet.generate_key().decode()
 
 CHANGE_PASSWORD = "/api/v1/auth/me/change-password/"
 

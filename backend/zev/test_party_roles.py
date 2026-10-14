@@ -276,8 +276,9 @@ class PartyRoleMigrationTests(TransactionTestCase):
         executor.migrate(executor.loader.graph.leaf_nodes())
 
     def test_the_owner_party_becomes_issuer_and_landowner_from_the_first_dated_document(self):
-        old = self.migrate(self.BEFORE)
         owner, other = make_user("mig_role_owner"), make_user("mig_role_other")
+        # The rollback also removes newer accounts fields; create current users first.
+        old = self.migrate(self.BEFORE)
         Zev_, Party_, Participant_ = (old.get_model("zev", name) for name in ("Zev", "Party", "Participant"))
         zev = Zev_.objects.create(name="Mig", owner_id=owner.pk, start_date=date(2026, 1, 1))
         own_party = Party_.objects.create(zev=zev, last_name="Owner", sort_name="Owner")

@@ -519,6 +519,7 @@ export const en = {
         unlinkAccount: 'Unlink',
         linkedSince: 'Linked since {{date}}',
         noProviders: 'No OAuth providers are configured.',
+        linkEmailNotVerified: 'The provider must verify the email address on this account before it can be linked.',
         linkSuccess: 'Account linked successfully.',
         unlinkConfirmTitle: 'Unlink account?',
         unlinkConfirmMessage: 'Remove the link with {{provider}}? You can re-link at any time.',
@@ -536,7 +537,7 @@ export const en = {
             submit: 'Send confirmation link',
             sent: 'If {{email}} can be used, we sent a confirmation link to it.',
             failed: 'The email change could not be requested.',
-            managed: 'Your email address is managed by your administrator. Ask them if it needs to change.',
+            managed: 'Your email address cannot be changed here. Contact your administrator if it needs to change.',
         },
         sessions: {
             title: 'Sessions',
