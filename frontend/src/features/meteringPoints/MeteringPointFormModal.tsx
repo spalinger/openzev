@@ -12,6 +12,8 @@ type MeteringPointFormModalProps = {
   submitLabel: string
   form: MeteringPointInput
   isPending: boolean
+  /** Field-keyed server validation errors, shown under their field. */
+  fieldErrors?: Record<string, string>
   onClose: () => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   setForm: Dispatch<SetStateAction<MeteringPointInput>>
@@ -25,12 +27,15 @@ export function MeteringPointFormModal({
   submitLabel,
   form,
   isPending,
+  fieldErrors = {},
   onClose,
   onSubmit,
   setForm,
   buildings = [],
 }: MeteringPointFormModalProps) {
   const { t } = useTranslation()
+  const secondaryError = fieldErrors.secondary_meter_id
+  const meterIdError = fieldErrors.meter_id
 
   return (
     <FormModal isOpen={isOpen} title={title} onClose={onClose}>
@@ -39,12 +44,29 @@ export function MeteringPointFormModal({
           <span>{t('pages.meteringPoints.form.meterId')}</span>
           <input
             value={form.meter_id}
+            aria-invalid={meterIdError ? true : undefined}
             onChange={(event) => {
               const value = event.target.value
               setForm((previous) => ({ ...previous, meter_id: value }))
             }}
             required
           />
+          {meterIdError && <span className="field-error" role="alert">{meterIdError}</span>}
+        </label>
+
+        <label>
+          <span>{t('pages.meteringPoints.form.secondaryMeterId')}</span>
+          <input
+            value={form.secondary_meter_id ?? ''}
+            aria-invalid={secondaryError ? true : undefined}
+            onChange={(event) => {
+              const value = event.target.value
+              setForm((previous) => ({ ...previous, secondary_meter_id: value }))
+            }}
+            placeholder={t('pages.meteringPoints.form.secondaryMeterIdPlaceholder')}
+          />
+          <small className="muted">{t('pages.meteringPoints.form.secondaryMeterIdHint')}</small>
+          {secondaryError && <span className="field-error" role="alert">{secondaryError}</span>}
         </label>
 
         <label>

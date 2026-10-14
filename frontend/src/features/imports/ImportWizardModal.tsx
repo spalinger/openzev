@@ -11,6 +11,7 @@ import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { FormModal } from '../../components/FormModal'
 import { MAX_UPLOAD_BYTES, type CsvColumnMap, type CsvFormatProfile, type DetectionState, type FilePreview } from './importUtils'
+import { SDAT_UPLOAD_ACCEPT } from './sdatOutcome'
 import { formatBytes } from '../../lib/numbers'
 import type { ImportTimestampTimezone } from '../../types/api'
 
@@ -270,12 +271,12 @@ export function ImportWizardModal(props: ImportWizardModalProps) {
                                 type="file"
                                 multiple
                                 onChange={props.onFileChange}
-                                accept={source === 'csv' ? '.csv,.xlsx' : '.xml,.xml.gz,.gz'}
+                                accept={source === 'csv' ? '.csv,.xlsx' : SDAT_UPLOAD_ACCEPT}
                             />
                         </label>
                         <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
                             {t('pages.imports.wizard.supportedExtensions', {
-                                extensions: source === 'csv' ? '.csv, .xlsx' : '.xml, .xml.gz',
+                                extensions: source === 'csv' ? '.csv, .xlsx' : '.xml, .xml.gz, .gz',
                             })}{' '}
                             {t('pages.imports.wizard.sizeLimit', { limit: formatBytes(MAX_UPLOAD_BYTES) })}
                         </p>

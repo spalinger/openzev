@@ -265,6 +265,7 @@ export function InvoicesContent() {
                             getRowMenuItems={rowMenuItems}
                             getRowWork={getRowWork}
                             repeatedPartyIds={repeatedParties(rows)}
+                            canAct={canWriteSelectedCommunity}
                         />
                     )}
                 </>

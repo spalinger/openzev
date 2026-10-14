@@ -36,14 +36,16 @@ import {
     getNextAssignmentGuidance,
     isAssignmentCurrent,
     isMeteringPointHolderLess,
-    meteringPointNeedsAttention,
     METERING_POINT_FILTER_KEYS,
+    meteringPointFieldErrors,
+    meteringPointNeedsAttention,
     METERING_POINT_SORT_KEY,
     readMeteringPointBuildingFilter,
     readMeteringPointSort,
     readMeteringPointTypeFilter,
     readMeteringPointView,
     sortMeteringPoints,
+    toMeteringPointPayload,
     type MeteringPointBuildingFilter,
     type MeteringPointHealth,
     type MeteringPointSort,
@@ -101,6 +103,7 @@ export function getScopedAndFilteredMeteringPoints(
         const matchesType = typeFilter === 'all' || point.meter_type === typeFilter
         const matchesSearch = !normalizedSearch
             || point.meter_id.toLowerCase().includes(normalizedSearch)
+            || (point.secondary_meter_id ?? '').toLowerCase().includes(normalizedSearch)
             || (point.location_description ?? '').toLowerCase().includes(normalizedSearch)
             || (point.building_name ?? '').toLowerCase().includes(normalizedSearch)
             || (participantNamesByMeteringPoint?.get(point.id) ?? '').toLowerCase().includes(normalizedSearch)
@@ -172,9 +175,17 @@ export function useMeteringPointActions({
     const todayIso = todayBusinessIso()
 
     // Metering point modal
-    const [mpForm, setMpForm] = useState<MeteringPointInput>(defaultMeteringPointForm())
+    const [mpForm, setMpFormState] = useState<MeteringPointInput>(defaultMeteringPointForm())
     const [editingMpId, setEditingMpId] = useState<string | null>(null)
     const [showMpModal, setShowMpModal] = useState(false)
+    // Field-keyed server validation errors for the open form (identity
+    // collisions). Editing clears them; a scope switch remounts this hook
+    // (page key), so they never leak into another community.
+    const [mpFieldErrors, setMpFieldErrors] = useState<Record<string, string>>({})
+    function setMpForm(update: React.SetStateAction<MeteringPointInput>) {
+        setMpFormState(update)
+        setMpFieldErrors({})
+    }
 
     // Assignment modal
     const [assignForm, setAssignForm] = useState<MeteringPointAssignmentInput>(defaultAssignmentForm())
@@ -378,7 +389,13 @@ export function useMeteringPointActions({
             )
         },
         onError: (error, variables) => {
-            if (isCurrent(variables.scope) && variables.scope.canWrite) pushToast(formatApiError(error, t('pages.meteringPoints.messages.saveFailed')), 'error')
+            if (isCurrent(variables.scope) && variables.scope.canWrite) {
+                const fields = meteringPointFieldErrors(error)
+                setMpFieldErrors(fields)
+                // Field-keyed collisions already render under their field;
+                // only toast when there is nothing field-specific to show.
+                if (Object.keys(fields).length === 0) pushToast(formatApiError(error, t('pages.meteringPoints.messages.saveFailed')), 'error')
+            }
         },
     })
 
@@ -514,22 +531,25 @@ export function useMeteringPointActions({
     function openEditMpModal(point: MeteringPoint) {
         if (!isCurrent(scope) || !canWrite) return
         setEditingMpId(point.id)
-        setMpForm({
+        setMpFormState({
             zev: point.zev,
             meter_id: point.meter_id,
+            secondary_meter_id: point.secondary_meter_id ?? '',
             meter_type: point.meter_type,
             is_active: point.is_active,
             location_description: point.location_description ?? '',
             has_behind_meter_generation: point.has_behind_meter_generation,
             building: point.building,
         })
+        setMpFieldErrors({})
         setShowMpModal(true)
     }
 
     function closeMpModal() {
         setShowMpModal(false)
         setEditingMpId(null)
-        setMpForm(defaultMeteringPointForm())
+        setMpFormState(defaultMeteringPointForm())
+        setMpFieldErrors({})
     }
 
     function submitMpForm(event: FormEvent<HTMLFormElement>) {
@@ -540,8 +560,10 @@ export function useMeteringPointActions({
             pushToast(t('pages.meteringPoints.messages.selectZev'), 'error')
             return
         }
+        // A blank secondary ID clears the alias (null); the backend
+        // normalizes again, so an uncleared '' can never persist.
         const payload: MeteringPointInput = {
-            ...mpForm,
+            ...toMeteringPointPayload({ ...mpForm, zev: zevForSubmit }),
             zev: zevForSubmit,
         }
         saveMpMutation.mutate({ id: editingMpId ?? undefined, payload, scope })
@@ -779,6 +801,7 @@ export function useMeteringPointActions({
         // Modal form state
         mpForm,
         setMpForm,
+        mpFieldErrors,
         editingMpId,
         showMpModal,
         assignForm,

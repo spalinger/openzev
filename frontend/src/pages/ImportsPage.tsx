@@ -34,6 +34,10 @@ import { ImportHistoryTable } from '../features/imports/ImportHistoryTable'
 import { ImportProtocolModal } from '../features/imports/ImportProtocolModal'
 import { ImportWizardModal } from '../features/imports/ImportWizardModal'
 import {
+    isFailedBatchOutcome,
+    isImportLogDeletable,
+} from '../features/imports/sdatOutcome'
+import {
     MAX_UPLOAD_BYTES,
     aggregateMissingMeters,
     csvConfigFor,
@@ -200,14 +204,24 @@ export function ImportsContent() {
     }
 
     function handleUploadOutcomes(outcomes: BatchFileOutcome<ImportLog>[], variables: Parameters<typeof uploadMeteringFiles>[0] & { scope: typeof scope; generation: number }) {
-        const imported = outcomes.filter((outcome) => outcome.value !== null)
-        const failed = outcomes.filter((outcome) => outcome.value === null)
+        // A rejected SDAT-CH file arrives as HTTP 201 with a persisted log
+        // (`result_status: rejected`), not as a thrown error — but for retry
+        // selection and toasts it failed like a 413/429.
+        const imported = outcomes.filter((outcome) => !isFailedBatchOutcome(outcome))
+        const failed = outcomes.filter((outcome) => isFailedBatchOutcome(outcome))
+        const rejectedLogs = failed
+            .map((outcome) => outcome.value)
+            .filter((log): log is ImportLog => !!log && log.result_status === 'rejected')
         void queryClient.invalidateQueries({ queryKey: ['metering'] })
         if (!isCurrent(variables.scope) || wizardGeneration.current !== variables.generation) return
 
         if (imported.length === 0) {
             // Nothing landed: keep the wizard open so the user can retry.
-            const detail = describeUploadError(failed[0]?.error)
+            const firstRejected = rejectedLogs[0] ?? null
+            if (firstRejected) setSelectedLog(firstRejected)
+            const detail = firstRejected
+                ? t('pages.imports.messages.importSdatRejected')
+                : describeUploadError(failed[0]?.error)
             pushToast(
                 outcomes.length > 1
                     ? `${t('pages.imports.messages.importBatchAllFailed', { count: outcomes.length })} ${detail}`
@@ -222,19 +236,25 @@ export function ImportsContent() {
             imported: logs.reduce((sum, log) => sum + log.rows_imported, 0),
             skipped: logs.reduce((sum, log) => sum + log.rows_skipped, 0),
             overwritten: logs.reduce((sum, log) => sum + (log.rows_overwritten ?? 0), 0),
-            issues: logs.reduce((sum, log) => sum + (log.errors?.length ?? 0), 0),
+            issues: logs.reduce(
+                (sum, log) => sum
+                    + (log.errors?.length ?? 0)
+                    + (log.issues?.filter((issue) => issue.severity === 'error').length ?? 0),
+                0,
+            ),
         }
         // The protocol modal shows one log: open the first that needs a look.
-        const logWithIssues = logs.find((log) => (log.errors?.length ?? 0) > 0)
+        const firstRejected = rejectedLogs[0] ?? null
+        const logWithIssues = logs.find((log) => (log.errors?.length ?? 0) > 0 || (log.issues?.some((issue) => issue.severity === 'error') ?? false))
         const logWithNotes = logs.find((log) => (log.warnings ?? []).length > 0)
-        const logToOpen = logWithIssues ?? logWithNotes ?? null
+        const logToOpen = firstRejected ?? logWithIssues ?? logWithNotes ?? null
 
         if (failed.length > 0) {
             // Keep only the files that did not go through, so a retry does not
             // import the others a second time. Their previews stay valid.
             const failedFiles = failed.map((outcome) => outcome.file)
             // Outcomes and previews both follow the order of the selection.
-            const failedPositions = new Set(outcomes.flatMap((outcome, position) => (outcome.value === null ? [position] : [])))
+            const failedPositions = new Set(outcomes.flatMap((outcome, position) => (isFailedBatchOutcome(outcome) ? [position] : [])))
             setFiles(failedFiles)
             setPreviews((prev) => prev.filter((_, position) => failedPositions.has(position)))
             setPreviewStamp((prev) => (prev ? { ...prev, files: stampFilesOf(failedFiles) } : prev))
@@ -297,6 +317,27 @@ export function ImportsContent() {
         onSuccess: handleUploadOutcomes,
     })
 
+    function describeDeletionError(error: unknown): string {
+        const code = (error as { response?: { data?: { code?: string } } })?.response?.data?.code
+        if (code === 'overwrite_import_protected') return t('pages.imports.delete.overwriteProtected')
+        if (code === 'quarantine_replace_protected') return t('pages.imports.delete.quarantineProtected')
+        return t('pages.imports.messages.deleteFailed')
+    }
+
+    function deletionSuccessMessage(result: { deleted_logs: number; deleted_readings: number; deleted_quarantined_readings?: number }): { key: string; params: Record<string, unknown> } {
+        const quarantined = result.deleted_quarantined_readings ?? 0
+        if (quarantined > 0) {
+            return {
+                key: 'pages.imports.messages.deleteSuccessWithHeld',
+                params: { logs: result.deleted_logs, readings: result.deleted_readings, held: quarantined },
+            }
+        }
+        return {
+            key: 'pages.imports.messages.deleteSuccess',
+            params: { count: result.deleted_logs, logs: result.deleted_logs, readings: result.deleted_readings },
+        }
+    }
+
     const deleteImportMutation = useMutation({
         mutationFn: ({ id, scope: submittingScope }: { id: string; scope: typeof scope }) => {
             assertWritable(submittingScope, false)
@@ -309,19 +350,12 @@ export function ImportsContent() {
             if (selectedLog?.id === variables.id) {
                 setSelectedLog(null)
             }
-            pushToast(
-                t('pages.imports.messages.deleteSuccess', {
-                    count: result.deleted_logs,
-                    logs: result.deleted_logs,
-                    readings: result.deleted_readings,
-                }),
-                'success',
-            )
+            const message = deletionSuccessMessage(result)
+            pushToast(t(message.key, message.params), 'success')
         },
         onError: (error, variables) => {
             if (!isCurrent(variables.scope)) return
-            const code = (error as { response?: { data?: { code?: string } } })?.response?.data?.code
-            pushToast(t(code === 'overwrite_import_protected' ? 'pages.imports.delete.overwriteProtected' : 'pages.imports.messages.deleteFailed'), 'error')
+            pushToast(describeDeletionError(error), 'error')
         },
     })
 
@@ -340,19 +374,12 @@ export function ImportsContent() {
             setBulkDeleteTo('')
             setBulkDeleteArmed(false)
             setSelectedLog(null)
-            pushToast(
-                t('pages.imports.messages.deleteSuccess', {
-                    count: result.deleted_logs,
-                    logs: result.deleted_logs,
-                    readings: result.deleted_readings,
-                }),
-                'success',
-            )
+            const message = deletionSuccessMessage(result)
+            pushToast(t(message.key, message.params), 'success')
         },
         onError: (error, variables) => {
             if (!isCurrent(variables.scope)) return
-            const code = (error as { response?: { data?: { code?: string } } })?.response?.data?.code
-            pushToast(t(code === 'overwrite_import_protected' ? 'pages.imports.delete.overwriteProtected' : 'pages.imports.messages.deleteFailed'), 'error')
+            pushToast(describeDeletionError(error), 'error')
         },
     })
 
@@ -460,7 +487,7 @@ export function ImportsContent() {
                                 label: t('pages.imports.actions.deleteImport'),
                                 icon: <FontAwesomeIcon icon={faTrash} fixedWidth />,
                                 danger: true,
-                                disabled: deleteImportMutation.isPending || dialogLoading || ctx.row.original.rows_overwritten > 0,
+                                disabled: deleteImportMutation.isPending || dialogLoading || !isImportLogDeletable(ctx.row.original),
                                 onClick: () => confirm({
                                     title: t('pages.imports.delete.singleTitle'),
                                     message: t('pages.imports.delete.singleMessage', {
@@ -797,9 +824,10 @@ export function ImportsContent() {
     // A protected log in scope rejects the entire bulk operation
     // server-side with zero deletions. Identify blockers up front (the
     // loaded logs are the exact backend scope) and prevent a predictably
-    // rejected submission; the server stays authoritative.
+    // rejected submission; the server stays authoritative. Both protection
+    // codes gate: billable replacements and held (quarantine) replacements.
     const bulkDeleteProtectedLogs = useMemo(
-        () => bulkDeleteScopeLogs.filter((log) => (log.rows_overwritten ?? 0) > 0),
+        () => bulkDeleteScopeLogs.filter((log) => !isImportLogDeletable(log)),
         [bulkDeleteScopeLogs],
     )
     const bulkDeleteProtectedExamples = useMemo(

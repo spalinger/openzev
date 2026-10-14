@@ -130,6 +130,17 @@ Open **Import Protocol** from the history table to see totals
 table (row, meter, reason). Overwrites show a success toast; only true
 failures show an error toast. Both errors and overwrite notes auto-open the protocol.
 
+For SDAT-CH files the protocol shows the structured outcome instead of row
+totals: **Accepted** (billable data written), **Held** (only non-billable
+quarantine values written — still a success), **No changes** (valid replay),
+**Corrections applied** (only overwrites, no new rows), or **Rejected**
+(nothing written). An observation accounting lists new, overwritten, held,
+promoted, duplicate, stale, excluded and rejected observations — promoted
+values are a subset of the created/overwritten rows, not extra energy. Each
+finding carries its stable cause plus the source meter, block/document,
+delivery and position needed to resolve it, and the delivery identity
+(delivery ID, creation, sender/receiver) is shown for traceability.
+
 Duplicate handling: the same metering point + timestamp + direction is stored
 once. Fully existing daily rows show a non-blocking preview notice, so a file
 with existing days and newly appended days can be imported together.
@@ -138,7 +149,12 @@ ones; fully duplicate rows are skipped with a `Duplicate reading` error.
 
 ## SDAT-CH Format
 
-OpenZEV supports the Swiss **SDAT-CH** metering data standard (used by utility providers).
+OpenZEV imports **E66 `ValidatedMeteredData` files for ZEV/vZEV billing**:
+validated active-energy customer/producer deliveries uploaded manually as
+XML (`.xml`) or gzipped XML (`.xml.gz`, `.gz`). That is the supported
+release profile — not all-role SDAT-CH exchange. Automated receipt,
+acknowledgements/error responses, LEG settlement and other market roles
+(supplier, balance-group, grid operator, switching) are deferred.
 
 1. Go to **Metering → Import history** and click **New Import**
 2. Choose the **SDAT-CH (ebIX XML)** format
@@ -150,11 +166,69 @@ OpenZEV supports the Swiss **SDAT-CH** metering data standard (used by utility p
    they are imported one after another; if some fail, the others stay
    imported and only the failed files remain selected so you can retry.
 
-OpenZEV accepts the current E66 XML format with active energy in kWh,
-15-minute intervals and UTC timestamps. Invalid files are rejected as a whole;
-the protocol reports zero committed readings. Temporary and information-only
-values are held separately from billing data. XML and gzip uploads are limited
-to 50 MB, with a 100 MB limit after decompression.
+### Supported profile
+
+| Aspect | Supported | Excluded / deferred |
+| --- | --- | --- |
+| Message | E66 `ValidatedMeteredData`, schema `ValidatedMeteredData_16` | E31 aggregates, acknowledgements, error reports, other roots |
+| Business reason | `E88` billing, `C38` information | `C40` LEG settlement, queries, switching, master data |
+| Product / unit | Active energy (`8716867000030`) in kWh | Reactive energy, LEG products, other units |
+| Direction | Customer/producer consumption (`IN`) and production (`OUT`) | Grid-interconnection (exchange) points |
+| Resolution | 15-minute intervals | Hourly and other resolutions |
+| Quality | Measured and estimated (`56`) values bill; temporary (`21`) values are held | — |
+| Transport | Manual file upload (XML, gzip) | Automated exchange, ACK/error messages |
+
+### Out of scope
+
+The importer is a **billing receiver profile**, not a full SDAT-CH exchange
+implementation. Content outside the table above is never silently imported:
+
+- **Whole-file rejection** — unsupported message types (E31 aggregates,
+  `ImbalanceData`, acknowledgements/error reports, other roots), unsupported
+  business reasons (LEG/community settlement `C40`, queries, switching,
+  master data), unrecognized products and non-kWh units: nothing is written
+  and the protocol names the cause.
+- **Reported skips** — reactive-energy, LEG and grid-interconnection
+  (exchange) blocks are skipped with a note; the rest of the file still
+  imports.
+- **Not implemented** — automated/scheduled receipt, acknowledgement and
+  error-response exchange, and the supplier, balance-group, grid-operator
+  and switching market roles.
+
+Real DSO production file variants and the full 50 MB exchange volume have not
+been exercised in production yet.
+
+### Complete intervals and atomic rejection
+
+Each billing block must carry **every position of its declared interval**
+— readings are never invented. An invalid file (unknown or ambiguous meter,
+incompatible unit, out-of-range or missing position, conflicting values,
+unknown product) rejects the **whole file**: no observations are written,
+existing data is unchanged, and the protocol names the cause with the
+affected meter, block and position. Reactive-energy, LEG and exchange blocks
+are intentional skips, reported as notes rather than failures. Separate files
+in a multi-file upload keep independent outcomes.
+
+### Corrections
+
+A replacement delivery (`Status 5`) with a newer `Creation` overwrites the
+billable values it names; an identical repeat is idempotent and changes
+nothing, while a different value at equal `Creation` rejects the file and
+reports both document identities. Overlaps with CSV/manual readings reject
+the file and preserve the existing data. Corrections that touch already
+invoiced periods flag those invoices for review instead of changing them —
+see [Invoice Management](09-invoice-management.md#metering-corrections-on-issued-invoices).
+
+### Held (non-billable) values
+
+Estimated/information-only and temporary values that are not billable are
+**held in quarantine**, visible in the protocol but excluded from billing,
+charts and invoices. A file that only holds values is still a successful
+import (`held`, not a failure). When a later validated delivery covers a
+held slot, the held value is promoted into billing and counted as such.
+
+XML and gzip uploads are limited to 50 MB, with a 100 MB limit after
+decompression.
 
 ## Timestamp Handling
 
@@ -243,7 +317,7 @@ CH12346-load,2026-01-15 01:00:00,0.630
 
 ### Scenario 2: Utility SDAT-CH Export
 
-Utility provides file: `20260315_metering.sdat`
+Utility provides file: `20260315_metering.xml` (or `.xml.gz`)
 
 1. Click **New Import** and choose **SDAT-CH (ebIX XML)** (select the target ZEV first)
 2. OpenZEV auto-parses metadata
@@ -330,7 +404,9 @@ with overwrite enabled; for SDAT-CH, request a newer correction delivery from
 your provider. Managers cannot delete imports from a disabled community.
 Period bulk-delete matches imports created from
 00:00 Swiss time on the first day up to midnight after the last day — the
-visible-count preview counts exactly the same imports.
+visible-count preview counts exactly the same imports. Deleting billable
+readings flags the affected invoices for review instead of changing them —
+see [Invoice Management](09-invoice-management.md#metering-corrections-on-issued-invoices).
 
 ## Data Quality Checks
 

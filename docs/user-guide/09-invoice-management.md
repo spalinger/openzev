@@ -294,6 +294,24 @@ regenerated.
 
 > **Tip:** You can generate invoices even when metering data is incomplete, but totals may be inaccurate. It is best to resolve missing data first.
 
+### Metering corrections on issued invoices
+
+A committed metering correction (or an import deletion) never rewrites an
+invoice — amounts, PDFs and delivery records stay as issued. Instead the
+affected invoices carry a **Data review** flag: the period rows and the
+invoice detail page name the tainted invoices, and the detail page lists the
+source evidence (delivery ID, changed intervals). The **Overview** readiness
+check gains a **Data corrections** step linking to the period's billing page.
+
+| Invoice status | What to do |
+| --- | --- |
+| **Draft** | **More → Regenerate invoice** bills the corrected values. |
+| **Approved / Sent** | Cancel the invoice, then generate a new one. Cancelling is available through the API only — there is no cancel button in the UI. |
+| **Paid** | Payment does not resolve a data correction: the flag persists until an explicit adjustment outside the normal workflow. |
+
+Participants see the flag on their own sent and paid invoices; the detail
+page explains it without offering management actions.
+
 ## Reviewing Invoices
 
 Click the invoice number in the **Participant** column to view the invoice detail page.

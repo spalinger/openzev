@@ -11,11 +11,53 @@ import type {
 export const defaultMeteringPointForm = (): MeteringPointInput => ({
   zev: '',
   meter_id: '',
+  secondary_meter_id: '',
   meter_type: 'consumption',
   is_active: true,
   location_description: '',
   has_behind_meter_generation: false,
 })
+
+/**
+ * Client mirror of the backend's `normalize_secondary_meter_id`: surrounding
+ * whitespace is dropped and a blank secondary ID becomes null (cleared),
+ * never an empty string. The backend normalizes again, so this only keeps
+ * the payload explicit.
+ */
+export function normalizeSecondaryMeterId(value: string | null | undefined): string | null {
+  if (value == null) return null
+  const trimmed = value.trim()
+  return trimmed === '' ? null : trimmed
+}
+
+/** Submit payload for the metering-point form: blank secondary ID clears it. */
+export function toMeteringPointPayload(form: MeteringPointInput): MeteringPointInput {
+  return { ...form, secondary_meter_id: normalizeSecondaryMeterId(form.secondary_meter_id) }
+}
+
+const METERING_POINT_FIELD_ERROR_KEYS = ['meter_id', 'secondary_meter_id'] as const
+
+/**
+ * Field-keyed server validation errors (400) for the metering-point form.
+ * The backend reports identity collisions per field
+ * (`{"secondary_meter_id": [...]}`); anything else keeps the generic toast
+ * path in the caller. Returns at most one message per known field.
+ */
+export function meteringPointFieldErrors(error: unknown): Record<string, string> {
+  const data = (error as { response?: { data?: unknown } })?.response?.data
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return {}
+  const record = data as Record<string, unknown>
+  const fields: Record<string, string> = {}
+  for (const key of METERING_POINT_FIELD_ERROR_KEYS) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) fields[key] = value
+    else if (Array.isArray(value)) {
+      const first = value.find((entry): entry is string => typeof entry === 'string' && entry.trim() !== '')
+      if (first) fields[key] = first
+    }
+  }
+  return fields
+}
 
 export const defaultAssignmentForm = (meteringPointId = ''): MeteringPointAssignmentInput => ({
   metering_point: meteringPointId,

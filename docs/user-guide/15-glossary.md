@@ -168,7 +168,7 @@ Aggregation level of a metering chart: hourly, daily, or monthly. Readings thems
 ## S
 
 **SDAT-CH**
-Swiss standard for metering data exchange. OpenZEV supports SDAT-CH uploads. See [Metering Imports](05-metering-import.md).
+Swiss standard for metering data exchange. OpenZEV imports E66 `ValidatedMeteredData` files for ZEV/vZEV billing (manual XML/gzip upload) — not all-role SDAT-CH exchange. See [Metering Imports](05-metering-import.md).
 
 **Self-Consumption / Self-Sufficiency**
 The fraction of local energy vs. total consumption. Example: 60 kWh local ÷ 100 kWh total = 60% self-consumption. Not shown for a participant who personally holds a metering point with **Generation Behind the Meter** — see below.

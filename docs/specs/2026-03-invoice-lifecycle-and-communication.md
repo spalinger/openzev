@@ -1386,6 +1386,17 @@ the cockpit readiness and attention caches.
   the presentation restriction is not an API alignment guarantee.
 - Viewers and managers of disabled communities retain filtering, conflict and
   related-invoice navigation, stored PDFs and batch download, with no writes.
+- Reading-correction review (§4.6) renders wherever the flags ride:
+  `InvoiceDataReviewNotice` (row/compact and detail/evidence variants) on the
+  period rows (`InvoicePeriodRowsTable`, imperative wording only when the
+  viewer can act), the invoice detail page (open impacts with source
+  evidence), a badge on the admin list and My invoices, and the
+  `data_corrections` readiness warn step (`review_data_corrections`
+  next-action mapping, `correctionsWarn` detail text) on Overview period
+  cards. Drafts resolve through the existing regenerate action, issued
+  invoices through cancel (API-only) plus regeneration, paid flags persist;
+  no lifecycle permission changes. Covered by
+  `frontend/tests/invoice-data-review.test.ts`.
 - Containers up to 46rem render card rows, keeping table headers accessible;
   up to 28rem, progress and actions stack. The amount column header names CHF;
   cards show the currency next to the amount.

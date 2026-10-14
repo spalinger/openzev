@@ -110,7 +110,17 @@ export function AdminInvoicesContent() {
                 filterFn: 'equalsString',
                 cell: (ctx) => {
                     const status = String(ctx.getValue() ?? '')
-                    return <InvoiceStatusBadge status={status} />
+                    const invoice = ctx.row.original
+                    return (
+                        <span className="actions-row actions-row-wrap">
+                            <InvoiceStatusBadge status={status} />
+                            {invoice.needs_data_review && (
+                                <span className="badge badge-warning" title={t('pages.invoices.dataReview.genericNotice', { count: invoice.open_data_impact_count ?? 0 })}>
+                                    {t('pages.invoices.dataReview.badge')}
+                                </span>
+                            )}
+                        </span>
+                    )
                 },
             },
             {

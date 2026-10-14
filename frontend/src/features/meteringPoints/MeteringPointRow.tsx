@@ -294,6 +294,9 @@ export function MeteringPointRow({
               </span>
               <strong>{point.meter_id}</strong>
             </span>
+            {point.secondary_meter_id && (
+              <span className="muted">{t('pages.meteringPoints.secondaryId', { id: point.secondary_meter_id })}</span>
+            )}
             {!point.is_active && <span className="badge badge-neutral">{t('pages.meteringPoints.inactive')}</span>}
             {point.has_behind_meter_generation && <BehindMeterBadge />}
             {isManagedScope && sourceNeedsAttention && (

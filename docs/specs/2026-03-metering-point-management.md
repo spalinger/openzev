@@ -612,6 +612,13 @@ python -m pytest -q
 ### Frontend
 
 - Form validation and error rendering for metering-point create/edit
+- Secondary meter ID editing in the existing form (`MeteringPointFormModal`):
+  blank clears the alias (payload normalizes to `null`, mirroring
+  `normalize_secondary_meter_id`), server collisions surface as field errors
+  under the field (`meteringPointFieldErrors` reads the field-keyed 400s;
+  editing clears them, scope switches remount the page so they never leak),
+  and the set alias shows on the meter card and matches search. Covered by
+  `frontend/tests/metering-point-secondary-id.test.ts`.
 - Assignment date-range picker with overlap/containment feedback
 - Lists support status, attention, search, type and building filters, with sort and filters stored
   in the URL, including same-page navigation.

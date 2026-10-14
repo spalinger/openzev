@@ -6,6 +6,7 @@ export const NEXT_ACTION_STEP_KEY: Record<string, string> = {
     fix_metering: 'metering',
     fix_assignments: 'assignments',
     fix_tariffs: 'tariffs',
+    review_data_corrections: 'data_corrections',
     generate: 'generated',
     review_generation_conflicts: 'generation_conflicts',
     approve: 'approved',
@@ -46,6 +47,17 @@ export function stepDetailText(step: ReadinessStep, t: TFunction): string | null
             return d('conflictsWarn', {
                 count: step.detail_data?.conflict_count ?? step.count,
                 names,
+            })
+        }
+        case 'data_corrections': {
+            if (step.status !== 'warn') return null
+            const invoices = (step.detail_data?.corrections ?? [])
+                .slice(0, 3)
+                .map((correction) => correction.invoice_number)
+                .join(', ')
+            return d('correctionsWarn', {
+                count: step.detail_data?.correction_count ?? step.count,
+                invoices,
             })
         }
         case 'approved':

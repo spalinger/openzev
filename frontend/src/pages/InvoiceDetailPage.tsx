@@ -15,6 +15,7 @@ import { useAuth } from '../lib/auth'
 import { scopeNoteKey, shellRoleForZev } from '../lib/communityAccess'
 import { PdfPreview } from '../components/PdfPreview'
 import { InvoiceAccessLinkCard } from '../features/invoices/InvoiceAccessLinkCard'
+import { InvoiceDataReviewNotice } from '../features/invoices/InvoiceDataReviewNotice'
 
 import { usePdfObjectUrl } from '../lib/usePdfObjectUrl'
 import { PageHeader } from '../components/PageHeader'
@@ -145,6 +146,10 @@ export function InvoiceDetailPage() {
                     <StatCard label={t('pages.invoiceDetail.feedIn')} value={formatKwh(Number(inv.total_feed_in_kwh ?? 0))} unit="kWh" />
                 </section>
             </div>
+
+            {inv.needs_data_review && (
+                <InvoiceDataReviewNotice invoice={inv} variant="detail" canAct={canManageAccessLink} />
+            )}
 
             {canManageAccessLink && inv.access_link != null && (
                 <InvoiceAccessLinkCard
