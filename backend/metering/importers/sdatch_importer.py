@@ -1237,6 +1237,17 @@ def import_sdatch(file, zev, user):
                 )
             _add_legacy_warnings(run)
             _finalize_log(log, run, status=status, changes=changes, changes_truncated=changes_truncated)
+            # Invoice flags join the same transaction: flags and reading
+            # changes commit or roll back together.
+            from invoices.reading_impact import flag_import_impacts
+
+            flag_import_impacts(
+                zev=zev,
+                import_log=log,
+                changes_truncated=changes_truncated,
+                delivery=run.delivery,
+                affected_slots=run.affected_slots,
+            )
         return log
     except _FileRejected as rejected:
         run.add_issues(rejected.issues)

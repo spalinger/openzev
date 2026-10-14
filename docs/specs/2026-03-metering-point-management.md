@@ -103,10 +103,11 @@ ID equal to its own primary ID.
   before saving each point; collisions, including duplicate IDs within the
   wizard payload, return `400 {"metering_points": {"meter_id": [...]}}` and
   roll back the whole setup, including the new owner account.
-- **Lookup:** `resolve_metering_point(zev, source_id)` matches either column
+- **Lookup:** `resolve_metering_point(zev, source_id, for_update=False)` matches either column
   within the given ZEV: zero matches return `None`, one returns the point,
   several raise `AmbiguousMeterIdentity` carrying `identity` and `point_ids`.
-  The SDAT importer uses this rule to refuse ambiguous routing.
+  The SDAT importer uses `for_update=True` inside its billing transaction to
+  resolve and lock current mappings before checking direction and writing.
 - **Legacy inspection:** `find_ambiguous_meter_identities()` reports normalized
   identities shared by several points (`shared`) or repeated on one point
   (`redundant`), as `{identity, kind, point_ids}` sorted by identity.
@@ -279,9 +280,15 @@ An omitted `delete_all` value defaults to false. Missing, malformed, or
 reversed date ranges and invalid boolean values return HTTP 400 with field-keyed
 serializer errors and perform no writes. When `delete_all=true`, dates are
 optional and all readings belonging to the selected meter are deleted. A
-successful response is `{ "deleted_count": integer }`; the audit event stores
-the normalized boolean and ISO date strings (or null dates for an all-reading
-deletion).
+successful response contains `deleted_readings` (billable),
+`deleted_quarantined_readings` (held), and `deleted_count` (a compatibility alias
+of `deleted_readings`). Both streams use the same date window. The audit event
+stores both counts, the normalized boolean and ISO date strings (or null dates
+for an all-reading deletion). The confirmation names both streams; the success
+message reports their separate counts. Held-only deletion does not flag invoices.
+Successful deletion invalidates metering and invoice queries, including period
+and readiness state, before any community-specific UI update. An obsolete
+account/session response does not update the new session's cache.
 
 ### 4.2 Metering point assignments
 
@@ -618,7 +625,7 @@ Tests are distributed across `metering/tests.py` and the invoice test suite.
 | Meter identity migration | `zev/test_meter_identity_migration.py` (2 methods): trimmed-secondary collisions abort without changing IDs; blanks and self-redundancy normalize, while cross-point collisions remain for reconciliation |
 | Assignment validation | Overlap rejection, ZEV-scope enforcement, participant-validity containment, date integrity |
 | CRUD operations | Create/update/delete for metering points and assignments with permission checks |
-| Reading deletion | `MeteringPointReadingsDeletionTests` (8 methods): admin whole-meter and inclusive-range deletion; false JSON/form values and omission remain bounded; invalid booleans and invalid/incomplete/reversed ranges return 400 without writes; owners are denied |
+| Reading deletion | `MeteringPointReadingsDeletionTests` (11 methods): admin whole-meter and inclusive-range deletion; false JSON/form values and omission remain bounded; invalid booleans and invalid/incomplete/reversed ranges return 400 without writes; owners are denied; held-only/mixed deletion response and audit counts match both streams |
 | Soft deactivation | `is_active = False` preserves history; meter remains queryable |
 | Billing integration | Engine resolves assignments for period; only overlapping assignments contribute readings |
 | Period overview | Assignment-aware gap detection, no-assignment exclusion |

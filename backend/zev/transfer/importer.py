@@ -32,6 +32,7 @@ from django.db import DataError, IntegrityError, transaction
 from django.utils import timezone
 
 from invoices.models import (
+    InvoiceReadingImpact,
     Charge, Credit, CreditApplication, Invoice, InvoiceDynamicSourceEvidence, InvoiceItem, InvoicePdfStatus, InvoiceStatus, Payment,
 )
 from tariffs.dynamic.evidence import lock_sources, record_invoice_evidence
@@ -735,7 +736,7 @@ def _import_charges(archive, zev, participants_by_archive_id, collector):
     return count
 
 
-def _import_invoices(archive, zev, participants_by_archive_id, collector):
+def _import_invoices(archive, zev, participants_by_archive_id, collector, *, format_version):
     """Create invoices and their line items, and return the highest number seen.
 
     The caller uses that to push ``Zev.invoice_counter`` past the imported
@@ -769,6 +770,25 @@ def _import_invoices(archive, zev, participants_by_archive_id, collector):
                 invoice.save()
                 _import_payments(invoice, raw, position)
                 _import_credits(invoice, raw, position)
+                if format_version >= 10 and "reading_impacts" not in raw:
+                    raise DjangoValidationError({"reading_impacts": "Missing correction state for format 10."})
+                impact_rows = raw.get("reading_impacts", [])
+                if not isinstance(impact_rows, list):
+                    raise DjangoValidationError({"reading_impacts": "Expected a list."})
+                for entry in impact_rows:
+                    if not isinstance(entry, dict) or not isinstance(entry.get("evidence"), dict):
+                        raise DjangoValidationError({"reading_impacts": "Invalid correction evidence."})
+                    json.dumps(entry["evidence"], allow_nan=False)
+                    created_at = _parse_datetime_utc(entry.get("created_at"))
+                    resolved_at = _parse_datetime_utc(entry["resolved_at"]) if entry.get("resolved_at") else None
+                    resolution = entry.get("resolution", "")
+                    if bool(resolution) != (resolved_at is not None):
+                        raise DjangoValidationError({"reading_impacts": "Resolution and resolved_at must agree."})
+                    impact = InvoiceReadingImpact(invoice=invoice, evidence=entry["evidence"],
+                        resolved_at=resolved_at, resolution=resolution)
+                    impact.full_clean(exclude=["invoice", "import_log"])
+                    impact.save()
+                    InvoiceReadingImpact.objects.filter(pk=impact.pk).update(created_at=created_at)
                 items = []
                 for raw_item in raw.get("items") or []:
                     item_fields = _pick(raw_item, INVOICE_ITEM_FIELDS, position, SECTION_INVOICES)
@@ -793,7 +813,7 @@ def _import_invoices(archive, zev, participants_by_archive_id, collector):
                     tariffs = list(Tariff.objects.filter(zev=zev).exclude(dynamic_source=None))
                     lock_sources({tariff.dynamic_source_id for tariff in tariffs})
                     record_invoice_evidence(invoice, tariffs)
-        except (DjangoValidationError, ValueError, TypeError, IntegrityError) as exc:
+        except (DjangoValidationError, ValueError, TypeError, OverflowError, IntegrityError) as exc:
             collector.add(SECTION_INVOICES, position, label, exc)
             continue
 
@@ -1436,7 +1456,7 @@ def _run_import(archive, manifest, sections, *, owner, name_override, collector,
             )
 
     if SECTION_INVOICES in sections:
-        count, highest = _import_invoices(archive, zev, participants_by_archive_id, collector)
+        count, highest = _import_invoices(archive, zev, participants_by_archive_id, collector, format_version=manifest["format_version"])
         summary["counts"][SECTION_INVOICES] = count
         # Past the imported history, so the next billing run cannot mint a
         # number this ZEV already carries.

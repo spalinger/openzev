@@ -938,3 +938,9 @@ configuration invariants, including the Helm schema constraint on
 - [x] Audit retention guidance exists for long-term operational maintenance.
 
 <!-- markdownlint-enable MD060 -->
+
+Import-log deletion emits one event per affected community. Log counts retain
+their original scope; billable/held counts and capped slot samples use the
+point's current scope. Legacy moved history never inserts another community's
+reading details into the original log community's event. Authorization runs
+before waiting for affected-community billing locks and again after waiting.

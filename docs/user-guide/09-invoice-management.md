@@ -690,3 +690,7 @@ available after billing. The selected community appears above the page title.
 - **Configure email delivery:** [Email Configuration](10-email-configuration.md)
 - **Understand billing logic:** [Billing & Allocation Explained](08-billing-allocation-explained.md)
 - **Manage tariffs:** [Tariff Configuration](07-tariff-configuration.md)
+
+Legacy CSV timestamp repairs also flag invoices for review, including periods
+on either side of a Swiss date boundary. Their evidence identifies a CSV
+timestamp correction rather than an SDAT delivery or an import deletion.

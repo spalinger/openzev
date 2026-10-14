@@ -27,8 +27,8 @@ from zev.management.commands.seed_demo import (
 	quarter_start,
 	years_before,
 )
-from invoices.models import ContractIssue, Credit, EmailLog, Invoice, InvoiceStatus
-from metering.models import ImportLog, MeterReading, ReadingDirection, ReadingResolution
+from invoices.models import ContractIssue, Credit, EmailLog, Invoice, InvoiceReadingImpact, InvoiceStatus
+from metering.models import ImportLog, MeterReading, QuarantinedReading, ReadingDirection, ReadingResolution
 from tariffs.dynamic.models import DynamicPricePoint, DynamicTariffSource
 from tariffs.models import BillingMode, PeriodType, Tariff
 from tariffs.series import active_version, find_gaps
@@ -1998,6 +1998,90 @@ class MeteringPointReadingsDeletionTests(TestCase):
 		)
 
 		self.assertEqual(resp.status_code, 403)
+
+	def test_delete_readings_removes_held_rows_and_flags_invoices(self):
+		participant = Participant.objects.create(
+			zev=self.zev,
+			first_name="Delete",
+			last_name="Impact",
+			email="delete.impact@example.com",
+			valid_from=date(2026, 1, 1),
+		)
+		MeteringPointAssignment.objects.create(
+			metering_point=self.metering_point,
+			participant=participant,
+			valid_from=date(2026, 1, 1),
+		)
+		invoice = Invoice.objects.create(
+			invoice_number="DR-DELETE-1",
+			zev=self.zev,
+			participant=participant,
+			period_start=date(2026, 1, 1),
+			period_end=date(2026, 1, 31),
+			status=InvoiceStatus.DRAFT,
+			total_chf=Decimal("42.00"),
+		)
+		QuarantinedReading.objects.create(
+			metering_point=self.metering_point,
+			timestamp=datetime(2026, 1, 10, 10, 0, tzinfo=timezone.utc),
+			energy_kwh=Decimal("1.0000"),
+			direction=ReadingDirection.IN,
+		)
+
+		resp = self.admin_client.post(
+			f"/api/v1/zev/metering-points/{self.metering_point.id}/delete-readings/",
+			{"delete_all": True},
+			format="json",
+		)
+
+		self.assertEqual(resp.status_code, 200)
+		self.assertEqual(resp.data["deleted_count"], 3)
+		self.assertEqual(
+			QuarantinedReading.objects.filter(metering_point=self.metering_point).count(), 0
+		)
+		self.assertTrue(
+			InvoiceReadingImpact.objects.filter(invoice=invoice, resolved_at__isnull=True).exists()
+		)
+
+
+	def test_held_only_deletion_reports_both_streams_in_response_and_audit(self):
+		from metering.models import QuarantinedReading
+		MeterReading.objects.filter(metering_point=self.metering_point).delete()
+		QuarantinedReading.objects.create(
+			metering_point=self.metering_point, timestamp=datetime(2026, 1, 10, tzinfo=timezone.utc),
+			energy_kwh="1", direction="in", business_reason="C38",
+		)
+		resp = self.admin_client.post(
+			f"/api/v1/zev/metering-points/{self.metering_point.pk}/delete-readings/",
+			{"delete_all": True}, format="json",
+		)
+		self.assertEqual(resp.status_code, 200)
+		self.assertEqual(resp.data, {"deleted_count": 0, "deleted_readings": 0, "deleted_quarantined_readings": 1})
+		self.assertFalse(QuarantinedReading.objects.filter(metering_point=self.metering_point).exists())
+		event = AuditEvent.objects.get(action_type="metering_point.delete_readings", target_id=str(self.metering_point.pk))
+		self.assertEqual(event.metadata_json["deleted_readings"], 0)
+		self.assertEqual(event.metadata_json["deleted_quarantined_readings"], 1)
+		self.assertIn("1 held", event.summary)
+		self.assertFalse(InvoiceReadingImpact.objects.exists())
+
+	def test_range_deletion_counts_both_streams_and_preserves_outside_values(self):
+		from metering.models import QuarantinedReading
+		for month, day in [(1, 10), (1, 20), (2, 1)]:
+			QuarantinedReading.objects.create(
+				metering_point=self.metering_point, timestamp=datetime(2026, month, day, 10, tzinfo=timezone.utc),
+				energy_kwh="1", direction="in",
+			)
+		resp = self.admin_client.post(
+			f"/api/v1/zev/metering-points/{self.metering_point.pk}/delete-readings/",
+			{"delete_all": False, "date_from": "2026-01-15", "date_to": "2026-01-31"}, format="json",
+		)
+		self.assertEqual(resp.status_code, 200)
+		self.assertEqual(resp.data, {"deleted_count": 1, "deleted_readings": 1, "deleted_quarantined_readings": 1})
+		self.assertEqual(QuarantinedReading.objects.filter(metering_point=self.metering_point).count(), 2)
+		self.assertEqual(MeterReading.objects.filter(metering_point=self.metering_point).count(), 2)
+		event = AuditEvent.objects.get(action_type="metering_point.delete_readings", target_id=str(self.metering_point.pk))
+		self.assertEqual(event.metadata_json["deleted_readings"], 1)
+		self.assertEqual(event.metadata_json["deleted_quarantined_readings"], 1)
 
 
 class MeteringPointCascadeInfoTests(TestCase):

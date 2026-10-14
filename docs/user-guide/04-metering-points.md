@@ -331,6 +331,13 @@ Click a row, or the arrow at its end, to open its details in place:
 > and adjust assignment windows. A hardware replacement with an unchanged source
 > identifier needs no new point.
 
+A point with billable or held readings cannot be deleted, moved to another
+community, or changed to another meter type. This protects historical billing.
+Use the protected import-deletion workflow, or ask an admin to use **Delete
+data** first when removal is intended. Reading deletion flags affected invoices
+for review. To retire a meter while preserving its history, end its assignment
+and deactivate it as described below.
+
 ### Decommissioning a Meter
 
 To stop billing a meter:

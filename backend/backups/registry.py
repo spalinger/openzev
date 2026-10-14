@@ -153,6 +153,7 @@ ZEV_SECTIONS: tuple[tuple[str, tuple[ZevPart, ...]], ...] = (
             ZevPart("invoices.InvoiceDynamicSourceEvidence", "invoice__zev"),
             ZevPart("invoices.InvoiceAccessToken", "invoice__zev"),
             ZevPart("invoices.EmailLog", "invoice__zev"),
+            ZevPart("invoices.InvoiceReadingImpact", "invoice__zev"),
         ),
     ),
     ("contract_issues", (ZevPart("invoices.ContractIssue", "zev"),)),

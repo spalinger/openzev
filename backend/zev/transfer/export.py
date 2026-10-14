@@ -255,6 +255,12 @@ def _export_invoices(zev):
                 {"credit_number": application.credit.credit_number, **_fields(application, CREDIT_APPLICATION_FIELDS)}
                 for application in invoice.credit_applications.all()
             ],
+            "reading_impacts": [
+                {"evidence": impact.evidence, "created_at": impact.created_at.isoformat(),
+                 "resolved_at": impact.resolved_at.isoformat() if impact.resolved_at else None,
+                 "resolution": impact.resolution}
+                for impact in invoice.reading_impacts.all()
+            ],
             "dynamic_evidence": [
                 {
                     "dynamic_source": _fields(evidence.source, DYNAMIC_SOURCE_FIELDS),
@@ -269,7 +275,7 @@ def _export_invoices(zev):
         # the data and would dominate the archive size. See the issue's note —
         # a regenerated PDF uses today's template, so this is not the right
         # answer if original documents have to be retained.
-        for invoice in Invoice.objects.filter(zev=zev).prefetch_related("items", "payments", "credits", "credit_applications__credit", "dynamic_evidence__source").order_by("period_start", "invoice_number")
+        for invoice in Invoice.objects.filter(zev=zev).prefetch_related("items", "payments", "credits", "credit_applications__credit", "dynamic_evidence__source", "reading_impacts").order_by("period_start", "invoice_number")
     ]
 
 

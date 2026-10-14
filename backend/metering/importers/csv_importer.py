@@ -21,6 +21,7 @@ from decimal import Decimal, InvalidOperation
 import openpyxl
 from dateutil import parser as dateutil_parser
 from django.conf import settings
+from metering.locks import lock_billing_inputs
 from django.db import IntegrityError, transaction
 
 from metering.importers.limits import (
@@ -1140,6 +1141,7 @@ def import_csv(
 
     try:
         with transaction.atomic():
+            lock_billing_inputs(zev)
             log = ImportLog.objects.create(
                 batch_id=batch_id,
                 zev=zev,

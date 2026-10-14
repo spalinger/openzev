@@ -331,6 +331,23 @@ class ConflictTests(ZevRestoreTestCase):
         self.assertFalse(conflict["overridable"])
         self.assertEqual(MeteringPoint.objects.get(pk=point.pk).zev_id, self.beta_id)
 
+    def test_a_restored_primary_cannot_collide_with_another_zevs_secondary(self):
+        point = MeteringPoint.objects.get(zev_id=self.alpha_id, meter_id="ALPHA-CONS-1")
+        point.meter_id = "ALPHA-RENAMED"
+        point.save(update_fields=["meter_id"])
+        foreign = MeteringPoint.objects.filter(zev_id=self.beta_id).first()
+        foreign.secondary_meter_id = "ALPHA-CONS-1"
+        foreign.save(update_fields=["secondary_meter_id"])
+        before = zev_rows(self.alpha_id)
+        for dry_run in (True, False):
+            if dry_run:
+                result = restore_from(self.raw, self.alpha_id, dry_run=True, force=True)
+                self.assertIn("meter_id_owned_by_other_zev", self.kinds(result.plan))
+            else:
+                with self.assertRaises(restore_zev.RestoreRefused):
+                    restore_from(self.raw, self.alpha_id, force=True)
+            self.assertEqual(zev_rows(self.alpha_id), before)
+
     def test_a_referenced_price_source_that_no_longer_exists_cannot_be_forced(self):
         def edit(members, manifest):
             name = f"zevs/{self.alpha_id}/tariffs.jsonl"
@@ -567,7 +584,7 @@ class SdatProvenanceRestoreTests(TestCase):
 
     def _delivery(self, zev, user, values, *, creation, status="9", reason="E88", delivery_id, doc):
         from metering.importers.sdatch_importer import import_sdatch
-        from metering.test_import_sdatch_strict import build_block, build_e66
+        from testing.sdat import build_block, build_e66
         from django.core.files.uploadedfile import SimpleUploadedFile
 
         obs = "".join(

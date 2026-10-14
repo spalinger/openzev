@@ -66,7 +66,7 @@ HTTPS, email, the first admin account, backups and updates.
 - Backend: Django, Django REST Framework, SimpleJWT
 - Frontend: React, TypeScript, Vite, TanStack Query, i18next
 - Async jobs: Celery worker and Beat with a Valkey broker (Redis-compatible)
-- Database: PostgreSQL, or SQLite and MariaDB via `DATABASE_URL`
+- Database: PostgreSQL for production billing; SQLite for local development/tests. MariaDB is not supported by the metering correction and identity-lock workflows.
 - Deployment: Docker Compose, or the Helm chart on Kubernetes. Images are published to GHCR, signed, with an SBOM.
 
 ## Contributing

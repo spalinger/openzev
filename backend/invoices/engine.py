@@ -45,6 +45,8 @@ from .document_parties import build_issuer, build_recipient
 from .charges import CHARGE_SORT_ORDER, ChargeLine, charge_lines_by_participant, pass_through_total
 from .models import Invoice, InvoiceItem, InvoiceStatus
 from .workflow import apply_open_credits
+from metering.locks import lock_billing_inputs
+from .reading_impact import settle_regeneration
 
 logger = logging.getLogger(__name__)
 
@@ -271,30 +273,24 @@ def locked_overlapping_invoices(participant, period_start, period_end):
     )
 
 
-def _discard_replaceable_invoices(participant, period_start, period_end) -> None:
-    """Clear the way for a regeneration, or refuse to.
-
-    A draft or cancelled invoice overlapping this period is replaced; anything
-    further along its lifecycle has been sent to somebody and must not be
-    silently rewritten. A cancelled invoice that was ever approved stays, with
-    its number, next to the new one (ADR 0037).
-    """
-    overlapping = Invoice.objects.filter(
-        participant=participant,
-        period_start__lte=period_end,
-        period_end__gte=period_start,
-    )
-    # Hold every overlapping row so approval cannot commit between the status
-    # check and the deletion below; approval takes the same row lock.
-    list(overlapping.order_by("pk").select_for_update().values_list("pk", flat=True))
-    locked = locked_overlapping_invoices(participant, period_start, period_end).first()
-    if locked:
-        raise ValueError(
-            f"Invoice {locked.invoice_number} already has status '{locked.status}' and cannot be regenerated."
-        )
-    overlapping.filter(
-        status__in=[InvoiceStatus.DRAFT, InvoiceStatus.CANCELLED], approved_at__isnull=True,
-    ).delete()
+def _replaceable_overlapping_invoice_ids(participant, period_start, period_end):
+    """Lock overlaps once, refusing issued states before pricing or replacement."""
+    overlapping = list(Invoice.objects.filter(
+        participant=participant, period_start__lte=period_end, period_end__gte=period_start,
+    ).order_by("pk").select_for_update().only("id", "status", "approved_at", "invoice_number", "period_start", "period_end"))
+    for invoice in overlapping:
+        if invoice.status not in (InvoiceStatus.DRAFT, InvoiceStatus.CANCELLED):
+            raise ValueError(
+                f"Invoice {invoice.invoice_number} already has status '{invoice.status}' and cannot be regenerated."
+            )
+    for invoice in overlapping:
+        if invoice.approved_at is None and not (
+            period_start <= invoice.period_start and period_end >= invoice.period_end
+        ):
+            raise ValueError(
+                f"Replacement period must cover the whole period of invoice {invoice.invoice_number}."
+            )
+    return [invoice.pk for invoice in overlapping if invoice.approved_at is None]
 
 
 # ─── Pricing state ────────────────────────────────────────────────────────────
@@ -1658,7 +1654,9 @@ def generate_invoice(
 
     if generation_context is not None:
         generation_context.validate_for(participant, period_start, period_end)
-    _discard_replaceable_invoices(participant, period_start, period_end)
+    # Keep previous drafts until replacement succeeds; rollback preserves their credits and flags.
+    lock_billing_inputs(zev)
+    doomed_invoice_ids = _replaceable_overlapping_invoice_ids(participant, period_start, period_end)
     if generation_context is None:
         generation_context = InvoiceGenerationContext.build(
             zev, period_start, period_end,
@@ -1971,10 +1969,6 @@ def generate_invoice(
         issuer=generation_context.issuer(zev),
         recipient=build_recipient(participant),
     )
-    # Open credit notes are set against the total after VAT; lines and totals
-    # stay as computed. A replaced draft was deleted above, so its credit is free.
-    apply_open_credits(invoice)
-
     # ─── 9. Create line items ─────────────────────────────────────────────
     items = []
     for payload in sorted(item_payloads, key=lambda entry: (_build_sort_order(entry["tariff"]), entry["tariff"].name.lower())):
@@ -2015,6 +2009,13 @@ def generate_invoice(
         ))
     InvoiceItem.objects.bulk_create(items)
     record_invoice_evidence(invoice, dynamic_tariffs)
+    settle_regeneration(
+        zev=zev,
+        doomed_invoice_ids=doomed_invoice_ids,
+        new_invoice=invoice,
+    )
+    # Replaced drafts release their credit applications before the new invoice uses them.
+    apply_open_credits(invoice)
 
     logger.info("Generated invoice %s for %s: %s CHF", invoice_number, participant.full_name, total_chf)
     return invoice

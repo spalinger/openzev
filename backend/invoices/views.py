@@ -4,7 +4,7 @@ import uuid
 import zipfile
 from datetime import date as date_type
 
-from django.db.models import OuterRef, Subquery, Sum
+from django.db.models import Count, OuterRef, Prefetch, Subquery, Sum
 from django.utils import timezone
 from rest_framework import mixins, viewsets, status
 from rest_framework.decorators import action
@@ -19,7 +19,7 @@ from allocation.validity import active_during
 from zev.models import Zev, Participant
 from zev import access
 from zev.scoping import ZevScopedQuerySetMixin
-from .models import Credit, CreditStatus, Invoice, InvoicePdfStatus, InvoiceStatus, EmailLog, Payment, sent_to_participant
+from .models import Credit, CreditStatus, Invoice, InvoicePdfStatus, InvoiceReadingImpact, InvoiceStatus, EmailLog, Payment, sent_to_participant
 from .serializers import (
     CorrectInvoiceSerializer, CreditSerializer, InvoiceListSerializer, InvoiceSerializer, GenerateInvoiceSerializer,
     GenerateZevInvoicesSerializer, MarkPaidSerializer, PaymentSerializer,
@@ -170,6 +170,12 @@ class InvoiceViewSet(
             queryset = queryset.prefetch_related(
                 "items", "email_logs", "payments", "credits__applications__invoice",
                 "credit_applications__credit__source_invoice",
+                Prefetch(
+                    "reading_impacts", to_attr="open_reading_impacts",
+                    queryset=InvoiceReadingImpact.objects.filter(
+                        resolved_at__isnull=True
+                    ).order_by("-created_at", "id"),
+                ),
             )
         else:
             # last_email_status/log_id ride a subquery annotation inside the
@@ -187,10 +193,20 @@ class InvoiceViewSet(
                 .annotate(total=Sum("amount_chf"))
                 .values("total")
             )
+            open_impacts = (
+                InvoiceReadingImpact.objects.filter(
+                    invoice=OuterRef("pk"), resolved_at__isnull=True
+                )
+                .values("invoice")
+                .annotate(_open_count=Count("id"))
+                .values("_open_count")
+            )
             queryset = queryset.annotate(
                 last_email_status=Subquery(latest_log.values("status")[:1]),
                 last_email_log_id=Subquery(latest_log.values("id")[:1]),
                 paid_sum=Subquery(paid[:1]),
+                open_data_impact_count=Subquery(open_impacts),
+
             )
         return self.scope_queryset(queryset)
 
@@ -721,8 +737,9 @@ class InvoiceViewSet(
             changes=build_diff(before, {"status": invoice.status}, ["status"]),
             metadata=metadata(before) if metadata else None,
         )
-        # The workflow wrote payments behind the prefetch this instance carries.
-        for relation in ("payments", "credits", "credit_applications"):
+        # Workflow writes can settle payments, credits, applications and reading impacts.
+        invoice.__dict__.pop("open_reading_impacts", None)
+        for relation in ("payments", "credits", "credit_applications", "reading_impacts"):
             getattr(invoice, "_prefetched_objects_cache", {}).pop(relation, None)
         if respond is not None:
             return Response(respond(invoice, before), status=response_status)

@@ -109,7 +109,13 @@ commit — a failed audit must not cause a duplicate import on client retry).
 
 ## 6. Archive format (`backend/zev/transfer/schema.py`)
 
-`FORMAT_VERSION = 9`, `SUPPORTED_FORMAT_VERSIONS = {1, 2, 3, 4, 5, 6, 7, 8, 9}`. Version 9
+`FORMAT_VERSION = 10`, `SUPPORTED_FORMAT_VERSIONS = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}`.
+Version 10 requires a `reading_impacts` array on each invoice (empty when none).
+Entries preserve `evidence`, `created_at`, `resolved_at` and `resolution`, with
+validated timestamps and consistent resolution state. Import/user links do not
+travel; the restored evidence still identifies the original delivery or deletion.
+Version 9 remains supported and defaults missing invoice correction state to
+empty. Older importers reject version 10 rather than dropping review flags. Version 9
 (SDAT-CH correction lifecycle) carries the full billable provenance and the
 held observations: readings rows gain `source_delivery_id`, `business_reason`,
 `condition`, `source_product`, `source_unit` and `source_meter_id`, and
@@ -561,7 +567,7 @@ and imports `False` when the archive predates the field
 imported ZEV; a structure-only archive still names the ZEV.
 
 **`ProvenanceQuarantineTransferTests`** (format version 9,
-`backend/zev/test_transfer.py`): the export carries format 9 with a
+`backend/zev/test_transfer.py`): the export carries format 10 with a
 `quarantined_readings` manifest count and one `quarantine/` member per meter
 with held rows; a round trip preserves every billable provenance field
 (delivery identity, quality, product/unit, observed meter identity and
@@ -667,10 +673,10 @@ garbled, missing-column and unknown-meter reading; a dropped readings file caugh
 bad row rolls everything back). `SchemaParityTests` gains `SUPPLEMENTARY_SOURCE_FIELDS` against
 `SupplementarySource` with its excluded set.
 
-### Backend — `backend/zev/test_transfer_invoice_pdfs.py` (format version 9)
+### Backend — `backend/zev/test_transfer_invoice_pdfs.py` (format version 10)
 
-`FormatVersionTests`: `FORMAT_VERSION == 9`; `SUPPORTED_FORMAT_VERSIONS ==
-{1, 2, 3, 4, 5, 6, 7, 8, 9}`; `invoice_pdfs` is a known section depending on `invoices`.
+`FormatVersionTests`: `FORMAT_VERSION == 10`; `SUPPORTED_FORMAT_VERSIONS ==
+{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}`; `invoice_pdfs` is a known section depending on `invoices`.
 `MemberNamingTests`: `pdf_member_name` is deterministic and collision-safe
 (same construction as reading member names), stays under `invoices/pdf/`.
 `RoundTripTests`: a PDF travels when `invoice_pdfs` is selected and does not

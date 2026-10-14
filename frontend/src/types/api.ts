@@ -1185,6 +1185,30 @@ export interface GridOperatorSuggestion {
 
 export type InvoicePdfStatus = 'none' | 'pending' | 'ready' | 'failed'
 
+/** One open reading-correction flag on an invoice (invoice-lifecycle spec §4.6).
+ * `import_log` is the source SDAT-CH import; null when the flag came from an
+ * import deletion (whose logs are gone) — `evidence` always keeps the
+ * delivery/batch identity. */
+export interface InvoiceReadingImpact {
+    id: string
+    import_log: string | null
+    evidence: {
+        source: 'sdat-import' | 'import-deletion'
+        delivery_id?: string
+        creation?: string
+        change_count?: number
+        kinds?: string[]
+        day_from?: string
+        day_to?: string
+        deleted_batches?: string[]
+        deleted_readings?: number
+        [key: string]: unknown
+    }
+    created_at: string
+    resolution: '' | 'regenerated' | 'cancelled'
+    resolved_at: string | null
+}
+
 export interface Invoice {
     id: string
     invoice_number: string
@@ -1247,6 +1271,12 @@ export interface Invoice {
      * The retry endpoint is log-scoped, so the email-delivery tab needs the
      * log id to offer an inline retry off the list payload. */
     last_email_log_id?: string | null
+    /** True while an open reading correction taints this invoice (list and detail). */
+    needs_data_review?: boolean
+    /** Number of open reading corrections (list and detail). */
+    open_data_impact_count?: number
+    /** Source evidence for callers with ZEV view access; empty without it (detail only). */
+    data_impacts?: InvoiceReadingImpact[]
 }
 
 export type CreditKind = 'reversal' | 'adjustment'
@@ -1425,6 +1455,7 @@ export type ReadinessStepKey =
     | 'metering'
     | 'assignments'
     | 'tariffs'
+    | 'data_corrections'
     | 'generated'
     | 'generation_conflicts'
     | 'charges'
@@ -1438,6 +1469,7 @@ export type ReadinessNextAction =
     | 'fix_metering'
     | 'fix_assignments'
     | 'fix_tariffs'
+    | 'review_data_corrections'
     | 'generate'
     | 'review_generation_conflicts'
     | 'approve'
@@ -1473,6 +1505,10 @@ export interface ReadinessStepDetailData {
     conflict_count?: number
     conflicts?: ReadinessConflict[]
     more_conflicts?: number
+    /** data_corrections warn: invoices tainted by corrected metering data. */
+    correction_count?: number
+    corrections?: ReadinessDataCorrection[]
+    more_corrections?: number
     /** paid todo: active invoices not yet paid. */
     unpaid?: number
     /** charges todo: drafts generated before a charge changed. */
@@ -1495,6 +1531,18 @@ export interface ReadinessConflictInvoice {
     status: string
     start: string
     end: string
+}
+
+/** One invoice tainted by a committed reading correction. */
+export interface ReadinessDataCorrection {
+    invoice_id: string
+    invoice_number: string
+    participant_name: string
+    status: string
+    /** Source delivery identity (empty for deletion-sourced flags). */
+    delivery_id: string
+    flagged_at: string
+    correction_count: number
 }
 
 export interface ReadinessStep {

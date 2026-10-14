@@ -115,14 +115,14 @@
 
   "after1_b": "Immagini",
   "after2_b": "Firmati", "after2_t": "manifest di release e attestazioni SBOM",
-  "after3_b": "Database", "after3_t": "PostgreSQL, MariaDB o SQLite tramite DATABASE_URL",
+  "after3_b": "Database", "after3_t": "PostgreSQL in produzione; SQLite per sviluppo e test",
 
   "stack_eyebrow": "Sotto il cofano",
   "stack_title": "Lo stack tecnologico",
   "st1_dt": "Backend", "st1_dd": "Django, Django REST Framework, SimpleJWT",
   "st2_dt": "Frontend", "st2_dd": "React, TypeScript, Vite, React Query, i18next",
   "st3_dt": "Asincrono", "st3_dd": "Worker e beat Celery su Valkey",
-  "st4_dt": "Dati", "st4_dd": "PostgreSQL, MariaDB o SQLite",
+  "st4_dt": "Dati", "st4_dd": "PostgreSQL in produzione; SQLite per sviluppo e test",
   "st5_dt": "API", "st5_dd": "Schema OpenAPI con Swagger e ReDoc",
   "st6_dt": "Installazione", "st6_dd": "Docker Compose, oppure Helm su Kubernetes",
   "st7_dt": "Licenza",

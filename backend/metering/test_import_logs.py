@@ -17,14 +17,15 @@ from rest_framework.test import APIClient
 
 from accounts.models import UserRole
 from audit.models import AuditEvent
+from invoices.models import Invoice, InvoiceReadingImpact, InvoiceStatus
 from metering.importers import csv_importer
 from metering.deletion import collect_deleted_slots
 from metering.models import ImportLog, ImportSource, MeterReading, QuarantinedReading, ReadingDirection, ReadingResolution
 from metering.testing import upload_csv
 from metering.importers.csv_importer import ImportFileError, import_csv, _upsert_reading
-from metering.test_import_sdatch_strict import build_block, build_e66, quarter_block
+from testing.sdat import build_block, build_e66, quarter_block
 from testing.helpers import authenticate as auth, make_user, create_managed_zev
-from zev.models import MeteringPoint, MeteringPointType, Participant
+from zev.models import MeteringPoint, MeteringPointAssignment, MeteringPointType, Participant
 
 
 class ImportLogDeletionTests(TestCase):
@@ -101,6 +102,51 @@ class ImportLogDeletionTests(TestCase):
         self.assertEqual(resp.data["deleted_readings"], 1)
         self.assertFalse(ImportLog.objects.filter(pk=log.id).exists())
         self.assertEqual(MeterReading.objects.filter(import_batch=log.batch_id).count(), 0)
+
+    def test_deletion_flags_readings_zev_when_log_has_none(self):
+        # A legacy log without a ZEV must not lose its invoice flag: deletion
+        # flags follow the deleted readings' ZEV, not the log's.
+        MeteringPointAssignment.objects.create(
+            metering_point=self.metering_point,
+            participant=self.participant,
+            valid_from=date(2026, 1, 1),
+        )
+        invoice = Invoice.objects.create(
+            invoice_number="D-LEGACY-1",
+            zev=self.zev,
+            participant=self.participant,
+            period_start=date(2026, 1, 1),
+            period_end=date(2026, 1, 31),
+            status=InvoiceStatus.DRAFT,
+            total_chf=Decimal("42.00"),
+        )
+        batch_id = uuid.uuid4()
+        log = ImportLog.objects.create(
+            batch_id=batch_id,
+            zev=None,
+            imported_by=self.owner,
+            source=ImportSource.CSV,
+            filename="legacy.csv",
+            rows_total=1,
+            rows_imported=1,
+            rows_skipped=0,
+        )
+        MeterReading.objects.create(
+            metering_point=self.metering_point,
+            timestamp=datetime(2026, 1, 10, 8, 0, tzinfo=timezone.utc),
+            energy_kwh=Decimal("1.0000"),
+            direction=ReadingDirection.IN,
+            resolution=ReadingResolution.FIFTEEN_MIN,
+            import_source=ImportSource.CSV,
+            import_batch=batch_id,
+        )
+
+        resp = self.client.delete(f"/api/v1/metering/import-logs/{log.id}/")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(
+            InvoiceReadingImpact.objects.filter(invoice=invoice, resolved_at__isnull=True).exists()
+        )
 
     def _overwrite_import(self, profile):
         original = self._create_import_log_with_reading(
@@ -483,7 +529,7 @@ class ImportLogCommitVisibilityTests(TransactionTestCase):
     @skipUnless(connection.vendor == "postgresql", "requires cross-connection visibility")
     def test_sdat_log_is_not_deletable_before_readings_commit(self):
         from metering.importers import sdatch_importer
-        from metering.test_import_sdatch_strict import build_e66, quarter_block
+        from testing.sdat import build_e66, quarter_block
         meter_id = "CH9999901234500000000000000000001"
         self.metering_point.meter_id = meter_id
         self.metering_point.save(update_fields=["meter_id"])
@@ -869,7 +915,7 @@ class SdatHeldDeletionTests(TestCase):
         self.assertTrue(response.data["deleted_slots_truncated"])
         event = AuditEvent.objects.get(action_type="import_log.bulk_delete")
         self.assertTrue(event.metadata_json["deleted_slots_truncated"])
-        self.assertEqual(event.metadata_json["deleted_slots"][-1], "...(+1 more)")
+        self.assertEqual(len(event.metadata_json["deleted_slots"]), 20)
 
     def test_malformed_replacement_evidence_does_not_allow_deletion(self):
         log = self._sdat_log()
@@ -889,10 +935,29 @@ class SdatHeldDeletionTests(TestCase):
         self._add_rows(log.batch_id, billable=1, held=1)
         other_owner = make_user("legacy_delete_other", UserRole.USER)
         other_zev = create_managed_zev(name="Legacy foreign community", owner=other_owner)
-        self.metering_point.zev = other_zev
-        self.metering_point.save(update_fields=["zev"])
-        response = self.client.delete(f"/api/v1/metering/import-logs/{log.id}/")
+        # Reproduce legacy moved history, which current model writes now prohibit.
+        MeteringPoint.objects.filter(pk=self.metering_point.pk).update(zev=other_zev)
+        from unittest.mock import patch
+
+        with patch("metering.views.lock_billing_inputs") as lock:
+            response = self.client.delete(f"/api/v1/metering/import-logs/{log.id}/")
+        lock.assert_not_called()
         self.assertEqual(response.status_code, 403)
         self.assertTrue(ImportLog.objects.filter(pk=log.pk).exists())
         self.assertEqual(MeterReading.objects.count(), 1)
         self.assertEqual(QuarantinedReading.objects.count(), 1)
+
+
+    def test_moved_reading_evidence_is_audited_only_in_its_current_community(self):
+        log = self._sdat_log()
+        self._add_rows(log.batch_id, billable=1, held=1)
+        other = create_managed_zev(name="Moved reading history", owner=self.owner)
+        MeteringPoint.objects.filter(pk=self.metering_point.pk).update(zev=other)
+        response = self.client.delete(f"/api/v1/metering/import-logs/{log.id}/")
+        self.assertEqual(response.status_code, 200, response.content)
+        old_event = AuditEvent.objects.get(action_type="import_log.delete", zev=self.zev)
+        new_event = AuditEvent.objects.get(action_type="import_log.delete", zev=other)
+        self.assertEqual(old_event.metadata_json["deleted_slots"], [])
+        self.assertEqual(old_event.metadata_json["deleted_readings"], 0)
+        self.assertEqual(new_event.metadata_json["deleted_logs"], 0)
+        self.assertEqual(len(new_event.metadata_json["deleted_slots"]), 2)

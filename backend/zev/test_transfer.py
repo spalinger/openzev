@@ -23,7 +23,7 @@ from accounts.models import UserRole
 from invoices.models import Credit, CreditApplication, Invoice, InvoiceItem, InvoiceStatus, Payment
 from metering.models import ImportLog, MeterReading, QuarantinedReading, ReadingResolution, SupplementarySource
 from metering.importers.sdatch_importer import import_sdatch
-from metering.test_import_sdatch_strict import build_block, build_e66
+from testing.sdat import build_block, build_e66
 from tariffs.dynamic.models import DynamicTariffSource
 from tariffs.models import BillingMode, EnergyType, PeriodType, Tariff, TariffCategory, TariffPeriod
 from testing.helpers import authenticate as auth, make_user, create_managed_zev
@@ -889,6 +889,7 @@ class RejectedArchiveTests(TestCase):
         invoice = {
             "participant_id": participants[0]["id"],
             "invoice_number": "REJ-00001",
+            "reading_impacts": [],
             "period_start": "2026-01-01",
             "period_end": "2026-01-31",
             "status": "sent",
@@ -1764,7 +1765,7 @@ class ProvenanceQuarantineTransferTests(TestCase):
         )
         return zev, cons, other
 
-    def test_export_carries_format_9_with_quarantine_counts(self):
+    def test_export_carries_current_format_with_quarantine_counts(self):
         zev, cons, other = self._build_zev()
         with zipfile.ZipFile(io.BytesIO(export_to_bytes(zev))) as archive:
             manifest = json.loads(archive.read(MANIFEST_NAME))
@@ -1802,6 +1803,48 @@ class ProvenanceQuarantineTransferTests(TestCase):
         self.assertEqual(held.source_delivery_id, "HELD-DEL")
         self.assertEqual(held.source_creation, datetime.fromisoformat(SEL_CREATION))
         self.assertEqual(held.source_meter_id, "PQ-CONS-1")
+
+    def test_invoice_correction_state_survives_transfer(self):
+        from invoices.models import InvoiceReadingImpact
+        zev, _, _ = self._build_zev()
+        participant = zev.participants.first()
+        invoice = Invoice.objects.create(zev=zev, participant=participant, invoice_number="PQ-123",
+            period_start=date(2026, 1, 1), period_end=date(2026, 1, 31), total_chf=Decimal("42"))
+        impact = InvoiceReadingImpact.objects.create(invoice=invoice, evidence={"source": "sdat-import", "delivery_id": "DEL-OLD"})
+        created = impact.created_at
+        resolved = InvoiceReadingImpact.objects.create(invoice=invoice, evidence={"source": "import-deletion"},
+            resolved_at=created, resolution="cancelled")
+        result = import_archive(io.BytesIO(export_and_clear(zev)), owner=self.importer)
+        restored = InvoiceReadingImpact.objects.get(invoice__zev_id=result["zev_id"], resolved_at__isnull=True)
+        self.assertEqual(restored.evidence, {"source": "sdat-import", "delivery_id": "DEL-OLD"})
+        self.assertEqual(restored.created_at, created)
+        self.assertIsNone(restored.import_log_id)
+        closed = InvoiceReadingImpact.objects.get(invoice__zev_id=result["zev_id"], resolved_at__isnull=False)
+        self.assertEqual(closed.resolution, resolved.resolution)
+        self.assertEqual(closed.resolved_at, resolved.resolved_at)
+
+    def test_format10_invalid_correction_state_rejects_archive(self):
+        zev, _, _ = self._build_zev()
+        Invoice.objects.create(zev=zev, participant=zev.participants.first(), invoice_number="PQ-123",
+            period_start=date(2026, 1, 1), period_end=date(2026, 1, 31), total_chf=Decimal("42"))
+        raw = export_and_clear(zev)
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            invoice = json.loads(archive.read("invoices.json"))[0]
+        for state in (None,
+                      [{"evidence": {"source": float("nan")}, "created_at": "2026-01-01T00:00:00Z"}],
+                      [{"evidence": {"source": "sdat-import"}, "created_at": "2026-01-01T00:00:00Z", "resolution": "cancelled"}]):
+            with self.subTest(state=state):
+                entry = {key: value for key, value in invoice.items() if key != "reading_impacts"}
+                if state is not None:
+                    entry["reading_impacts"] = state
+                damaged = rewrite_archive(raw, replace={"invoices.json": [entry]})
+                with self.assertRaises(ImportFailed):
+                    import_archive(io.BytesIO(damaged), owner=self.importer)
+                self.assertFalse(Zev.objects.filter(access_grants__user=self.importer).exists())
+        legacy = as_format_version(raw, 9, replace={"invoices.json": [{key: value for key, value in invoice.items() if key != "reading_impacts"}]})
+        result = import_archive(io.BytesIO(legacy), owner=self.importer)
+        from invoices.models import InvoiceReadingImpact
+        self.assertFalse(InvoiceReadingImpact.objects.filter(invoice__zev_id=result["zev_id"]).exists())
 
     def test_v9_requires_quarantine_count(self):
         zev, _, _ = self._build_zev()
@@ -2064,9 +2107,13 @@ class UnsafeArchiveTransferTests(TestCase):
         live = create_managed_zev(name="Live ZEV", owner=self.owner, zev_type="vzev", invoice_prefix="LZ")
         MeteringPoint.objects.create(zev=live, meter_id="LZ-CONS-1", meter_type=MeteringPointType.CONSUMPTION)
         zev = create_managed_zev(name="AliasLive ZEV", owner=self.owner, zev_type="vzev", invoice_prefix="AL")
-        MeteringPoint.objects.create(zev=zev, meter_id="AL-CONS-1", secondary_meter_id="LZ-CONS-1",
+        MeteringPoint.objects.create(zev=zev, meter_id="AL-CONS-1",
                                      meter_type=MeteringPointType.CONSUMPTION)
         raw = export_to_bytes(zev)
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            points = json.loads(archive.read("metering_points.json"))
+        points[0]["secondary_meter_id"] = "LZ-CONS-1"
+        raw = rewrite_archive(raw, replace={"metering_points.json": points})
         before = Zev.objects.count()
         with self.assertRaises(ImportFailed):
             import_archive(io.BytesIO(raw), owner=self.importer)

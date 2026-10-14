@@ -10,6 +10,7 @@ what a v1 archive contains, and a field removed from the API must not silently
 break every archive already sitting on someone's disk.
 """
 
+# Version 10 preserves invoice reading-impact evidence and resolution state.
 # Bumped whenever the archive layout changes in a way an older importer cannot
 # read. Version 9 carries the SDAT-CH replace provenance and held
 # observations: readings rows gain the delivery-identity, quality and
@@ -27,8 +28,8 @@ break every archive already sitting on someone's disk.
 # provenance. Version 1 remains readable for static exports and legacy
 # adapter-based dynamic descriptors. An archive naming a version that is not
 # listed here is rejected outright rather than imported half-understood.
-FORMAT_VERSION = 9
-SUPPORTED_FORMAT_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9})
+FORMAT_VERSION = 10
+SUPPORTED_FORMAT_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9, 10})
 
 MANIFEST_NAME = "manifest.json"
 READINGS_DIR = "readings"
@@ -465,9 +466,8 @@ INVOICE_ITEM_FIELDS = (
 # section; older archives hold none and import zero held rows. Only meters
 # with held rows get a member (unlike readings, where every meter gets one).
 #
-# Invoice-impact state rides the same extension rule: additive
-# optional columns or keys with documented defaults travel without a version
-# bump; anything an older importer would silently drop needs one.
+# Format 10 adds invoice-impact state because older importers would silently
+# drop it. Only additive optional fields with safe defaults need no version bump.
 READING_CSV_COLUMNS = (
     "meter_id",
     "timestamp",

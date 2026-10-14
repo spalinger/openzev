@@ -1,8 +1,8 @@
 """Regression tests for the generate_metering_data management command."""
 from io import StringIO
 
-from django.core.management import call_command
-from django.test import TestCase
+from django.core.management import call_command, CommandError
+from django.test import TestCase, override_settings
 
 from accounts.models import UserRole
 from metering.models import MeterReading, ReadingResolution
@@ -10,6 +10,7 @@ from testing.helpers import make_user, create_managed_zev
 from zev.models import MeteringPoint, MeteringPointType
 
 
+@override_settings(DEBUG=True)
 class GenerateMeteringDataResolutionTests(TestCase):
     """The command must write valid ReadingResolution choices.
 
@@ -51,6 +52,12 @@ class GenerateMeteringDataResolutionTests(TestCase):
             )
         )
         self.assertEqual(resolutions, {ReadingResolution.FIFTEEN_MIN})
+
+    @override_settings(DEBUG=False)
+    def test_sample_generation_is_disabled_in_production(self):
+        with self.assertRaises(CommandError):
+            self._run("15min")
+        self.assertFalse(MeterReading.objects.exists())
 
     def test_hourly_interval_writes_valid_resolution(self):
         self._run("hourly")

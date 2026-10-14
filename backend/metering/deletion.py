@@ -8,7 +8,9 @@ survives promotion and import-batch reassignment. See the metering import
 and quality spec §5.7.
 """
 
-DELETION_EVIDENCE_CAP = 500
+from audit.services import MAX_AUDIT_LIST_ITEMS
+
+DELETION_EVIDENCE_CAP = MAX_AUDIT_LIST_ITEMS
 
 OVERWRITE_PROTECTED = "overwrite_import_protected"
 QUARANTINE_REPLACE_PROTECTED = "quarantine_replace_protected"
@@ -25,14 +27,8 @@ def protection_code(log):
     return None
 
 
-def collect_deleted_slots(batch_ids, *, cap=DELETION_EVIDENCE_CAP):
-    """Describe the readings a deletion is about to remove.
-
-    Returns ``(slots, truncated)`` where each slot carries the metering
-    point, meter id, timestamp, direction, energy and stream. Captured
-    before the delete so invoice-impact consumers keep per-slot evidence
-    after the rows are gone.
-    """
+def collect_deleted_slots(batch_ids, *, zev_id=None, cap=DELETION_EVIDENCE_CAP):
+    """Capture bounded billable/held deletion evidence for audit metadata."""
     from .models import MeterReading, QuarantinedReading
 
     slots = []
@@ -50,7 +46,9 @@ def collect_deleted_slots(batch_ids, *, cap=DELETION_EVIDENCE_CAP):
                 "energy_kwh",
             )
         )
-        for row in rows.iterator():
+        if zev_id is not None:
+            rows = rows.filter(metering_point__zev_id=zev_id)
+        for row in rows[:max(0, cap - len(slots)) + 1]:
             if len(slots) >= cap:
                 truncated = True
                 break

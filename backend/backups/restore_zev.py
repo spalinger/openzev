@@ -41,7 +41,7 @@ from typing import BinaryIO
 from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.db import DatabaseError, IntegrityError, connection, transaction
+from django.db import models, DatabaseError, IntegrityError, connection, transaction
 from django.db.models import Q
 
 from zev.models import MANAGING_ROLES
@@ -171,7 +171,7 @@ def read_facts(zf, manifest: dict, entry: dict) -> ArchiveFacts:
             elif canonical == "invoices.ContractIssue":
                 facts.contract_issue_ids.add(record["pk"])
             elif canonical == "zev.MeteringPoint":
-                facts.meter_ids.add(fields.get("meter_id", ""))
+                facts.meter_ids.update(value for value in (fields.get("meter_id"), fields.get("secondary_meter_id")) if value)
             elif canonical in ("zev.Party", "zev.Participant") and fields.get("user") is not None:
                 links.append((str(record["pk"] if canonical == "zev.Party" else fields["party"]), fields["user"]))
             elif canonical == "zev.ZevPartyRole" and fields.get("role") in MANAGING_ROLES:
@@ -260,7 +260,9 @@ def evaluate(facts: ArchiveFacts, *, force: bool, exclude_job=None) -> dict:
     point_model = apps.get_model("zev.MeteringPoint")
     stolen = [
         f"{row['meter_id']} → {row['zev__name']}"
-        for row in point_model._base_manager.filter(meter_id__in=facts.meter_ids)
+        for row in point_model._base_manager.filter(
+            models.Q(meter_id__in=facts.meter_ids) | models.Q(secondary_meter_id__in=facts.meter_ids)
+        )
         .exclude(zev_id=facts.zev_id).values("meter_id", "zev__name")
     ]
     conflicts += [_conflict("meter_id_owned_by_other_zev", d, overridable=False) for d in _listed(stolen)]
@@ -471,6 +473,10 @@ def restore_zev(
         zev_model = apps.get_model("zev.Zev")
         try:
             with transaction.atomic():
+                from zev.locks import lock_meter_identities
+                from zev.models import MeteringPoint, validate_meter_identities
+
+                lock_meter_identities()
                 # The row lock serializes this with anything else that locks the
                 # community (contract issuance does) for the whole restore.
                 zev_model.objects.select_for_update().filter(pk=zev_id).first()
@@ -482,6 +488,15 @@ def restore_zev(
                 progress("Replacing the community's data…")
                 _clear_zev(zev_id, facts.contract_issue_ids)
                 _apply(zf, manifest, facts, report, referenced, write=True)
+                # Raw deserialization bypasses save(); enforce the global identity rule here.
+                for point in MeteringPoint.objects.filter(zev_id=zev_id):
+                    try:
+                        validate_meter_identities(
+                            meter_id=point.meter_id, secondary_meter_id=point.secondary_meter_id,
+                            exclude_pk=point.pk,
+                        )
+                    except ValidationError as exc:
+                        raise RestoreError("Restored meter identities conflict with another point.") from exc
                 # Raw restore writes bypass model guards; protect newly managing accounts before commit.
                 accounts = get_user_model().objects.filter(independent_login_required=False).filter(
                     Q(parties__roles__zev_id=zev_id, parties__roles__role__in=MANAGING_ROLES)

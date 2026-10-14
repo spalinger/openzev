@@ -4,7 +4,7 @@ import tempfile
 from django.conf import settings as django_settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Max, Min, Prefetch, Q
+from django.db.models import Count, Exists, Max, Min, OuterRef, Prefetch, Q
 from django.http import FileResponse, Http404, HttpResponse
 from config.http import content_disposition, sanitize_filename
 from django.utils import timezone as dj_timezone
@@ -959,16 +959,34 @@ class MeteringPointViewSet(AuditedCreateDestroyMixin, AuditedUpdateMixin, ZevSco
         # Recheck after rollback: identity races are 400s; unrelated integrity errors propagate.
         try:
             super().perform_create(serializer)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.message_dict) from exc
         except IntegrityError:
             serializer.validate(serializer.validated_data)
             raise
 
     def perform_update(self, serializer):
         try:
-            super().perform_update(serializer)
+            with transaction.atomic():
+                from zev.locks import lock_meter_identities
+
+                lock_meter_identities()
+                MeteringPoint.objects.select_for_update().get(pk=serializer.instance.pk)
+                # PATCH must preserve fields changed by another request before we acquired the lock.
+                serializer.instance = self.get_object()
+                serializer.validate(serializer.validated_data)
+                super().perform_update(serializer)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.message_dict) from exc
         except IntegrityError:
             serializer.validate(serializer.validated_data)
             raise
+
+    def perform_destroy(self, instance):
+        try:
+            super().perform_destroy(instance)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages) from exc
 
     def get_queryset(self):
         # Annotate the cascade a delete would take with it (readings +
@@ -1015,8 +1033,11 @@ class MeteringPointViewSet(AuditedCreateDestroyMixin, AuditedUpdateMixin, ZevSco
         url_path="delete-readings",
         permission_classes=[IsAuthenticated, IsAdmin],
     )
+    @transaction.atomic
     def delete_readings(self, request, pk=None):
         metering_point = self.get_object()
+        from metering.locks import lock_billing_inputs
+        lock_billing_inputs(metering_point.zev)
         serializer = MeteringPointReadingsDeleteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         delete_all = serializer.validated_data["delete_all"]
@@ -1024,13 +1045,23 @@ class MeteringPointViewSet(AuditedCreateDestroyMixin, AuditedUpdateMixin, ZevSco
         date_to = serializer.validated_data.get("date_to")
 
         readings_qs = MeterReading.objects.filter(metering_point=metering_point)
+        held_qs = QuarantinedReading.objects.filter(metering_point=metering_point)
 
         if not delete_all:
             start_dt, end_dt_exclusive = period_window(date_from, date_to)
             readings_qs = readings_qs.filter(timestamp__gte=start_dt, timestamp__lt=end_dt_exclusive)
+            held_qs = held_qs.filter(timestamp__gte=start_dt, timestamp__lt=end_dt_exclusive)
+
+        from invoices.reading_impact import flag_deleted_slot_impacts
 
         deleted_count = readings_qs.count()
+        deleted_held = held_qs.count()
+        batch_ids = readings_qs.exclude(import_batch=None).order_by().values_list("import_batch", flat=True).distinct()
+        flag_deleted_slot_impacts(
+            zev=metering_point.zev, readings=readings_qs, batch_ids=list(batch_ids),
+        )
         readings_qs.delete()
+        held_qs.delete()
 
         record_audit_event(
             request=request,
@@ -1040,15 +1071,20 @@ class MeteringPointViewSet(AuditedCreateDestroyMixin, AuditedUpdateMixin, ZevSco
             target=metering_point,
             target_id=str(metering_point.pk),
             target_display=metering_point.meter_id,
-            summary=f"Deleted {deleted_count} meter readings for {metering_point.meter_id}.",
+            summary=f"Deleted {deleted_count} billable readings and {deleted_held} held observations for {metering_point.meter_id}.",
             metadata={
+                "deleted_readings": deleted_count,
+                "deleted_quarantined_readings": deleted_held,
                 "delete_all": delete_all,
                 "date_from": date_from.isoformat() if date_from else None,
                 "date_to": date_to.isoformat() if date_to else None,
             },
         )
 
-        return Response({"deleted_count": deleted_count}, status=status.HTTP_200_OK)
+        return Response({
+            "deleted_count": deleted_count, "deleted_readings": deleted_count,
+            "deleted_quarantined_readings": deleted_held,
+        }, status=status.HTTP_200_OK)
 
 
 class MeteringPointAssignmentViewSet(AuditedCreateDestroyMixin, AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.ModelViewSet):

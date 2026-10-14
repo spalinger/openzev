@@ -7,7 +7,7 @@ class MeterReadingSerializer(serializers.ModelSerializer):
     class Meta:
         model = MeterReading
         fields = "__all__"
-        read_only_fields = ["id", "created_at", "import_batch"]
+        read_only_fields = tuple(field.name for field in MeterReading._meta.fields)
 
 
 class ImportLogListSerializer(serializers.ModelSerializer):
@@ -19,7 +19,7 @@ class ImportLogListSerializer(serializers.ModelSerializer):
     class Meta:
         model = ImportLog
         exclude = ["reading_changes"]
-        read_only_fields = ["id", "created_at", "batch_id"]
+        read_only_fields = tuple(field.name for field in ImportLog._meta.fields)
 
     def get_imported_by_display(self, obj):
         user = obj.imported_by

@@ -25,6 +25,7 @@ from .deletion import (
 )
 from zev import access
 from zev.scoping import ZevScopedQuerySetMixin, assert_zev_not_disabled
+from .locks import lock_billing_inputs, protect_billing_scope
 from .serializers import MeterReadingSerializer, ImportLogSerializer, ImportLogListSerializer
 from .importers.csv_detect import detect_csv_settings
 from .importers.csv_importer import ImportFileError, import_csv, preview_csv
@@ -37,7 +38,7 @@ from .analytics import (
 )
 from .supplementary.surfaces import attach_hourly_gross, attach_owner_gross, attach_participant_gross, window_for
 from audit.models import AuditActionCategory, AuditEventStatus
-from audit.services import MAX_AUDIT_LIST_ITEMS, record_audit_event
+from audit.services import record_audit_event
 
 
 def _validated_uuid(raw, field_name):
@@ -165,7 +166,7 @@ def _resolve_dashboard_scope(user, zev_id):
     return "participant", list(own), None
 
 
-class MeterReadingViewSet(ZevScopedQuerySetMixin, viewsets.ModelViewSet):
+class MeterReadingViewSet(ZevScopedQuerySetMixin, viewsets.ReadOnlyModelViewSet):
     serializer_class = MeterReadingSerializer
     permission_classes = [IsAuthenticated, HasZevAccess]
     zev_lookup = "metering_point__zev"
@@ -521,6 +522,28 @@ class ImportLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.
             # Freeze and lock the selection before checking protection. Avoid
             # locking nullable select_related joins from get_queryset().
             selected_ids = list(queryset.values_list("pk", flat=True))
+            logs = list(ImportLog.objects.filter(pk__in=selected_ids).order_by("pk"))
+            batch_ids = {log.batch_id for log in logs}
+            affected_zev_ids = {log.zev_id for log in logs if log.zev_id}
+            # Flags follow the readings' ZEV, not the log's: a metering point
+            # may have moved ZEVs since the import, and a legacy log can carry
+            # no ZEV while its readings live in a real one.
+            for model in (MeterReading, QuarantinedReading):
+                for batch_id, zev_id in (
+                    model.objects.filter(import_batch__in=batch_ids)
+                    .values_list("import_batch", "metering_point__zev_id")
+                    .distinct()
+                ):
+                    if zev_id is not None:
+                        affected_zev_ids.add(zev_id)
+            def authorize():
+                if not self.request.user.is_admin and affected_zev_ids - access.managed_zev_ids(self.request.user):
+                    raise PermissionDenied("You do not have access to all ZEVs affected by this deletion.")
+
+            authorize()
+            zevs = Zev.objects.in_bulk(affected_zev_ids)
+            for zev_id in sorted(zevs):
+                protect_billing_scope(zevs[zev_id])
             logs = list(ImportLog.objects.filter(pk__in=selected_ids).order_by("pk").select_for_update())
             codes = {protection_code(log) for log in logs}
             if OVERWRITE_PROTECTED in codes:
@@ -533,38 +556,45 @@ class ImportLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.
                     "code": QUARANTINE_REPLACE_PROTECTED,
                     "error": "Imports that replaced held readings cannot be deleted. No imports were deleted.",
                 })
-            batch_ids = {log.batch_id for log in logs}
-            affected_zev_ids = {log.zev_id for log in logs if log.zev_id}
+            current_batches = {log.batch_id for log in logs}
+            current_scopes = {log.zev_id for log in logs if log.zev_id}
             for model in (MeterReading, QuarantinedReading):
-                affected_zev_ids.update(
-                    model.objects.filter(import_batch__in=batch_ids)
-                    .values_list("metering_point__zev_id", flat=True).distinct()
-                )
-            zevs = Zev.objects.in_bulk(affected_zev_ids)
-            if not self.request.user.is_admin:
-                if affected_zev_ids - access.managed_zev_ids(self.request.user):
-                    raise PermissionDenied("You do not have access to all ZEVs affected by this deletion.")
+                current_scopes.update(model.objects.filter(import_batch__in=current_batches).values_list(
+                    "metering_point__zev_id", flat=True,
+                ))
+            if current_scopes - affected_zev_ids:
+                raise ValidationError("Import scope changed while waiting; retry the deletion.")
+            batch_ids = current_batches
+            for zev_id in sorted(zevs):
+                lock_billing_inputs(zevs[zev_id])
+            authorize()  # Access may have changed while waiting for a writer.
             for zev in zevs.values():
                 assert_zev_not_disabled(self.request.user, zev)
             by_zev = {}
+
+            def counts_for(zev):
+                return by_zev.setdefault(zev, {
+                    "deleted_logs": 0, "deleted_readings": 0,
+                    "deleted_quarantined_readings": 0, "deleted_slots": [],
+                    "deleted_slots_truncated": False,
+                })
+
             for log in logs:
-                counts = by_zev.setdefault(zevs.get(log.zev_id), {"deleted_logs": 0, "deleted_readings": 0, "deleted_quarantined_readings": 0, "deleted_slots_truncated": False, "batch_ids": set()})
-                counts["deleted_logs"] += 1
-                if log.batch_id:
-                    counts["batch_ids"].add(log.batch_id)
-            slots_truncated = False
-            for counts in by_zev.values():
-                batch_ids = counts.pop("batch_ids")
-                if not batch_ids:
-                    continue
-                slots, truncated = collect_deleted_slots(batch_ids)
-                counts["deleted_slots"] = slots
-                counts["deleted_slots_truncated"] = truncated or len(slots) > MAX_AUDIT_LIST_ITEMS
-                slots_truncated = slots_truncated or counts["deleted_slots_truncated"]
-                deleted_billable, _ = MeterReading.objects.filter(import_batch__in=batch_ids).delete()
-                deleted_held, _ = QuarantinedReading.objects.filter(import_batch__in=batch_ids).delete()
-                counts["deleted_readings"] = deleted_billable
-                counts["deleted_quarantined_readings"] = deleted_held
+                counts_for(zevs.get(log.zev_id))["deleted_logs"] += 1
+            from invoices.reading_impact import flag_deleted_slot_impacts
+
+            for zev in zevs.values():
+                counts = counts_for(zev)
+                readings = MeterReading.objects.filter(import_batch__in=batch_ids, metering_point__zev=zev)
+                held = QuarantinedReading.objects.filter(import_batch__in=batch_ids, metering_point__zev=zev)
+                counts["deleted_slots"], counts["deleted_slots_truncated"] = collect_deleted_slots(
+                    batch_ids, zev_id=zev.pk,
+                )
+                reading_batches = list(readings.order_by().values_list("import_batch", flat=True).distinct())
+                flag_deleted_slot_impacts(zev=zev, readings=readings, batch_ids=reading_batches)
+                counts["deleted_readings"], _ = readings.delete()
+                counts["deleted_quarantined_readings"], _ = held.delete()
+            slots_truncated = any(counts["deleted_slots_truncated"] for counts in by_zev.values())
             ImportLog.objects.filter(pk__in=[log.pk for log in logs]).delete()
 
         result = {
@@ -578,22 +608,18 @@ class ImportLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.
     @transaction.atomic
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        zev = instance.zev
         result, by_zev = self._delete_import_logs(self.get_queryset().filter(pk=instance.pk))
-        metadata = dict(result)
-        for counts in by_zev.values():
-            metadata["deleted_slots"] = counts.get("deleted_slots", [])
-        record_audit_event(
-            request=request,
-            action_category=AuditActionCategory.METERING,
-            action_type="import_log.delete",
-            target_type="metering.ImportLog",
-            target_id=str(instance.pk),
-            target_display=str(instance.batch_id),
-            zev=zev,
-            summary=f"Deleted import log {instance.pk} and related readings.",
-            metadata=metadata,
-        )
+        for zev, counts in by_zev.items():
+            record_audit_event(
+                request=request,
+                action_category=AuditActionCategory.METERING,
+                action_type="import_log.delete",
+                target_type="metering.ImportLog",
+                target_id=str(instance.pk), target_display=str(instance.batch_id),
+                zev=zev,
+                summary=f"Deleted import log {instance.pk} and related readings.",
+                metadata=counts,
+            )
         return Response(result, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["post"], url_path="bulk-delete")
@@ -637,9 +663,8 @@ class ImportLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.
             "timezone": str(business_tz()),
         }
         # One event per affected ZEV, so each owner sees the deletion in their
-        # own scoped audit log. Attribution comes only from the deleted logs,
-        # never from the request's zev_id, which is unchecked user input. A
-        # no-op deletion (or logs without a ZEV) yields one unscoped event.
+        # own scoped audit log. Log counts follow their original ZEV; reading
+        # counts and samples follow their current ZEV. No-op deletes stay unscoped.
         for zev, counts in (by_zev or {None: {"deleted_logs": 0, "deleted_readings": 0}}).items():
             record_audit_event(
                 request=request,

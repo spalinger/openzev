@@ -12,9 +12,6 @@ from testing.helpers import make_user as make_user, create_managed_zev
 from zev.models import Participant
 
 
-_counter = 0
-
-
 def make_zev(owner, name="Test ZEV"):
     return create_managed_zev(name=name, owner=owner, zev_type="vzev", invoice_prefix="T")
 
@@ -31,10 +28,11 @@ def make_participant(zev, user=None, first="Jane", last="Doe"):
 
 
 def make_invoice(zev, participant, inv_status=InvoiceStatus.DRAFT, period=None):
-    global _counter
-    _counter += 1
+    # Numbers come from the ZEV sequence, never a hardcoded guess: regeneration
+    # keeps the replaced draft until the new invoice commits, so a squatted
+    # number would collide with the freshly issued one.
     return Invoice.objects.create(
-        invoice_number=f"T-{_counter:05d}",
+        invoice_number=zev.next_invoice_number(),
         zev=zev,
         participant=participant,
         period_start=period[0] if period else date(2026, 1, 1),
