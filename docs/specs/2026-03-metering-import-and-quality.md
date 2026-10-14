@@ -337,10 +337,40 @@ the target ZEV; preview uses the same ZEV-scoped lookup.
 ### 4.2 SDAT-CH (ebIX XML) importer
 
 Parses the Swiss SDAT-CH `ValidatedMeteredData` (E66) format delivered by
-VNBs (SDAT-CH 2025; normative references in `docs/specs/sdat-ch-official-TEMP/`,
-a temporary working copy — remove before merge). Only E66 is accepted:
+VNBs (SDAT-CH 2025: [metering processes V2](https://www.strom.ch/de/media/13628/download),
+[fundamentals](https://www.strom.ch/de/media/13633/download); reference schemas and
+examples in the [official archive](https://www.strom.ch/de/media/13704/download)).
+Only E66 is accepted:
 `AggregatedMeteredData` (E31), `ImbalanceData` and any other root are
 rejected with a named error, never silently imported.
+
+**Supported release profile** (qualified claim — ZEV/vZEV receiver, manual
+E66 import; automated exchange, ACK/error, LEG settlement and other market
+roles are deferred):
+
+| Aspect | Supported (writes billing data) | Held / rejected outcome |
+|---|---|---|
+| Message/root | E66 `ValidatedMeteredData_16`, namespace `http://www.strom.ch`, XSD-valid | Other roots → `unsupported_root`; other `ValidatedMeteredData_*` versions → `unsupported_schema_version`; schema-invalid → `schema_invalid` |
+| Header | `DocumentType` E66; `Status` 9 original / 5 replacement; `Creation` with explicit zone; reason `E88`/`C38` | Other types → `unsupported_document_type`; `Status` 1 → `cancellation_rejected`, other `Status` values → `unsupported_status`; missing/naive `Creation` → `missing_creation`/`invalid_creation`/`naive_timestamp`; missing reason → `missing_reason`; other reasons (incl. `C40`, `C23`) → `unsupported_reason`; missing header structure → `invalid_header` |
+| Product/unit | Active energy `8716867000030` in `KWH` | Other unit → `unsupported_unit` (rejects file); reactive `…047` → `reactive_excluded` skip; LEG `…123/…124` → `leg_excluded` skip; unknown product → `unknown_product` |
+| Direction | `ConsumptionMeteringPoint` → IN, `ProductionMeteringPoint` → OUT | `ExchangeMeteringPoint` → `exchange_excluded` skip |
+| Interval | 15/MIN, UTC-aligned, whole slot count, complete positions `1..n` | Missing/duplicate/conflicting/out-of-range → `missing_position`/`duplicate_position`/`conflicting_position`/`invalid_position` (rejects file) |
+| Quality | E88 + absent/`56` → billable (`condition` retained); C38 or `21` → held quarantine | Held rows never enter billing; promotion of predecessors counts as `promoted` |
+| Identity | `VSENationalID` resolves via `zev.models.resolve_metering_point` | Unknown → `unknown_meter`; multi-point → `ambiguous_meter` (both reject file) |
+| Overlap | SDAT-only slots | CSV/manual overlap → `source_conflict` (rejects file, existing data kept) |
+| Freshness | Newer `Creation` (replace) / skip-existing (original) | Stale skip; equal-`Creation` value conflict → `equal_creation_conflict` (rejects file) |
+| Observation detail | Well-formed volumes with known `Condition` (absent/`56`/`21`) | Bad volume → `invalid_volume`; unknown `Condition` → `unknown_condition`; block without meter → `missing_meter_point` (all reject file) |
+| File/delivery envelope | Well-formed non-empty delivery within size caps | Oversize → `file_too_large`/`decompressed_too_large`; bad gzip → `gzip_error`; malformed XML → `malformed_xml`; no blocks → `empty_delivery`; issue overflow → `too_many_issues`; unexpected failure → `internal_error` (all reject with zero observation writes) |
+| Replay outcome | Changed data commits | Fully superseded/duplicate deliveries commit nothing and report info `stale_superseded`/`duplicate_delivery` |
+
+Conformance corpus: `backend/metering/test_fixtures/sdatch/e66_1_4_4_customer.xml`
+is an unmodified copy of the official VSE 1_4_4 customer/producer example
+(source archive `https://www.strom.ch/de/media/13704/download`,
+SHA-256 `02db4e971439d04ec9165162d2aa73202e0088ac8fb29da76fa8e91eb166558a`):
+190 billable active readings, 2 held active readings, 192 intentionally
+skipped reactive observations, with billable sums 14,060.102 kWh IN and
+33,060.302 kWh OUT over canonical interval-start timestamps
+2025-06-02 22:00Z–2025-06-03 21:45Z.
 
 **Required parameter:** `zev_id` (explicit ZEV selection in request body).
 
