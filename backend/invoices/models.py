@@ -149,6 +149,51 @@ class InvoiceDynamicSourceEvidence(models.Model):
         ]
 
 
+class InvoiceReadingImpactResolution(models.TextChoices):
+    REGENERATED = "regenerated", "Regenerated"
+    CANCELLED = "cancelled", "Cancelled"
+
+
+class InvoiceReadingImpact(models.Model):
+    """A committed billing-input change that may have outdated an invoice.
+
+    Importing data never rewrites an invoice; it records one row per affected
+    invoice and source import instead (invoice-lifecycle spec §4.6). The row
+    survives on its own: invoice deletion cascades, import-log deletion
+    nulls the link while ``evidence`` keeps the delivery identity.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name="reading_impacts")
+    import_log = models.ForeignKey(
+        "metering.ImportLog", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    evidence = models.JSONField(
+        default=dict,
+        help_text="Source delivery identity and change summary: {source, delivery_id, creation, change_count, kinds, day_from, day_to, ...}.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    resolution = models.CharField(
+        max_length=20, choices=InvoiceReadingImpactResolution.choices, blank=True, default=""
+    )
+
+    class Meta:
+        ordering = ["-created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["invoice", "import_log"],
+                name="uniq_invoice_reading_impact_log",
+            ),
+        ]
+
+    def __str__(self):
+        return f"reading impact on {self.invoice_id} ({self.resolution or 'open'})"
+
+
 class InvoiceItem(models.Model):
     """A line item on an invoice."""
 

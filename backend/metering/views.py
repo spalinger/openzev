@@ -529,11 +529,20 @@ class ImportLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.
                 })
             batch_ids = {log.batch_id for log in logs}
             affected_zev_ids = {log.zev_id for log in logs if log.zev_id}
+            # Flags follow the readings' ZEV, not the log's: a metering point
+            # may have moved ZEVs since the import, and a legacy log can carry
+            # no ZEV while its readings live in a real one.
+            batch_zev_ids: dict = {}
             for model in (MeterReading, QuarantinedReading):
-                affected_zev_ids.update(
+                for batch_id, zev_id in (
                     model.objects.filter(import_batch__in=batch_ids)
-                    .values_list("metering_point__zev_id", flat=True).distinct()
-                )
+                    .values_list("import_batch", "metering_point__zev_id")
+                    .distinct()
+                ):
+                    if zev_id is not None:
+                        affected_zev_ids.add(zev_id)
+                    if batch_id is not None and zev_id is not None:
+                        batch_zev_ids.setdefault(batch_id, set()).add(zev_id)
             zevs = Zev.objects.in_bulk(affected_zev_ids)
             if not self.request.user.is_admin:
                 if affected_zev_ids - access.managed_zev_ids(self.request.user):
@@ -547,16 +556,35 @@ class ImportLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.
                 if log.batch_id:
                     counts["batch_ids"].add(log.batch_id)
             slots_truncated = False
-            for counts in by_zev.values():
-                batch_ids = counts.pop("batch_ids")
-                if not batch_ids:
+            from invoices.reading_impact import flag_deleted_slot_impacts
+
+            for zev, counts in by_zev.items():
+                group_batches = counts.pop("batch_ids")
+                if not group_batches:
                     continue
-                slots, truncated = collect_deleted_slots(batch_ids)
+                slots, truncated = collect_deleted_slots(group_batches)
                 counts["deleted_slots"] = slots
                 counts["deleted_slots_truncated"] = truncated or len(slots) > MAX_AUDIT_LIST_ITEMS
                 slots_truncated = slots_truncated or counts["deleted_slots_truncated"]
-                deleted_billable, _ = MeterReading.objects.filter(import_batch__in=batch_ids).delete()
-                deleted_held, _ = QuarantinedReading.objects.filter(import_batch__in=batch_ids).delete()
+                flag_zev_ids = set()
+                for batch_id in group_batches:
+                    flag_zev_ids.update(
+                        batch_zev_ids.get(batch_id) or ({zev.id} if zev is not None else set())
+                    )
+                for flag_zev_id in flag_zev_ids:
+                    flag_zev = zevs.get(flag_zev_id)
+                    if flag_zev is None:
+                        continue
+                    # Billable deletions leave invoices stale; the flags join
+                    # the same transaction as the deletes.
+                    flag_deleted_slot_impacts(
+                        zev=flag_zev,
+                        slots=slots,
+                        slots_truncated=truncated,
+                        batch_ids=sorted(group_batches),
+                    )
+                deleted_billable, _ = MeterReading.objects.filter(import_batch__in=group_batches).delete()
+                deleted_held, _ = QuarantinedReading.objects.filter(import_batch__in=group_batches).delete()
                 counts["deleted_readings"] = deleted_billable
                 counts["deleted_quarantined_readings"] = deleted_held
             ImportLog.objects.filter(pk__in=[log.pk for log in logs]).delete()

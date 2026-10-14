@@ -133,15 +133,20 @@ def mark_invoice_paid(invoice: Invoice) -> dict:
 
 def cancel_invoice(invoice: Invoice) -> dict:
     """Cancel a not-yet-paid invoice. Returns the ``before`` diff dict."""
-    return _lock_and_transition(
-        invoice,
-        allowed_from={InvoiceStatus.DRAFT, InvoiceStatus.APPROVED, InvoiceStatus.SENT},
-        to_status=InvoiceStatus.CANCELLED,
-        invalid_message=lambda current: (
-            "Invoice is already cancelled." if current == InvoiceStatus.CANCELLED
-            else "Paid invoices cannot be cancelled."
-        ),
-    )
+    from .reading_impact import resolve_on_cancel
+
+    with transaction.atomic():
+        before = _lock_and_transition(
+            invoice,
+            allowed_from={InvoiceStatus.DRAFT, InvoiceStatus.APPROVED, InvoiceStatus.SENT},
+            to_status=InvoiceStatus.CANCELLED,
+            invalid_message=lambda current: (
+                "Invoice is already cancelled." if current == InvoiceStatus.CANCELLED
+                else "Paid invoices cannot be cancelled."
+            ),
+        )
+        resolve_on_cancel(invoice=invoice)
+    return before
 
 
 def record_email_delivery(invoice: Invoice, sent_at) -> str:

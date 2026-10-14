@@ -27,8 +27,8 @@ from zev.management.commands.seed_demo import (
 	quarter_start,
 	years_before,
 )
-from invoices.models import ContractIssue, EmailLog, Invoice, InvoiceStatus
-from metering.models import ImportLog, MeterReading, ReadingDirection, ReadingResolution
+from invoices.models import ContractIssue, EmailLog, Invoice, InvoiceReadingImpact, InvoiceStatus
+from metering.models import ImportLog, MeterReading, QuarantinedReading, ReadingDirection, ReadingResolution
 from tariffs.dynamic.models import DynamicPricePoint, DynamicTariffSource
 from tariffs.models import BillingMode, PeriodType, Tariff
 from tariffs.series import active_version, find_gaps
@@ -1982,6 +1982,50 @@ class MeteringPointReadingsDeletionTests(TestCase):
 		)
 
 		self.assertEqual(resp.status_code, 403)
+
+	def test_delete_readings_removes_held_rows_and_flags_invoices(self):
+		participant = Participant.objects.create(
+			zev=self.zev,
+			first_name="Delete",
+			last_name="Impact",
+			email="delete.impact@example.com",
+			valid_from=date(2026, 1, 1),
+		)
+		MeteringPointAssignment.objects.create(
+			metering_point=self.metering_point,
+			participant=participant,
+			valid_from=date(2026, 1, 1),
+		)
+		invoice = Invoice.objects.create(
+			invoice_number="DR-DELETE-1",
+			zev=self.zev,
+			participant=participant,
+			period_start=date(2026, 1, 1),
+			period_end=date(2026, 1, 31),
+			status=InvoiceStatus.DRAFT,
+			total_chf=Decimal("42.00"),
+		)
+		QuarantinedReading.objects.create(
+			metering_point=self.metering_point,
+			timestamp=datetime(2026, 1, 10, 10, 0, tzinfo=timezone.utc),
+			energy_kwh=Decimal("1.0000"),
+			direction=ReadingDirection.IN,
+		)
+
+		resp = self.admin_client.post(
+			f"/api/v1/zev/metering-points/{self.metering_point.id}/delete-readings/",
+			{"delete_all": True},
+			format="json",
+		)
+
+		self.assertEqual(resp.status_code, 200)
+		self.assertEqual(resp.data["deleted_count"], 3)
+		self.assertEqual(
+			QuarantinedReading.objects.filter(metering_point=self.metering_point).count(), 0
+		)
+		self.assertTrue(
+			InvoiceReadingImpact.objects.filter(invoice=invoice, resolved_at__isnull=True).exists()
+		)
 
 
 class MeteringPointCascadeInfoTests(TestCase):

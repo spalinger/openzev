@@ -1320,6 +1320,17 @@ def import_sdatch(file, zev, user):
                     )
                     run.counts = attempt_run.counts
                     run.issues = attempt_run.issues
+                    # Invoice flags join the same transaction: flags and reading
+                    # changes commit or roll back together.
+                    from invoices.reading_impact import flag_import_impacts
+
+                    flag_import_impacts(
+                        zev=zev,
+                        import_log=log,
+                        changes=changes,
+                        changes_truncated=changes_truncated,
+                        delivery=run.delivery,
+                    )
                     if run.counts["created"] + run.counts["overwritten"] > 0:
                         status = SdatResultStatus.ACCEPTED
                     elif run.counts["held"] > 0:

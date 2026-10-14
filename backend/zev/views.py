@@ -19,7 +19,7 @@ from accounts.permissions import IsAdmin
 from accounts.throttling import ApiKeyRateThrottle, TransferArchiveThrottle
 from accounts.models import FeatureFlag, User
 from allocation.validity import period_window
-from metering.models import MeterReading
+from metering.models import MeterReading, QuarantinedReading
 from . import access, onboarding
 from .models import MANAGING_ROLES, Building, Zev, Participant, Party, PartyRole, MeteringPoint, MeteringPointAssignment, ZevPartyRole
 from .buildings import ensure_initial_building
@@ -989,13 +989,59 @@ class MeteringPointViewSet(AuditedCreateDestroyMixin, AuditedUpdateMixin, ZevSco
         date_to = serializer.validated_data.get("date_to")
 
         readings_qs = MeterReading.objects.filter(metering_point=metering_point)
+        held_qs = QuarantinedReading.objects.filter(metering_point=metering_point)
 
         if not delete_all:
             start_dt, end_dt_exclusive = period_window(date_from, date_to)
             readings_qs = readings_qs.filter(timestamp__gte=start_dt, timestamp__lt=end_dt_exclusive)
+            held_qs = held_qs.filter(timestamp__gte=start_dt, timestamp__lt=end_dt_exclusive)
+
+        # Capture each billable slot before the rows disappear: invoices left
+        # stale by an admin deletion are flagged exactly like an import-batch
+        # deletion. Evidence is capped; the count still reflects every row.
+        from invoices.reading_impact import flag_deleted_slot_impacts
+        from metering.deletion import DELETION_EVIDENCE_CAP
+
+        slots = []
+        slots_truncated = False
+        batch_ids = set()
+        for row in readings_qs.order_by("timestamp", "direction").values(
+            "metering_point_id",
+            "metering_point__meter_id",
+            "timestamp",
+            "direction",
+            "energy_kwh",
+            "import_batch",
+        ):
+            if row["import_batch"] is not None:
+                batch_ids.add(str(row["import_batch"]))
+            if len(slots) >= DELETION_EVIDENCE_CAP:
+                slots_truncated = True
+                continue
+            slots.append(
+                {
+                    "metering_point": str(row["metering_point_id"]),
+                    "meter_id": row["metering_point__meter_id"],
+                    "timestamp": row["timestamp"].isoformat(),
+                    "direction": row["direction"],
+                    "energy_kwh": str(row["energy_kwh"]),
+                    "stream": "billable",
+                }
+            )
 
         deleted_count = readings_qs.count()
-        readings_qs.delete()
+        with transaction.atomic():
+            readings_qs.delete()
+            # Held observations never billed, but they are removed with the
+            # billable ones so the meter's retained history stays consistent.
+            held_qs.delete()
+            if metering_point.zev_id is not None:
+                flag_deleted_slot_impacts(
+                    zev=metering_point.zev,
+                    slots=slots,
+                    slots_truncated=slots_truncated,
+                    batch_ids=sorted(batch_ids),
+                )
 
         record_audit_event(
             request=request,

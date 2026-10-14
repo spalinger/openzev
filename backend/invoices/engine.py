@@ -43,6 +43,7 @@ from metering.models import MeterReading, ReadingDirection
 from .band_labels import band_description, translations_for as band_translations_for
 from .document_parties import build_issuer, build_recipient
 from .models import Invoice, InvoiceItem, InvoiceStatus
+from .reading_impact import settle_regeneration
 
 logger = logging.getLogger(__name__)
 
@@ -260,24 +261,12 @@ def locked_overlapping_invoices(participant, period_start, period_end):
     )
 
 
-def _discard_replaceable_invoices(participant, period_start, period_end) -> None:
-    """Clear the way for a regeneration, or refuse to.
-
-    A draft or cancelled invoice overlapping this period is replaced; anything
-    further along its lifecycle has been sent to somebody and must not be
-    silently rewritten.
-    """
-    overlapping = Invoice.objects.filter(
-        participant=participant,
-        period_start__lte=period_end,
-        period_end__gte=period_start,
-    )
+def _refuse_locked_regeneration(participant, period_start, period_end) -> None:
     locked = locked_overlapping_invoices(participant, period_start, period_end).first()
     if locked:
         raise ValueError(
             f"Invoice {locked.invoice_number} already has status '{locked.status}' and cannot be regenerated."
         )
-    overlapping.filter(status__in=[InvoiceStatus.DRAFT, InvoiceStatus.CANCELLED]).delete()
 
 
 # ─── Pricing state ────────────────────────────────────────────────────────────
@@ -1627,7 +1616,20 @@ def generate_invoice(
 
     if generation_context is not None:
         generation_context.validate_for(participant, period_start, period_end)
-    _discard_replaceable_invoices(participant, period_start, period_end)
+    # The locked guard runs before any pricing work. Replaceable drafts are
+    # deleted only after the new invoice commits (settle step below): a
+    # correction landing mid-regeneration still finds an invoice to flag,
+    # and a failed run never destroys the working draft.
+    generation_started = timezone.now()
+    _refuse_locked_regeneration(participant, period_start, period_end)
+    doomed_invoice_ids = list(
+        Invoice.objects.filter(
+            participant=participant,
+            period_start__lte=period_end,
+            period_end__gte=period_start,
+            status__in=[InvoiceStatus.DRAFT, InvoiceStatus.CANCELLED],
+        ).values_list("pk", flat=True)
+    )
     if generation_context is None:
         generation_context = InvoiceGenerationContext.build(
             zev, period_start, period_end,
@@ -1906,57 +1908,64 @@ def generate_invoice(
 
     # ─── 8. Create invoice ────────────────────────────────────────────────
     invoice_number = zev.next_invoice_number()
-    invoice = Invoice.objects.create(
-        invoice_number=invoice_number,
-        zev=zev,
-        participant=participant,
-        period_start=period_start,
-        period_end=period_end,
-        status=InvoiceStatus.DRAFT,
-        total_local_kwh=local_kwh,
-        total_grid_kwh=grid_kwh,
-        total_feed_in_kwh=exported_kwh_acc.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP),
-        total_local_sold_kwh=local_sold_kwh_acc.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP),
-        local_sale_chf=Decimal("0") - producer_credit_chf,
-        local_sale_feed_in_chf=(
-            None
-            if local_sale_feed_in_acc is None
-            else local_sale_feed_in_acc.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        ),
-        subtotal_chf=subtotal,
-        vat_rate=vat_rate,
-        vat_base_chf=vat_base_chf if zev.vat_mode == VatMode.REGISTERED else None,
-        vat_chf=vat_chf,
-        embedded_vat_chf=embedded_vat_chf if zev.vat_mode == VatMode.INCLUSIVE else None,
-        total_chf=total_chf,
-        due_date=timezone.localdate() + timedelta(days=zev.payment_term_days),
-        issuer=generation_context.issuer(zev),
-        recipient=build_recipient(participant),
-    )
-
-    # ─── 9. Create line items ─────────────────────────────────────────────
-    items = []
-    for payload in sorted(item_payloads, key=lambda entry: (_build_sort_order(entry["tariff"]), entry["tariff"].name.lower())):
-        tariff = payload["tariff"]
-        lang = participant.zev.invoice_language or "de"
-        items.append(InvoiceItem(
-            invoice=invoice,
-            item_type=_get_item_type(tariff),
-            tariff_category=tariff.category,
-            description=_build_description(
-                tariff, period_start, period_end, payload["quantity"], lang,
-                base_rate=payload.get("base_rate"), bucket=payload["bucket"],
-                period=payload.get("period"),
-                effective_percentage=payload.get("effective_percentage"),
+    with transaction.atomic():
+        invoice = Invoice.objects.create(
+            invoice_number=invoice_number,
+            zev=zev,
+            participant=participant,
+            period_start=period_start,
+            period_end=period_end,
+            status=InvoiceStatus.DRAFT,
+            total_local_kwh=local_kwh,
+            total_grid_kwh=grid_kwh,
+            total_feed_in_kwh=exported_kwh_acc.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP),
+            total_local_sold_kwh=local_sold_kwh_acc.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP),
+            local_sale_chf=Decimal("0") - producer_credit_chf,
+            local_sale_feed_in_chf=(
+                None
+                if local_sale_feed_in_acc is None
+                else local_sale_feed_in_acc.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             ),
-            quantity_kwh=payload["quantity"],
-            unit=payload["unit"],
-            unit_price_chf=payload["unit_price"],
-            total_chf=payload["total"],
-            sort_order=_build_sort_order(tariff),
-        ))
-    InvoiceItem.objects.bulk_create(items)
-    record_invoice_evidence(invoice, dynamic_tariffs)
+            subtotal_chf=subtotal,
+            vat_rate=vat_rate,
+            vat_base_chf=vat_base_chf if zev.vat_mode == VatMode.REGISTERED else None,
+            vat_chf=vat_chf,
+            embedded_vat_chf=embedded_vat_chf if zev.vat_mode == VatMode.INCLUSIVE else None,
+            total_chf=total_chf,
+            due_date=timezone.localdate() + timedelta(days=zev.payment_term_days),
+            issuer=generation_context.issuer(zev),
+            recipient=build_recipient(participant),
+        )
+
+        # ─── 9. Create line items ─────────────────────────────────────────────
+        items = []
+        for payload in sorted(item_payloads, key=lambda entry: (_build_sort_order(entry["tariff"]), entry["tariff"].name.lower())):
+            tariff = payload["tariff"]
+            lang = participant.zev.invoice_language or "de"
+            items.append(InvoiceItem(
+                invoice=invoice,
+                item_type=_get_item_type(tariff),
+                tariff_category=tariff.category,
+                description=_build_description(
+                    tariff, period_start, period_end, payload["quantity"], lang,
+                    base_rate=payload.get("base_rate"), bucket=payload["bucket"],
+                    period=payload.get("period"),
+                    effective_percentage=payload.get("effective_percentage"),
+                ),
+                quantity_kwh=payload["quantity"],
+                unit=payload["unit"],
+                unit_price_chf=payload["unit_price"],
+                total_chf=payload["total"],
+                sort_order=_build_sort_order(tariff),
+            ))
+        InvoiceItem.objects.bulk_create(items)
+        record_invoice_evidence(invoice, dynamic_tariffs)
+        settle_regeneration(
+            zev=zev,
+            doomed_invoice_ids=doomed_invoice_ids,
+            new_invoice=invoice,
+            since=generation_started,
+        )
 
     logger.info("Generated invoice %s for %s: %s CHF", invoice_number, participant.full_name, total_chf)
     return invoice

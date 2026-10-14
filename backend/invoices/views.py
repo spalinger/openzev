@@ -3,7 +3,7 @@ import logging
 import zipfile
 from datetime import date as date_type
 
-from django.db.models import OuterRef, Subquery
+from django.db.models import Count, Exists, OuterRef, Prefetch, Subquery
 from rest_framework import mixins, viewsets, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -18,7 +18,7 @@ from zev.models import Zev, Participant
 from zev import access
 from zev.scoping import ZevScopedQuerySetMixin
 from .document_parties import build_issuer, build_recipient
-from .models import Invoice, InvoicePdfStatus, InvoiceStatus, EmailLog, sent_to_participant
+from .models import Invoice, InvoicePdfStatus, InvoiceReadingImpact, InvoiceStatus, EmailLog, sent_to_participant
 from .serializers import (
     InvoiceListSerializer, InvoiceSerializer, GenerateInvoiceSerializer,
     GenerateZevInvoicesSerializer
@@ -140,7 +140,16 @@ class InvoiceViewSet(
         # database cost the payload change just removed. getattr because schema
         # generation instantiates the view without an action.
         if getattr(self, "action", None) != "list":
-            queryset = queryset.prefetch_related("items", "email_logs")
+            queryset = queryset.prefetch_related(
+                "items",
+                "email_logs",
+                Prefetch(
+                    "reading_impacts",
+                    queryset=InvoiceReadingImpact.objects.filter(
+                        resolved_at__isnull=True
+                    ).order_by("-created_at", "id"),
+                ),
+            )
         else:
             # last_email_status/log_id ride a subquery annotation inside the
             # invoice SELECT, no per-row N+1. Both use the same deterministic
@@ -150,9 +159,23 @@ class InvoiceViewSet(
                 .order_by("-created_at", "-id")
                 .values("status", "id")[:1]
             )
+            open_impacts = (
+                InvoiceReadingImpact.objects.filter(
+                    invoice=OuterRef("pk"), resolved_at__isnull=True
+                )
+                .values("invoice")
+                .annotate(_open_count=Count("id"))
+                .values("_open_count")
+            )
             queryset = queryset.annotate(
                 last_email_status=Subquery(latest_log.values("status")[:1]),
                 last_email_log_id=Subquery(latest_log.values("id")[:1]),
+                open_data_impact_count=Subquery(open_impacts),
+                needs_data_review=Exists(
+                    InvoiceReadingImpact.objects.filter(
+                        invoice=OuterRef("pk"), resolved_at__isnull=True
+                    )
+                ),
             )
         return self.scope_queryset(queryset)
 

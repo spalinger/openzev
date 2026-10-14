@@ -8,12 +8,12 @@ request/response layer.
 
 from datetime import date as date_type
 
-from django.db.models import OuterRef, Subquery
+from django.db.models import OuterRef, Prefetch, Subquery
 
 from allocation.validity import active_during, civil_date, period_window
 from zev.models import Participant, MeteringPointAssignment
 from metering.models import MeterReading
-from .models import EmailLog, Invoice, InvoiceStatus
+from .models import EmailLog, Invoice, InvoiceReadingImpact, InvoiceStatus
 from .readiness import _spans_cover
 from .serializers import InvoiceSerializer
 
@@ -47,7 +47,16 @@ def compute_period_overview(*, zev, period_start: date_type, period_end: date_ty
         period_start=period_start,
         period_end=period_end,
     ).select_related("participant__party", "zev").order_by("-created_at", "-id")
-    invoice_rows = invoice_rows.prefetch_related("items", "email_logs").annotate(
+    invoice_rows = invoice_rows.prefetch_related(
+        "items",
+        "email_logs",
+        Prefetch(
+            "reading_impacts",
+            queryset=InvoiceReadingImpact.objects.filter(
+                resolved_at__isnull=True
+            ).order_by("-created_at", "id"),
+        ),
+    ).annotate(
         last_email_status=Subquery(
             EmailLog.objects.filter(invoice=OuterRef("pk")).order_by("-created_at", "-id").values("status")[:1]
         )

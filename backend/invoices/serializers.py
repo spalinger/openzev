@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Invoice, InvoiceItem, EmailLog
+from .models import Invoice, InvoiceItem, EmailLog, InvoiceReadingImpact
 from .description_utils import strip_period_suffix
 
 
@@ -19,6 +19,13 @@ class InvoiceItemSerializer(serializers.ModelSerializer):
         model = InvoiceItem
         fields = "__all__"
         read_only_fields = ["id"]
+
+
+class InvoiceReadingImpactSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InvoiceReadingImpact
+        fields = ("id", "import_log", "evidence", "created_at", "resolution", "resolved_at")
+        read_only_fields = ["id", "created_at"]
 
 
 class EmailLogSerializer(serializers.ModelSerializer):
@@ -44,6 +51,8 @@ class InvoiceListSerializer(serializers.ModelSerializer):
     pdf_url = serializers.SerializerMethodField()
     last_email_status = serializers.SerializerMethodField()
     last_email_log_id = serializers.SerializerMethodField()
+    needs_data_review = serializers.SerializerMethodField()
+    open_data_impact_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Invoice
@@ -110,6 +119,31 @@ class InvoiceListSerializer(serializers.ModelSerializer):
         log = self._latest_email_log(obj)
         return str(log.id) if log else None
 
+    def get_needs_data_review(self, obj) -> bool:
+        """Whether an open reading correction taints this invoice.
+
+        Annotated on the list query; detail shapes reuse the prefetched open
+        impacts, falling back to one EXISTS query only when neither is present.
+        """
+        if "needs_data_review" in obj.__dict__:
+            return bool(obj.needs_data_review)
+        impacts = getattr(obj, "_prefetched_objects_cache", {}).get("reading_impacts")
+        if impacts is not None:
+            return len(impacts) > 0
+        return InvoiceReadingImpact.objects.filter(
+            invoice_id=obj.pk, resolved_at__isnull=True
+        ).exists()
+
+    def get_open_data_impact_count(self, obj) -> int:
+        if "open_data_impact_count" in obj.__dict__:
+            return int(obj.open_data_impact_count or 0)
+        impacts = getattr(obj, "_prefetched_objects_cache", {}).get("reading_impacts")
+        if impacts is not None:
+            return len(impacts)
+        return InvoiceReadingImpact.objects.filter(
+            invoice_id=obj.pk, resolved_at__isnull=True
+        ).count()
+
     @staticmethod
     def _latest_email_log(obj):
         # Detail and period-overview already load all logs. Reuse that data,
@@ -136,6 +170,7 @@ class InvoiceSerializer(InvoiceListSerializer):
     items = InvoiceItemSerializer(many=True, read_only=True)
     email_logs = EmailLogSerializer(many=True, read_only=True)
     access_link = serializers.SerializerMethodField()
+    data_impacts = serializers.SerializerMethodField()
 
     def get_access_link(self, obj) -> dict | None:
         """State of the access link printed on this invoice, or ``None``.
@@ -156,6 +191,21 @@ class InvoiceSerializer(InvoiceListSerializer):
             "created_at": token.created_at,
             "last_used_at": token.last_used_at,
         }
+
+    def get_data_impacts(self, obj) -> list[dict]:
+        """Open reading impacts with their source evidence, detail reads only.
+
+        List payloads carry only the flag and the count; the evidence rides
+        the bounded detail/overview/echo shapes.
+        """
+        impacts = getattr(obj, "_prefetched_objects_cache", {}).get("reading_impacts")
+        if impacts is None:
+            impacts = list(
+                InvoiceReadingImpact.objects.filter(
+                    invoice_id=obj.pk, resolved_at__isnull=True
+                ).order_by("-created_at", "id")
+            )
+        return InvoiceReadingImpactSerializer(impacts, many=True).data
 
 
 class GenerateInvoiceSerializer(serializers.Serializer):

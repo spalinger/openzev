@@ -132,9 +132,13 @@ class AllocationQueryCountTests(_ReconciliationBase):
         # issuer (#761) reads the owner's participant row; a batch reads it
         # once for all its invoices. 17 -> 18: the issuer is the dated role
         # holder (one query); this ZEV has none, so the owner fallback reads
-        # the owner's party too, until Zev.owner goes.
+        # the owner's party too, until Zev.owner goes. 18 -> 20: regeneration
+        # deletes replaceable drafts only after the new invoice commits, so a
+        # correction landing mid-run still finds an invoice to flag
+        # (reading-impact settle): the doomed-ids fetch plus the commit
+        # block's savepoint pair.
         self._call_at_most(
-            18, generate_invoice, self.alice, PERIOD_START, PERIOD_END
+            20, generate_invoice, self.alice, PERIOD_START, PERIOD_END
         )
 
     def test_weight_keyed_shared_fees_do_not_scale_queries_with_tariff_count(self):

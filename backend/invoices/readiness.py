@@ -21,7 +21,7 @@ from tariffs.models import BillingMode, EnergyType, Tariff, TariffCategory
 from zev.models import PARTY_NAME_FIELDS, MeteringPoint, MeteringPointAssignment, Participant
 from zev.iban import is_valid_iban
 
-from .models import EmailLog, Invoice, InvoiceStatus
+from .models import EmailLog, Invoice, InvoiceReadingImpact, InvoiceStatus
 
 
 # Billing-period alignment
@@ -428,6 +428,7 @@ NEXT_ACTION_BY_STEP = {
     "metering": "fix_metering",
     "assignments": "fix_assignments",
     "tariffs": "fix_tariffs",
+    "data_corrections": "review_data_corrections",
     "generated": "generate",
     "generation_conflicts": "review_generation_conflicts",
     "approved": "approve",
@@ -483,6 +484,7 @@ class BulkData:
     dynamic_uncovered: dict  # dynamic source id -> {uncovered day, ...}, span-wide
     invoice_rows: list[tuple[int, int, date, date, str, str]]  # (id, pid, ps, pe, status, number)
     latest_email_status: dict[int, str]  # per invoice id
+    impacts: list[tuple]  # open reading impacts: (invoice id, pid, ps, pe, status, number, name, delivery id, created)
 
 
 def _newest_email_logs_qs(zev):
@@ -551,6 +553,27 @@ def _load_bulk(zev, span_start: date, span_end: date) -> BulkData:
         "invoice_id", "status"
     ):
         latest_email_status.setdefault(invoice_id, status)
+    impacts = [
+        (
+            impact.invoice_id,
+            impact.invoice.participant_id,
+            impact.invoice.period_start,
+            impact.invoice.period_end,
+            impact.invoice.status,
+            impact.invoice.invoice_number,
+            impact.invoice.participant.full_name,
+            (impact.evidence or {}).get("delivery_id", ""),
+            impact.created_at.isoformat(),
+        )
+        for impact in InvoiceReadingImpact.objects.filter(
+            resolved_at__isnull=True,
+            invoice__zev=zev,
+            invoice__period_start__lte=span_end,
+            invoice__period_end__gte=span_start,
+        )
+        .select_related("invoice__participant__party")
+        .order_by("-created_at", "id")
+    ]
     return BulkData(
         meter_id_by_mp=meter_id_by_mp,
         participants=participants,
@@ -561,6 +584,7 @@ def _load_bulk(zev, span_start: date, span_end: date) -> BulkData:
         dynamic_uncovered=dynamic_uncovered,
         invoice_rows=invoices,
         latest_email_status=latest_email_status,
+        impacts=impacts,
     )
 
 
@@ -887,6 +911,54 @@ def _bulk_generation_conflicts(
     )
 
 
+def _bulk_data_corrections(
+    data: BulkData, period_start: date, period_end: date
+) -> StepResult:
+    """Invoices of the exact period tainted by a committed reading correction.
+
+    Drafts need explicit regeneration; issued invoices need the
+    cancel-and-regenerate workflow. Paid invoices keep their flag: payment is
+    not a data resolution (invoice-lifecycle spec §4.6).
+    """
+    link = f"/billing/invoices?period_start={period_start.isoformat()}&period_end={period_end.isoformat()}"
+    rows = [
+        {
+            "invoice_id": str(inv_id),
+            "invoice_number": number,
+            "participant_name": name,
+            "status": status,
+            "delivery_id": delivery_id,
+            "flagged_at": created,
+        }
+        for inv_id, _pid, ps, pe, status, number, name, delivery_id, created in data.impacts
+        if (ps, pe) == (period_start, period_end)
+    ]
+    if not rows:
+        return StepResult("data_corrections", "ok", 0)
+    by_invoice: dict[str, dict] = {}
+    for row in rows:
+        entry = by_invoice.setdefault(row["invoice_id"], {**row, "correction_count": 0})
+        entry["correction_count"] += 1
+    affected = sorted(by_invoice.values(), key=lambda row: (row["participant_name"], row["invoice_id"]))
+    visible = affected[:3]
+    extra = len(affected) - len(visible)
+    names = ", ".join(row["participant_name"] for row in visible) + ("…" if extra else "")
+    return StepResult(
+        "data_corrections",
+        "warn",
+        len(affected),
+        detail=(
+            f"{len(affected)} invoice(s) may be outdated by corrected metering data: {names}"
+        ),
+        detail_data={
+            "correction_count": len(rows),
+            "corrections": visible,
+            "more_corrections": extra,
+        },
+        link=link,
+    )
+
+
 def _bulk_period_readiness(
     zev, data: BulkData, period_start: date, period_end: date
 ) -> dict:
@@ -896,6 +968,7 @@ def _bulk_period_readiness(
         _bulk_assignments(data, period_start, period_end),
         _tariffs_step_from_list(data.energy, data.pct, period_start, period_end, data.dynamic_uncovered),
         _bulk_generation_conflicts(data, period_start, period_end),
+        _bulk_data_corrections(data, period_start, period_end),
         *invoice_steps,
     ]
     next_action = _select_next_action(steps)

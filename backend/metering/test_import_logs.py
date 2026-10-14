@@ -17,6 +17,7 @@ from rest_framework.test import APIClient
 
 from accounts.models import UserRole
 from audit.models import AuditEvent
+from invoices.models import Invoice, InvoiceReadingImpact, InvoiceStatus
 from metering.importers import csv_importer
 from metering.deletion import collect_deleted_slots
 from metering.models import ImportLog, ImportSource, MeterReading, QuarantinedReading, ReadingDirection, ReadingResolution
@@ -24,7 +25,7 @@ from metering.testing import upload_csv
 from metering.importers.csv_importer import ImportFileError, import_csv, _upsert_reading
 from metering.test_import_sdatch_strict import build_block, build_e66, quarter_block
 from testing.helpers import authenticate as auth, make_user, create_managed_zev
-from zev.models import MeteringPoint, MeteringPointType, Participant
+from zev.models import MeteringPoint, MeteringPointAssignment, MeteringPointType, Participant
 
 
 class ImportLogDeletionTests(TestCase):
@@ -90,6 +91,51 @@ class ImportLogDeletionTests(TestCase):
         self.assertEqual(resp.data["deleted_readings"], 1)
         self.assertFalse(ImportLog.objects.filter(pk=log.id).exists())
         self.assertEqual(MeterReading.objects.filter(import_batch=log.batch_id).count(), 0)
+
+    def test_deletion_flags_readings_zev_when_log_has_none(self):
+        # A legacy log without a ZEV must not lose its invoice flag: deletion
+        # flags follow the deleted readings' ZEV, not the log's.
+        MeteringPointAssignment.objects.create(
+            metering_point=self.metering_point,
+            participant=self.participant,
+            valid_from=date(2026, 1, 1),
+        )
+        invoice = Invoice.objects.create(
+            invoice_number="D-LEGACY-1",
+            zev=self.zev,
+            participant=self.participant,
+            period_start=date(2026, 1, 1),
+            period_end=date(2026, 1, 31),
+            status=InvoiceStatus.DRAFT,
+            total_chf=Decimal("42.00"),
+        )
+        batch_id = uuid.uuid4()
+        log = ImportLog.objects.create(
+            batch_id=batch_id,
+            zev=None,
+            imported_by=self.owner,
+            source=ImportSource.CSV,
+            filename="legacy.csv",
+            rows_total=1,
+            rows_imported=1,
+            rows_skipped=0,
+        )
+        MeterReading.objects.create(
+            metering_point=self.metering_point,
+            timestamp=datetime(2026, 1, 10, 8, 0, tzinfo=timezone.utc),
+            energy_kwh=Decimal("1.0000"),
+            direction=ReadingDirection.IN,
+            resolution=ReadingResolution.FIFTEEN_MIN,
+            import_source=ImportSource.CSV,
+            import_batch=batch_id,
+        )
+
+        resp = self.client.delete(f"/api/v1/metering/import-logs/{log.id}/")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(
+            InvoiceReadingImpact.objects.filter(invoice=invoice, resolved_at__isnull=True).exists()
+        )
 
     def _overwrite_import(self, profile):
         original = self._create_import_log_with_reading(
