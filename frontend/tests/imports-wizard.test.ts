@@ -544,6 +544,8 @@ describe('ImportsPage wizard gating', () => {
     it('disables deletion and explains protection for overwritten imports', () => {
         twoLogs()
         importLogsData[0].rows_overwritten = 1
+        importLogsData[0].deletable = false
+        importLogsData[0].deletion_protection_code = 'overwrite_import_protected'
         renderPage()
         const row = Array.from(container.querySelectorAll('tbody tr')).find((entry) => entry.textContent?.includes('alpha.csv'))!
         const actions = Array.from(row.querySelectorAll('button')).find((button) => button.textContent === 'pages.imports.actions.rowActions')!
@@ -846,7 +848,7 @@ describe('ImportsPage multi-file import', () => {
             done: 2,
             total: 3,
             failed: 1,
-            names: 'b.csv',
+            names: 'b.csv', imported: 2, overwritten: 0, held: 0,
         })
         expect(container.textContent).toContain('pages.imports.wizard.title')
         // The retry covers only the failed file and its preview is still valid.
@@ -1102,6 +1104,7 @@ describe('import deletion completion ownership', () => {
         expect(container.querySelector<HTMLInputElement>('input[type=date]')!.value).toBe('2026-03-05')
         expect(pushToast).not.toHaveBeenCalled()
         expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['metering'] })
+        expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['invoices'] })
         act(() => mutation.onError(new Error('Old failure'), variables))
         expect(pushToast).not.toHaveBeenCalled()
     })

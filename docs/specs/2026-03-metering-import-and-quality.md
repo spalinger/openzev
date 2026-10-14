@@ -1776,3 +1776,20 @@ original-log and current-reading communities before locking logs, then recheck
 the selection. This matches live restore’s parent-before-child order.
 
 `RevisionBoundaryTests` pins tariff-band rejection, all schema-admitted reactive exclusions, capped unknown/ambiguous/direction diagnostics, held-original preservation, semantic-quality conflicts, mixed-outcome guidance and logged rollback on infrastructure failures.
+
+### Reading mutation feedback and cache refresh
+
+Import completion and single/bulk import deletion call the shared frontend
+`invalidateReadingQueries` helper, invalidating `metering` and `invoices`
+query prefixes before the selected-community UI guard. This covers invoice
+detail/list/personal queries, period overview, readiness, readiness lists and
+attention. Point-data deletion uses the same helper after its session-ownership
+guard. Existing account/session and modal-generation protections remain in place.
+
+Single SDAT success toasts use `sdatOutcomeKind`: accepted, correction-only,
+held-only and unchanged have distinct messages. Notes are not overwrite evidence.
+Batch messages report new, corrected and held observations, including successful
+files in a partial batch. CSV `rows_imported` includes overwrites, so its new
+count is `rows_imported - rows_overwritten`; SDAT uses `result_counts.created`.
+Promotion is already a subset of created/overwritten and is not added again.
+The protocol retains all structured counters and rejected-file retry behavior.

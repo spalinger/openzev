@@ -12,6 +12,9 @@ type MeteringPointFormModalProps = {
   submitLabel: string
   form: MeteringPointInput
   isPending: boolean
+  historyProtected?: boolean
+  /** Field-keyed server validation errors, shown under their field. */
+  fieldErrors?: Record<string, string>
   onClose: () => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   setForm: Dispatch<SetStateAction<MeteringPointInput>>
@@ -25,12 +28,16 @@ export function MeteringPointFormModal({
   submitLabel,
   form,
   isPending,
+  historyProtected = false,
+  fieldErrors = {},
   onClose,
   onSubmit,
   setForm,
   buildings = [],
 }: MeteringPointFormModalProps) {
   const { t } = useTranslation()
+  const secondaryError = fieldErrors.secondary_meter_id
+  const meterIdError = fieldErrors.meter_id
 
   return (
     <FormModal isOpen={isOpen} title={title} onClose={onClose}>
@@ -39,18 +46,43 @@ export function MeteringPointFormModal({
           <span>{t('pages.meteringPoints.form.meterId')}</span>
           <input
             value={form.meter_id}
+            aria-invalid={meterIdError ? true : undefined}
+            aria-describedby={meterIdError ? 'metering-point-form-meter_id-error' : undefined}
             onChange={(event) => {
               const value = event.target.value
               setForm((previous) => ({ ...previous, meter_id: value }))
             }}
             required
           />
+          {meterIdError && (
+            <span className="field-error" id="metering-point-form-meter_id-error" role="alert">{meterIdError}</span>
+          )}
+        </label>
+
+        <label>
+          <span>{t('pages.meteringPoints.form.secondaryMeterId')}</span>
+          <input
+            value={form.secondary_meter_id ?? ''}
+            aria-invalid={secondaryError ? true : undefined}
+            aria-describedby={secondaryError ? 'metering-point-form-secondary_meter_id-error' : undefined}
+            onChange={(event) => {
+              const value = event.target.value
+              setForm((previous) => ({ ...previous, secondary_meter_id: value }))
+            }}
+            placeholder={t('pages.meteringPoints.form.secondaryMeterIdPlaceholder')}
+          />
+          <small className="muted">{t('pages.meteringPoints.form.secondaryMeterIdHint')}</small>
+          {secondaryError && (
+            <span className="field-error" id="metering-point-form-secondary_meter_id-error" role="alert">{secondaryError}</span>
+          )}
         </label>
 
         <label>
           <span>{t('pages.meteringPoints.form.meterType')}</span>
           <select
             value={form.meter_type}
+            disabled={historyProtected}
+            aria-describedby={historyProtected ? 'metering-point-history-hint' : undefined}
             onChange={(event) => {
               const value = event.target.value as MeteringPointInput['meter_type']
               setForm((previous) => ({
@@ -67,6 +99,10 @@ export function MeteringPointFormModal({
               </option>
             ))}
           </select>
+          {historyProtected && (
+            <small className="muted" id="metering-point-history-hint">{t('pages.meteringPoints.form.historyProtected')}</small>
+          )}
+          {fieldErrors.meter_type && <span className="field-error" role="alert">{fieldErrors.meter_type}</span>}
         </label>
 
         <div style={{ gridColumn: '1 / -1' }}>

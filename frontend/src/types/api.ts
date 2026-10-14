@@ -847,8 +847,7 @@ export interface MeteringPoint {
     id: string
     zev: string
     meter_id: string
-    /** Second 33-char VSENationalID of the same physical meter (SDAT-CH flow
-     * direction pair); null when the point has a single ID. */
+    /** Alternative identity of the same physical meter, e.g. a second SDAT-CH VSENationalID. */
     secondary_meter_id: string | null
     meter_type: 'consumption' | 'production' | 'bidirectional'
     is_active: boolean
@@ -858,7 +857,9 @@ export interface MeteringPoint {
     /** PV (or other generation) sits behind this meter: it records only the
      * surplus fed in and the residual grid draw (net / surplus metering). */
     has_behind_meter_generation: boolean
-    /** Readings that a delete of this metering point would cascade-delete. */
+    /** True while billable or held history prevents type/community changes and deletion. */
+    history_protected?: boolean
+    /** Billable readings belonging to this metering point. */
     reading_count: number
     /** Assignment windows (any state) that a delete of this metering point would cascade-delete. */
     assignment_count: number
@@ -1186,14 +1187,15 @@ export interface GridOperatorSuggestion {
 export type InvoicePdfStatus = 'none' | 'pending' | 'ready' | 'failed'
 
 /** One open reading-correction flag on an invoice (invoice-lifecycle spec §4.6).
- * `import_log` is the source SDAT-CH import; null when the flag came from an
+ * `import_log` is the source import (SDAT-CH or CSV); null when the flag came from an
  * import deletion (whose logs are gone) — `evidence` always keeps the
- * delivery/batch identity. */
+ * delivery, filename or batch identity. */
 export interface InvoiceReadingImpact {
     id: string
     import_log: string | null
     evidence: {
-        source: 'sdat-import' | 'import-deletion'
+        source: 'sdat-import' | 'csv-import' | 'import-deletion' | 'csv-reanchor'
+        filename?: string
         delivery_id?: string
         creation?: string
         change_count?: number
@@ -1201,6 +1203,7 @@ export interface InvoiceReadingImpact {
         day_from?: string
         day_to?: string
         deleted_batches?: string[]
+        changed_readings?: number
         deleted_readings?: number
         [key: string]: unknown
     }
@@ -1745,7 +1748,7 @@ export interface ImportLog {
     rows_skipped: number
     source: string
     errors?: Array<{ row: number | null; error: string; meter_id?: string | null }>
-    warnings?: Array<{ row: number | null; warning: string }>
+    warnings?: Array<{ row?: number | null; warning: string }>
     /** '' for batches imported before ADR 0026 (offset-less values read as UTC). */
     timestamp_timezone?: ImportTimestampTimezone | ''
     created_at: string
@@ -1755,7 +1758,7 @@ export interface ImportLog {
     result_counts?: SdatResultCounts
     /** Structured SDAT-CH issues with stable codes; no prose parsing needed. */
     issues?: SdatIssue[]
-    /** Committed billable-slot changes for invoice-impact consumers (D). Empty unless the import committed writes. */
+    /** Committed billable-slot changes for invoice-impact consumers. Empty unless the import committed writes. */
     reading_changes?: SdatReadingChange[]
     /** SDAT-CH delivery identity (delivery vs block identity, creation, reason, sender/receiver). */
     source_delivery?: SdatDelivery
@@ -1774,10 +1777,12 @@ export interface SdatResultCounts {
     held: number
     promoted: number
     duplicate: number
+    /** Original deliveries skipped because a reading already exists. Absent on older logs. */
+    original_existing?: number
     stale: number
     excluded: number
     rejected: number
-    /** Existing quarantine rows updated (replacement protection evidence for C). */
+    /** Existing quarantine rows updated (replacement protection evidence). */
     quarantine_overwritten: number
     reading_changes_truncated?: boolean
     [key: string]: number | boolean | undefined
@@ -1821,6 +1826,8 @@ export interface ImportDeletionResult {
     deleted_readings: number
     /** Held (quarantine) readings removed alongside the billable ones. */
     deleted_quarantined_readings?: number
+    /** True when the audit slot evidence was capped. */
+    deleted_slots_truncated?: boolean
     mode?: 'all' | 'period'
     timezone?: 'Europe/Zurich'
 }
@@ -2642,4 +2649,11 @@ export interface ChargePreview {
     total_billed_chf: string
     /** What the split leaves over after rounding each share to the centime. */
     unrecovered_chf: string
+}
+
+export interface MeteringReadingsDeletionResult {
+    /** Legacy alias of deleted_readings; excludes held observations. */
+    deleted_count: number
+    deleted_readings: number
+    deleted_quarantined_readings: number
 }

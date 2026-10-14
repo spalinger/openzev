@@ -4,6 +4,8 @@ import type { InvoiceStepReason } from './invoiceRowState'
 
 export function invoiceStepReasonText(t: TFunction, reason: InvoiceStepReason, row: InvoicePeriodParticipantRow): string {
     switch (reason) {
+        case 'correction':
+            return t('pages.invoices.dataReview.badge')
         case 'metering':
             return row.metering_points_total === 0
                 ? t('pages.invoices.issues.meteringNoPoints')

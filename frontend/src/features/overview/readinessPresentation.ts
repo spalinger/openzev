@@ -7,6 +7,7 @@ export const NEXT_ACTION_STEP_KEYS: Record<string, string[]> = {
     fix_assignments: ['assignments'],
     fix_tariffs: ['tariffs'],
     // Stale charges are regenerated like a missing invoice, so either step can carry it.
+    review_data_corrections: ['data_corrections'],
     generate: ['generated', 'charges'],
     review_generation_conflicts: ['generation_conflicts'],
     approve: ['approved'],
@@ -55,6 +56,17 @@ export function stepDetailText(step: ReadinessStep, t: TFunction): string | null
             return d('chargesWarn', {
                 count: (step.detail_data?.unbilled_charges ?? []).length + (step.detail_data?.more_unbilled ?? 0),
                 names: (step.detail_data?.unbilled_charges ?? []).join(', '),
+            })
+        }
+        case 'data_corrections': {
+            if (step.status !== 'warn') return null
+            const invoices = (step.detail_data?.corrections ?? [])
+                .slice(0, 3)
+                .map((correction) => correction.invoice_number)
+                .join(', ')
+            return d('correctionsWarn', {
+                count: step.count,
+                invoices,
             })
         }
         case 'approved':

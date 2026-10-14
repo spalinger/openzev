@@ -84,6 +84,13 @@ export function MyInvoicesPage() {
                                         <td className="numeric"><InvoiceTotal invoice={invoice} /></td>
                                         <td>
                                             <InvoiceStatusBadge status={invoice.status} paidChf={invoice.paid_chf} />
+                                            {invoice.needs_data_review && (
+                                                <div style={{ marginTop: '0.25rem' }}>
+                                                    <span className="badge badge-warning" title={t('pages.invoices.dataReview.issuedNotice', { count: invoice.open_data_impact_count ?? 0 })}>
+                                                        {t('pages.invoices.dataReview.badge')}
+                                                    </span>
+                                                </div>
+                                            )}
                                         </td>
                                         <td>
                                             <InvoiceRowActions>

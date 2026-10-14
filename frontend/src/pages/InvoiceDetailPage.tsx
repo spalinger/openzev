@@ -19,6 +19,7 @@ import { InvoiceAppliedCreditsCard } from '../features/invoices/InvoiceAppliedCr
 import { InvoiceCreditsCard } from '../features/invoices/InvoiceCreditsCard'
 import { amountDueChf, canCorrectInvoice, hasCreditApplied } from '../features/invoices/invoiceCredits'
 import { InvoicePaymentsCard } from '../features/invoices/InvoicePaymentsCard'
+import { InvoiceDataReviewNotice } from '../features/invoices/InvoiceDataReviewNotice'
 import type { Invoice } from '../types/api'
 
 import { usePdfObjectUrl } from '../lib/usePdfObjectUrl'
@@ -80,6 +81,8 @@ export function InvoiceDetailPage() {
     // The invoice's own community, which may not be the selected one.
     const invoiceScopeNoteKey = scopeNoteKey(invoiceShellRole)
     const canManageAccessLink = invoiceShellRole === 'admin' || invoiceShellRole === 'manager'
+    const canReviewData = canManageAccessLink && (user?.role === 'admin'
+        || user?.memberships?.some((membership) => membership.zev === inv.zev && !membership.zev_disabled))
     const isParticipant = invoiceShellRole === 'participant' || invoiceShellRole === 'former'
     const origin = (location.state as { from?: string; period_start?: string; period_end?: string } | null)
     const isoDay = /^\d{4}-\d{2}-\d{2}$/
@@ -195,6 +198,9 @@ export function InvoiceDetailPage() {
             </div>
 
             <InvoiceAppliedCreditsCard invoice={inv} />
+            {inv.needs_data_review && (
+                <InvoiceDataReviewNotice invoice={inv} variant="detail" canAct={!!canReviewData} />
+            )}
 
             {/* `payments` is null for a participant, who sees the totals only. */}
             {!isParticipant && inv.payments != null && (

@@ -173,7 +173,7 @@ acknowledgements/error responses, LEG settlement and other market roles
 | Aspect | Supported | Excluded / deferred |
 | --- | --- | --- |
 | Message | E66 `ValidatedMeteredData`, schema `ValidatedMeteredData_16` | E31 aggregates, acknowledgements, error reports, other roots |
-| Business reason | `E88` billing, `C38` information | `C40` LEG settlement, queries, switching, master data |
+| Business reason | `E88` billing, `C38` information | `C40` community management, queries, switching, master data |
 | Product / unit | Active energy (`8716867000030`) in kWh | Reactive energy, LEG products, other units |
 | Direction | Customer/producer consumption (`IN`) and production (`OUT`) | Grid-interconnection (exchange) points |
 | Resolution | 15-minute intervals | Hourly and other resolutions |
@@ -506,3 +506,16 @@ a validated delivery can promote them. There is no manual release action.
 Direct reading API create/update/delete operations return `405`; corrections use
 imports or the protected deletion workflow. PostgreSQL is required for production
 metering correction and identity concurrency guarantees.
+
+The completion message distinguishes new readings, corrections, held values and
+unchanged files. Batch messages count these separately. Reading changes and
+deletions refresh invoice-review and billing-readiness state. **Delete data**
+removes billable and held observations in the chosen range and reports both counts.
+
+Production deployments require PostgreSQL. SQLite is supported for development
+and tests; MariaDB does not support these billing/identity lock workflows.
+Historical assignment edits remain a separate management operation: the reading
+correction flags described here track imports, protected deletion and timestamp
+repair, not every change to assignment windows. Review affected billing periods
+when changing historical assignments.
+

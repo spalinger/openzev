@@ -5,6 +5,7 @@ import { act } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MantineProvider } from '@mantine/core'
+import { fetchInvoice } from '../src/lib/api/invoices'
 import { InvoiceDetailPage } from '../src/pages/InvoiceDetailPage'
 
 vi.mock('react-i18next', () => ({
@@ -45,9 +46,9 @@ vi.mock('../src/lib/api/invoices', () => ({
 }))
 
 /** A non-admin account managing, or taking part in, the invoice's community (#761). */
-function mockRole(relation: 'manager' | 'participant') {
+function mockRole(relation: 'manager' | 'participant', disabled = false) {
     const membership = {
-        zev: 'z1', zev_name: 'Muster ZEV', zev_disabled: false,
+        zev: 'z1', zev_name: 'Muster ZEV', zev_disabled: disabled,
         access: relation === 'manager' ? 'manager' : null,
         participants: relation === 'participant' ? [{ id: 'p1', valid_from: '2026-01-01', valid_to: null, live: true }] : [],
     }
@@ -88,6 +89,17 @@ async function renderDetail(initialEntries: unknown[] = ['/billing/invoices/1'])
 }
 
 describe('InvoiceDetailPage return link', () => {
+    it.each([false, true])('uses the invoice community write state for correction wording (disabled=%s)', async disabled => {
+        mockRole('manager', disabled)
+        const inv = await fetchInvoice('1')
+        vi.mocked(fetchInvoice).mockResolvedValueOnce({ ...inv, needs_data_review: true, open_data_impact_count: 1 })
+        const container = await renderDetail()
+        expect(container.textContent).toContain(disabled
+            ? 'pages.invoices.dataReview.issuedNotice'
+            : 'pages.invoices.dataReview.issuedAction')
+        container.remove()
+    })
+
     it('sends participants back to their own invoices list', async () => {
         mockRole('participant')
         const container = await renderDetail()

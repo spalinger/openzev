@@ -1,3 +1,4 @@
+import type { MeteringReadingsDeletionResult } from '../../types/api'
 import type {
   Building,
   BuildingInput,
@@ -196,8 +197,8 @@ export async function deleteMeteringPoint(id: string): Promise<void> {
 export async function deleteMeteringPointReadings(
   id: string,
   payload: { delete_all: boolean; date_from?: string; date_to?: string },
-): Promise<{ deleted_count: number }> {
-  const { data } = await api.post<{ deleted_count: number }>(`/zev/metering-points/${id}/delete-readings/`, payload)
+): Promise<MeteringReadingsDeletionResult> {
+  const { data } = await api.post<MeteringReadingsDeletionResult>(`/zev/metering-points/${id}/delete-readings/`, payload)
   return data
 }
 

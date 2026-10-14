@@ -67,6 +67,7 @@ function MeteringPointsView({ canWrite, canDeleteData }: { canWrite: boolean; ca
         deleteMeteringDataMutation,
         mpForm,
         setMpForm,
+        mpFieldErrors,
         editingMpId,
         showMpModal,
         assignForm,
@@ -218,6 +219,8 @@ function MeteringPointsView({ canWrite, canDeleteData }: { canWrite: boolean; ca
                     title={editingMpId ? t('pages.meteringPoints.editTitle') : t('pages.meteringPoints.createTitle')}
                     submitLabel={editingMpId ? t('pages.meteringPoints.saveChanges') : t('pages.meteringPoints.createButton')}
                     form={mpForm}
+                    fieldErrors={mpFieldErrors}
+                    historyProtected={meteringPointsQuery.data?.find((point) => point.id === editingMpId)?.history_protected}
                     isPending={saveMpMutation.isPending}
                     onClose={closeMpModal}
                     onSubmit={submitMpForm}
