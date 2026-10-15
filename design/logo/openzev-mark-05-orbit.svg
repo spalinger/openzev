@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="openZEV">
+  <title>openZEV</title>
+  <defs>
+    <linearGradient id="loop" x1="84" y1="94" x2="420" y2="430" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5DB346"/>
+      <stop offset="1" stop-color="#2E9EDB"/>
+    </linearGradient>
+    <linearGradient id="sun" x1="346.99" y1="119.41" x2="394.59" y2="167.01" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFD54A"/>
+      <stop offset="1" stop-color="#F08A00"/>
+    </linearGradient>
+    <linearGradient id="bolt" x1="217" y1="261" x2="287" y2="331" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFD54A"/>
+      <stop offset="1" stop-color="#F08A00"/>
+    </linearGradient>
+  </defs>
+  <g fill="none" stroke="url(#loop)" stroke-width="24" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M412.37 211.94A168 168 0 1 1 302.06 101.63"/>
+    <path d="M252 158L332 232L332 346L172 346L172 232Z"/>
+  </g>
+  <path fill="url(#bolt)" d="M257.78 246.94L227.34 296.94Q226.04 299.08 228.54 299.08L248.14 299.08Q249.64 299.08 249.3 300.54L240.77 336.77Q240.2 339.2 241.59 337.12L276.57 284.64Q277.96 282.56 275.46 282.56L255.86 282.56Q254.36 282.56 254.55 281.07L258.77 247.28Q259.08 244.8 257.78 246.94Z"/>
+  <g stroke="#F8B517" stroke-width="11" stroke-linecap="round">
+    <path d="M404.74 109.26L411.1 102.9"/>
+    <path d="M418.79 143.21L427.79 143.21"/>
+    <path d="M404.74 177.15L411.1 183.51"/>
+    <path d="M370.79 191.21L370.79 200.21"/>
+    <path d="M336.85 177.15L330.49 183.51"/>
+    <path d="M322.79 143.21L313.79 143.21"/>
+    <path d="M336.85 109.26L330.49 102.9"/>
+    <path d="M370.79 95.21L370.79 86.21"/>
+  </g>
+  <circle cx="370.79" cy="143.21" r="34" fill="url(#sun)"/>
+</svg>
