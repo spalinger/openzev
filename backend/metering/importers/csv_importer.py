@@ -21,9 +21,9 @@ from decimal import Decimal, InvalidOperation
 import openpyxl
 from dateutil import parser as dateutil_parser
 from django.conf import settings
-from metering.locks import lock_billing_inputs
 from django.db import IntegrityError, transaction
 
+from metering.importers.reading_changes import READING_CHANGE_CAP, ReadingChangeRecorder
 from metering.importers.limits import (
     MAX_REPORTED_ERRORS,
     MAX_UPLOAD_BYTES,
@@ -32,7 +32,8 @@ from metering.importers.limits import (
     mb,
     validate_zip,
 )
-from metering.models import ImportLog, ImportSource, MeterReading
+from metering.models import ImportLog, ImportSource, MeterReading, ReadingChangeKind
+from metering.locks import lock_billing_inputs
 from zev.models import MeteringPoint
 
 # Upload hardening limits — rationale: docs/specs/2026-03-metering-import-and-quality.md §4.4.
@@ -656,23 +657,45 @@ def _coerce_interval_minutes(interval_minutes):
 
 
 def _upsert_reading(mp, ts, direction, energy, batch_id, overwrite_existing):
-    """Create the reading row, or update it when overwriting. True if created."""
-    method = (
-        MeterReading.objects.update_or_create
-        if overwrite_existing
-        else MeterReading.objects.get_or_create
+    """Return (created, old_energy); None means no existing row was changed."""
+    queryset = MeterReading.objects.select_for_update() if overwrite_existing else MeterReading.objects
+    existing, created = queryset.get_or_create(
+        metering_point=mp, timestamp=ts, direction=direction,
+        defaults={"energy_kwh": energy, "import_source": ImportSource.CSV, "import_batch": batch_id},
     )
-    _, created = method(
-        metering_point=mp,
-        timestamp=ts,
-        direction=direction,
-        defaults={
-            "energy_kwh": energy,
-            "import_source": ImportSource.CSV,
-            "import_batch": batch_id,
-        },
+    if created or not overwrite_existing:
+        return created, None
+
+    old_energy = existing.energy_kwh
+    if old_energy == energy:
+        return False, None
+    existing.energy_kwh = energy
+    existing.import_source = ImportSource.CSV
+    existing.import_batch = batch_id
+    existing.source_creation = None
+    existing.source_document_id = ""
+    existing.source_delivery_id = ""
+    existing.business_reason = ""
+    existing.condition = ""
+    existing.source_product = ""
+    existing.source_unit = ""
+    existing.source_meter_id = ""
+    existing.save(
+        update_fields=[
+            "energy_kwh",
+            "import_source",
+            "import_batch",
+            "source_creation",
+            "source_document_id",
+            "source_delivery_id",
+            "business_reason",
+            "condition",
+            "source_product",
+            "source_unit",
+            "source_meter_id",
+        ]
     )
-    return created
+    return False, old_energy
 
 
 def _contiguous_day_ranges(windows):
@@ -1215,7 +1238,10 @@ def _import_table_rows(
     overwrite_existing,
 ):
     """Row loop of import_csv; runs inside the import transaction."""
-    meter_lookup = {mp.meter_id: mp for mp in _meter_queryset_for_user(user, zev)}
+    meter_lookup = {
+        mp.meter_id: mp
+        for mp in _meter_queryset_for_user(user, zev).order_by("pk").select_for_update(of=("self",))
+    }
 
     imported = 0
     skipped = 0
@@ -1233,6 +1259,12 @@ def _import_table_rows(
     reader = TimestampReader(timestamp_format, timestamp_timezone)
     # Zero-energy rows inside the spring DST gap, per civil day.
     dst_gap_skipped: dict = {}
+    # Committed billable-slot changes in SDAT reading_changes shape, consumed
+    # by invoices.reading_impact.flag_import_impacts (invoice-lifecycle §4.6).
+    change_log = ReadingChangeRecorder(cap=READING_CHANGE_CAP)
+
+    def record_change(mp, ts, direction, *, kind, old, new):
+        change_log.record(metering_point=mp, timestamp=ts, direction=direction, kind=kind, old=old, new=new)
 
     for idx, row in enumerate(table.rows):
         row_number = idx + (2 if has_header else 1)
@@ -1297,7 +1329,6 @@ def _import_table_rows(
                 slots: list = []
                 for slot, value in enumerate(values):
                     if value is None:
-                        slots.append(None)
                         continue
                     direction, energy = _infer_direction_and_energy(mp.meter_type, value, explicit_direction)
                     ts = window.start + timedelta(minutes=interval_minutes * slot)
@@ -1305,11 +1336,9 @@ def _import_table_rows(
                         (mp.id, ts, direction) in preexisting_daily
                         or (mp.id, ts, direction) in written_daily
                     ):
-                        slots.append(None)
                         continue
                     slots.append((ts, direction, energy))
-                new_entries = [entry for entry in slots if entry is not None]
-                if not new_entries:
+                if not slots:
                     skipped += 1
                     add_error(
                         errors,
@@ -1323,32 +1352,28 @@ def _import_table_rows(
                 if overwrite_existing:
                     row_imported = 0
                     row_overwritten = 0
+                    row_changes = []
                     with transaction.atomic():
-                        for entry in slots:
-                            if entry is None:
-                                continue
-                            ts, direction, energy = entry
-                            if _upsert_reading(mp, ts, direction, energy, batch_id, True):
+                        for ts, direction, energy in slots:
+                            created, old_energy = _upsert_reading(mp, ts, direction, energy, batch_id, True)
+                            if created:
                                 row_imported += 1
-                            else:
+                                row_changes.append((ts, direction, energy, ReadingChangeKind.AVAILABILITY, None))
+                            elif old_energy is not None:
                                 row_overwritten += 1
+                                row_changes.append((ts, direction, energy, ReadingChangeKind.VALUE, old_energy))
+                    for ts, direction, energy, kind, old in row_changes:
+                        record_change(mp, ts, direction, kind=kind, old=old, new=energy)
                     imported += row_imported
                     overwritten += row_overwritten
+                    if row_imported + row_overwritten == 0:
+                        skipped += 1
                 else:
-                    # Fast path: one savepoint for the row, no per-slot
-                    # SELECTs — the batched prefetch above stays sufficient.
-                    # A late collision (a concurrent import winning a slot
-                    # after the prefetch) aborts the row savepoint; the
-                    # per-slot retry below then commits every slot that is
-                    # still free instead of losing the row's other new slots.
-                    # Whole-row validation rejects above stay atomic per row.
-                    row_imported = 0
+                    # Late collisions retry per slot after the row savepoint rolls back.
+                    row_written: list = []
                     try:
                         with transaction.atomic():
-                            for entry in slots:
-                                if entry is None:
-                                    continue
-                                ts, direction, energy = entry
+                            for ts, direction, energy in slots:
                                 MeterReading.objects.create(
                                     metering_point=mp,
                                     timestamp=ts,
@@ -1357,13 +1382,13 @@ def _import_table_rows(
                                     import_source=ImportSource.CSV,
                                     import_batch=batch_id,
                                 )
-                                row_imported += 1
+                                row_written.append((ts, direction, energy))
                     except IntegrityError:
-                        row_imported = 0
-                        for entry in slots:
-                            if entry is None:
-                                continue
-                            ts, direction, energy = entry
+                        # A late collision aborted the row savepoint. Retry
+                        # each slot individually so the row still commits its
+                        # surviving slots.
+                        row_written = []
+                        for ts, direction, energy in slots:
                             try:
                                 with transaction.atomic():
                                     MeterReading.objects.create(
@@ -1378,13 +1403,17 @@ def _import_table_rows(
                                 # Absorbed late collision: the row still
                                 # succeeds with its surviving slots.
                                 continue
-                            row_imported += 1
-                            written_daily.add((mp.id, ts, direction))
-                    else:
-                        for entry in slots:
-                            if entry is not None:
-                                ts, direction, _ = entry
-                                written_daily.add((mp.id, ts, direction))
+                            row_written.append((ts, direction, energy))
+                    # Record changes only for slots that committed: the aborted
+                    # fast-path attempt must not leave duplicate or phantom
+                    # entries in reading_changes (invoice-impact evidence).
+                    row_imported = len(row_written)
+                    for ts, direction, energy in row_written:
+                        record_change(
+                            mp, ts, direction,
+                            kind=ReadingChangeKind.AVAILABILITY, old=None, new=energy,
+                        )
+                        written_daily.add((mp.id, ts, direction))
                     if row_imported == 0:
                         # Nothing survived (every remaining slot collided
                         # after the prefetch): same duplicate report as a
@@ -1420,11 +1449,22 @@ def _import_table_rows(
                 add_error(errors, _csv_error(row_number, meter_id, row_error))
                 continue
 
-            created = _upsert_reading(mp, ts, direction, energy, batch_id, overwrite_existing)
+            created, old_energy = _upsert_reading(mp, ts, direction, energy, batch_id, overwrite_existing)
             if created:
                 imported += 1
-            elif overwrite_existing:
+                record_change(
+                    mp, ts, direction,
+                    kind=ReadingChangeKind.AVAILABILITY, old=None, new=energy,
+                )
+            elif overwrite_existing and old_energy is not None:
                 overwritten += 1
+                record_change(
+                    mp, ts, direction,
+                    kind=ReadingChangeKind.VALUE,
+                    old=old_energy, new=energy,
+                )
+            elif overwrite_existing:
+                skipped += 1
             else:
                 skipped += 1
                 add_error(
@@ -1467,5 +1507,18 @@ def _import_table_rows(
         })
     log.errors = errors
     log.warnings = warnings
+    log.reading_changes = change_log.changes
+    if change_log.truncated:
+        log.result_counts["reading_changes_truncated"] = True
+    # Flags and readings commit together, including changes beyond the evidence cap.
+    from invoices.reading_impact import flag_import_impacts
+
+    flag_import_impacts(
+        zev=zev,
+        import_log=log,
+        changes_truncated=change_log.truncated,
+        delivery={},
+        affected_slots=change_log.affected_slots,
+    )
     log.save()
     return log

@@ -103,12 +103,12 @@ alike. Delimiter may be any single character (for example `,`, `;`, `|`, or tab)
    - Click **Load Preview**. Configuration changes, including toggling overwrite, invalidate the preview — reload before importing. Selecting or removing a file also requires a new preview. With several files, each gets its own preview section; one file with errors blocks the whole import, and a meter missing from any file is listed once.
    - Check **Metering point exists** per row; missing IDs are listed with copy/download actions and block **Start Import** until the meters exist.
    - Check **Direction**: where each row's readings will land — *Consumption (in)*, *Feed-in (out)*, or both when a bidirectional meter's row splits by sign. If a whole file shows the wrong direction, the **Direction column** mapping is wrong.
-   - Check **Existing data**: the database already holds that reading (standard rows), or the day already holds readings for that meter/direction (daily rows). Enabling overwrite shows an estimate of how many existing readings will be replaced; fully duplicate rows never block the import — they are skipped (reported in the protocol) in skip mode and replaced in overwrite mode.
+   - Check **Existing data**: the database already holds that reading (standard rows), or the day already holds readings for that meter/direction (daily rows). Enabling overwrite shows an estimate of how many existing readings will be replaced; fully duplicate rows never block the import — they are skipped in skip mode; overwrite mode replaces only changed values. Identical values keep their original source and batch.
    - Review **Errors**: parse failures and empty daily rows. Values above 99999999.9999 kWh are rejected: they cannot be stored. Partially duplicate daily rows show no error — the existing slots are skipped and missing ones are imported (gap-fill).
 
 5. **Review Import Options**
    - **Overwrite existing readings** for the same metering point + timestamp +
-     direction (unchecked by default). When checked, re-importing overwrites any
+     direction (unchecked by default). When checked, re-importing replaces changed
      existing readings that match; when unchecked, existing readings are kept
      and duplicates are skipped per slot. Overwrites are reported as a protocol
      **Note** (`Overwrote N existing readings.`), not as errors.
@@ -332,7 +332,7 @@ The CSV references a meter ID that doesn't exist in the selected ZEV. Solutions:
 
 The reading already exists. Without overwrite, fully duplicate rows are
 skipped; partially duplicate daily rows gap-fill the missing slots. With
-**Overwrite existing readings** checked, matching readings are updated and the
+**Overwrite existing readings** checked, matching readings with different values are updated and the
 protocol notes `Overwrote N existing readings.`
 
 **Two files for the same meter, one consumption and one feed-in?** Grid
@@ -507,6 +507,13 @@ Direct reading API create/update/delete operations return `405`; corrections use
 imports or the protected deletion workflow. PostgreSQL is required for production
 metering correction and identity concurrency guarantees.
 
+
+CSV overwrite skips identical values and preserves their source evidence and
+import ownership. Changing an SDAT value deliberately makes it a CSV correction:
+it clears the SDAT provenance and later SDAT deliveries cannot replace that slot.
+The confirmation explains this before import. CSV meter lookup uses primary IDs;
+secondary SDAT aliases are not CSV identifiers.
+
 The completion message distinguishes new readings, corrections, held values and
 unchanged files. Batch messages count these separately. Reading changes and
 deletions refresh invoice-review and billing-readiness state. **Delete data**
@@ -518,4 +525,3 @@ Historical assignment edits remain a separate management operation: the reading
 correction flags described here track imports, protected deletion and timestamp
 repair, not every change to assignment windows. Review affected billing periods
 when changing historical assignments.
-

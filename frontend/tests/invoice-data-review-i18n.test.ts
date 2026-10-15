@@ -108,7 +108,7 @@ describe('InvoiceDataReviewNotice evidence plural resolution', () => {
         })
         const text = container.textContent ?? ''
         // A missing `count` would render the raw key instead of a sentence.
-        expect(text).toContain('CSV correction.csv changed 2 intervals between 03.02.2026 and 04.02.2026.')
+        expect(text).toContain('Source CSV correction.csv recorded 2 reading changes between 03.02.2026 and 04.02.2026.')
         expect(text).toContain('flagged 02.03.2026')
         expect(text).toContain('CSV timestamps corrected for 2 readings between 03.02.2026 and 04.02.2026.')
         expect(text).not.toContain('pages.invoices.dataReview.evidenceImport')

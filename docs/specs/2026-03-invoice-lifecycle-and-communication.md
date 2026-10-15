@@ -334,8 +334,7 @@ before deleting them.
 
 CSV imports use the same helper inside the import transaction, supplying
 complete quantity-change scope alongside capped `reading_changes` evidence
-(`availability` for creates, `value` for changed overwrites, `metadata` for
-identical-value overwrites — metering import spec §4.1). CSV flags carry
+(`availability` for creates and `value` for changed overwrites; identical values are no-ops — metering import spec §4.1). CSV flags carry
 `evidence.source: csv-import` with the `filename` instead of SDAT delivery
 identity; attribution, matching and resolution are identical to SDAT flags.
 
@@ -359,7 +358,7 @@ Evidence caps never cap attribution: importers keep an uncapped, compact
 per-meter/day/direction counter of availability/value changes alongside the
 bounded `reading_changes` array. Flags use that counter, including changes
 after a metadata-only prefix; evidence totals/kinds and affected day bounds
-cover the entire import. Deletions query distinct scoped meter/day/direction
+cover the entire source import, not the subset priced by one invoice. Counts describe changes rather than unique slots when a file writes a slot repeatedly. Deletions query distinct scoped meter/day/direction
 slots before removing the rows, independently of the audit sample limit.
 
 PostgreSQL serializes the writes that move billing inputs with a per-ZEV

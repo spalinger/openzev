@@ -336,8 +336,9 @@ they are stored separately and added to the new draft again.
 A committed metering correction (or an import deletion) never rewrites an
 invoice — amounts, PDFs and delivery records stay as issued. Instead the
 affected invoices stay in the **Issues** filter and carry a **Data review**
-flag. The period rows and invoice detail page identify them; the detail page lists the
-source evidence (delivery ID, changed intervals). The **Overview** readiness
+flag. The period rows and invoice detail page identify them; managers and viewers
+also see source evidence (delivery ID or CSV filename, changed intervals) on the
+detail page. The **Overview** readiness
 check gains a **Data corrections** step linking to the period's billing page.
 
 | Invoice status | What to do |
@@ -350,8 +351,8 @@ Full reversal is available for a positive invoice with uncredited payments
 or applied credit. If neither remains, the flag stays open for review.
 Zero invoices and payouts cannot be reversed.
 
-Participants see the flag on their own sent and paid invoices; the detail
-page explains it without offering management actions.
+Participants see the review flag on their own sent and paid invoices,
+without internal import evidence or management actions.
 
 ## Reviewing Invoices
 
