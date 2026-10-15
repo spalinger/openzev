@@ -2293,7 +2293,7 @@
 <li>Backend running? <code>docker compose ps</code></li>
 <li>Check logs: <code>docker compose logs app</code> (<code>backend</code> on the two-container source build)</li>
 <li>Database connected? <code>docker compose logs db</code></li>
-<li>More troubleshooting: Check Redis for celery</li>
+<li>More troubleshooting: Check Valkey for celery</li>
 </ol>
 <h2 id="authentication--access">Authentication &amp; Access<a class="headerlink" href="#authentication--access" title="Permanent link">&para;</a></h2>
 <h3 id="cant-login">Can't Login<a class="headerlink" href="#cant-login" title="Permanent link">&para;</a></h3>
@@ -2314,7 +2314,7 @@
 <tr>
 <td>Participant never set a password</td>
 <td>The onboarding link was not used, or has expired</td>
-<td>A manager of the community sends a new onboarding link from the <strong>⋯</strong> menu on the participant's row</td>
+<td>For a participant-only account, a manager of the community sends a new onboarding link from the <strong>⋯</strong> menu on the participant's row. If manager/viewer access was added, use the access invitation instead</td>
 </tr>
 <tr>
 <td>"Permission denied"</td>
@@ -2332,6 +2332,11 @@
 <td>Request the change again under <strong>My Account → Profile</strong></td>
 </tr>
 <tr>
+<td>Password-reset link says it "does not work"</td>
+<td>The link was already used, is older than one hour, or your password or address changed after you asked</td>
+<td>Request a new one with <strong>Forgot your password?</strong> on the sign-in page</td>
+</tr>
+<tr>
 <td>"429 Too many requests"</td>
 <td>Login/registration attempts exceeded the per-IP rate limit</td>
 <td>Wait a while (check the <code>Retry-After</code> header) before trying again</td>
@@ -2339,14 +2344,20 @@
 </tbody>
 </table>
 <h3 id="forgot-password">Forgot Password<a class="headerlink" href="#forgot-password" title="Permanent link">&para;</a></h3>
-<p>There is no "forgot password" link on the login page.</p>
+<p>Choose <strong>Forgot your password?</strong> under the sign-in form and enter the email address of your
+account. If that account has a password, you receive a link that is valid for one hour and works
+once. Opening it lets you choose a new password; you are signed out on every device and then sign
+in again with it. If you use a second factor (authenticator app or passkey), you are still asked
+for it when you sign in: the reset never replaces it.</p>
+<p>The page answers the same whether or not the address has an account, so a mail that does not
+arrive means one of: the address has no account, the account has no password (see below), the
+mail is in spam, or a link was already sent in the last 15 minutes (use that one, or wait).</p>
 <ul>
-<li><strong>Participants:</strong> ask a manager of the community to send the onboarding link again
-  (<strong>Participants → More → Send onboarding link</strong>). It signs you in, and you
-  choose a new password. If your invoice has a participant QR code, you can
-  also request a sign-in link from the page it opens.</li>
-<li><strong>Managers and admins:</strong> someone with server access sets a new password — see
-  <a href="../11-roles-and-permissions/#user-cannot-login">Roles and Permissions → "User cannot login"</a>.</li>
+<li><strong>Participant-only accounts without a password:</strong> ask a manager of the community to send the
+  onboarding link again (<strong>Participants → ⋯ → Send onboarding link</strong>). It signs you in, and you
+  choose a password. If your invoice has a participant QR code, you can also request a sign-in
+  link from the page it opens.</li>
+<li><strong>Accounts that sign in with an external provider only:</strong> use that provider.</li>
 </ul>
 <h3 id="unauthorized--403-forbidden-errors">"Unauthorized" / "403 Forbidden" Errors<a class="headerlink" href="#unauthorized--403-forbidden-errors" title="Permanent link">&para;</a></h3>
 <p><strong>Problem:</strong> Accessing feature you shouldn't see (permission issue).</p>
@@ -2499,7 +2510,7 @@ A common cause is the Celery worker not running — check <code>docker compose l
 <p><strong>Fix:</strong></p>
 <ol>
 <li>Restart worker service: <code>docker compose restart worker</code></li>
-<li>Check Redis: <code>docker compose logs redis</code></li>
+<li>Check Valkey: <code>docker compose logs valkey</code></li>
 <li>Check worker and scheduler status under <strong>Platform → Overview → System health</strong></li>
 </ol>
 <h2 id="getting-help">Getting Help<a class="headerlink" href="#getting-help" title="Permanent link">&para;</a></h2>
