@@ -166,7 +166,7 @@ keeps working ([`2026-10-privacy-retention-sweep.md`](2026-10-privacy-retention-
 |---|---|---|
 | `invoice` | FK → `Invoice` (`CASCADE`) | Flagged invoice; deletion resolves by cascade |
 | `import_log` | FK → `metering.ImportLog` (`SET_NULL`, nullable) | Source import; null for deletion-sourced flags or after log deletion — `evidence` keeps the identity |
-| `evidence` | `JSONField` | `{source: sdat-import \| import-deletion, delivery_id, creation, status, reason (import only), change_count, kinds, day_from, day_to, changes_truncated \| deleted_batches, deleted_readings, slots_truncated}` |
+| `evidence` | `JSONField` | `{source: sdat-import \| csv-import \| import-deletion, delivery_id, creation, status, reason (SDAT import only), filename (CSV import only), change_count, kinds, day_from, day_to, changes_truncated \| deleted_batches, deleted_readings, slots_truncated}` |
 | `created_at` | `DateTimeField` (auto) | When the correction landed; the regeneration cutoff compares against it |
 | `resolved_at` | `DateTimeField` (nullable) | Set on cancel-workflow resolution; regeneration resolves by row deletion with an audit event |
 | `resolved_by` | FK → user (`SET_NULL`, nullable) | Reserved; workflow resolutions record the actor on the invoice audit event instead |
@@ -285,6 +285,14 @@ transaction, so flags and reading changes succeed or roll back together; an
 additive-import deletion flags the same way inside its own delete
 transaction, consuming the deletion evidence (`deleted_slots`, billable
 stream only) scoped to each affected ZEV.
+
+CSV imports flag through the same helper: every committed CSV slot lands on
+the log's `reading_changes` (`availability` for creates, `value` for
+changed overwrites, `metadata` for identical-value overwrites — the
+metering import spec §5.2), and `flag_import_impacts()` consumes them
+unchanged inside the import transaction. CSV flags carry
+`evidence.source: csv-import` with the `filename` instead of SDAT delivery
+identity; attribution, matching and resolution are identical to SDAT flags.
 
 Attribution: only `availability`/`value` change kinds flag (metadata-only
 provenance updates change no quantity); replays, stale skips, held-only
@@ -1281,6 +1289,7 @@ the cockpit readiness and attention caches.
 | `test_period_overview_unit.py` | `ComputePeriodOverviewTests` (10 tests) | §5.5 unit level: complete/incomplete participants, single missing day, exclusion without assignment, partial-assignment required-day windows and gaps, invoice period matching, row ordering, multiple-metering-point counts |
 | `test_readiness.py` | 22 test classes (106 tests) | §5.6a: cockpit period resolution, bulk parity and stable query count, exact historical periods, running-versus-ended lifecycle metadata, first-run/awaiting/caught-up states, structured step details, attention and RBAC |
 | `test_reading_impact.py` | `AttributionTests` (9), `CorrectionImportTests` (3), `DraftRegenerationTests` (3), `FinalInvoiceResolutionTests` (2), `VisibilityTests` (3), `ReadinessImpactTests` (1), `BackupRoundTripTests` (1), `DeletionImpactTests` (2) | §4.6/§5.6a: holder-only vs community spread attribution, historical (not current) holder flagged, Swiss civil-day period routing, unrelated periods/ZEVs and cancelled invoices unflagged, metadata-only/empty changes flag nothing, per-import idempotency, end-to-end SDAT-CH correction flagging with snapshots/items/PDF/delivery records untouched, held/duplicate/stale/rejected files flag nothing, regeneration resolving incorporated revisions (mid-run correction carried, failed run keeps the flag), paid keeping the flag with cancel refused, cancel resolving as `cancelled`, manager/participant/other-ZEV visibility, readiness `data_corrections` warn step, backup/restore round trip, billable-deletion flagging |
+| `metering/test_import_csv.py` | `CsvOverwriteImpactTests` (5) | §4.6: end-to-end CSV overwrite flagging — billed-slot overwrite flags the invoice with `csv-import` evidence (value change, `filename` instead of delivery identity), past holder flagged while the current holder's later invoice stays clean, skip-mode duplicates and identical-value overwrites (metadata-only) flag nothing, rolled-back files persist no readings and flag nothing |
 | `test_engine_edge_cases.py` | `InvoiceMathEdgeCaseTests` | Edge cases: monthly fee month-boundary counting, tariff validity windows, zero/negative fees, rounding |
 | `test_engine_edge_cases.py` | `InvoiceVatRateSelectionTests` | VAT rate active at period_end, zero VAT when no vat_number |
 | `test_email_formatting.py` | `InvoiceEmailFormattingTests` | §7.1–7.2: date format in email body, custom ZEV templates, auto-transition to sent |

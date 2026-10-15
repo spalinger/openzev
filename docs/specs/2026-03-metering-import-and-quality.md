@@ -45,6 +45,9 @@ import and quality features from scratch.
 
 - Real-time streaming metering ingestion
 - Utility-specific protocols beyond CSV/Excel and SDAT-CH
+- SDAT-CH roles beyond the qualified E66 receiver profile: E31/`ImbalanceData`
+  messages, ACK/error exchange, LEG/community settlement, automated exchange,
+  and non-15-minute or non-kWh billing data (see §4.2)
 - Metering point and assignment management — see `SPEC-2026-metering-point-management`
 
 ---
@@ -73,7 +76,7 @@ import and quality features from scratch.
 | `source_meter_id` | `CharField(64)` | Meter identity as observed in the delivery (`VSENationalID`), before alias resolution |
 | `created_at` | `DateTimeField` (auto) | Creation timestamp |
 
-Ordering: `["metering_point", "timestamp"]`.
+Ordering: `["metering_point", "timestamp", "id"]`.
 
 **Database constraints:**
 
@@ -142,7 +145,7 @@ Ordering: `["metering_point", "timestamp"]`.
 | `result_status` | `CharField(16)` | Machine-readable SDAT-CH outcome: `accepted` (billable writes committed), `held` (only quarantine writes), `unchanged` (valid file, no writes), `rejected` (no observation writes, failure log preserved); blank for CSV/manual imports |
 | `result_counts` | `JSONField` (default `{}`) | Typed SDAT-CH observation accounting: `created`, `overwritten`, `held`, `promoted`, `duplicate`, `stale`, `excluded`, `rejected`, `quarantine_overwritten` (existing quarantine rows updated — replacement protection evidence), `reading_changes_truncated`. Identity: `rows_total == created+overwritten+held+duplicate+stale+excluded` on committed files (`rejected` only on rejected files); `promoted` is informational overlap, never added on top of `created`/`overwritten` |
 | `issues` | `JSONField` (default `[]`) | Structured SDAT-CH issues: `{code, severity: error|info, message, meter_id?, block_id?, position?, ...}` with stable codes (e.g. `unsupported_unit`, `missing_position`, `equal_creation_conflict`, `source_conflict`, `reactive_excluded`); the machine-readable source behind `errors`/`warnings` prose |
-| `reading_changes` | `JSONField` (default `[]`) | Committed billable-slot changes for invoice-impact consumers: `{metering_point, meter_id, timestamp, direction, kind: availability|value|metadata, old_energy, new_energy, promoted, source_document_id}`. Written in the same transaction as the readings — rolled-back imports record none |
+| `reading_changes` | `JSONField` (default `[]`) | Committed billable-slot changes for invoice-impact consumers (written by SDAT-CH and CSV imports): `{metering_point, meter_id, timestamp, direction, kind: availability|value|metadata, old_energy, new_energy, promoted, source_document_id}` (CSV sets `promoted: false` and an empty `source_document_id`). Written in the same transaction as the readings — rolled-back imports record none |
 | `source_delivery` | `JSONField` (default `{}`) | SDAT-CH delivery identity: `{delivery_id, creation, status, reason, sender_id, sender_role, receiver_id, receiver_role}` |
 | `timestamp_timezone` | `CharField(40, blank)` (default `""`) | Zone offset-less timestamps were read in: `"Europe/Zurich"` or `"UTC"` for CSV (the import setting), `"Europe/Zurich"` for SDAT-CH. `""` marks imports from before ADR 0026, which read them as UTC — the batches `reanchor_readings` operates on (spec `2026-09-swiss-civil-time.md` §6.3). Migration `0006_importlog_timestamp_timezone` |
 | `created_at` | `DateTimeField` (auto) | Import timestamp |
@@ -273,6 +276,24 @@ second file is skipped wholesale in skip mode, and in overwrite mode replaces
 the first file's readings. Mapping the OBIS column as `direction` is the
 supported way to import such a pair.
 
+**CSV change evidence and invoice flags:** every committed CSV slot is
+recorded on the log's `reading_changes` in the same shape SDAT publishes
+(`metering_point`, `meter_id`, `timestamp`, `direction`, `kind`,
+`old_energy`, `new_energy`, plus `promoted: false` and an empty
+`source_document_id` — CSV has neither): created slots are `availability`,
+overwrites with a different value are `value`, overwrites with an identical
+value are `metadata`. Evidence is capped at `CSV_READING_CHANGE_CAP`
+(10_000, the SDAT bound); past the cap the list stops growing and
+`result_counts.reading_changes_truncated` is set (the key is absent when
+nothing truncated). The import calls `flag_import_impacts()` unchanged
+inside the same transaction, so a CSV overwrite of billed readings raises
+the same scoped invoice data-review flag as an SDAT correction
+(resolution via regenerate/cancel, §4.6 of the invoice lifecycle spec),
+while skip-mode duplicates, identical re-imports (metadata-only) and
+rolled-back files flag nothing. Warnings, counts and idempotency are
+unchanged: `rows_overwritten` still counts every upserted slot including
+identical-value and intra-file repeats.
+
 An unparseable direction rejects the whole row — one error, one
 `rows_skipped`, nothing written — in both preview and import. Standard rows
 report it from `_interpret_standard_row` after the timestamp and energy
@@ -351,10 +372,10 @@ roles are deferred):
 | Aspect | Supported (writes billing data) | Held / rejected outcome |
 |---|---|---|
 | Message/root | E66 `ValidatedMeteredData_16`, namespace `http://www.strom.ch`, XSD-valid | Other roots → `unsupported_root`; other `ValidatedMeteredData_*` versions → `unsupported_schema_version`; schema-invalid → `schema_invalid` |
-| Header | `DocumentType` E66; `Status` 9 original / 5 replacement; `Creation` with explicit zone; reason `E88`/`C38` | Other types → `unsupported_document_type`; `Status` 1 → `cancellation_rejected`, other `Status` values → `unsupported_status`; missing/naive `Creation` → `missing_creation`/`invalid_creation`/`naive_timestamp`; missing reason → `missing_reason`; other reasons (incl. `C40`, `C23`) → `unsupported_reason`; missing header structure → `invalid_header` |
+| Header | `DocumentType` E66; `Status` 9 original / 5 replacement; `Creation` with explicit zone; reason `E88`/`C38` | Other types → `unsupported_document_type`; `Status` 1 → `cancellation_rejected`, other `Status` values → `unsupported_status`; missing/invalid `Creation` → `missing_creation`/`invalid_creation`; missing reason → `missing_reason`; other reasons (incl. `C40`, `C23`) → `unsupported_reason`; missing header structure → `invalid_header` |
 | Product/unit | Active energy `8716867000030` in `KWH` | Other unit → `unsupported_unit` (rejects file); reactive `…047` → `reactive_excluded` skip; LEG `…123/…124` → `leg_excluded` skip; unknown product → `unknown_product` |
 | Direction | `ConsumptionMeteringPoint` → IN, `ProductionMeteringPoint` → OUT | `ExchangeMeteringPoint` → `exchange_excluded` skip |
-| Interval | 15/MIN, UTC-aligned, whole slot count, complete positions `1..n` | Missing/duplicate/conflicting/out-of-range → `missing_position`/`duplicate_position`/`conflicting_position`/`invalid_position` (rejects file) |
+| Interval | 15/MIN, UTC-aligned, whole slot count, complete positions `1..n` | Missing/unaligned Interval or Resolution → `missing_interval`/`invalid_interval`/`unaligned_interval`/`missing_resolution`; missing/duplicate/conflicting/out-of-range positions → `missing_position`/`duplicate_position`/`conflicting_position`/`invalid_position` (rejects file) |
 | Quality | E88 + absent/`56` → billable (`condition` retained); C38 or `21` → held quarantine | Held rows never enter billing; promotion of predecessors counts as `promoted` |
 | Identity | `VSENationalID` resolves via `zev.models.resolve_metering_point` | Unknown → `unknown_meter`; multi-point → `ambiguous_meter` (both reject file) |
 | Overlap | SDAT-only slots | CSV/manual overlap → `source_conflict` (rejects file, existing data kept) |
@@ -362,6 +383,20 @@ roles are deferred):
 | Observation detail | Well-formed volumes with known `Condition` (absent/`56`/`21`) | Bad volume → `invalid_volume`; unknown `Condition` → `unknown_condition`; block without meter → `missing_meter_point` (all reject file) |
 | File/delivery envelope | Well-formed non-empty delivery within size caps | Oversize → `file_too_large`/`decompressed_too_large`; bad gzip → `gzip_error`; malformed XML → `malformed_xml`; no blocks → `empty_delivery`; issue overflow → `too_many_issues`; unexpected failure → `internal_error` (all reject with zero observation writes) |
 | Replay outcome | Changed data commits | Fully superseded/duplicate deliveries commit nothing and report info `stale_superseded`/`duplicate_delivery` |
+
+**XSD-gate precedence.** The schema gate (step 3) runs before the header and
+per-block semantic checks, so a value the 1.6 XSD already constrains is
+reported as `schema_invalid` rather than by the specific code named above:
+`Resolution` is fixed at `15`/`MIN` (so `unsupported_resolution` is a
+defensive handler, unreachable for schema-valid input), `Condition` is
+restricted to `21`/`56` (so `unknown_condition` is likewise defensive),
+`Creation` must carry an explicit zone, and offset-less `Interval` timestamps
+are schema-invalid (so `naive_timestamp` is defensive). Tests pin this
+(`test_derived_hourly_resolution_is_rejected`,
+`test_derived_bad_condition_is_schema_rejected` assert `schema_invalid`). The
+named codes remain a catalogue and would guard a future schema change.
+`missing_interval` and `missing_resolution` stay reachable because those
+elements are optional in the schema.
 
 Conformance corpus: `backend/metering/test_fixtures/sdatch/e66_1_4_4_customer.xml`
 is an unmodified copy of the official VSE 1_4_4 customer/producer example
@@ -405,7 +440,7 @@ is a named rejection before any observation write:
    permits 9/5); `Status` `5` means replace (upsert), `9` means original
    (skip-existing), anything else is rejected. `Creation` is mandatory and
    must carry an explicit zone — a missing or offset-less `Creation` rejects
-   the file (`missing_creation`/`invalid_creation`/`naive_timestamp`); it is
+   the file (`missing_creation`/`invalid_creation`); it is
    never defaulted to now. `BusinessReasonType` must be `E88` (billing) or
    `C38` (information). Every other schema-valid reason is a named
    unsupported profile (`unsupported_reason`): `C40` LEG settlement, `C23`
@@ -1196,7 +1231,7 @@ and missing meters still block the wizard.
   `protection_code` defines replacement protection.
 - CSV import runs in one transaction, publishing its readings and finalized overwrite count together. The successful log is created inside that transaction, so no half-finished import is ever visible or deletable. An unexpected failure rolls everything back and is then recorded as a separate failed-attempt log outside the transaction, before an `ImportFileError` propagates (400 with an actionable message, never an untraced 500). Deletion freezes the visible selection, locks its logs in primary-key order, checks protection, and deletes only that selection in one transaction.
 - Migration `0005_importlog_rows_overwritten` backfills the count from exact `Overwrote N existing readings.` notes in both legacy `errors` and newer `warnings`; other logs keep zero. The field is exposed by the import-log serializer and represented by `ImportLog.rows_overwritten: number` in TypeScript. Counts include repeated writes within the same file, so those overwrite imports are conservatively protected too.
-- The frontend disables the protected row's delete action, explains the policy in its protocol and bulk-delete dialog, and maps server rejections to the same localized message. The bulk dialog additionally lists the blocking protected imports (filename + creation time) and disables review/confirmation while any is in scope; the server stays authoritative. Correct a protected import by uploading corrected readings with overwrite enabled. (`quarantine_replace_protected` currently falls back to the generic delete-failure message until the import-protocol work renders it.)
+- The frontend disables the protected row's delete action, explains the policy in its protocol and bulk-delete dialog, and maps server rejections to the same localized message. The bulk dialog additionally lists the blocking protected imports (filename + creation time) and disables review/confirmation while any is in scope; the server stays authoritative. Correct a protected import by uploading corrected readings with overwrite enabled. (`quarantine_replace_protected` is mapped to its own localized message in the protocol and bulk-delete dialogs, in all four languages.)
 - `ImportLog` is read-only in Django admin (no add/change/delete): deletion, with its overwrite protection and batch cleanup, happens only through the application's protected workflow. Whole-ZEV deletion still removes the community's meters, readings and logs together.
 - Bulk delete uses the same manager/importer write scope as single deletion.
 - Bulk delete accepts `mode = all | period`.
@@ -1332,6 +1367,7 @@ interface ImportLog {
   rows_skipped: number
   source: string
   errors?: Array<{ row: number | null; error: string; meter_id?: string | null }>
+  warnings?: Array<{ row?: number | null; warning: string }>  // SDAT-CH warnings carry no row
   timestamp_timezone?: 'Europe/Zurich' | 'UTC' | ''  // '' = imported before ADR 0026
   created_at: string
   result_status?: '' | SdatResultStatus  // '' = CSV/manual/legacy
@@ -1352,6 +1388,7 @@ interface ImportPreviewRow {
   timestamp?: string | null
   energy?: string | null
   existing_data?: boolean
+  directions?: string[]             // reading directions this row would import ('in' / 'out')
   interval_minutes?: number
   values_count?: number
 }
@@ -1363,6 +1400,8 @@ interface ImportPreviewResult {
     existing_metering_points: number  // unique meters over the whole file that exist in the target ZEV
     missing_metering_points: number   // unique meters over the whole file that are missing in the target ZEV
     rows_previewed: number            // display-row cap (max_rows, currently 30)
+    rows_skipped_existing: number     // rows skipped because every slot already exists
+    readings_existing: number         // existing readings that would be left untouched
   }
   missing_meter_ids: string[]         // sorted distinct missing IDs over the whole file, capped at 50
   errors: Array<{ row: number | null; error: string }>
@@ -1496,6 +1535,7 @@ preview or quarantine dashboard.
 | Test module / class | Validates |
 |---|---|
 | `metering/test_import_csv.py::CsvImportTests` | §4.1/4.3/5.6/8.3: malformed CSV reported without crash; concurrent standard-profile duplicate races are skipped; timezone offset normalized (default parsing and explicit `%z` format); direct upload without preview valid (advisory contract); duplicate rows skipped; idempotent re-import; overwrite (`overwrite_existing=true`) updates in place and returns the overwrite note in `warnings` (never in `errors`); headerless positional mapping; `daily_15min` with `energy_start`/`values_count`; invalid/missing timestamp/energy handling; daily atomic rollback leaks no `imported` count on `IntegrityError`; empty daily rows skipped with an error; daily existence checks batched per contiguous file-day block (query-bound regression test); ZEV scoping (target-ZEV required, missing → 400, bad UUID → 400, unknown → 404, foreign-owned for owner → 403, disabled for owner → 400; admins can import into disabled ZEVs; mixed-ZEV file scoped to target with per-row errors; `log.zev` equals the requested target); preview (existing/missing meters without writing, unique counts, `missing_meter_ids` capped at 50, rows-beyond-cap still blocking, preview cap, no-write, field validation on missing-meter rows, clean invalid-number messages, single error per truncated/invalid daily row, validation stop at the error cap with whole-file coverage intact; ZEV rejections: missing → 400, bad UUID → 400, unknown → 404, foreign → 403; owners retain preview access for disabled ZEVs); import (truncated daily row writes nothing and counts one skip with zero readings; CSV errors carry `meter_id` when the row names a meter); same-owner multi-ZEV scoping (a meter from the owner's other ZEV is missing/skipped when targeting the first, for both import and preview); combined row-level field errors (bad timestamp, bad energy, bad direction, blank `meter_id`, missing timestamp/energy); column-mapping failure shape (200, empty `preview_rows`, single `row: null` error); exactly-50 missing IDs with no overflow remainder; audit events recorded for foreign-ZEV preview and import rejections; invalid `timestamp_format` rejected up front on preview (200 with a `row: null` error) and import (201 log, nothing written); year-less formats rejected on preview and upload; invalid timestamps report `Invalid timestamp value` without dateutil internals; daily `existing_data` is direction-aware; `test_daily_overwrite_preview_allows_duplicates_without_writing` covers skip/overwrite parity, invalid-value rejection, unchanged readings/logs during preview, and the final overwrite; OBIS direction mapping (a `1.29.0` file and a `2.29.0` file import onto one bidirectional point as `in` and `out`; an OBIS code overrides meter-type inference on the standard profile; reactive `3.29.0` is rejected; an invalid daily direction rejects the row in preview and import; preview rows report their `directions`) |
+| `metering/test_import_csv.py::CsvOverwriteImpactTests` (5) | §5.2: billed-slot CSV overwrite flags the invoice with `csv-import` evidence (`value` change, counts/warnings unchanged), past (not current) holder flagged, skip-mode duplicates and identical-value overwrites (metadata-only) flag nothing, rolled-back files persist no readings and flag nothing |
 | `metering/test_import_csv_characterization.py` | §4.1/4.3 parsing semantics (BOM, blank lines, ragged rows, Excel first-sheet and blank rows, empty-vs-missing, comma decimals, etc.), plus ZEV-required calls (every `upload_csv`/`preview_csv` passes `zev_id`; helper injects it by default), the unique preview summary (`"existing_metering_points" == 1` not 30), atomic daily validation (truncated/invalid rows write nothing: one error, one skip, zero readings) with per-slot gap-fill for partial duplicates, native Excel datetimes bypassing `timestamp_format` (standard and daily), `meter_id` on CSV errors, and `direction` column resolution (an explicitly mapped but unresolvable reference is a column error; the default reference stays lenient and falls back to meter-type inference) |
 | `metering/test_import_limits.py::CsvLimitTests` / `XlsxZipLimitTests` / `BackendUploadCapTests` | §4.4/§8.3: size/row/col caps, `values_count`/`interval_minutes` bounds on both import and preview (with `zev_id`), error truncation with sentinel; overwrite note lives in `warnings`, XLSX ZIP limits; characterization also exercises preview with `zev_id` |
 | `metering/testing.py` | Shared `upload_csv`/`preview_csv`/`detect_csv` helpers used by the import modules (the upload/preview helpers always exercise the required-`zev_id` path) |

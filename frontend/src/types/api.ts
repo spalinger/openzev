@@ -1113,14 +1113,14 @@ export interface GridOperatorSuggestion {
 export type InvoicePdfStatus = 'none' | 'pending' | 'ready' | 'failed'
 
 /** One open reading-correction flag on an invoice (invoice-lifecycle spec §4.6).
- * `import_log` is the source SDAT-CH import; null when the flag came from an
+ * `import_log` is the source import (SDAT-CH or CSV); null when the flag came from an
  * import deletion (whose logs are gone) — `evidence` always keeps the
  * delivery/batch identity. */
 export interface InvoiceReadingImpact {
     id: string
     import_log: string | null
     evidence: {
-        source: 'sdat-import' | 'import-deletion'
+        source: 'sdat-import' | 'csv-import' | 'import-deletion'
         delivery_id?: string
         creation?: string
         change_count?: number
@@ -1561,7 +1561,7 @@ export interface ImportLog {
     rows_skipped: number
     source: string
     errors?: Array<{ row: number | null; error: string; meter_id?: string | null }>
-    warnings?: Array<{ row: number | null; warning: string }>
+    warnings?: Array<{ row?: number | null; warning: string }>
     /** '' for batches imported before ADR 0026 (offset-less values read as UTC). */
     timestamp_timezone?: ImportTimestampTimezone | ''
     created_at: string
@@ -1637,6 +1637,8 @@ export interface ImportDeletionResult {
     deleted_readings: number
     /** Held (quarantine) readings removed alongside the billable ones. */
     deleted_quarantined_readings?: number
+    /** True when the audit slot evidence was capped. */
+    deleted_slots_truncated?: boolean
     mode?: 'all' | 'period'
     timezone?: 'Europe/Zurich'
 }
