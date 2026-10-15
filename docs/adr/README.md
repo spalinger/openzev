@@ -40,6 +40,7 @@ This directory captures key architectural decisions for OpenZEV.
 - [0034: Participant links never sign in an account with independent access](0034-participant-links-never-sign-in-independent-accounts.md)
 - [0036: Explicit participant-link password recovery](0036-explicit-participant-link-password-recovery.md)
 - [0037: Issued invoices are corrected by credit note, never deleted](0037-issued-invoices-are-corrected-not-deleted.md) (amends 0006; Proposed)
+- [0038: Order invoice-generation locks with restore and approval](0038-invoice-generation-lock-order.md)
 
 ## Conventions
 

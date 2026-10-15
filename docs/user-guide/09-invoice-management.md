@@ -302,6 +302,9 @@ community stops watching the previous period.
 
 The system calculates energy allocation and applies tariffs, creating a **Draft** invoice.
 
+Concurrent generation requests for the same participant run in sequence.
+The regeneration rules below apply to overlapping billing periods.
+
 ### Regenerating an Existing Invoice
 
 While an invoice is a **Draft**, **More → Regenerate invoice** replaces it with a

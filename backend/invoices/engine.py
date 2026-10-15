@@ -17,7 +17,7 @@ from functools import lru_cache
 from typing import Iterable, NamedTuple
 from uuid import UUID
 
-from django.db import models, transaction
+from django.db import connection, models, transaction
 from django.utils import timezone
 
 from billiard.exceptions import SoftTimeLimitExceeded
@@ -273,6 +273,9 @@ def _discard_replaceable_invoices(participant, period_start, period_end) -> None
         period_start__lte=period_end,
         period_end__gte=period_start,
     )
+    # Hold every overlapping row so approval cannot commit between the status
+    # check and the deletion below; approval takes the same row lock.
+    list(overlapping.order_by("pk").select_for_update().values_list("pk", flat=True))
     locked = locked_overlapping_invoices(participant, period_start, period_end).first()
     if locked:
         raise ValueError(
@@ -1619,13 +1622,23 @@ def generate_invoice(
 ) -> Invoice:
     """
     Generate (or regenerate) an invoice for a participant for the given period.
-    Existing DRAFT invoice for the same period will be replaced.
-    Raises ValueError if a non-draft, non-cancelled invoice already exists.
+    Replaces overlapping drafts and never-approved cancelled invoices.
+    Raises ValueError if an approved, sent or paid invoice overlaps.
 
     Batch callers pass an ``InvoiceGenerationContext`` with precomputed
     ZEV-period denominators. The single-invoice path omits it and derives the
     same values on demand.
     """
+    # Match restore's ZEV-first order without serializing other generators (ADR 0038).
+    if connection.vendor == "postgresql":
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'SELECT "id" FROM "zev_zev" WHERE "id" = %s FOR KEY SHARE',
+                [participant.zev_id],
+            )
+    # Lock even when no invoice exists, before checking or deleting overlaps.
+    # Selecting only the PK avoids locking a shared party via the manager's join.
+    Participant.objects.select_for_update().values("pk").get(pk=participant.pk)
     zev = participant.zev
 
     if generation_context is not None:

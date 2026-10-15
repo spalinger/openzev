@@ -8,7 +8,7 @@
 - Created: 2026-03-24
 - Target Release: Ongoing baseline
 - Related Issues: n/a (baseline)
-- Related ADRs: 0002, 0006, 0026 (supersedes 0007)
+- Related ADRs: 0002, 0006, 0026 (supersedes 0007), 0038
 - Impacted Areas: backend, frontend, docs
 
 ## 1. Problem and outcome
@@ -488,8 +488,16 @@ The engine runs **inside a single database transaction**.
 
 ### 4.0 Guard rails
 
-1. If a non-draft, non-cancelled invoice exists for the same participant + period → **raise `ValueError`** (do not overwrite).
-2. Delete any existing `draft` or `cancelled` invoice for the same participant + period that was never approved (`approved_at` null). A cancelled invoice that was approved stays, with its number, next to the new one (ADR 0037, `_discard_replaceable_invoices`).
+Generation holds its locks until the surrounding transaction ends, in this order:
+
+1. PostgreSQL: ZEV `FOR KEY SHARE`, which conflicts with restore's exclusive lock but permits other generators ([ADR 0038](../adr/0038-invoice-generation-lock-order.md)).
+2. Participant `FOR UPDATE`, selecting only its primary key to avoid locking the related party.
+3. All overlapping invoice rows `FOR UPDATE`, ordered by primary key, before checking their status or deleting them. Approval uses the same invoice-row lock.
+
+Pricing and numbering may still serialize on shared dynamic-price sources and the ZEV row.
+
+- An `approved`, `sent` or `paid` invoice overlapping the requested inclusive period for the same participant → **raise `ValueError`**.
+- Delete overlapping drafts and never-approved cancellations (`approved_at` null). Keep issued cancellations with their numbers next to the new draft (ADR 0037, `_discard_replaceable_invoices`).
 
 ### 4.1 Collect metering points
 
@@ -1416,13 +1424,14 @@ The description renders as: `"Surcharge 50% (50% von CHF 0.32/kWh)"` (German).
 |---|---|---|
 | Allocation regressions in edge timestamps | High | Golden-case regression tests and ADR alignment checks |
 | Historical invoice drift after tariff changes | High | Versioned validity windows and non-mutating historical invoices |
+| Concurrent generation creates overlapping drafts for one participant | High | Participant row lock precedes overlap checks and replacement (§4.0) |
 | Rounding/VAT discrepancies | Medium | Currency rounding tests and explicit VAT selection tests |
 | Zero-production timestamps causing division by zero | Medium | Guard clause: `if zev_production_at_ts > 0` before share computation |
 | Overlapping tariff validity windows | Medium | Tariff matching applies **all** active tariffs (no conflict — they accumulate) |
 | `fixed_price_chf` entered per-participant on a shared fee | Medium | Field label and form hint state "total for the community"; §3.4 and §4.6.3 call out the changed meaning |
 | Shared fee over- or under-recovering after a membership change | Medium | Denominator and charged months both evaluated per month (§4.6.3); reconciliation asserted across a full ZEV run |
 | A dynamic tariff's fetched series has a gap inside a billed period | High — would otherwise bill zero for a real reading | Engine refuses to generate rather than degrade (§4.4.3); readiness flags the gap before generation is attempted (`2026-09-dynamic-tariffs.md` §9.3) |
-| Concurrent generation for one participant and period | High — duplicate invoices with distinct numbers | Known gap: overlap checks precede number allocation and are not serialized. Follow-up: coordinate generation per participant/period; numbering locks alone do not make generation idempotent. |
+| Concurrent generation for one participant and period | High — duplicate invoices with distinct numbers | Serialized: the participant row lock precedes overlap checks and replacement, and overlapping invoice rows are held through the status check and deletion (§4.0) |
 
 ---
 
