@@ -246,6 +246,11 @@ address, after which the new login belongs to that party.
 The QR-Rechnung creditor address is the address of the ZEV's responsible
 person, taken from their participant record.
 
+#### Document numbering
+
+Invoice and participation-contract numbers are assigned automatically. Their
+counters cannot be reset through settings or the standard API.
+
 ### Documents & emails tab
 
 The invoice email template (see [Email Templates](#email-templates) below)
