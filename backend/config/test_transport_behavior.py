@@ -22,6 +22,7 @@ urlpatterns = [path("transport/", transport_probe, name="transport-probe")]
 
 def gunicorn_response(headers):
     """Pass real Gunicorn parsing and WSGI output through Django middleware."""
+    # This interaction test follows the Gunicorn version pinned in requirements.txt.
     config = Config()
     deployed_config = runpy.run_path(str(Path(__file__).resolve().parents[1] / "gunicorn.conf.py"))
     config.set("secure_scheme_headers", deployed_config["secure_scheme_headers"])

@@ -22,38 +22,35 @@ configuration.
 
 ## Production hardening
 
-Non-debug renders fail when `SECRET_KEY`, `DATABASE_URL`, or `frontendUrl`
-still hold their local defaults; point them at real secrets/URLs (existing
-Secrets for the first two) or set `debug: true` for local experiments only.
-The backend redirects HTTP to HTTPS (`backend.secureSslRedirect`) and sends a
-one-year HSTS header (`backend.hstsSeconds`) only when the scheme is trusted,
-i.e. a non-debug render with `backend.numProxies > 0` (default `0`: no
-redirect, no HSTS, so a default install can neither loop nor pin the wrong
-scheme — set `1` behind a sanitising ingress); tune all three for your ingress
-topology (hop-counting semantics: [Reverse proxies and NUM_PROXIES](#reverse-proxies-and-num_proxies)). Debug
-renders (`debug: true`, all workloads in Django debug mode) switch the
-redirect off and HSTS to zero for local plain-HTTP experiments.
-The schema requires boolean `debug` and `backend.secureSslRedirect` values,
-and a non-negative integer `backend.hstsSeconds`; quoted booleans are rejected.
+Production renders reject empty values and known development defaults for
+the secret, database URL, and frontend origin. Django checks the remaining
+production configuration. See [Example values](#example-values).
+
+Transport values render exactly as configured, including in debug and with
+`numProxies: 0`. See [proxy configuration](#reverse-proxies-and-num_proxies)
+before enabling redirects or HSTS. Booleans must be unquoted; HSTS seconds
+must be a non-negative integer. Set chart-managed transport settings through
+`debug` and `backend` values, not `backend.extraEnv`.
 
 Every workload runs as UID 10001 with the RuntimeDefault seccomp profile,
 privilege escalation disabled, dropped capabilities, and bounded CPU/memory
-(the frontend image listens on 8080 for this reason).
+(the frontend container listens on 8080; its Service remains on port 80).
 
-The nginx images log request paths and status codes without query strings or
-Referer headers. Request-context error logs are suppressed because nginx
-includes the original URI in upstream errors; process diagnostics still go to
-stderr. Django's `NUM_PROXIES` setting owns forwarded HTTPS detection, and
-Gunicorn does not independently infer HTTPS from forwarded headers.
+Partial security-context and resource overrides retain the other defaults;
+`{}` does not clear them. To omit a context or resource map, explicitly set
+that component's `podSecurityContext`, `securityContext`, or `resources` to
+`null`. Size memory limits for representative PDF workloads, including
+interactive invoice regeneration in the backend.
+
+See the [hardening spec](../../docs/specs/2026-09-production-hardening.md) for logging boundaries and upgrade requirements.
 
 ## Install
 
-Local experiments need `--set debug=true`, otherwise the render fails closed
-(see above). Production installs pass the secrets and URLs instead — see
-[Example values](#example-values):
+Local HTTP experiments need debug mode and disabled transport settings:
 
 ```bash
-helm upgrade --install openzev ./charts/openzev -n openzev --create-namespace --set debug=true
+helm upgrade --install openzev ./charts/openzev -n openzev --create-namespace \
+  --set debug=true --set backend.secureSslRedirect=false --set backend.hstsSeconds=0
 ```
 
 A production install must use a values file containing real secrets and the
@@ -337,6 +334,13 @@ an integer `>= 0` — empty, null, negative, and fractional values are rejected
 at install/upgrade time instead of crashing the backend on startup.
 Workers do not serve HTTP and do not need this setting.
 
+The backend connection from an ingress uses HTTP. Before enabling
+`backend.secureSslRedirect`, configure HTTPS at the ingress, make it overwrite
+`X-Forwarded-Proto` with the external scheme, and set `backend.numProxies`
+accordingly. Otherwise HTTPS requests can loop through redirects. Keep
+`backend.hstsSeconds: 0` until the public HTTPS origin works; the default
+`31536000` tells browsers to require HTTPS for one year after a secure response.
+
 ## Email configuration
 
 Set email-related values under `email` in `values.yaml`:
@@ -406,7 +410,7 @@ frontendUrl: https://openzev.example.com
 backend:
   allowedHosts: "openzev.example.com"
   csrfTrustedOrigins: "https://openzev.example.com"
-  # The ingress must sanitize XFF and send XFP=https.
+  # See "Reverse proxies and NUM_PROXIES" above.
   numProxies: 1
   secureSslRedirect: true
   hstsSeconds: 31536000

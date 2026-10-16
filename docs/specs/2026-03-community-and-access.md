@@ -1061,7 +1061,7 @@ A positive `NUM_PROXIES` also enables Django's forwarded HTTPS detection.
 Gunicorn's independent scheme inference is disabled in `backend/gunicorn.conf.py`,
 so even loopback requests cannot bypass disabled Django proxy trust.
 Transport defaults, deployment trust boundaries and log handling are detailed
-in [the production hardening spec](2026-09-production-hardening.md#6-transport-settings-and-proxy-trust).
+in [the production hardening spec](2026-09-production-hardening.md#2-transport-settings-and-proxy-trust).
 
 ---
 
@@ -2265,7 +2265,7 @@ lists the test classes per module (test counts are the `test_*` methods).
 | `ValidateSecretKeyTests` | 4 | Rejects empty and placeholder production keys while allowing them in development |
 | `ProductionHostsCheckTests` | 11 | Rejects unsafe hosts and frontend origins; accepts a complete production configuration; preserves distinct system-check IDs |
 | `ProductionConfigurationCheckTests` / `SeedDemoGuardTests` | 7 | Rejects empty/insecure CSRF origins, console or incomplete SMTP mail, and empty WebAuthn settings; refuses demo seeding in production |
-| `SettingsGuardsTests` | 2 | Isolated settings imports ignore forwarded HTTPS with `NUM_PROXIES=0` and trust it with `NUM_PROXIES=1` |
+| `ProxySettingsTests` | 2 | Isolated settings imports ignore forwarded HTTPS with `NUM_PROXIES=0` and trust it with `NUM_PROXIES=1` |
 
 **`config/test_transport_behavior.py`** (`TransportBehaviorTests`, 5 tests):
 HTTP redirects, trusted forwarded HTTPS with HSTS, spoofed forwarded HTTPS,

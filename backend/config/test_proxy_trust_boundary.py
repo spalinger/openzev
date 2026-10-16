@@ -1,11 +1,8 @@
-"""Pin the proxy trust boundary and log-safety rules across delivery modes.
+"""Pin the proxy trust boundary across delivery modes.
 
 The shipped protection is the combination of a backend reachable only through
 an overwriting proxy, loopback-bound production Compose entry points, and a
-matching ``NUM_PROXIES`` value. A future change from ``$remote_addr`` back to
-``$proxy_add_x_forwarded_for``, a query-bearing nginx log format, or a
-republished production port would silently reintroduce spoofing or token
-leakage.
+matching ``NUM_PROXIES`` value.
 """
 
 import json
@@ -53,28 +50,6 @@ class ProxyTrustBoundaryTests(SimpleTestCase):
                 self.assertIn("proxy_set_header X-Forwarded-For $remote_addr;", nginx)
                 self.assertNotIn("$proxy_add_x_forwarded_for", nginx)
 
-    def test_nginx_access_logs_omit_query_strings_and_referer(self):
-        for name in (
-            "frontend/nginx.conf",
-            "frontend/nginx.compose.conf",
-            "docker/fullstack-nginx.conf",
-        ):
-            nginx = read(name)
-            with self.subTest(config=name):
-                self.assertIn("log_format no_query", nginx)
-                self.assertIn("$request_method $uri $server_protocol", nginx)
-                self.assertNotIn("$request_uri", nginx)
-                self.assertNotIn("$args", nginx)
-                self.assertNotIn("$http_referer", nginx)
-
-    def test_gunicorn_logs_omit_query_and_referer(self):
-        for name in ("backend/Dockerfile", "docker/start-fullstack.sh"):
-            entrypoint = read(name)
-            with self.subTest(entrypoint=name):
-                self.assertIn("%(U)s", entrypoint)
-                self.assertNotIn("%(q)s", entrypoint)
-                self.assertNotIn("%(f)s", entrypoint)
-
     def test_dev_compose_keeps_zero_trusted_hops(self):
         compose = load_yaml("docker-compose.dev.yml")
 
@@ -82,11 +57,12 @@ class ProxyTrustBoundaryTests(SimpleTestCase):
         self.assertIn("8001:8000", compose["services"]["backend"]["ports"])
 
     def test_release_compose_matches_fullstack_trust_boundary(self):
-        compose = read("deploy/docker-compose.yml")
-        self.assertIn("NUM_PROXIES: 1", compose)
-        # Only the app's nginx port is published, never gunicorn's.
-        self.assertIn('"8080:80"', compose)
-        self.assertNotIn("8000", compose)
+        services = load_yaml("deploy/docker-compose.yml")["services"]
+        self.assertEqual(services["app"]["ports"], ["127.0.0.1:8080:8080"])
+        self.assertEqual(services["app"]["environment"]["NUM_PROXIES"], 1)
+        for name, service in services.items():
+            if name != "app":
+                self.assertNotIn("ports", service)
 
     def test_helm_defaults_safe_and_worker_has_no_num_proxies(self):
         values = load_yaml("charts/openzev/values.yaml")

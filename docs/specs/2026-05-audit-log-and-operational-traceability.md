@@ -805,7 +805,7 @@ middleware propagation; `AuditIpPersistenceTests` (1) checks
 malformed-address persistence as NULL. `ForwardedForThrottleTests` in
 `backend/accounts/test_throttling.py` (3) covers production zero-hop wiring
 and forwarded-header throttle buckets. `ProxyTrustBoundaryTests` in
-`backend/config/test_proxy_trust_boundary.py` (6) checks deployment
+`backend/config/test_proxy_trust_boundary.py` (8) checks deployment
 configuration invariants, including the Helm schema constraint on
 `backend.numProxies`.
 

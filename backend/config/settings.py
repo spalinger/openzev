@@ -227,8 +227,7 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 50,
 }
 
-# Trusted X-Forwarded-For hops (0 = REMOTE_ADDR only; NUM_PROXIES itself is
-# defined and validated in the transport section above). See
+# Trusted X-Forwarded-For hops (0 = REMOTE_ADDR only). See
 # charts/openzev/README.md ("Reverse proxies and NUM_PROXIES").
 # Both DRF throttling and config.client_ip read the REST_FRAMEWORK key below
 # (single source of truth); the top-level name keeps the env var discoverable.

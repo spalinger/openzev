@@ -1,5 +1,6 @@
 """Guards that keep a DEBUG=False deployment from starting insecure."""
 
+import json
 import os
 import subprocess
 import sys
@@ -167,25 +168,26 @@ def _proxy_header_in_subprocess(num_proxies):
         [
             sys.executable,
             "-c",
-            "import django; django.setup(); "
+            "import json, django; django.setup(); "
             "from django.conf import settings; "
-            "print(getattr(settings, 'SECURE_PROXY_SSL_HEADER', None))",
+            "print(json.dumps(getattr(settings, 'SECURE_PROXY_SSL_HEADER', None)))",
         ],
         cwd=Path(__file__).resolve().parents[1],
         env=env,
         check=True,
         capture_output=True,
         text=True,
+        timeout=30,
     )
-    return result.stdout.strip()
+    return json.loads(result.stdout)
 
 
-class SettingsGuardsTests(SimpleTestCase):
+class ProxySettingsTests(SimpleTestCase):
     def test_forwarded_proto_is_not_trusted_without_configured_proxy(self):
-        self.assertEqual(_proxy_header_in_subprocess("0"), "None")
+        self.assertIsNone(_proxy_header_in_subprocess("0"))
 
     def test_forwarded_proto_is_trusted_when_configured(self):
         self.assertEqual(
             _proxy_header_in_subprocess("1"),
-            "('HTTP_X_FORWARDED_PROTO', 'https')",
+            ["HTTP_X_FORWARDED_PROTO", "https"],
         )

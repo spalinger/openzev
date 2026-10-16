@@ -18,7 +18,7 @@ x-securityContext: &defaultSecurityContext
   allowPrivilegeEscalation: false
   capabilities:
     drop: [ALL]
-  readOnlyRootFilesystem: false
+  readOnlyRootFilesystem: false # nginx and PDF rendering need writable runtime paths.
 
 # Public frontend base URL used by backend-generated links/redirects
 # (verification emails and OAuth callback redirects).
@@ -111,9 +111,7 @@ backend:
   # Defaults to corsAllowedOrigins when left empty.
   # Example: "https://openzev.example.com"
   csrfTrustedOrigins: ""
-  # Number of proxy-added addresses retained in X-Forwarded-For. A positive
-  # value also enables trusting X-Forwarded-Proto for HTTPS detection; use it
-  # only behind a sanitising ingress (see the chart README).
+  # Trusted forwarded-address count; also gates HTTPS detection. See the README.
   numProxies: 0
 
 worker:
@@ -185,7 +183,7 @@ frontend:
     pullPolicy: IfNotPresent
   service:
     type: ClusterIP
-    port: 8080
+    port: 80
   podAnnotations: {}
   podSecurityContext: *defaultPodSecurityContext
   securityContext: *defaultSecurityContext
