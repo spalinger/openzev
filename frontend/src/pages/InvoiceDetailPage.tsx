@@ -15,8 +15,9 @@ import { useAuth } from '../lib/auth'
 import { scopeNoteKey, shellRoleForZev } from '../lib/communityAccess'
 import { PdfPreview } from '../components/PdfPreview'
 import { InvoiceAccessLinkCard } from '../features/invoices/InvoiceAccessLinkCard'
+import { InvoiceAppliedCreditsCard } from '../features/invoices/InvoiceAppliedCreditsCard'
 import { InvoiceCreditsCard } from '../features/invoices/InvoiceCreditsCard'
-import { canCorrectInvoice } from '../features/invoices/invoiceCredits'
+import { amountDueChf, canCorrectInvoice, hasCreditApplied } from '../features/invoices/invoiceCredits'
 import { InvoicePaymentsCard } from '../features/invoices/InvoicePaymentsCard'
 import type { Invoice } from '../types/api'
 
@@ -25,7 +26,7 @@ import { PageHeader } from '../components/PageHeader'
 import { Notice } from '../components/Notice'
 import { StatCard } from '../components/StatCard'
 import { InvoiceStatusBadge } from '../components/InvoicePresentation'
-import { formatChfAmount, formatKwh } from '../lib/numbers'
+import { formatChf, formatChfAmount, formatKwh } from '../lib/numbers'
 
 export function InvoiceDetailPage() {
     const { t } = useTranslation()
@@ -113,6 +114,13 @@ export function InvoiceDetailPage() {
         }
     }
 
+    // A refund leaves the invoice's own payload alone but changes what its credit notes show.
+    const handleCreditChanged = () => {
+        if (invoiceId) void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.detail(invoiceId) })
+        void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.credits() })
+        void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.mine() })
+    }
+
     const handleGeneratePdf = async () => {
         if (!invoiceId) return
         setGenerating(true)
@@ -140,6 +148,23 @@ export function InvoiceDetailPage() {
                         <span className="visually-hidden">{t('pages.invoiceDetail.status')}: </span>
                         <InvoiceStatusBadge status={inv.status} paidChf={inv.paid_chf} />
                         <span>{`${inv.participant_name} · ${formatShortDate(inv.period_start, settings)} → ${formatShortDate(inv.period_end, settings)}`}</span>
+                        {inv.replaced_by ? (
+                            <span>
+                                {t('pages.invoiceDetail.replacedBy')}{' '}
+                                <Link to={`/billing/invoices/${inv.replaced_by.id}`} state={location.state}>{inv.replaced_by.invoice_number}</Link>
+                            </span>
+                        ) : null}
+                        {inv.replaces?.length ? (
+                            <span>
+                                {t('pages.invoiceDetail.replaces')}{' '}
+                                {inv.replaces.map((ref, index) => (
+                                    <span key={ref.id}>
+                                        {index > 0 && ', '}
+                                        <Link to={`/billing/invoices/${ref.id}`} state={location.state}>{ref.invoice_number}</Link>
+                                    </span>
+                                ))}
+                            </span>
+                        ) : null}
                     </span>
                 }
                 actions={
@@ -152,7 +177,13 @@ export function InvoiceDetailPage() {
             {/* The figures of the invoice, as its summary tiles print them. */}
             <div className="invoice-figures">
                 <section className="stat-grid">
-                    <StatCard accent label={t('pages.invoiceDetail.total')} value={formatChfAmount(Number(inv.total_chf))} currency="CHF" />
+                    <StatCard
+                        accent
+                        label={t('pages.invoiceDetail.total')}
+                        value={formatChfAmount(Number(inv.total_chf))}
+                        currency="CHF"
+                        hint={hasCreditApplied(inv) ? t('pages.invoiceDetail.amountDueHint', { amount: formatChf(amountDueChf(inv)) }) : undefined}
+                    />
                     <StatCard label={t('pages.invoiceDetail.subtotal')} value={inv.subtotal_chf != null ? formatChfAmount(Number(inv.subtotal_chf)) : null} currency="CHF" />
                     <StatCard label={t('pages.invoiceDetail.vat')} value={inv.vat_chf != null ? formatChfAmount(Number(inv.vat_chf)) : null} currency="CHF" />
                 </section>
@@ -163,6 +194,8 @@ export function InvoiceDetailPage() {
                 </section>
             </div>
 
+            <InvoiceAppliedCreditsCard invoice={inv} />
+
             {/* `payments` is null for a participant, who sees the totals only. */}
             {!isParticipant && inv.payments != null && (
                 <InvoicePaymentsCard invoice={inv} canManage={canManageAccessLink} onChanged={handleInvoiceChanged} />
@@ -170,7 +203,12 @@ export function InvoiceDetailPage() {
 
             {/* A credit note exists for the participant from the moment it is issued. */}
             {((inv.credits ?? []).length > 0 || canCorrectInvoice(inv, canManageAccessLink)) && (
-                <InvoiceCreditsCard invoice={inv} canManage={canManageAccessLink} onChanged={handleInvoiceChanged} />
+                <InvoiceCreditsCard
+                    invoice={inv}
+                    canManage={canManageAccessLink}
+                    onChanged={handleInvoiceChanged}
+                    onCreditChanged={handleCreditChanged}
+                />
             )}
 
             {canManageAccessLink && inv.access_link != null && (

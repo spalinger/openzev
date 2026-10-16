@@ -7,6 +7,7 @@ import { ActionMenu, type ActionMenuItem } from './ActionMenu'
 import { openInvoicePdf } from '../lib/api/invoices'
 import { formatChf, formatChfAmount } from '../lib/numbers'
 import type { Invoice } from '../types/api'
+import { amountDueChf, hasCreditApplied } from '../features/invoices/invoiceCredits'
 import { invoiceStatusBadgeClass, isPartlyPaid } from '../features/invoices/invoiceStatus'
 
 export function InvoiceLink({ invoice, from, period, children, className }: {
@@ -39,6 +40,28 @@ export function InvoiceStatusBadge({ status, paidChf }: { status: Invoice['statu
 export function InvoiceAmount({ value, currency = true }: { value: Invoice['total_chf'] | null; currency?: boolean }) {
     if (value === null) return <span className="muted">-</span>
     return <>{currency ? formatChf(Number(value)) : formatChfAmount(Number(value))}</>
+}
+
+/**
+ * The invoice total and, where credit notes were set against it, the amount
+ * due beneath it (#388).
+ */
+export function InvoiceTotal({ invoice, currency = true }: {
+    invoice: Pick<Invoice, 'status' | 'total_chf' | 'credit_applied_chf' | 'amount_due_chf'>
+    currency?: boolean
+}) {
+    const { t } = useTranslation()
+    const due = amountDueChf(invoice)
+    return (
+        <>
+            <InvoiceAmount value={invoice.total_chf} currency={currency} />
+            {hasCreditApplied(invoice) && (
+                <small className="muted invoice-amount-due" style={{ display: 'block' }}>
+                    {t('invoice.amountDue')}: {currency ? formatChf(due) : formatChfAmount(due)}
+                </small>
+            )}
+        </>
+    )
 }
 
 /** Presentation only: callers decide whether PDF access is allowed and pass local pending state. */
