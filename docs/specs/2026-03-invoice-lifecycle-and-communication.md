@@ -8,7 +8,7 @@
 - Created: 2026-03-24
 - Target Release: Ongoing baseline
 - Related Issues: n/a (baseline)
-- Related ADRs: 0004, 0006, 0008, 0037
+- Related ADRs: 0004, 0006, 0008, 0037, 0038
 - Impacted Areas: backend, frontend, async jobs
 
 ## 1. Problem and outcome
@@ -282,8 +282,11 @@ invoice is in `approved` state, the task **automatically transitions** it to
 | `cancelled`, approved before (`approved_at` set) | **Kept** with its number; the new draft is created next to it (ADR 0037) |
 | `approved`, `sent`, `paid` | **Blocked** — raise `ValueError` (HTTP `409 Conflict`) |
 
-Engine regeneration operates inside `@transaction.atomic`.  The match key is
-`(participant, period_start, period_end)`.
+Single and bulk regeneration are atomic and serialized per participant before
+checking inclusive period overlaps (`period_start <= requested_end` and
+`period_end >= requested_start`). Adjacent periods are kept. See the
+[billing-engine guard rails](2026-03-tariffs-and-billing-engine.md#40-guard-rails)
+for the lock order coordinating generation with approval and community restore.
 
 ### 4.5 Deletion rules
 
@@ -1220,7 +1223,7 @@ the cockpit readiness and attention caches.
 |---|---|---|
 | Invalid state transitions exposed in UI/API | High | Centralized transition guards per endpoint + frontend button gating by status |
 | Duplicate or lost email sends | High | Per-attempt `EmailLog` audit trail, bounded retries (max 3) scoped to the SMTP send only — a post-delivery bookkeeping failure cannot trigger one (`#576`) — explicit retry endpoint refuses an already-`sent` log |
-| Regeneration races with approval/sending | Medium | Lifecycle locking: only never-approved draft/cancelled invoices may be replaced (`@transaction.atomic`) |
+| Regeneration races with approval/sending | High | Lock overlapping invoice rows before checking their status and deleting them; workflow transitions acquire the same invoice-row lock (§4.4) |
 | QR-Rechnung generation failure | Low | Graceful skip with log warning; invoice renders without QR section |
 | PDF template corruption via admin API | Medium | Templates stored in DB; on-disk default always intact and recoverable via DELETE endpoint |
 | Contract template corruption via admin API | Medium | Same DB-backed recovery mechanism applies |
@@ -1249,7 +1252,8 @@ visibility, restored access, and strict selection with a second membership.
 | `tests.py` | `InvoiceBillingIntegrationTests` | §5.2: end-to-end generation via API with metering data; allocation failures reported as 400, not the 409 duplicate-invoice message |
 | `test_payments.py` | `PaymentWorkflowTests` (10), `PaymentApiTests` (12), `RetentionTests` (7), `BillingRuleTests` (1), `BackfillMigrationTests` (1) | §3.6/§4/§5.3 (#388): partial payments keep `sent`, covering payments move to `paid`, over-payment / non-sent / future / non-positive refused, mark-paid books the outstanding amount (dated), a payout is paid with one negative payment, a zero total has none, removing a payment reverts `paid` → `sent`, `approved_at` stamped by approve and approve-all; API echoes `paid_chf`/`outstanding_chf` and payments, list annotation, removal and unknown id, audit events, cancel refused with payments, viewer read-only, participant sees totals but no rows (`payments` null, list `403`), disabled ZEV refused; regeneration keeps an issued cancelled invoice and deletes a never-issued one, owner cannot delete an issued cancelled invoice, admin cannot delete one with payments, period overview shows the replacement and readiness ignores the retained original; `billed_invoices`; the `0023` backfill |
 | `test_workflow.py` | `InvoiceWorkflowTests` | §4.2: approve draft ✓, approve non-draft ✗, mark-sent from approved ✓, mark-sent from draft ✗, mark-paid from sent ✓, mark-paid from draft ✗, cancel from draft/approved/sent ✓, cancel from paid ✗, cancel already-cancelled ✗ |
-| `test_workflow.py` | `InvoiceEngineGuardTests` | §4.4: regenerate approved/paid → 409, regenerate draft/cancelled → success |
+| `test_workflow.py` | `InvoiceEngineGuardTests` | §4.4: regenerate approved/sent/paid → 409; drafts and never-approved cancellations are replaced (201) |
+| `test_generation_race.py` | 9 test functions (11 cases, PostgreSQL only) | §4.4: participant/invoice lock scope, committed outcomes, rollback and community-restore ordering |
 | `test_disabled_zev_invoice_generation.py` | `GenerateSingleInvoiceTests`, `GenerateAllInvoicesTests` | §5.2: ZEV lifecycle phase 2 — `generate`/`generate-all` refuse a disabled ZEV for its owner (400, no invoice created / no task queued) but not for an admin |
 | `test_workflow.py` | `StaleInstanceConcurrencyTests` | §5.3 concurrency (#572): a stale-in-memory `cancel_invoice`/`approve_invoice`/`mark_invoice_sent` cannot undo a transition another already-loaded instance committed first (a `paid` invoice survives a stale cancel, a `cancelled` one survives a stale mark-sent/approve); a stale `record_email_delivery` never raises and never resurrects a status past cancellation, but still records `sent_at` and reports the row's real prior status; a second stale cancel is reported as "already cancelled", not the original status |
 | `test_workflow.py` | `test_concurrent_cancel_and_mark_paid_serialize_on_the_row_lock` (PostgreSQL only — CI's PostgreSQL leg) | §5.3 concurrency (#572): two genuinely overlapping transactions — one holding the invoice row lock, the other running real `mark_invoice_paid` — serialize on that lock (verified via `pg_blocking_pids`) rather than racing; the second sees the first's committed `cancelled` status and correctly refuses |

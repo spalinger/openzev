@@ -9,8 +9,8 @@ The whole-consumer counts that follow assert *upper bounds*: they catch a
 future change silently adding queries (N+1) to the billing path while leaving
 room to *remove* a query (an improvement) without churning this file.
 
-Counts are measured on the shared multi-meter reconciliation fixture and
-verified to be identical on SQLite and PostgreSQL.
+Bounds cover SQLite and PostgreSQL on the shared multi-meter reconciliation
+fixture; generation also takes a ZEV key-share lock on PostgreSQL.
 """
 from datetime import date
 from decimal import Decimal
@@ -121,10 +121,10 @@ class AllocationQueryCountTests(_ReconciliationBase):
             AssignmentWindows.for_participant(self.alice, PERIOD_START, PERIOD_END)
 
     def test_engine_generate_invoice_query_count(self):
-        # Covers metering/tariffs, issuer snapshots, and invoice writes.
-        # Number allocation adds SAVEPOINT, a locked read, and RELEASE (+3).
+        # Covers pricing, issuer snapshots, invoice writes and row locks.
+        # The bound includes PostgreSQL's additional ZEV key-share query.
         self._call_at_most(
-            21, generate_invoice, self.alice, PERIOD_START, PERIOD_END
+            24, generate_invoice, self.alice, PERIOD_START, PERIOD_END
         )
 
     def test_weight_keyed_shared_fees_do_not_scale_queries_with_tariff_count(self):
