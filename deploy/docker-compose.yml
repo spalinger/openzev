@@ -33,7 +33,8 @@ services:
       - db
       - valkey
     ports:
-      - "8080:80"
+      # Only a trusted local TLS proxy may reach the scheme-trusting nginx.
+      - "127.0.0.1:8080:8080"
     volumes:
       - backend_media:/app/media
 
