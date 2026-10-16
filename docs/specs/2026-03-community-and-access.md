@@ -314,6 +314,9 @@ and the representative manage the ZEV through that role
 and `viewable_zev_ids` include those ZEVs, memberships carry `roles`, and the
 last-manager rule counts them.
 
+Concurrent manager removal and waiting-request authorization follow
+SPEC-2026-10-zev-access-grants §7.1; regressions are listed in its §13.
+
 ### 4.2 Backend permission classes
 
 Defined in `accounts/permissions.py` and `zev/permissions.py`.
@@ -1145,21 +1148,25 @@ human to judge as weak) but is long enough to pass them on the next change.
     administrator. There is no separate "last active admin" guard: the only way
     to reach zero active admins through `is_active` is exactly this case (a
     non-self deactivation always leaves the acting admin active).
-- DELETE: two guards:
+- DELETE: eligibility and manager guards, checked under the account's locks:
   1. **Last-admin guard** — blocked if the target `is_admin` and no other
      user with `role=admin` exists (→ 403 "Cannot delete the last admin
      account."). Self-deletion is allowed when another admin remains.
   2. **Linked-account guard** — blocked if user has linked participant records
      (→ 403 "Linked participant accounts cannot be deleted.").
   3. **Last-manager guard** — the delete runs inside `zev.access.keeping_a_manager`
-     over every ZEV the account manages (grant or role, `managed_zev_ids`); when its
-     cascaded manager grants or its cleared `Party.user` leave one of them without a
+     with `account=instance`, covering all related ZEVs, including historical/future
+     relationships. When its cascaded manager grants or cleared `Party.user` leave one without a
      manager, it is rolled back (→ 403 `NO_MANAGER_LEFT`, denied `user.delete` audit
-     event). SPEC-2026-10-zev-parties §5.5.
+     event). Concurrent relationship additions may instead cause a retryable 400;
+     lock order, fresh authorization and response: access-grants §7.1.
 
   Success audit is recorded before `instance.delete()` so the actor FK is
   valid; `on_delete=SET_NULL` nullifies `actor_user` on self-deletion while
   preserving `actor_display` and `target_id`.
+  If the caller is deleted while waiting for a lock, return 403 and record a
+  denied `user.delete` event with `actor_user=null`, preserving the caller's
+  display and role snapshot; leave the target account intact.
 
 ### 6.4 Admin accounts page (frontend)
 
@@ -2312,7 +2319,8 @@ prior readings for that community, including rows outside the new seed window.
 | `test_scoping.py` | 1 | 4 | `ZevScopedQuerySetMixin` read scoping (admin, grant, participant link, manager-only resource) |
 | `test_access_regression.py` | 2 | 17 | #761: pins what an account with one relationship sees and may change (lists, cross-ZEV detail, reports, dashboard, statements, MCP, main writes); unchanged by the per-ZEV rewrite |
 | `test_access.py` | 4 | 24 | #761: `ZevAccessGrant` model, `zev.access` helpers, owner-grant invariant, migration 0031 (SPEC-2026-10-zev-access-grants §13) |
-| `test_access_api.py` | 3 | 35 | #761 step 5: the grant API (`/zev/zevs/{id}/access/`: list, give, change, revoke, last-manager rule, audit), email invitations (inactive account, 7-day link, accept via verify-email, resend, revoke, failed send, templates), `/auth/me` memberships, `may_create_zev`, grant holders' logins protected |
+| `test_access_api.py` | 3 | 38 | #761 step 5: the grant API (`/zev/zevs/{id}/access/`: list, give, change, revoke, last-manager rule, audit), email invitations (inactive account, 7-day link, accept via verify-email, resend, revoke, failed send, templates), `/auth/me` memberships, `may_create_zev`, grant holders' logins protected |
+| `test_manager_concurrency.py` | 0 | 63 | PostgreSQL concurrency contract and regressions: access-grants §7.1 and §13 |
 | `test_access_scoping.py` | 4 | 14 | #761: viewers read what managers read and write nothing (`ViewerWriteRouterWalkTests` tries every unsafe route); accounts with several relationships get the union; former participants keep sent invoices only |
 | `test_write_scoping.py` | 5 | 19 | Write scoping: foreign create refused, move-via-PATCH refused, legit writes and admin bypass still work, audit retained; DELETE on a ZEV is `405` for every role, since the only supported removal path is disable then purge |
 | `test_disable_enable.py` | 4 | 17 | ZEV lifecycle phase 1: owner/admin can disable, only admin can enable, both audited, guarded against double-disable/double-enable; a disabled ZEV is read-only to its owner (admin can still write); the self-setup "already have a ZEV" guard excludes disabled ZEVs |
