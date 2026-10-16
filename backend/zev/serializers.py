@@ -668,6 +668,9 @@ class ZevSerializer(BankIbanValidationMixin, serializers.ModelSerializer):
                 {"vat_number": "Only a VAT-registered ZEV carries a VAT number. "
                  "Clear it, or set the VAT mode to registered."}
             )
+        # Save the validated VAT pair together so concurrent partial edits cannot mix it.
+        if "vat_mode" in attrs or "vat_number" in attrs:
+            attrs.update(vat_mode=vat_mode, vat_number=vat_number)
         return attrs
 
     def get_issuer(self, obj):
@@ -695,7 +698,16 @@ class ZevSerializer(BankIbanValidationMixin, serializers.ModelSerializer):
         read_only_fields = [
             "id", "created_at", "updated_at",
             "disabled_at", "disabled_by", "disabled_reason",
+            "invoice_counter", "contract_counter",
         ]
+
+    def update(self, instance, validated_data):
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        # A full save would rewind counters allocated since this instance was loaded.
+        instance.save(update_fields=[*validated_data, "updated_at"])
+        instance.refresh_from_db()
+        return instance
 
 
 class ZevDetailSerializer(ZevSerializer):

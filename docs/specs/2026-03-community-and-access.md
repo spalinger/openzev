@@ -1283,8 +1283,10 @@ set is rejected unless the caller is an admin. The owner still sees it (their
 write to it — not even re-clear `disabled_at` itself, since that field is
 read-only on `ZevSerializer` regardless of disabled state.
 
-**Serializer:** `ZevSerializer` (all fields except `disabled_at`/
-`disabled_by`/`disabled_reason`, which are read-only — see §7.1a). Retrieve
+**Serializer:** `ZevSerializer` (all model fields; `id`, `created_at`, `updated_at`,
+`invoice_counter`, `contract_counter`, and `disabled_at`/`disabled_by`/
+`disabled_reason` are read-only — see §7.1a and
+`2026-03-admin-governance-and-settings.md` §4.3). Retrieve
 uses `ZevDetailSerializer` which nests `participants` (via
 `ParticipantSerializer`, many=True, read-only).
 
@@ -2121,8 +2123,9 @@ fields written through — `kind`, `title`, `first_name`, `last_name`,
 
 ### 13.4 ZevSerializer / ZevDetailSerializer
 
-`ZevSerializer`: all model fields. Owner assignment defaults to `request.user`.
-Owner validation: non-admin cannot assign a different owner.
+`ZevSerializer`: all model fields plus read-only `issuer`; there is no `owner`
+field. Read-only fields are listed in §7.1; settings persistence is described
+in `2026-03-admin-governance-and-settings.md` §4.3.
 
 `ZevDetailSerializer`: extends `ZevSerializer`, adds nested `participants`
 (ParticipantSerializer, many=True, read-only).
