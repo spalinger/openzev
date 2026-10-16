@@ -36,11 +36,8 @@ def can_reset(user: User | None) -> bool:
 
 
 def _state_fingerprint(user: User) -> str:
-    """Stands for "the account as it was when the link was issued": its address
-    and password hash. Either changing makes the fingerprint differ. A keyed MAC
-    (as in Django's own reset tokens), so nothing can be recomputed from a leaked
-    token without the server's secret key."""
-    return salted_hmac(SALT, f"{user.pk}\x00{user.email}\x00{user.password}").hexdigest()[:16]
+    """Bind reset tokens to the account's email, password hash and session version."""
+    return salted_hmac(SALT, f"{user.pk}\x00{user.email}\x00{user.password}\x00{user.session_version}").hexdigest()[:16]
 
 
 def issue_token(user: User) -> str:

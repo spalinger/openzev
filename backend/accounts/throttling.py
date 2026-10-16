@@ -132,7 +132,7 @@ class AuthMfaThrottle(SimpleRateThrottle):
 
         token = (request.data or {}).get("mfa_token", "")
         try:
-            user, _ = mfa.resolve_challenge(token)
+            user, _, _ = mfa.resolve_challenge(token)
             ident = str(user.pk)
         except mfa.MfaChallengeError:
             ident = self.get_ident(request)

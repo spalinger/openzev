@@ -312,10 +312,11 @@ to bombard one mailbox, which an IP-keyed limit would not.
 `POST /api/v1/public/magic-link/consume/` with `{"token": "..."}`.
 
 Marks `consumed_at`, issues the normal auth cookies via the same helper
-`verify_email` uses, and returns `{"detail": "Signed in."}` (or the MFA challenge
-shape when required). Subsequent requests use ordinary participant scoping.
+`verify_email` uses, and returns `{"detail": "Signed in."}` or an MFA challenge.
+Subsequent requests use participant scoping and `src=participant_link` provenance.
 After full authentication, including required MFA, pending credentials are retired
-and the session may reset its password; unflagged passwords are preserved. See
+and a separate fixed recovery deadline is issued; unflagged passwords are preserved.
+Session renewal retains provenance without renewing recovery permission. See
 [setup and recovery](2026-09-participant-onboarding-link.md#password-setup-and-explicit-recovery).
 
 A link whose account gained its own login after it was issued is spent without

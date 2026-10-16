@@ -252,11 +252,12 @@ def link_account_for(participant):
     return user
 
 
-def has_login_credentials(user):
+def has_independent_login_credentials(user):
+    """Return whether the account has an independent login credential."""
     return (
-        user.has_usable_password()
-        or user.social_accounts.filter(provider__enabled=True).exists()
-        or user.webauthn_credentials.exists()
+        (user.has_usable_password() and not user.password_from_participant_link)
+        or user.social_accounts.filter(provider__enabled=True, from_participant_link=False).exists()
+        or user.webauthn_credentials.filter(from_participant_link=False).exists()
     )
 
 
@@ -267,21 +268,21 @@ def is_pending_invitation(user) -> bool:
 
 
 def validate_account_login(user, *, field="user") -> None:
-    if not has_login_credentials(user) and not is_pending_invitation(user):
+    if not has_independent_login_credentials(user) and not is_pending_invitation(user):
         raise ValidationError({
             field: "Send an access invitation before assigning independent access.",
         })
 
 
 def protect_account_login(user, *, credential_field="user"):
-    """Require a login, then retire sessions, API keys and participant tokens before promotion.
+    """Require ownership, then retire participant credentials before promotion.
 
-    An already protected account was promoted before and passes unchanged, even
-    between accepting its invitation and choosing a password. Call inside a
-    transaction. Bulk writes bypass the model guards that call this, so
+    Already-protected accounts are unchanged, including between invitation
+    acceptance and password enrollment. Call inside a transaction.
+    Bulk writes bypass the model guards that call this, so
     maintenance code must call it before adding access.
     """
-    from accounts.models import ApiKey, MagicLinkToken
+    from accounts.models import ApiKey, MagicLinkToken, TotpDevice
     from accounts.session_revocation import revoke_sessions
     from .onboarding import revoke_active_for_user
 
@@ -289,6 +290,15 @@ def protect_account_login(user, *, credential_field="user"):
     if locked.independent_login_required:
         return locked
     validate_account_login(locked, field=credential_field)
+    if locked.password_from_participant_link:
+        locked.set_unusable_password()
+        locked.password_from_participant_link = False
+        locked.must_change_password = False
+        locked.save(update_fields=["password", "password_from_participant_link", "must_change_password"])
+    locked.webauthn_credentials.filter(from_participant_link=True).delete()
+    locked.social_accounts.filter(from_participant_link=True).delete()
+    locked.mfa_recovery_codes.filter(from_participant_link=True).delete()
+    TotpDevice.objects.filter(user=locked, from_participant_link=True).delete()
     revoke_sessions(locked)
     ApiKey.objects.filter(user=locked, revoked_at__isnull=True).update(revoked_at=timezone.now())
     revoke_active_for_user(locked)
@@ -310,7 +320,7 @@ def existing_owner_problem(user) -> str | None:
         return "An admin account cannot be a ZEV owner. Choose another account."
     if not user.is_active and not is_pending_invitation(user):
         return "This account is deactivated."
-    if not has_login_credentials(user) and not is_pending_invitation(user):
+    if not has_independent_login_credentials(user) and not is_pending_invitation(user):
         return "Send this account an access invitation before making it a ZEV owner."
     return None
 

@@ -152,6 +152,13 @@ a password, or their external sign-in provider. If neither is available, ask
 someone with server access to recover the account; see
 [Roles and Permissions](11-roles-and-permissions.md#user-cannot-login).
 
+### Give a Participant Independent Access
+
+Credentials created through participant links cannot carry independent access.
+Giving manager/viewer access sends an invitation unless an independent login
+already exists; see [promotion and recovery](11-roles-and-permissions.md#giving-a-participant-independent-access)
+for the required steps and upgrade effects.
+
 ## Participation Contract
 
 **Contract PDF** on a participant's row downloads their participation

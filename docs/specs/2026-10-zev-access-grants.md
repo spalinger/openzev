@@ -498,8 +498,8 @@ under the action it attempted. Metadata always carries `user_id`.
 syncs participant fields only for accounts without independent access.
 `requires_independent_login`, `link_account_for` and `protect_account_login`
 follow the canonical [onboarding account policy](2026-09-participant-onboarding-link.md#no-link-signs-in-an-account-with-its-own-login).
-`has_login_credentials` checks a usable password, linked enabled OAuth provider
-or passkey; `is_pending_invitation` checks an inactive account with an unused
+`has_independent_login_credentials` checks independent password/provider/passkey ownership
+under that policy; `is_pending_invitation` checks an inactive account with an unused
 invitation. `validate_account_login` accepts either for managing-role assignment
 and later links; the parties spec §5.5 describes its field errors.
 `own_participant_for_user(user, zev_id=None)` returns the first current row in
@@ -619,12 +619,13 @@ tokens; it reads `/auth/me`.
 Triggered by a grant create requiring an invitation (§7.1):
 
 1. Create a passwordless inactive `role=user` account when none exists, or
-   deactivate the authorized existing passwordless account under its user lock.
+   deactivate the authorized existing account without independent credentials under
+   its user lock. Passwords/passkeys enrolled through participant links do not count;
+   an unmarked password/passkey or enabled verified social account does.
 2. `issue_invitation` locks and rechecks the inactive user, consumes earlier unused invitation tokens and creates
    `EmailVerificationToken(purpose="invitation", token=token_urlsafe(48))`.
-3. Create the grant; `protect_account_login` retires participant sessions, API keys and
-   tokens before access changes. Pending invitations do not set the permanent
-   independent-login flag.
+3. Create the grant; `protect_account_login` retires participant credentials under
+   onboarding spec §4. Pending invitations do not set the permanent independent-login flag.
 4. Send `zev_access_invitation`; failure retains the grant for resend (§7.1).
 
 `POST /auth/verify-email/` consumes the invitation, activates the account and

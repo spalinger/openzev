@@ -73,9 +73,9 @@ class EmailChangeRequestView(APIView):
                 {"detail": "Your email address is managed by your administrator.", "code": "managed_email"},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        if not user.has_usable_password():
+        if not user.has_usable_password() or user.password_from_participant_link:
             return Response(
-                {"detail": "Your email address is managed by your administrator.", "code": "no_password"},
+                {"detail": "Email changes require an independently established password.", "code": "no_password"},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -274,8 +274,9 @@ class PasswordResetConfirmView(APIView):
             except (User.DoesNotExist, password_reset.PasswordResetError):
                 return invalid
             locked.set_password(new_password)
+            locked.password_from_participant_link = False
             locked.must_change_password = False
-            locked.save(update_fields=["password", "must_change_password"])
+            locked.save(update_fields=["password", "password_from_participant_link", "must_change_password"])
             revoke_sessions(locked)
             links_revoked = zev_onboarding.revoke_active_for_user(locked)
             magic_revoked = magic_links.revoke_for_user(locked)

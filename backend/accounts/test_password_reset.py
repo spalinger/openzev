@@ -19,7 +19,8 @@ from audit.models import AuditEvent
 from testing.helpers import authenticate as auth, make_user
 
 from . import password_reset
-from .models import TotpDevice, User, UserRole
+from .models import OAuthExchangeCode, TotpDevice, User, UserRole
+from .session_revocation import revoke_sessions
 from .test_mfa import TEST_KEY, TOKEN_URL, TOTP_CONFIRM_URL, TOTP_DEVICE_URL
 
 REQUEST_URL = "/api/v1/auth/password-reset/"
@@ -113,6 +114,49 @@ class PasswordResetRequestTests(PasswordResetBase):
 
 
 class PasswordResetConfirmTests(PasswordResetBase):
+    def test_mailbox_recovery_establishes_an_independent_password(self):
+        self.user.password_from_participant_link = True
+        self.user.save(update_fields=["password_from_participant_link"])
+        self.request_reset()
+        token = _token_from_mail(mail.outbox[0])
+
+        self.assertEqual(self.confirm(token).status_code, 200)
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.password_from_participant_link)
+        login = self.client.post(TOKEN_URL, {"username": self.user.username, "password": NEW_PASSWORD})
+        self.assertEqual(login.status_code, 200)
+        from .jwt_utils import is_participant_link_session
+        from rest_framework_simplejwt.tokens import AccessToken
+
+        self.assertFalse(is_participant_link_session(AccessToken(login.cookies["openzev_access"].value)))
+
+    def test_recovery_discards_pending_oauth_exchange_codes(self):
+        code = OAuthExchangeCode.objects.create(user=self.user, code="before-mailbox-recovery")
+        self.assertEqual(self.confirm(self.issue()).status_code, 200)
+        self.assertFalse(OAuthExchangeCode.objects.filter(pk=code.pk).exists())
+        response = self.client.post("/api/v1/auth/oauth/token-exchange/", {"code": code.code}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.cookies)
+
+    def test_session_revocation_invalidates_an_outstanding_reset_link(self):
+        token = self.issue()
+        revoke_sessions(self.user)
+        self.assertEqual(self.confirm(token).status_code, 400)
+
+    def test_confirmation_rechecks_revocation_after_token_resolution(self):
+        token = self.issue()
+        resolve = password_reset.resolve_token
+
+        def revoke_after_read(value, **kwargs):
+            user = resolve(value, **kwargs)
+            revoke_sessions(User.objects.get(pk=user.pk))
+            return user
+
+        with mock.patch("accounts.views_security.password_reset.resolve_token", side_effect=revoke_after_read):
+            self.assertEqual(self.confirm(token).status_code, 400)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("pass1234"))
+
     def test_sets_the_password_and_clears_the_forced_change(self):
         response = self.confirm(self.issue())
 

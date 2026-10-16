@@ -39,7 +39,7 @@ from config.safe_format import render_with_fallback
 from . import access
 from .models import Party, Zev, ZevAccessGrant, ZevAccessRole
 from .services import (
-    build_unique_username, requires_independent_login, has_login_credentials,
+    build_unique_username, requires_independent_login, has_independent_login_credentials,
     is_pending_invitation, issue_invitation,
 )
 
@@ -325,7 +325,7 @@ class ZevAccessListView(_ZevAccessBase):
                 account.set_unusable_password()
                 account.save(update_fields=["password"])
             else:
-                needs_invitation = not has_login_credentials(account)
+                needs_invitation = not has_independent_login_credentials(account)
                 if needs_invitation and not request.user.is_admin:
                     if (
                         requires_independent_login(account)

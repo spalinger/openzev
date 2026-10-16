@@ -3,7 +3,7 @@ import { useMutation } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../../lib/auth'
 import { requestEmailChange } from '../../lib/api/auth'
-import { formatApiError } from '../../lib/api/errors'
+import { apiErrorPayload, formatApiError } from '../../lib/api/errors'
 import { useToast } from '../../lib/toast'
 
 /**
@@ -34,7 +34,12 @@ export function EmailChangeForm() {
             setPassword('')
             setError(null)
         },
-        onError: (err) => setError(formatApiError(err, t('account.emailChange.failed'))),
+        onError: (err) => {
+            const code = String(apiErrorPayload(err)?.code)
+            setError(['no_password', 'managed_email'].includes(code)
+                ? t('account.emailChange.managed')
+                : formatApiError(err, t('account.emailChange.failed')))
+        },
     })
 
     function submit(event: FormEvent) {

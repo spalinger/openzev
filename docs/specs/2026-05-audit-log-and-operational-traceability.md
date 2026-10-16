@@ -395,7 +395,9 @@ mutation it describes. The update mixin reads its before-snapshot outside
 that block, so the recorded diff is best-effort under concurrent writes.
 Password setup/change/recovery also write their audit event inside the credential
 transaction; audit failures roll back password/session/link changes and the post-commit
-notification. Initial setup records the actual prior pending-change flag. MFA login
+notification. The `recover_password` management command likewise wraps trusted
+recovery and `auth.password.recovered` auditing in one transaction; an audit failure
+rolls back its password, session and link/code retirement. Initial setup records the actual prior pending-change flag. MFA login
 events distinguish `first_factor` (`password`/`participant_link`) and `second_factor`
 (`totp`/`recovery_code`); the existing `method` key is retained, with
 `participant_link+totp` for link/TOTP logins.

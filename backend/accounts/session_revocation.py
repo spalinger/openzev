@@ -20,17 +20,23 @@ from rest_framework_simplejwt.settings import api_settings as jwt_settings
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .cookies import set_auth_cookies
-from .jwt_utils import SESSION_CLAIM, impersonator_of, make_jwt_for_user
+from .jwt_utils import SESSION_CLAIM, impersonator_of, is_participant_link_session, make_jwt_for_user
 from .models import OAuthExchangeCode, User
 
 
 def is_session_current(token, user) -> bool:
     """True when ``token`` was issued in ``user``'s current session.
 
-    Single place for the ``SESSION_CLAIM`` check. ``is_active`` stays at the
-    call sites (simplejwt's rule for access tokens, explicit filter elsewhere).
+    Participant-derived sessions also fail once independent access is required.
+    ``is_active`` stays at the call sites.
     """
-    return token.get(SESSION_CLAIM, 0) == user.session_version
+    if token.get(SESSION_CLAIM, 0) != user.session_version:
+        return False
+    if is_participant_link_session(token):
+        from zev.services import requires_independent_login
+
+        return not requires_independent_login(user)
+    return True
 
 
 def validate_refresh_token(refresh_token: str) -> RefreshToken:
@@ -71,5 +77,8 @@ def keep_current_session(request, response, user) -> None:
     An impersonation session stays an impersonation session: the claim is
     carried over rather than silently promoting the admin to the target.
     """
-    tokens = make_jwt_for_user(user, impersonated_by=impersonator_of(request.auth))
+    tokens = make_jwt_for_user(
+        user, impersonated_by=impersonator_of(request.auth),
+        participant_link=is_participant_link_session(request.auth),
+    )
     set_auth_cookies(request, response, access=tokens["access"], refresh=tokens["refresh"])

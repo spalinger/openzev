@@ -126,6 +126,7 @@ duplicate-secret handling is not worth the surface.
 |---|---|---|---|
 | `id` | `UUIDField` | `uuid4` | Primary key, non-editable |
 | `user` | `OneToOneField(User, CASCADE)` | — | `related_name="totp_device"` |
+| `from_participant_link` | `BooleanField` | `False` | Non-editable enrollment origin; onboarding spec §4 |
 | `secret_encrypted` | `BinaryField` | — | Fernet token over the base32 secret (§4.5) |
 | `confirmed_at` | `DateTimeField` | `null` | Null until a code is verified; an unconfirmed device never gates login |
 | `last_used_step` | `BigIntegerField` | `null` | Replay guard: the TOTP step counter last accepted |
@@ -156,6 +157,7 @@ Many per user, deliberately — a lost phone must not be a lockout.
 |---|---|---|---|
 | `id` | `UUIDField` | `uuid4` | Primary key |
 | `user` | `ForeignKey(User, CASCADE)` | — | `related_name="webauthn_credentials"` |
+| `from_participant_link` | `BooleanField` | `False` | Non-editable enrollment origin; login inherits it (onboarding spec §4) |
 | `credential_id` | `BinaryField` | — | `unique=True`; the raw credential ID from the authenticator |
 | `public_key` | `BinaryField` | — | COSE-encoded public key. **Public — not encrypted** |
 | `sign_count` | `BigIntegerField` | `0` | Monotonic counter; a decrease signals a cloned authenticator |
@@ -184,6 +186,7 @@ never exposed.
 |---|---|---|---|
 | `id` | `UUIDField` | `uuid4` | Primary key |
 | `user` | `ForeignKey(User, CASCADE)` | — | `related_name="mfa_recovery_codes"` |
+| `from_participant_link` | `BooleanField` | `False` | Non-editable issuance origin; onboarding spec §4 |
 | `code_hash` | `CharField(64)` | — | SHA-256 hex of the code |
 | `used_at` | `DateTimeField` | `null` | Single use |
 | `created_at` | `DateTimeField` | `auto_now_add` | |
@@ -198,6 +201,11 @@ there is nothing for an attacker to guess and no iteration count changes that. R
 
 **Regeneration** deletes all existing rows for the user and issues ten new ones, so an old
 printout stops working.
+
+First-factor recovery codes inherit enrollment origin; explicit regeneration
+uses the caller's session. TOTP setup/confirmation uses sticky OR semantics.
+[Onboarding spec §4](2026-09-participant-onboarding-link.md#no-link-signs-in-an-account-with-its-own-login)
+defines promotion, mixed-origin credentials and upgrade behavior.
 
 ### 4.4 `AppSettings` additions
 
@@ -302,12 +310,12 @@ keep their existing `oauth.login` event, which already names the provider. `pass
 `auth.mfa.challenge_failed` with the reason.
 
 **The challenge token** is `django.core.signing.TimestampSigner(salt="accounts.mfa.challenge")`
-over `{user: pk, sv: session_version, participant_link: boolean}`, with `max_age = MFA_CHALLENGE_TTL`
+over `{user: pk, sv: session_version, participant_link: boolean, password_recovery: boolean}`, with `max_age = MFA_CHALLENGE_TTL`
 (5 minutes). Resolution requires an active user and the current session version;
 session revocation invalidates outstanding challenges. The optional provenance
 defaults to false for existing callers/challenges: pre-deployment object challenges
 containing only `{user, sv}` remain accepted, with no link recovery permission. `resolve_challenge(token, lock=False)`
-returns `(user, participant_link)`; `TokenMfaView` uses `lock=True` inside its transaction.
+returns `(user, participant_link, password_recovery)`; `TokenMfaView` uses `lock=True` inside its transaction.
 Resolution rechecks signed expiry after the lock wait, then activity/session version;
 link provenance also rechecks independent-account eligibility. Pending credentials
 are retired and recovery is granted only after successful MFA; see
@@ -317,6 +325,12 @@ format rejects challenges issued by the previous scalar-signed format as
 most `MFA_CHALLENGE_TTL`, 5 minutes). A signed token rather than a
 JWT deliberately: it is structurally incapable of authenticating a request, because no
 authentication class parses it, so a bug cannot promote it into a session.
+
+`TokenMfaView` transfers origin and fresh-link proof separately. Ordinary password challenges can
+carry participant credential origin without recovery permission. Source propagation
+follows onboarding spec §4.
+Older object tokens lacking either boolean default that field to false; the upgrade invalidates
+legacy participant sessions/challenges.
 
 It is **not** single-use, and does not need to be: within its 5-minute window it is only useful
 with a valid TOTP code, and `last_used_step` (§4.1) already makes each code single-use. Adding a
@@ -379,6 +393,10 @@ failure.
 `me/mfa/totp/` POST returns the secret in plain text **once**, because the user must be able to
 type it into an authenticator that cannot scan a QR code. `qr_svg` is rendered server-side with
 the already-installed `qrcode` dependency, so the secret never reaches a third-party QR service.
+
+Passkey authentication rechecks the credential under its lock after assertion
+verification. A credential deleted by removal or promotion returns the generic
+400 authentication failure without issuing cookies.
 
 ### 5.3 Administration
 
@@ -739,9 +757,9 @@ provider without the requirement unaffected). TOTP tests pin the clock
 with a `totp_step` helper so replay protection never collides with a real 30-second step. The
 Passkeys, the policy, the removal guard and the admin reset shipped with PR 3 (below).
 
-**As shipped in PR 3**: `accounts/test_passkeys.py`, 64 tests, driving py_webauthn end to end
+**Passkey coverage**: `accounts/test_passkeys.py`, 65 tests, driving py_webauthn end to end
 through a small software authenticator (real `none` attestations, real ES256 assertions, nothing
-about the library mocked): `PasskeyRegistrationTests` (13), `PasskeyLoginTests` (15, including that a
+about the library mocked): `PasskeyRegistrationTests` (13), `PasskeyLoginTests` (16, including that a
 successful login stamps `User.last_login`),
 `PasskeyGatesThePasswordRouteTests` (7, the passkey-gated password / magic-link routes and the recovery-code second step), `PasskeyThrottleTests` (1), `MfaPolicyTests` (11), `MfaRemovalGuardTests` (6),
 `MfaAdminResetTests` (7) and `WebAuthnRpCheckTests` (4). These replace the illustrative

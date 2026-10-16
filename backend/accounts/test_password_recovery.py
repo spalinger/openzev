@@ -51,6 +51,22 @@ class ParticipantPasswordRecoveryTests(TestCase):
         token = magic_links.issue(self.user)
         return client.post(MAGIC, {"token": token.token}, format="json")
 
+    def test_participant_credential_password_login_does_not_grant_or_renew_recovery(self):
+        self.choose_password()
+        self.user.password_from_participant_link = True
+        self.user.save(update_fields=["password_from_participant_link"])
+        client = APIClient()
+        response = client.post("/api/v1/auth/token/", {"email": self.user.email, "password": PASSWORD})
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(client.get(ME).data["password_recovery_expires_at"])
+        self.assertEqual(client.post(RESET, {"new_password": "DeniedPassword42!"}).status_code, 403)
+        self.assertEqual(client.post(ME + "change-password/", {
+            "old_password": PASSWORD, "new_password": "ChangedParticipantPassword42!",
+        }).status_code, 200)
+        self.assertIsNone(client.get(ME).data["password_recovery_expires_at"])
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.password_from_participant_link)
+
     def test_link_setup_then_manager_address_edit_keeps_real_password_login_working(self):
         self.assertEqual(self.link_login().status_code, 200)
         self.assertEqual(self.client.post(INITIAL, {"new_password": PASSWORD}).status_code, 200)
@@ -367,9 +383,10 @@ class ParticipantPasswordRecoveryTests(TestCase):
         challenge = TimestampSigner(salt=mfa.MFA_CHALLENGE_SALT).sign_object({
             "user": self.user.pk, "sv": self.user.session_version,
         })
-        user, participant_link = mfa.resolve_challenge(challenge)
+        user, participant_link, recovery = mfa.resolve_challenge(challenge)
         self.assertEqual(user.pk, self.user.pk)
         self.assertFalse(participant_link)
+        self.assertFalse(recovery)
 
     def test_initial_password_audit_uses_actual_pending_flag(self):
         for pending in (False, True):

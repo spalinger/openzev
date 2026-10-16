@@ -11,18 +11,29 @@ from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 SESSION_CLAIM = "sv"
 
 IMPERSONATOR_CLAIM = "impersonated_by"
+SOURCE_CLAIM = "src"
+PARTICIPANT_LINK_SOURCE = "participant_link"
 PASSWORD_RECOVERY_CLAIM = "password_recovery_until"
 PASSWORD_RECOVERY_WINDOW = timedelta(minutes=15)
 
 
-def make_jwt_for_user(user, *, impersonated_by=None, participant_link: bool = False) -> dict:
+def make_jwt_for_user(
+    user, *, impersonated_by=None, participant_link: bool = False, password_recovery: bool = False,
+) -> dict:
     refresh = RefreshToken.for_user(user)
     add_custom_claims(refresh, user)
+    if participant_link:
+        refresh[SOURCE_CLAIM] = PARTICIPANT_LINK_SOURCE
+    # Impersonation cannot authorize password recovery.
     if impersonated_by:
         refresh[IMPERSONATOR_CLAIM] = impersonated_by
-    elif participant_link:
+    elif password_recovery:
         refresh[PASSWORD_RECOVERY_CLAIM] = int((timezone.now() + PASSWORD_RECOVERY_WINDOW).timestamp())
     return {"access": str(refresh.access_token), "refresh": str(refresh)}
+
+
+def is_participant_link_session(token) -> bool:
+    return hasattr(token, "get") and token.get(SOURCE_CLAIM) == PARTICIPANT_LINK_SOURCE
 
 
 def password_recovery_deadline(token, user):
@@ -61,16 +72,5 @@ def impersonator_of(token) -> int | None:
 
 
 def record_login(user) -> None:
-    """Stamp ``last_login`` for a genuine new sign-in.
-
-    Called explicitly at each door that mints a session because a person just
-    authenticated — never from inside ``make_jwt_for_user`` itself, which also
-    backs two things that are not that: ``session_revocation.keep_current_session``
-    (reissuing tokens under the *same* session after a password or email
-    change) and impersonation (the admin signed in; the target did not).
-    Reuses Django's own ``update_last_login`` — the same function
-    ``django.contrib.auth`` wires to the ``user_logged_in`` signal for the
-    admin site, which none of this project's own login views raise (they
-    return JSON, not a redirect through ``django.contrib.auth.login()``).
-    """
+    """Stamp last_login after authentication, excluding renewal and impersonation."""
     update_last_login(None, user)

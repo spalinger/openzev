@@ -57,6 +57,7 @@ class User(AbstractUser):
     # from its grants (zev.access).
     may_create_zev = models.BooleanField(default=False)
     independent_login_required = models.BooleanField(default=False, editable=False)
+    password_from_participant_link = models.BooleanField(default=False, editable=False)
     # The community opened by default for this user. Accounts that relate to
     # several communities can switch between them; this records the one
     # to land on, so the default does not depend on the order the list happens
@@ -131,11 +132,11 @@ class User(AbstractUser):
                 field.name
                 for field in self._meta.concrete_fields
                 if not field.primary_key and field.name not in (
-                    "session_version", "independent_login_required", "password",
+                    "session_version", "independent_login_required", "password", "password_from_participant_link",
                 )
             ]
             if self._password is not None or getattr(self, "_unusable_password_set", False):
-                kwargs["update_fields"].extend(["password"])
+                kwargs["update_fields"].extend(["password", "password_from_participant_link"])
         privilege_fields = {"role", "is_superuser", "may_create_zev"}
         update_fields = kwargs.get("update_fields")
         if not self.independent_login_required and (self.is_admin or self.may_create_zev) and (
@@ -147,7 +148,15 @@ class User(AbstractUser):
                 from zev.services import protect_account_login
 
                 with transaction.atomic():
-                    protect_account_login(self, credential_field=self._privilege_field())
+                    locked = type(self).objects.locked().get(pk=self.pk)
+                    retire_password = not locked.independent_login_required and locked.password_from_participant_link
+                    if retire_password and self._password is not None:
+                        raise ValidationError({"password": "Set an independent password before assigning access."})
+                    protected = protect_account_login(locked, credential_field=self._privilege_field())
+                    if retire_password:
+                        self.password = protected.password
+                        self.password_from_participant_link = protected.password_from_participant_link
+                        self.must_change_password = protected.must_change_password
                     self.independent_login_required = True
                     if update_fields is not None:
                         kwargs["update_fields"] = set(update_fields) | {"independent_login_required"}
@@ -290,6 +299,7 @@ class TotpDevice(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="totp_device")
+    from_participant_link = models.BooleanField(default=False, editable=False)
     secret_encrypted = models.BinaryField()
     # Null until a code is verified. An unconfirmed device never gates login —
     # otherwise a user who abandons enrolment mid-flow (closed the tab before
@@ -379,6 +389,7 @@ class MfaRecoveryCode(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="mfa_recovery_codes")
+    from_participant_link = models.BooleanField(default=False, editable=False)
     code_hash = models.CharField(max_length=64)
     used_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -408,6 +419,7 @@ class WebAuthnCredential(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="webauthn_credentials")
+    from_participant_link = models.BooleanField(default=False, editable=False)
     credential_id = models.BinaryField(unique=True)
     public_key = models.BinaryField()
     # Monotonic counter reported by the authenticator; a decrease signals a
@@ -715,6 +727,7 @@ class SocialAccount(models.Model):
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="social_accounts")
     provider = models.ForeignKey(OAuthProvider, on_delete=models.CASCADE, related_name="social_accounts")
+    from_participant_link = models.BooleanField(default=False, editable=False)
     uid = models.CharField(max_length=500, help_text="Unique identifier returned by the provider (sub / id).")
     extra_data = models.JSONField(default=dict)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -735,6 +748,8 @@ class OAuthState(models.Model):
     # If set, this is a *link* request; the completed callback attaches the
     # social account to this user instead of creating a new session.
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    session_version = models.PositiveIntegerField(null=True, editable=False)
+    from_participant_link = models.BooleanField(default=False, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def is_valid(self) -> bool:
