@@ -239,7 +239,7 @@ def test_generation_finishes_before_a_waiting_restore():
 
     def restore_lock():
         with transaction.atomic():
-            return Zev.objects.select_for_update().get(pk=participant.zev_id).pk
+            return Zev.objects.select_for_update().only("pk").get(pk=participant.zev_id).pk
 
     with ThreadPoolExecutor(max_workers=1) as pool:
         def gather_while_restore_waits(*args, **kwargs):
