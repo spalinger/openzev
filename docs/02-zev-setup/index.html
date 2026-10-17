@@ -789,6 +789,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#document-numbering" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Document numbering
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1546,6 +1557,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../21-analytics-and-grafana/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Analytics and Grafana
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1873,6 +1912,17 @@
     <span class="md-ellipsis">
       
         Payment Details
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#document-numbering" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Document numbering
       
     </span>
   </a>
@@ -2366,6 +2416,9 @@ address, after which the new login belongs to that party.</p>
 </table>
 <p>The QR-Rechnung creditor address is the address of the ZEV's responsible
 person, taken from their participant record.</p>
+<h4 id="document-numbering">Document numbering<a class="headerlink" href="#document-numbering" title="Permanent link">&para;</a></h4>
+<p>Invoice and participation-contract numbers are assigned automatically. Their
+counters cannot be reset through settings or the standard API.</p>
 <h3 id="documents--emails-tab">Documents &amp; emails tab<a class="headerlink" href="#documents--emails-tab" title="Permanent link">&para;</a></h3>
 <p>The invoice email template (see <a href="#email-templates">Email Templates</a> below)
 and these free-text fields:</p>
@@ -2480,7 +2533,7 @@ is still a draft) if you want it in the new shape.</p>
 <li><strong>Subject line</strong> — Email subject sent with invoices</li>
 <li><strong>Email body</strong> — Message body sent with invoice PDF attachment</li>
 </ul>
-<p>Both fields support variable placeholders such as <code>{invoice_number}</code>, <code>{zev_name}</code>, <code>{participant_name}</code>, <code>{period_start}</code>, <code>{period_end}</code>, and <code>{total_chf}</code>. See <a href="../10-email-configuration/#email-templates">Email Configuration → Email Templates</a> for the full variable reference.</p>
+<p>Both fields support variable placeholders such as <code>{invoice_number}</code>, <code>{zev_name}</code>, <code>{participant_name}</code>, <code>{period_start}</code>, <code>{period_end}</code>, <code>{total_chf}</code>, and <code>{amount_due_chf}</code>. See <a href="../10-email-configuration/#email-templates">Email Configuration → Email Templates</a> for the full variable reference.</p>
 <p>Subject and body can inherit the platform template or use your own text
 independently. Their badges show the saved choice; <strong>Unsaved changes</strong> marks a
 staged edit. <strong>Use platform default</strong> takes effect after <strong>Save changes</strong>. See
