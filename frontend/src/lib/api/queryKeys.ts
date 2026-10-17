@@ -34,6 +34,12 @@ export const queryKeys = {
     dynamicPrices: (sourceId: string, dateFrom: string, dateTo: string) =>
       ['tariffs', 'dynamic-sources', sourceId, 'prices', dateFrom, dateTo] as const,
   },
+  charges: {
+    lists: () => ['charges', 'list'] as const,
+    list: (zevId?: string, periodStart?: string, periodEnd?: string) =>
+      ['charges', 'list', zevId ?? 'all', periodStart ?? null, periodEnd ?? null] as const,
+    preview: (payload: unknown) => ['charges', 'preview', payload] as const,
+  },
   feasibility: {
     enabled: () => ['feasibility', 'enabled'] as const,
   },
