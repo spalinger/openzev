@@ -499,6 +499,26 @@ test.describe('User Guide Screenshots', () => {
     await screenshotFull(page, '09-imports')
   })
 
+  // 09b — SDAT-CH import protocol: the seeded correction import shows the
+  // guide's structured outcome ("Corrections applied"), observation
+  // accounting, stable findings and the delivery identity.
+  test('09b-import-protocol', async ({ page }) => {
+    await navigateTo(page, '/metering/imports')
+    await page.waitForSelector('tbody tr', { timeout: 10_000 })
+    const row = page.locator('tbody tr', { hasText: 'e66-correction' })
+    await expect(row).toHaveCount(1)
+    await row.getByRole('button', {
+      name: /open protocol|protokoll/i,
+    }).click()
+    await page.waitForSelector('div[role="dialog"]', { timeout: 10_000 })
+    await page.waitForSelector('div[role="dialog"] .badge', { timeout: 10_000 })
+    // A taller viewport shows outcome badge, accounting and findings together;
+    // at 900px the findings sit below the fold of the scrolling dialog.
+    await page.setViewportSize({ width: 1440, height: 1400 })
+    await page.waitForTimeout(400)
+    await screenshotViewport(page, '09b-import-protocol')
+  })
+
   // 10 — Admin Dashboard
   test('10-admin-dashboard', async ({ page }) => {
     await navigateTo(page, '/admin')

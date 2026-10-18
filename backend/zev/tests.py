@@ -2769,6 +2769,7 @@ class SeedDemoReseedTests(SeedDemoWindow, TestCase):
 			"dynamic_points": DynamicPricePoint.objects.count(),
 			"email_logs": EmailLog.objects.count(),
 			"import_logs": ImportLog.objects.count(),
+			"reading_impacts": InvoiceReadingImpact.objects.count(),
 			"audit_events": AuditEvent.objects.count(),
 			"contracts": ContractIssue.objects.count(),
 			"zevs": Zev.objects.count(),
@@ -2819,7 +2820,13 @@ class SeedDemoReseedTests(SeedDemoWindow, TestCase):
 		self.assertGreater(first["readings"], 0)
 		self.assertGreater(first["invoices"], 0)
 		self.assertGreater(first["email_logs"], 0)
-		self.assertEqual(first["import_logs"], 2)
+		self.assertEqual(first["import_logs"], 3)
+		self.assertEqual(first["reading_impacts"], 1)
+		impact = InvoiceReadingImpact.objects.get()
+		self.assertIsNone(impact.resolved_at)
+		self.assertEqual(impact.invoice.participant.user.email, "anna@openzev.local")
+		self.assertEqual(impact.import_log.result_status, "accepted")
+		self.assertEqual(impact.evidence["delivery_id"], impact.import_log.source_delivery["delivery_id"])
 		self.assertGreater(first["audit_events"], 0)
 		self.assertEqual(first["contracts"], 0)  # PDF issuance is mocked
 
@@ -2835,6 +2842,7 @@ class SeedDemoReseedTests(SeedDemoWindow, TestCase):
 		self.assertEqual(second["dynamic_points"], first["dynamic_points"])
 		self.assertEqual(second["email_logs"], first["email_logs"])
 		self.assertEqual(second["import_logs"], first["import_logs"])
+		self.assertEqual(second["reading_impacts"], first["reading_impacts"])
 		self.assertEqual(second["audit_events"], first["audit_events"])
 		self.assertEqual(second["contracts"], first["contracts"])
 		self.assertEqual(second["zevs"], 2)
