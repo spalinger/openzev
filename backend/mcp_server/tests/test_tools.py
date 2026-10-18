@@ -7,6 +7,10 @@ from zoneinfo import ZoneInfo
 from decimal import Decimal
 
 import pytest
+from django.core.cache import cache
+from accounts.throttling import AuditListThrottle
+from rest_framework.test import APIClient
+from testing.helpers import authenticate
 
 from invoices.models import Credit, CreditApplication, InvoiceStatus
 from metering.models import ImportLog, ImportSource, MeterReading, ReadingDirection, ReadingResolution
@@ -711,3 +715,24 @@ class TestAuditQuery:
             call_tool(owner_mcp_client, "period_readiness", {"zev_id": str(zev.id)})
         result = _structured(call_tool(owner_mcp_client, "audit_query", {"limit": 1}))
         assert len(result["events"]) == 1
+
+    def test_audit_budget_is_shared_with_browser_and_reported_as_tool_error(self, owner_mcp_client, owner_user, monkeypatch):
+        cache.clear()
+        monkeypatch.setattr(AuditListThrottle, "THROTTLE_RATES", {"audit_list": "1/minute"})
+        zev = ZevFactory(owner=owner_user)
+        from audit.models import AuditEvent, AuditActionCategory
+        AuditEvent.objects.create(zev=zev, action_category=AuditActionCategory.SYSTEM,
+                                  action_type="system.test", target_type="test", summary="Visible event")
+        try:
+            first = _structured(call_tool(owner_mcp_client, "audit_query", {"zev_id": str(zev.pk)}))
+            assert len(first["events"]) == 1
+            browser = APIClient()
+            authenticate(browser, owner_user)
+            assert browser.get("/api/v1/audit/events/").status_code == 429
+            result = _tool_result(call_tool(owner_mcp_client, "audit_query", {"zev_id": str(zev.pk)}))
+            assert result["isError"] is True
+            assert "throttled" in result["content"][0]["text"].lower()
+            assert "events" not in result["structuredContent"]
+            assert "throttled" in result["structuredContent"]["error"].lower()
+        finally:
+            cache.clear()

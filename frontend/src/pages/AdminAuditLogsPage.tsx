@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
+import { isAxiosError } from 'axios'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { fetchAuditEvents, fetchAuditFilterOptions } from '../lib/api/audit'
+import { formatApiError } from '../lib/api/errors'
 import { queryKeys } from '../lib/api/queryKeys'
 import { formatDateTime, useAppSettings } from '../lib/appSettings'
 import { useAuth } from '../lib/auth'
 import { useManagedZev } from '../lib/managedZev'
-import { useScopeNote } from '../lib/communityAccess'
+import { useCommunityAccess, useScopeNote } from '../lib/communityAccess'
 import { CivilDateInput } from '../components/CivilDateInput'
 import { AuditEventDrawer } from '../features/audit/AuditEventDrawer'
 import type { AuditActionCategory, AuditEventFilters, AuditEventStatus } from '../types/api'
@@ -75,11 +77,17 @@ export function AuditLogsPage({ scope, embedded = false }: AuditLogsPageProps & 
     const scopeNote = useScopeNote()
     const { settings } = useAppSettings()
     const { user } = useAuth()
+    const { isZevScope } = useCommunityAccess()
     const { searchParams, updateParams } = usePageNavigation()
     const isAdminView = scope === 'admin'
-    const canUseSearch = isAdminView && user?.role === 'admin'
     const { selectedZevId, selectedZev, isLoading: managedZevLoading } = useManagedZev()
+    const canReadAudit = isAdminView
+        ? user?.role === 'admin'
+        : isZevScope && !!selectedZevId && selectedZev?.id === selectedZevId && !managedZevLoading
     const [localFilters, setFilters] = useState<AuditFilterState>(DEFAULT_FILTERS)
+    const [searchDraft, setSearchDraft] = useState('')
+    const searchTooLong = Array.from(searchDraft.trim()).length > 50
+    const scopeContext = isAdminView ? 'admin' : selectedZevId
     const category = searchParams.get('action_category')
     const urlTextFilters = {
         actionType: searchParams.get('action_type') ?? '',
@@ -91,22 +99,26 @@ export function AuditLogsPage({ scope, embedded = false }: AuditLogsPageProps & 
         ...urlTextFilters,
     }
     const [textFilters, setTextFilters] = useState(urlTextFilters)
-    const context = JSON.stringify([
-        isAdminView ? 'admin' : selectedZevId,
-        contextualFilters.actionCategory,
-        contextualFilters.actionType,
-        contextualFilters.targetType,
-        contextualFilters.targetId,
-    ])
+    const context = {
+        scope: scopeContext,
+        filters: JSON.stringify([
+            contextualFilters.actionCategory,
+            contextualFilters.actionType,
+            contextualFilters.targetType,
+            contextualFilters.targetId,
+        ]),
+    }
     const [previousContext, setPreviousContext] = useState(context)
     const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
-    const contextChanged = previousContext !== context
+    const scopeChanged = previousContext.scope !== context.scope
+    const contextChanged = scopeChanged || previousContext.filters !== context.filters
     // Reset before requesting a changed URL filter or community scope.
     if (contextChanged) {
         setPreviousContext(context)
-        setFilters(previous => ({ ...previous, page: 1 }))
+        setFilters(previous => ({ ...previous, page: 1, ...(scopeChanged ? { search: '' } : {}) }))
         setSelectedEventId(null)
         setTextFilters(urlTextFilters)
+        if (scopeChanged) setSearchDraft('')
     }
     const filters = { ...localFilters, ...contextualFilters, page: contextChanged ? 1 : localFilters.page }
 
@@ -137,14 +149,24 @@ export function AuditLogsPage({ scope, embedded = false }: AuditLogsPageProps & 
         actor_user: filters.actorUser ? Number(filters.actorUser) : undefined,
         date_from: filters.dateFrom || undefined,
         date_to: filters.dateTo || undefined,
-        q: canUseSearch ? filters.search || undefined : undefined,
+        q: canReadAudit ? filters.search || undefined : undefined,
     }
 
+    const canFetchAudit = canReadAudit && !contextChanged
     const eventsQuery = useQuery({
         queryKey: queryKeys.admin.auditEvents(apiFilters),
         queryFn: () => fetchAuditEvents(apiFilters),
-        enabled: isAdminView || (!managedZevLoading && !!selectedZevId),
+        enabled: canFetchAudit,
+        retry: (failureCount, error) => {
+            const status = isAxiosError(error) ? error.response?.status : undefined
+            return (status === undefined || status >= 500) && failureCount < 3
+        },
+        refetchOnWindowFocus: false,
     })
+
+    function refreshEvents() {
+        if (canFetchAudit) void eventsQuery.refetch()
+    }
 
     // The ZEV/actor filter options come from the audit API itself, so they are
     // derived from the same visibility-scoped queryset as the events: owners
@@ -153,6 +175,7 @@ export function AuditLogsPage({ scope, embedded = false }: AuditLogsPageProps & 
     const optionsQuery = useQuery({
         queryKey: queryKeys.admin.auditFilterOptions(),
         queryFn: fetchAuditFilterOptions,
+        enabled: canReadAudit,
     })
 
     const zevNameById = useMemo(() => {
@@ -194,10 +217,17 @@ export function AuditLogsPage({ scope, embedded = false }: AuditLogsPageProps & 
 
     function clearFilters() {
         setFilters(DEFAULT_FILTERS)
+        setSearchDraft('')
         setSelectedEventId(null)
         setLinkedActorUsername(null)
         setTextFilters({ actionType: '', targetType: '', targetId: '' })
         updateParams(params => Object.values(LINK_FILTER_PARAMS).forEach(param => params.delete(param)))
+    }
+
+    function commitSearch() {
+        if (!canReadAudit || searchTooLong) return
+        const search = searchDraft.trim()
+        if (search !== filters.search) updateFilter('search', search)
     }
 
     function commitTextFilters() {
@@ -320,19 +350,31 @@ export function AuditLogsPage({ scope, embedded = false }: AuditLogsPageProps & 
                 <label>
                     {t('pages.auditLogs.filters.search')}
                     <input
-                        value={filters.search}
-                        onChange={(event) => updateFilter('search', event.target.value)}
+                        value={searchDraft}
+                        onChange={(event) => setSearchDraft(event.target.value)}
+                        onBlur={commitSearch}
+                        onKeyDown={event => { if (event.key === 'Enter') commitSearch() }}
+                        aria-invalid={searchTooLong}
+                        aria-describedby={canReadAudit ? 'audit-search-hint' : undefined}
                         placeholder={t('pages.auditLogs.filters.searchPlaceholder')}
-                        disabled={!canUseSearch}
+                        disabled={!canReadAudit}
                     />
                 </label>
-                {!canUseSearch && <p className="muted">{t('pages.auditLogs.filters.searchRestricted')}</p>}
+                {canReadAudit && <p id="audit-search-hint" className={searchTooLong ? 'text-error' : 'muted'}>
+                    {t(searchTooLong ? 'pages.auditLogs.filters.searchTooLong' : 'pages.auditLogs.filters.searchHint')}
+                </p>}
 
                 <div className="actions-row actions-row-wrap actions-row-end">
-                    <button type="button" className="button button-secondary" onClick={clearFilters}>
+                    {/* Keep a pointer click on Clear from applying the focused draft on blur. */}
+                    <button
+                        type="button"
+                        className="button button-secondary"
+                        onPointerDown={event => event.preventDefault()}
+                        onClick={clearFilters}
+                    >
                         {t('pages.auditLogs.actions.clearFilters')}
                     </button>
-                    <button type="button" className="button button-secondary" onClick={() => void eventsQuery.refetch()}>
+                    <button type="button" className="button button-secondary" disabled={!canFetchAudit} onClick={refreshEvents}>
                         {t('pages.auditLogs.actions.refresh')}
                     </button>
                 </div>
@@ -340,7 +382,11 @@ export function AuditLogsPage({ scope, embedded = false }: AuditLogsPageProps & 
 
             <section className="table-card">
                 {eventsQuery.isLoading && <PageSkeleton variant="tableRows" />}
-                {eventsQuery.isError && <Notice tone="error" onRetry={() => void eventsQuery.refetch()} isRetrying={eventsQuery.isFetching}>{t('pages.auditLogs.loadError')}</Notice>}
+                {eventsQuery.isError && (
+                    <Notice tone="error" onRetry={refreshEvents} isRetrying={eventsQuery.isFetching}>
+                        {formatApiError(eventsQuery.error, t('pages.auditLogs.loadError'))}
+                    </Notice>
+                )}
                 {!eventsQuery.isLoading && !eventsQuery.isError && events.length === 0 && <p className="muted">{t('pages.auditLogs.empty')}</p>}
 
                 {events.length > 0 && (

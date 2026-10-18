@@ -3,6 +3,7 @@ from __future__ import annotations
 import ipaddress
 from datetime import date, datetime
 from decimal import Decimal
+from itertools import islice
 from typing import Any, Iterable
 from uuid import UUID
 
@@ -12,7 +13,9 @@ from .models import AuditEvent, AuditEventSource, AuditEventStatus
 
 SENSITIVE_KEYS = {
     "password",
+    "user_password",
     "token",
+    "access_token",
     "refresh",
     "access",
     "client_secret",
@@ -20,6 +23,7 @@ SENSITIVE_KEYS = {
     "email_host_password",
     "authorization",
     "api_key",
+    "api_key_value",
     "push_token",
     "refresh_token",
 }
@@ -35,26 +39,25 @@ def _truncate_text(value: str, limit: int = MAX_AUDIT_STRING_LENGTH) -> str:
     return f"{value[: limit - 3]}..."
 
 
-def _to_primitive(value: Any) -> Any:
+def _to_primitive(value: Any, field_name: str = "") -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         if isinstance(value, str):
+            if field_name == "iban" or field_name.endswith("_iban"):
+                return _mask_iban(value)
             return _truncate_text(value)
         return value
     if isinstance(value, (date, datetime, Decimal, UUID)):
-        return str(value)
+        return _truncate_text(str(value))
     if isinstance(value, list):
-        normalized = [_to_primitive(v) for v in value[:MAX_AUDIT_LIST_ITEMS]]
+        normalized = [_to_primitive(v, field_name) for v in value[:MAX_AUDIT_LIST_ITEMS]]
         if len(value) > MAX_AUDIT_LIST_ITEMS:
             normalized.append(f"...(+{len(value) - MAX_AUDIT_LIST_ITEMS} more)")
         return normalized
     if isinstance(value, tuple):
-        return _to_primitive(list(value))
+        return _to_primitive(list(value), field_name)
     if isinstance(value, dict):
-        normalized = {str(k): _to_primitive(v) for k, v in list(value.items())[:MAX_AUDIT_DICT_ITEMS]}
-        if len(value) > MAX_AUDIT_DICT_ITEMS:
-            normalized["..."] = f"+{len(value) - MAX_AUDIT_DICT_ITEMS} more"
-        return normalized
-    return str(value)
+        return redact_metadata(value, field_name)
+    return _truncate_text(str(value))
 
 
 def _mask_iban(value: str) -> str:
@@ -64,39 +67,39 @@ def _mask_iban(value: str) -> str:
     return f"****{value[-4:]}"
 
 
-def redact_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
+def redact_metadata(metadata: dict[str, Any] | None, field_name: str = "") -> dict[str, Any]:
     if not metadata:
         return {}
 
     redacted: dict[str, Any] = {}
-    for key, value in metadata.items():
+    for key, value in islice(metadata.items(), MAX_AUDIT_DICT_ITEMS):
+        key = str(key)
         lower_key = key.lower()
         if lower_key in SENSITIVE_KEYS:
             continue
         if lower_key in {"email_body_template", "body", "template_content", "content"}:
             continue
-        if "iban" in lower_key and isinstance(value, str):
-            redacted[key] = _mask_iban(value)
-            continue
+        # Diff sides describe the enclosing field, including scalar IBANs.
+        value_field = field_name if lower_key in {"before", "after"} else lower_key
         if isinstance(value, dict):
-            nested = redact_metadata(value)
-            if nested:
+            nested = redact_metadata(value, value_field)
+            if nested or lower_key in {"before", "after"}:
                 redacted[key] = nested
             continue
-        if isinstance(value, list):
-            redacted[key] = _to_primitive(value)
-            continue
-        redacted[key] = _to_primitive(value)
+        redacted[key] = _to_primitive(value, value_field)
+    if len(metadata) > MAX_AUDIT_DICT_ITEMS:
+        redacted["..."] = f"+{len(metadata) - MAX_AUDIT_DICT_ITEMS} more"
     return redacted
 
 
 def build_diff(before: dict[str, Any] | None, after: dict[str, Any] | None, allowed_fields: Iterable[str]) -> dict[str, Any]:
+    """Select changed fields; record_audit_event normalizes them once on write."""
     before = before or {}
     after = after or {}
     diff: dict[str, Any] = {}
     for field in allowed_fields:
-        old_value = _to_primitive(before.get(field))
-        new_value = _to_primitive(after.get(field))
+        old_value = before.get(field)
+        new_value = after.get(field)
         if old_value != new_value:
             diff[field] = {"before": old_value, "after": new_value}
     return diff
@@ -240,9 +243,10 @@ def record_audit_event(
         api_key = getattr(request, "api_key", None)
         if api_key is not None:
             metadata = {
-                **(metadata or {}),
                 "api_key_id": str(api_key.pk),
                 "api_key_name": api_key.name,
+                **{key: value for key, value in (metadata or {}).items()
+                   if key not in {"api_key_id", "api_key_name"}},
             }
 
     actor_snapshot = snapshot_actor(user)

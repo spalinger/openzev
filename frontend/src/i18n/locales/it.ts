@@ -1065,9 +1065,10 @@ export const it = {
                 status: 'Stato',
                 dateFrom: 'Data iniziale',
                 dateTo: 'Data finale',
-                search: 'Ricerca full-text',
+                search: 'Ricerca',
                 searchPlaceholder: 'Riepilogo, destinazione, tipo azione',
-                searchRestricted: 'La ricerca full-text è attualmente disponibile solo per gli amministratori.',
+                searchHint: 'Invio o uscire dal campo per applicare. Max. 50 caratteri.',
+                searchTooLong: 'Usare al massimo 50 caratteri.',
             },
             actions: {
                 clearFilters: 'Cancella filtri',

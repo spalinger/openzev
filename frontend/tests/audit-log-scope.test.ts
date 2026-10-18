@@ -37,17 +37,12 @@ vi.mock('../src/lib/appSettings', () => ({
 
 const fetchAuditEvents = vi.fn()
 const fetchAuditEvent = vi.fn()
+const fetchAuditFilterOptions = vi.fn().mockResolvedValue({ zevs: [{ id: 'z1', name: 'Z1' }, { id: 'z2', name: 'Z2' }], actors: [] })
 
 vi.mock('../src/lib/api/audit', () => ({
     fetchAuditEvents: (...args: unknown[]) => fetchAuditEvents(...args),
     fetchAuditEvent: (...args: unknown[]) => fetchAuditEvent(...args),
-    fetchAuditFilterOptions: () => Promise.resolve({
-        zevs: [
-            { id: 'z1', name: 'Z1' },
-            { id: 'z2', name: 'Z2' },
-        ],
-        actors: [],
-    }),
+    fetchAuditFilterOptions: () => fetchAuditFilterOptions(),
 }))
 
 const emptyPage = { results: [], count: 0, next: null, previous: null }
@@ -104,13 +99,14 @@ function mockAdmin() {
     })
 }
 
-function mockSelection(selectedZevId: string | null) {
+function mockSelection(selectedZevId: string | null, relation = 'manager') {
     mockManagedZev.mockReturnValue({
         managedZevs: selectedZevId ? [{ id: selectedZevId }] : [],
         selectedZevId,
         selectedZev: selectedZevId ? { id: selectedZevId, name: selectedZevId === 'z1' ? 'Z1' : 'Z2' } : null,
         isSelectable: false,
         isLoading: false,
+        relation: selectedZevId ? relation : undefined,
         setSelectedZevId: vi.fn(),
     })
 }
@@ -139,6 +135,7 @@ function renderAuditLogs(scope: 'admin' | 'owner', initialEntries: string[] = ['
             ),
         )
     return {
+        client,
         container,
         location: () => path,
         navigate: async (to: string) => {
@@ -212,7 +209,220 @@ async function typeValue(input: HTMLInputElement, value: string) {
     })
 }
 
+async function pressEnter(input: HTMLInputElement) {
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
+}
+
+async function mountOwnerAudit() {
+    mockOwner()
+    mockSelection('z1')
+    const page = renderAuditLogs('owner')
+    await page.mount()
+    return page
+}
+
 describe('audit log community scope', () => {
+    it.each(['manager', 'viewer', 'admin'])('enables %s community search', async relation => {
+        if (relation === 'admin') mockAdmin()
+        else mockOwner()
+        mockSelection('z1', relation)
+        const page = renderAuditLogs('owner')
+        await page.mount()
+        expect(filterInput(page.container, 'search').disabled).toBe(false)
+        expect(fetchAuditEvents).toHaveBeenCalled()
+        expect(fetchAuditFilterOptions).toHaveBeenCalled()
+        page.unmount()
+    })
+
+    it('keeps search local until Enter or blur', async () => {
+        const page = await mountOwnerAudit()
+        const input = filterInput(page.container, 'search')
+        const beforeTyping = fetchAuditEvents.mock.calls.length
+        await typeValue(input, '  invoice  ')
+        expect(fetchAuditEvents).toHaveBeenCalledTimes(beforeTyping)
+        await pressEnter(input)
+        await waitForCondition(() => fetchAuditEvents.mock.calls.at(-1)?.[0].q === 'invoice', 'applied search')
+        expect(fetchAuditEvents).toHaveBeenLastCalledWith(expect.objectContaining({ zev: 'z1', q: 'invoice', page: 1 }))
+        await typeValue(input, 'new search')
+        await act(async () => { input.dispatchEvent(new FocusEvent('focusout', { bubbles: true })) })
+        await waitForCondition(() => fetchAuditEvents.mock.calls.at(-1)?.[0].q === 'new search', 'blur search')
+        page.unmount()
+    })
+
+    it('clears applied and draft search before requesting a new community', async () => {
+        const page = await mountOwnerAudit()
+        const input = filterInput(page.container, 'search')
+        await typeValue(input, 'invoice')
+        await pressEnter(input)
+        await typeValue(input, 'unfinished')
+        const beforeSwitch = fetchAuditEvents.mock.calls.length
+        mockSelection('z2')
+        await page.rerender()
+        await waitForCondition(() => fetchAuditEvents.mock.calls.length > beforeSwitch, 'new community')
+        expect(fetchAuditEvents.mock.calls.slice(beforeSwitch).every(([filters]) => filters.zev === 'z2' && filters.q === undefined && filters.page === 1)).toBe(true)
+        expect(input.value).toBe('')
+        page.unmount()
+    })
+
+    it('preserves page 2 when unchanged search is submitted or blurred', async () => {
+        mockOwner()
+        mockSelection('z1')
+        fetchAuditEvents.mockResolvedValue({ results: [sampleEvent], count: 150, next: 'next', previous: 'previous' })
+        const page = renderAuditLogs('owner')
+        await page.mount()
+        const input = filterInput(page.container, 'search')
+        await typeValue(input, 'invoice')
+        await pressEnter(input)
+        await click(await waitForButton(page.container, 'pages.auditLogs.pagination.next'))
+        await waitForCondition(() => fetchAuditEvents.mock.calls.at(-1)?.[0].page === 2, 'page 2')
+        const before = fetchAuditEvents.mock.calls.length
+        await act(async () => {
+            input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+            input.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
+        })
+        expect(fetchAuditEvents).toHaveBeenCalledTimes(before)
+        expect(fetchAuditEvents).toHaveBeenLastCalledWith(expect.objectContaining({ q: 'invoice', page: 2 }))
+        page.unmount()
+    })
+
+    it('clears a focused dirty draft without first searching it', async () => {
+        const page = await mountOwnerAudit()
+        const input = filterInput(page.container, 'search')
+        await typeValue(input, 'invoice')
+        await pressEnter(input)
+        await act(async () => { input.focus() })
+        await typeValue(input, 'dirty draft')
+        const before = fetchAuditEvents.mock.calls.length
+        const clear = buttonByText(page.container, 'pages.auditLogs.actions.clearFilters')
+        await act(async () => {
+            const down = new MouseEvent('pointerdown', { bubbles: true, cancelable: true })
+            if (clear.dispatchEvent(down)) clear.focus()
+        })
+        await click(clear)
+        expect(fetchAuditEvents.mock.calls.slice(before).map(([filters]) => filters.q)).toEqual([undefined])
+        expect(input.value).toBe('')
+        page.unmount()
+    })
+
+    it('applies search when keyboard focus leaves for Clear without activating it', async () => {
+        const page = await mountOwnerAudit()
+        const input = filterInput(page.container, 'search')
+        await act(async () => { input.focus() })
+        await typeValue(input, 'invoice')
+        await act(async () => { buttonByText(page.container, 'pages.auditLogs.actions.clearFilters').focus() })
+        expect(fetchAuditEvents).toHaveBeenLastCalledWith(expect.objectContaining({ q: 'invoice' }))
+        page.unmount()
+    })
+
+    it.each([400, 401, 403, 429])('shows HTTP %i feedback without automatically retrying', async status => {
+        mockOwner()
+        mockSelection('z1')
+        const detail = status === 429 ? 'Try again in 60 seconds.' : 'Invalid request.'
+        fetchAuditEvents.mockRejectedValue(Object.assign(new Error(detail), {
+            isAxiosError: true, response: { status, data: { detail } },
+        }))
+        const page = renderAuditLogs('owner')
+        vi.useFakeTimers()
+        try {
+            const mounting = page.mount()
+            await vi.advanceTimersByTimeAsync(100)
+            await mounting
+            await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+            expect(page.container.textContent).toContain(detail)
+            expect(fetchAuditEvents).toHaveBeenCalledTimes(1)
+        } finally {
+            page.unmount()
+            vi.useRealTimers()
+        }
+    })
+
+    it.each(['no selection', 'loading', 'participant', 'stale selection'])('blocks manual refresh with %s', async state => {
+        mockOwner()
+        mockSelection(state === 'no selection' ? null : 'z1', state === 'participant' ? 'participant' : 'manager')
+        if (state === 'loading') mockManagedZev.mockReturnValue({ ...mockManagedZev(), isLoading: true })
+        if (state === 'stale selection') mockManagedZev.mockReturnValue({ ...mockManagedZev(), selectedZevId: 'z2' })
+        const page = renderAuditLogs('owner')
+        await page.mount()
+        const refresh = buttonByText(page.container, 'pages.auditLogs.actions.refresh')
+        expect(refresh.disabled).toBe(true)
+        await click(refresh)
+        expect(fetchAuditEvents).not.toHaveBeenCalled()
+        expect(fetchAuditFilterOptions).not.toHaveBeenCalled()
+        page.unmount()
+    })
+
+    it.each([undefined, 500])('retries transient failures with status %s', async status => {
+        mockOwner()
+        mockSelection('z1')
+        fetchAuditEvents.mockRejectedValue(Object.assign(new Error('Temporarily unavailable'), {
+            isAxiosError: true, response: status === undefined ? undefined : { status },
+        }))
+        const page = renderAuditLogs('owner')
+        page.client.setDefaultOptions({ queries: { retryDelay: 0 } })
+        try {
+            await page.mount()
+            await waitForCondition(() => fetchAuditEvents.mock.calls.length === 4, 'three transient retries')
+            expect(fetchAuditEvents).toHaveBeenCalledTimes(4)
+        } finally {
+            page.unmount()
+        }
+    })
+
+    it('guards error retry when community access is lost', async () => {
+        fetchAuditEvents.mockRejectedValue(Object.assign(new Error('Invalid request'), {
+            isAxiosError: true, response: { status: 400, data: { detail: 'Invalid request' } },
+        }))
+        const page = await mountOwnerAudit()
+        await waitForCondition(() => page.container.textContent?.includes('Invalid request') === true, 'error feedback')
+        mockSelection('z1', 'participant')
+        await page.rerender()
+        const before = fetchAuditEvents.mock.calls.length
+        await click(buttonByText(page.container, 'common.retry'))
+        expect(fetchAuditEvents).toHaveBeenCalledTimes(before)
+        page.unmount()
+    })
+
+    it('validates 50 Unicode characters and keeps oversized search local', async () => {
+        mockAdmin()
+        mockSelection(null)
+        const page = renderAuditLogs('admin')
+        await page.mount()
+        const input = filterInput(page.container, 'search')
+        await typeValue(input, '😀'.repeat(50))
+        await pressEnter(input)
+        await waitForCondition(() => fetchAuditEvents.mock.calls.at(-1)?.[0].q === '😀'.repeat(50), 'Unicode boundary')
+        const beforeOversized = fetchAuditEvents.mock.calls.length
+        await typeValue(input, 'x'.repeat(51))
+        await pressEnter(input)
+        expect(input.getAttribute('aria-invalid')).toBe('true')
+        expect(page.container.textContent).toContain('pages.auditLogs.filters.searchTooLong')
+        expect(fetchAuditEvents).toHaveBeenCalledTimes(beforeOversized)
+        page.unmount()
+    })
+
+    it('does not request events or filter options for participant-only access', async () => {
+        mockOwner()
+        mockSelection('z1', 'participant')
+        const page = renderAuditLogs('owner')
+        await page.mount()
+        expect(filterInput(page.container, 'search').disabled).toBe(true)
+        expect(fetchAuditEvents).not.toHaveBeenCalled()
+        expect(fetchAuditFilterOptions).not.toHaveBeenCalled()
+        expect(page.container.querySelector('#audit-search-hint')).toBeNull()
+        page.unmount()
+    })
+
+    it('renders audit markup as text', async () => {
+        mockOwner()
+        mockSelection('z1')
+        fetchAuditEvents.mockResolvedValue({ ...emptyPage, count: 1, results: [{ ...sampleEvent, summary: '<script>alert(1)</script>' }] })
+        const page = renderAuditLogs('owner')
+        await page.mount()
+        await waitForCondition(() => page.container.textContent?.includes('<script>alert(1)</script>') === true, 'literal markup')
+        expect(page.container.querySelector('script')).toBeNull()
+        page.unmount()
+    })
+
     it('applies source activity links as visible target filters from the first request', async () => {
         mockAdmin()
         mockSelection('z1')
@@ -253,7 +463,7 @@ describe('audit log community scope', () => {
         }
         expect(fetchAuditEvents).toHaveBeenCalledTimes(before)
         expect(page.location()).toBe('/admin/audit?from=bookmark#activity')
-        await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
+        await pressEnter(input)
         await waitForCondition(() => fetchAuditEvents.mock.calls.length > before, 'committed audit text')
         expect(fetchAuditEvents.mock.calls.slice(before)).toHaveLength(1)
         expect(fetchAuditEvents).toHaveBeenLastCalledWith(expect.objectContaining({ [param]: value, page: 1 }))
@@ -339,10 +549,7 @@ describe('audit log community scope', () => {
     })
 
     it('owner request is scoped to the global selection', async () => {
-        mockOwner()
-        mockSelection('z1')
-        const page = renderAuditLogs('owner')
-        await page.mount()
+        const page = await mountOwnerAudit()
         expect(fetchAuditEvents).toHaveBeenCalled()
         const arg = fetchAuditEvents.mock.calls.at(-1)?.[0] as Record<string, unknown>
         expect(arg.zev).toBe('z1')
@@ -351,10 +558,7 @@ describe('audit log community scope', () => {
     })
 
     it('owner view has no independent community selector', async () => {
-        mockOwner()
-        mockSelection('z1')
-        const page = renderAuditLogs('owner')
-        await page.mount()
+        const page = await mountOwnerAudit()
         const labels = Array.from(page.container.querySelectorAll('label')).map((l) => l.textContent)
         expect(labels.some((text) => text?.includes('pages.auditLogs.filters.zev'))).toBe(false)
         page.unmount()

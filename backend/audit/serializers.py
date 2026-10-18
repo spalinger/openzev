@@ -54,16 +54,16 @@ class AuditEventFilterSerializer(serializers.Serializer):
         choices=[choice[0] for choice in AuditActionCategory.choices],
         required=False,
     )
-    action_type = serializers.CharField(required=False)
-    target_type = serializers.CharField(required=False)
-    target_id = serializers.CharField(required=False)
+    action_type = serializers.CharField(required=False, max_length=80)
+    target_type = serializers.CharField(required=False, max_length=120)
+    target_id = serializers.CharField(required=False, max_length=64)
     status = serializers.ChoiceField(
         choices=[choice[0] for choice in AuditEventStatus.choices],
         required=False,
     )
     date_from = serializers.DateField(required=False)
     date_to = serializers.DateField(required=False)
-    q = serializers.CharField(required=False)
+    q = serializers.CharField(required=False, allow_blank=True, max_length=50)
 
     def validate(self, attrs):
         date_from = attrs.get("date_from")

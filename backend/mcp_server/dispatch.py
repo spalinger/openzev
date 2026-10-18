@@ -22,15 +22,29 @@ MAX_PAGES_DEFAULT = 10
 
 
 class DispatchError(Exception):
-    """Raised when a sub-request cannot be made at all (not an HTTP error
-    from the resolved view — those come back as a normal ``SubResponse``).
-    """
+    """A dispatch failed or a paginated sub-request returned an error."""
+
+    def __init__(self, message: str, *, status: int = 500):
+        super().__init__(message)
+        self.status = status
 
 
 @dataclass
 class SubResponse:
     status: int
     data: Any
+
+
+def sub_error_message(sub) -> str:
+    """Best-effort human-readable message from a non-2xx ``SubResponse``."""
+    data = sub.data
+    if isinstance(data, dict):
+        for key in ("error", "detail"):
+            if key in data and isinstance(data[key], str):
+                return data[key]
+        if data:
+            return str(data)
+    return f"Request failed with status {sub.status}."
 
 
 def _build_request(outer_request, path: str, params: dict | None) -> HttpRequest:
@@ -138,10 +152,8 @@ def dispatch_get_all(
     Returns ``(rows, truncated, total)``. ``truncated`` is ``True`` when
     ``max_pages`` or ``limit`` stopped the walk before the list actually
     ended. Stops as soon as ``limit`` rows have been collected (if given).
-    A non-paginated (non-2xx, or unexpected shape) first response is
-    returned as a single "page" of zero rows with the caller left to inspect
-    ``status``/``data`` itself — callers that need the raw first response
-    should use :func:`dispatch_get` directly instead.
+    Raises ``DispatchError`` on failed pages instead of returning an empty or
+    partial result as success.
     """
     rows: list = []
     total: int | None = None
@@ -162,11 +174,10 @@ def dispatch_get_all(
             user=user,
             on_dispatch=on_dispatch,
         )
-        if sub.status != 200 or not isinstance(sub.data, dict) or "results" not in sub.data:
-            # Not a paginated list (or an error) — hand back what we have.
-            if page == 1:
-                return [], False, None
-            break
+        if sub.status != 200:
+            raise DispatchError(sub_error_message(sub), status=sub.status)
+        if not isinstance(sub.data, dict) or "results" not in sub.data:
+            raise DispatchError("Expected a paginated response.")
 
         total = sub.data.get("count", total)
         page_rows = sub.data.get("results") or []

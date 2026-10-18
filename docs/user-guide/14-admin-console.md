@@ -226,17 +226,20 @@ billing-relevant, and destructive actions.
   and viewers see the events of the currently selected community.
   Managers and viewers only see events for communities they can access;
   they cannot see global or other-community events.
-  There is no community selector here (it follows the community chosen above the page title) and no
-  text search; the filters are date range, actor, category, action type,
-  target type, target ID, and status. (The legacy route `/audit-logs` redirects here.)
+  There is no community selector here (it follows the community chosen above
+  the page title). The filters are date range, actor, category, action type,
+  target type, target ID, status, and text search. (The legacy route `/audit-logs`
+  redirects here.)
 
-**Platform → Overview → Audit log** supports the full filter set: date range,
-community (ZEV) selector, actor, category, action type, target type, target ID,
-status, and text
-search. Text search is available only to admin users. Events are
-read-only — there is no public write endpoint.
-Action type, target type and target ID apply when you press **Enter** or leave
-the field. Open an event by clicking its summary or focusing it and pressing
+**Platform → Overview → Audit log** adds a community (ZEV) selector to the same
+filters. Search matches summary, target and action type, ignoring case. Use up to
+50 characters. All text filters apply with **Enter** or by leaving the field.
+Switching communities in **Community → Settings → Audit log** clears search;
+the platform community filter preserves it. **Clear filters** discards unfinished
+text. Events are read-only.
+If the list is rate-limited, wait for the indicated time before retrying; see
+[rate limits](16-api-keys.md#rate-limits).
+Open an event by clicking its summary or focusing it and pressing
 **Enter** or **Space**.
 
 The quickest way in is from the account itself: **View activity** on a row
