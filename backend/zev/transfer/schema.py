@@ -243,6 +243,7 @@ LEGACY_PARTICIPANT_FIELDS = (
 
 METERING_POINT_FIELDS = (
     "meter_id",
+    "secondary_meter_id",
     "meter_type",
     "is_active",
     "location_description",
@@ -442,6 +443,11 @@ INVOICE_ITEM_FIELDS = (
 # stay loadable through the normal metering import — but a backup that silently
 # turned hourly readings into 15-minute ones would not be a backup, so the
 # archive carries them and the archive's own reader restores them.
+#
+# ``source_creation``/``source_document_id`` are the SDAT-CH replace provenance
+# (grill Q12): without them a transferred ZEV would treat every pre-transfer
+# reading as the oldest delivery and let the next VNB replacement overwrite
+# unconditionally.
 READING_CSV_COLUMNS = (
     "meter_id",
     "timestamp",
@@ -449,6 +455,8 @@ READING_CSV_COLUMNS = (
     "direction",
     "resolution",
     "import_source",
+    "source_creation",
+    "source_document_id",
 )
 
 

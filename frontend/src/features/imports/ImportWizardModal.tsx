@@ -270,12 +270,12 @@ export function ImportWizardModal(props: ImportWizardModalProps) {
                                 type="file"
                                 multiple
                                 onChange={props.onFileChange}
-                                accept={source === 'csv' ? '.csv,.xlsx' : '.xml'}
+                                accept={source === 'csv' ? '.csv,.xlsx' : '.xml,.xml.gz,.gz'}
                             />
                         </label>
                         <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
                             {t('pages.imports.wizard.supportedExtensions', {
-                                extensions: source === 'csv' ? '.csv, .xlsx' : '.xml',
+                                extensions: source === 'csv' ? '.csv, .xlsx' : '.xml, .xml.gz',
                             })}{' '}
                             {t('pages.imports.wizard.sizeLimit', { limit: formatBytes(MAX_UPLOAD_BYTES) })}
                         </p>

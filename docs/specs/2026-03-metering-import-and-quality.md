@@ -63,6 +63,8 @@ import and quality features from scratch.
 | `resolution` | `ReadingResolution` | `15min`, `hourly`, or `daily` |
 | `import_source` | `ImportSource` | `csv`, `sdatch`, or `manual` |
 | `import_batch` | `UUIDField` (nullable) | Groups readings from the same import |
+| `source_creation` | `DateTimeField` (nullable) | SDAT-CH `InstanceDocument/Creation` of the delivery that wrote the row; `NULL` for CSV/manual/legacy rows (replace provenance, Q12) |
+| `source_document_id` | `CharField(40)` | SDAT-CH `MeteringData/DocumentID` of the delivery that wrote the row |
 | `created_at` | `DateTimeField` (auto) | Creation timestamp |
 
 Ordering: `["metering_point", "timestamp"]`.
@@ -292,25 +294,89 @@ the target ZEV; preview uses the same ZEV-scoped lookup.
 
 ### 4.2 SDAT-CH (ebIX XML) importer
 
-Parses the Swiss SDAT-CH MeteringData XML format delivered by VNBs.
+Parses the Swiss SDAT-CH `ValidatedMeteredData` (E66) format delivered by
+VNBs (SDAT-CH 2025; normative references in `docs/specs/sdat-ch-official-TEMP/`,
+a temporary working copy — remove before merge). Only E66 is accepted:
+`AggregatedMeteredData` (E31), `ImbalanceData` and any other root are
+rejected with a named error, never silently imported.
 
 **Required parameter:** `zev_id` (explicit ZEV selection in request body).
 
-**Parsing logic:**
-1. Parse XML via `lxml.etree`.  Malformed XML → log error and return.
-2. Iterate `<MeteringPoint>` elements; extract `<MeteringPointID>` or `<ID>`.
-3. Look up meter in the provided ZEV's metering points.  Unknown meters →
-   error per meter, skip.
-4. For each `<Interval>`: extract start timestamp and resolution.
-5. Resolution mapping: `PT15M → 15`, `PT30M → 30`, `PT60M/PT1H → 60`;
-   default `15` min.
-6. For each `<Observation>`: extract `<Volume>`/`<Quantity>` and optional
-   `<Direction>`/`<EnergyFlowDirection>`.
-7. Direction: default `in`; `"OUT"` in direction text → `out`.
-8. Timestamps: each observation offset = `start + resolution × observation_index`.
-9. Write via `get_or_create` (skip existing; no overwrite mode).
+**File handling:** `.xml` and `.xml.gz` (gunzip, decompressed cap
+`MAX_SDAT_DECOMPRESSED_BYTES` 100 MB). Size cap `MAX_SDAT_BYTES` (50 MB)
+applies to the upload.
+
+**Parsing logic** (`backend/metering/importers/sdatch_importer.py`):
+1. Parse XML via `lxml.etree` (hardened parser: no entities/DTD/network).
+   Malformed XML → log error and return.
+2. Root gate: local name must start with `ValidatedMeteredData_`; anything
+   else is a loud "not per-meter data" error with zero rows.
+3. XSD gate: `ValidatedMeteredData_16` files validate against the vendored
+   `backend/metering/importers/sdat_xsd/` bundle (54 files, offline);
+   schema-invalid files are rejected up front. Other schema versions parse
+   structurally with a warning. (The vendored schemas carry a libxml2
+   workaround: `use="prohibited"` attributes with child `simpleType`s —
+   tolerated by industry tooling, rejected by libxml2 — are stripped from
+   in-memory copies at compile time; the vendored files stay pristine.)
+4. Header: `DocumentType` must be E66; `Status` `1` (cancellation) is
+   rejected; `Status` `5` means replace (upsert), anything else means
+   original (skip-existing). `Creation` orders deliveries (Q12).
+5. `BusinessReasonType`: `E88` (billing) vs `C38` (info-only) and others.
+6. Per `MeteringData` block: `Interval` (`StartDateTime`/`EndDateTime`,
+   UTC `…Z`), `Resolution` (`<Resolution>15</…><Unit>MIN</…>`; `15` →
+   `15min`, `60` → `hourly`; missing/other → block error, Q14).
+7. Metering point: `ConsumptionMeteringPoint` → `in`,
+   `ProductionMeteringPoint` → `out` (direction lives in the element name,
+   never in a tag). `VSENationalID` (33 chars) matches `meter_id` **or**
+   `secondary_meter_id` within the target ZEV (one physical meter carries
+   two IDs, one per flow direction). Unknown meters → error per meter,
+   skip. `ExchangeMeteringPoint` (grid interconnection) → skipped with a
+   note (Q13).
+8. Product filter: `8716867000030` (active energy) is imported;
+   `8716867000047` (reactive) and `2404050010123`/`2404050010124` (LEG
+   energy/rest) are skipped with a per-product note; unknown products are
+   block errors.
+9. Per `Observation`: timestamp = `start + resolution × (Sequence − 1)`
+   (`Sequence` runs 1..n; gaps are imported and flagged, never fatal —
+   one warning per block, capped at 10). Volumes are `Decimal` quantized
+   to 4 dp; negative, unparseable, unknown-`Condition` or over-range
+   values are row errors. `Condition` absent/`56` = final-grade,
+   `21` = temporary.
+10. Routing (Q15): `E88` + (absent|`56`) → `MeterReading`; `C38` (any
+    condition) or `21` (any reason) → `QuarantinedReading` (invisible to
+    billing, dashboards and charts).
+11. Writes: originals use `get_or_create` (skip duplicates). Replaces
+    (`Status=5`) upsert guarded by `source_creation`: stale deliveries
+    never clobber fresher data, and non-SDAT (CSV/manual) rows are never
+    overwritten — both count as skipped with notes. Replacements count in
+    `ImportLog.rows_overwritten`.
+12. Promotion (Q16): a billable delivery that is actually written deletes
+    the matching quarantined row and counts it as promoted (warning note).
+    Billable rows never land while newer quarantined data for the slot
+    exists.
+
+**Quarantine model:** `QuarantinedReading` (metering app) mirrors the
+`MeterReading` key (`metering_point`, `timestamp`, `direction`, unique)
+plus `business_reason`, `condition`, `source_creation`,
+`source_document_id`. Nothing in allocation, tariffs, invoices,
+dashboards or charts reads it — billing safety by construction, covered
+by `invoices/test_engine_edge_cases.py:
+test_quarantined_sdat_observations_are_not_billed`.
+
+**Provenance model:** `MeterReading.source_creation` /
+`source_document_id` record the SDAT-CH delivery that wrote the row.
+They travel in whole-ZEV transfer archives
+(`READING_CSV_COLUMNS`) and backups so moved/restored ZEVs keep their
+replace guards; `MeteringPoint.secondary_meter_id` travels in
+`METERING_POINT_FIELDS` for the same reason. Quarantine rows travel in
+backups; transfer archives do not carry them (transient hold data,
+re-importable from the VNB — like `ImportLog`s, which do not travel
+either).
 
 **Permission:** non-admins must manage the ZEV (`zev.access.can_manage`, an active manager grant; #761).
+
+**No preview:** SDAT-CH imports directly; the `ImportLog` (counts, errors,
+warnings incl. quarantine/promotion notes) is the protocol.
 
 ### 4.3 Preview workflow
 

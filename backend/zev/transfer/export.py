@@ -287,9 +287,17 @@ def _write_readings(archive, zev):
             queryset = (
                 MeterReading.objects.filter(metering_point=point)
                 .order_by("timestamp", "direction")
-                .values_list("timestamp", "energy_kwh", "direction", "resolution", "import_source")
+                .values_list(
+                    "timestamp",
+                    "energy_kwh",
+                    "direction",
+                    "resolution",
+                    "import_source",
+                    "source_creation",
+                    "source_document_id",
+                )
             )
-            for timestamp, energy_kwh, direction, resolution, import_source in queryset.iterator(
+            for timestamp, energy_kwh, direction, resolution, import_source, source_creation, source_document_id in queryset.iterator(
                 chunk_size=READING_CHUNK_SIZE
             ):
                 writer.writerow(
@@ -300,6 +308,8 @@ def _write_readings(archive, zev):
                         direction,
                         resolution,
                         import_source,
+                        source_creation.astimezone(timezone.utc).isoformat() if source_creation else "",
+                        source_document_id or "",
                     ]
                 )
                 rows += 1

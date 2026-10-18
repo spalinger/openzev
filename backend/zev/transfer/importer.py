@@ -1226,6 +1226,14 @@ def _build_reading(row, points_by_meter_id, batch_id):
     if source not in _VALID_SOURCES:
         return {"import_source": [f"Invalid import source '{source}'."]}
 
+    source_creation_raw = (row.get("source_creation") or "").strip()
+    try:
+        source_creation = _parse_datetime_utc(source_creation_raw) if source_creation_raw else None
+    except (ValueError, TypeError, OverflowError) as exc:
+        return {"source_creation": [f"Unreadable timestamp: {exc}"]}
+
+    source_document_id = (row.get("source_document_id") or "").strip()[:40]
+
     return MeterReading(
         metering_point=point,
         timestamp=timestamp,
@@ -1234,6 +1242,8 @@ def _build_reading(row, points_by_meter_id, batch_id):
         resolution=resolution,
         import_source=source,
         import_batch=batch_id,
+        source_creation=source_creation,
+        source_document_id=source_document_id,
     )
 
 
