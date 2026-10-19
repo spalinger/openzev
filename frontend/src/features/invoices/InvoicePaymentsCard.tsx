@@ -89,7 +89,7 @@ export function InvoicePaymentsCard({
                             onClick={() => markPaidMutation.mutate()}
                         >
                             <FontAwesomeIcon icon={faMoneyBillWave} fixedWidth />
-                            {payments.length > 0 ? t('pages.invoiceDetail.payments.markRestPaid') : t('pages.invoices.markPaid')}
+                            {payments.length > 0 ? t('pages.invoices.markRestPaid') : t('pages.invoices.markPaid')}
                         </button>
                     </div>
                 ) : null}

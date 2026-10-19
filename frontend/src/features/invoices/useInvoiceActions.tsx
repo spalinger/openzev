@@ -27,6 +27,7 @@ import {
     markInvoicePaid,
     markInvoiceSent,
     openInvoicePdf,
+    recordPayment,
     sendAllInvoices,
     sendInvoiceEmail,
 } from '../../lib/api/invoices'
@@ -40,6 +41,9 @@ import { liveInvoice, type InvoiceRowWork } from './invoiceRowState'
 import { getLatestEmailLog } from './emailLogs'
 import { useEmailDelivery } from './useEmailDelivery'
 import { invoiceRowCounts } from './invoiceRowFilters'
+import { amountDueChf } from './invoiceCredits'
+import { isPartlyPaid } from './invoiceStatus'
+import type { RecordPaymentValues } from './RecordPaymentModal'
 import type { ActionMenuItem } from '../../components/ActionMenu'
 import type { Invoice, InvoicePeriodParticipantRow } from '../../types/api'
 
@@ -65,6 +69,7 @@ export function useInvoiceActions({
     rows,
     userRole,
     onDeleteClick,
+    onRecordPaymentClick,
     onPdfQueued,
     generationParticipantIds = [],
     canGenerate = true,
@@ -80,6 +85,8 @@ export function useInvoiceActions({
     canWrite?: boolean
     accountId?: number
     onDeleteClick: (invoiceId: string) => void
+    /** Opens the record-payment dialog; the page owns the modal and its state. */
+    onRecordPaymentClick: (invoice: Invoice) => void
     /** Called when an action queued PDF work the operator should see arrive. */
     onPdfQueued: (generationParticipantIds?: string[]) => void
 }) {
@@ -229,6 +236,18 @@ export function useInvoiceActions({
             invalidateCockpit()
         },
         onError: (error) => pushToast(formatApiError(error, t('pages.invoices.messages.markPaidFailed')), 'error'),
+    })
+
+    const recordPaymentMutation = useMutation({
+        mutationFn: ({ invoiceId, values }: { invoiceId: string; values: RecordPaymentValues }) =>
+            recordPayment(invoiceId, values),
+        onSuccess: () => {
+            pushToast(t('pages.invoiceDetail.payments.recorded'), 'success')
+            invalidatePeriodOverview()
+            invalidateInvoicesList()
+            invalidateCockpit()
+        },
+        onError: (error) => pushToast(formatApiError(error, t('pages.invoiceDetail.payments.recordFailed')), 'error'),
     })
 
     // ── Batch mutations ──────────────────────────────────────────────
@@ -435,7 +454,9 @@ export function useInvoiceActions({
         if (invoice.status === 'sent') {
             return {
                 key: 'mark-paid',
-                label: t('pages.invoices.markPaid'),
+                label: isPartlyPaid(invoice)
+                    ? t('pages.invoices.markRestPaid')
+                    : t('pages.invoices.markPaid'),
                 icon: <FontAwesomeIcon icon={faMoneyBillWave} fixedWidth />,
                 onClick: () => markPaidMutation.mutate(invoice.id),
                 disabled: markPaidMutation.isPending,
@@ -499,6 +520,20 @@ export function useInvoiceActions({
             })
         }
 
+        if (invoice.status === 'sent') {
+            // Same eligibility as the detail card: a payout or an invoice whose
+            // credit covers it is settled with mark-paid, not a payment row.
+            if (amountDueChf(invoice) > 0 && Number(invoice.outstanding_chf ?? 0) > 0) {
+                items.push({
+                    key: 'record-payment',
+                    label: t('pages.invoiceDetail.payments.record'),
+                    icon: <FontAwesomeIcon icon={faMoneyBillWave} fixedWidth />,
+                    section: t('pages.invoices.menuSections.invoice'),
+                    onClick: () => onRecordPaymentClick(invoice),
+                })
+            }
+        }
+
         if (hasDeletePermission(invoice, userRole)) {
             items.push({
                 key: 'delete',
@@ -552,6 +587,7 @@ export function useInvoiceActions({
         emailMutation,
         markSentMutation,
         markPaidMutation,
+        recordPaymentMutation,
         generateAllMutation,
         approveAllMutation,
         sendAllMutation,

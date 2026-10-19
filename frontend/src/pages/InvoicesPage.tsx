@@ -6,6 +6,7 @@ import { repeatedParties } from '../features/invoices/invoiceRowState'
 import { InvoiceBatchActions } from '../features/invoices/InvoiceBatchActions'
 import { InvoiceRowFilterTabs } from '../features/invoices/InvoiceRowFilterTabs'
 import { InvoiceDeleteModal } from '../features/invoices/InvoiceDeleteModal'
+import { RecordPaymentModal } from '../features/invoices/RecordPaymentModal'
 import { InvoicesEmptyState } from '../features/invoices/InvoicesEmptyState'
 import { useInvoiceActions } from '../features/invoices/useInvoiceActions'
 import {
@@ -91,15 +92,17 @@ export function InvoicesContent() {
     }, [user?.id, selectedZevId, period.period_start, period.period_end, stopPdfWatch])
 
     const [deleteModalInvoiceId, setDeleteModalInvoiceId] = useState<string | null>(null)
+    const [recordPaymentInvoiceId, setRecordPaymentInvoiceId] = useState<string | null>(null)
     // Row filters narrow one period of one community: never let a filter leak
     // into another period, community or account.
     const [rowFilter, setRowFilter] = useState<InvoiceRowFilter>(null)
 
-    // A deletion dialog targets one community's invoice: never let it survive
-    // an account, community, write-access, or period change.
+    // A deletion or record-payment dialog targets one community's invoice:
+    // never let it survive an account, community, write-access or period change.
     const { isZevScope: isManagedScope, canWriteSelectedCommunity } = useCommunityAccess()
     useEffect(() => {
         setDeleteModalInvoiceId(null)
+        setRecordPaymentInvoiceId(null)
     }, [user?.id, selectedZevId, canWriteSelectedCommunity, period.period_start, period.period_end])
 
     useEffect(() => {
@@ -148,6 +151,7 @@ export function InvoicesContent() {
 
     const {
         deleteMutation,
+        recordPaymentMutation,
         downloadAllPdfsMutation,
         anyBatchPending,
         rowCounts,
@@ -166,6 +170,7 @@ export function InvoicesContent() {
         canGenerate: wholePeriod,
         generationParticipantIds: pdfWatch?.generationParticipantIds,
         onDeleteClick: (invoiceId) => setDeleteModalInvoiceId(invoiceId),
+        onRecordPaymentClick: (invoice) => setRecordPaymentInvoiceId(invoice.id),
         onPdfQueued: startPdfWatch,
     })
 
@@ -183,6 +188,9 @@ export function InvoicesContent() {
     // The filter narrows what the table shows. Batch actions keep reading the
     // whole period (`rows`), so narrowing the view never narrows an operation.
     const visibleRows = filterInvoiceRows(rows, rowFilter, getRowWork)
+    const recordPaymentInvoice = recordPaymentInvoiceId
+        ? rows.find((row) => row.invoice?.id === recordPaymentInvoiceId)?.invoice ?? null
+        : null
 
     const content = (
         <div className="invoice-period-view">
@@ -293,6 +301,20 @@ export function InvoicesContent() {
                     deleteMutation.mutate(deleteModalInvoiceId, {
                         onSuccess: () => setDeleteModalInvoiceId(null),
                     })
+                }}
+            />
+
+            <RecordPaymentModal
+                isOpen={recordPaymentInvoice !== null}
+                isPending={recordPaymentMutation.isPending}
+                outstandingChf={recordPaymentInvoice?.outstanding_chf ?? '0.00'}
+                onClose={() => setRecordPaymentInvoiceId(null)}
+                onSubmit={(values) => {
+                    if (!recordPaymentInvoice) return
+                    recordPaymentMutation.mutate(
+                        { invoiceId: recordPaymentInvoice.id, values },
+                        { onSuccess: () => setRecordPaymentInvoiceId(null) },
+                    )
                 }}
             />
         </div>

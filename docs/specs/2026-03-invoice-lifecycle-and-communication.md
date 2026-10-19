@@ -1319,6 +1319,11 @@ visibility, restored access, and strict selection with a second membership.
   invoices retain their link but have no billed amount. When the row's invoice
   `replaces` earlier ones, a "Replaces INV-x (Cancelled)" line links the newest
   of them, with "+n more" for the rest.
+- A sent row's primary action is **Mark Paid**; once it has payments
+  (`paid_chf ≠ 0`) it reads **Mark rest as paid** and books only the outstanding
+  amount. Its overflow menu carries **Record payment** for a sent invoice that
+  still collects money (`amount_due_chf > 0` and `outstanding_chf > 0`), opening
+  the same dialog as the detail page.
 - `InvoiceDetailPage` header meta adds "Replaced by INV-x" on a cancelled
   invoice with a `replaced_by`, and "Replaces INV-x, INV-y" when `replaces` is
   not empty; both links keep the page's return state.

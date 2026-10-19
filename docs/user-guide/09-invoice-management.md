@@ -456,9 +456,12 @@ Email sending is asynchronous via Celery with automatic retries. For delivery me
 When a participant has paid the whole invoice, click **Mark Paid** on the row
 (shown for `Sent` invoices). It records one payment for the outstanding amount,
 dated today, and the status changes to `Paid`. It is a single-click action.
+Once part of the money has been recorded, the same row action reads **Mark rest
+as paid** and books only what is still open.
 
 For a partial payment, or to record the date the money actually arrived, open
-the invoice and use the **Payments** card:
+the invoice and use the **Payments** card, or pick **Record payment** from the
+row's **...** menu without leaving the list:
 
 1. Click **Record payment**.
 2. Enter the amount (it starts at the outstanding amount and can't exceed it),

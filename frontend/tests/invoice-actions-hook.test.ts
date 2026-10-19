@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, createElement, useEffect } from 'react'
 import { useInvoiceActions } from '../src/features/invoices/useInvoiceActions'
+import { recordPayment } from '../src/lib/api/invoices'
 
 const pushToast = vi.fn()
 const invalidateQueries = vi.fn()
@@ -66,6 +67,7 @@ vi.mock('../src/lib/api/invoices', () => ({
   markInvoicePaid: vi.fn(),
   markInvoiceSent: vi.fn(),
   openInvoicePdf: vi.fn(),
+  recordPayment: vi.fn(),
   retryFailedEmail: vi.fn(),
   sendAllInvoices: vi.fn(),
   sendInvoiceEmail: vi.fn(),
@@ -136,6 +138,7 @@ function createHarness(
       ] as any,
       userRole: 'participant',
       onDeleteClick: vi.fn(),
+      onRecordPaymentClick: vi.fn(),
       onPdfQueued,
       ...extra,
       ...options,
@@ -221,6 +224,66 @@ describe('useInvoiceActions hook', () => {
     // The row menu opens a stored document; without one there is nothing to open.
     expect(result!.getRowMenuItems({ participant_id: 'participant-2', invoice: { id: 'invoice-draft', status: 'draft', pdf_url: null, email_logs: [] } as any } as any)
       .map((item) => item.key)).not.toContain('open-pdf')
+  })
+
+  it('marks only the rest as paid once money has been received', () => {
+    const { Harness, getResult } = createHarness()
+    act(() => root.render(createElement(Harness)))
+    const sent = (paidChf: string) => ({
+      participant_id: 'participant-4',
+      invoice: {
+        id: 'invoice-sent', status: 'sent', paid_chf: paidChf,
+        outstanding_chf: paidChf === '0.00' ? '100.00' : '75.00',
+        total_chf: '100.00', amount_due_chf: '100.00',
+      },
+    } as any)
+
+    expect(getResult()!.getPrimaryRowAction(sent('0.00'))?.label).toBe('pages.invoices.markPaid')
+    expect(getResult()!.getPrimaryRowAction(sent('25.00'))?.label).toBe('pages.invoices.markRestPaid')
+  })
+
+  it('offers record payment in the row menu while a sent invoice still collects money', () => {
+    const onRecordPaymentClick = vi.fn()
+    const { Harness, getResult } = createHarness(undefined, undefined, { onRecordPaymentClick })
+    act(() => root.render(createElement(Harness)))
+    const result = getResult()!
+    const row = (invoice: Record<string, unknown>) => ({ participant_id: 'participant-4', invoice } as any)
+
+    const sent = row({
+      id: 'invoice-sent', status: 'sent', pdf_url: null,
+      paid_chf: '25.00', outstanding_chf: '75.00', total_chf: '100.00', amount_due_chf: '100.00',
+    })
+    const item = result.getRowMenuItems(sent).find((entry) => entry.key === 'record-payment')
+    expect(item?.label).toBe('pages.invoiceDetail.payments.record')
+    item?.onClick()
+    expect(onRecordPaymentClick).toHaveBeenCalledWith(sent.invoice)
+
+    // A payout and an invoice nothing is left on are settled with mark-paid only.
+    expect(result.getRowMenuItems(row({
+      id: 'invoice-payout', status: 'sent', paid_chf: '-40.00', outstanding_chf: '-40.00', total_chf: '-40.00',
+    })).map((entry) => entry.key)).not.toContain('record-payment')
+    expect(result.getRowMenuItems(row({
+      id: 'invoice-covered', status: 'sent', paid_chf: '0.00', outstanding_chf: '0.00',
+      total_chf: '100.00', amount_due_chf: '100.00',
+    })).map((entry) => entry.key)).not.toContain('record-payment')
+  })
+
+  it('books a row payment through the API and refreshes the period', async () => {
+    const { Harness, getResult } = createHarness()
+    act(() => root.render(createElement(Harness)))
+    const instance = mutationInstances.find((item) => item.mutate === getResult()!.recordPaymentMutation.mutate)!
+    const variables = {
+      invoiceId: 'invoice-sent',
+      values: { amount_chf: '75.00', paid_on: '2026-05-10', note: 'E-Banking' },
+    }
+
+    await (instance.options.mutationFn as (vars: typeof variables) => Promise<unknown>)(variables)
+    expect(vi.mocked(recordPayment)).toHaveBeenCalledWith('invoice-sent', variables.values)
+
+    invalidateQueries.mockClear()
+    act(() => (instance.options.onSuccess as () => void)())
+    expect(pushToast).toHaveBeenCalledWith('pages.invoiceDetail.payments.recorded', 'success')
+    expect(invalidateQueries).toHaveBeenCalled()
   })
 
 })

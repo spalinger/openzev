@@ -453,8 +453,13 @@ SPEC-2026-04. All text goes through i18n (de, fr, it, en).
 
 ### 7.1 Phase 1
 
-- **Billing period table** (`useInvoiceActions.tsx`): unchanged. "Mark paid" stays the one-click
-  primary action of a sent row and books the full outstanding amount.
+- **Billing period table** (`useInvoiceActions.tsx`): the sent row's primary action is "Mark paid"
+  and books the full outstanding amount; once `paid_chf ≠ 0` it reads "Mark rest as paid" and books
+  only what is still open. The overflow menu of a sent invoice that still collects money
+  (`amount_due_chf > 0` and `outstanding_chf > 0`) carries "Record payment", which opens the same
+  `RecordPaymentModal` as the detail page (`InvoicesPage` owns the open invoice id and the mutation).
+  A successful record invalidates the period overview, lists, `mine`, readiness, readiness list and
+  attention.
 - **`frontend/src/features/invoices/InvoicePaymentsCard.tsx`** (new), on `InvoiceDetailPage.tsx`
   for non-participants whenever the invoice carries `payments`. A `card` with a `card-header`:
   "Payments" plus, for managers on a `sent` invoice, "Record payment" (only when
@@ -468,7 +473,7 @@ SPEC-2026-04. All text goes through i18n (de, fr, it, en).
 - **`frontend/src/features/invoices/RecordPaymentModal.tsx`** (new): `FormModal` (480px) with amount
   (defaults to `outstanding_chf`, validated `> 0` and `≤ outstanding` inline), paid on
   (`CivilDateInput`, defaults to today, `maxDate` today) and an optional note, submitted through
-  `FormModalFooter`.
+  `FormModalFooter`. Mounted by the detail Payments card and by `InvoicesPage` for the row menu.
 - **Partly paid** (`invoiceStatus.ts` `isPartlyPaid`): a `sent` invoice with `paid_chf ≠ 0`.
   `InvoiceStatusBadge` takes an optional `paidChf` and then reads "Partly paid" (detail page, admin
   invoice list, My invoices, participant dashboard card). In the period table's progress
@@ -476,7 +481,9 @@ SPEC-2026-04. All text goes through i18n (de, fr, it, en).
 - API client (`lib/api/invoices.ts`): `recordPayment(invoiceId, body)`,
   `deletePayment(invoiceId, paymentId)`, `markInvoicePaid(invoiceId, paidOn?)`.
 - i18n: `invoice.status.partlyPaid`, `pages.invoices.progress.reasons.partlyPaid`,
-  `pages.invoiceDetail.payments.*` in de, fr, it, en.
+  `pages.invoices.markRestPaid` (the shared "rest as paid" label of the period row and the detail
+  card), `pages.invoiceDetail.payments.*` in de, fr, it, en. The row menu reuses
+  `pages.invoiceDetail.payments.record` / `recorded` / `recordFailed`.
 
 ```typescript
 export interface Payment {
