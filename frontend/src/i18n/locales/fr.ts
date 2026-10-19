@@ -2890,6 +2890,7 @@ export const fr = {
                 title: 'Paiements',
                 record: 'Saisir un paiement',
                 recordTitle: 'Saisir un paiement',
+                invoiceContext: 'Paiement pour la facture {{number}}',
                 summary: 'Reçu {{paid}} · ouvert {{outstanding}}',
                 summaryCancelled: 'Reçu {{paid}} · la facture est annulée',
                 empty: 'Aucun paiement saisi.',

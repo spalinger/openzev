@@ -2890,6 +2890,7 @@ export const de = {
                 title: 'Zahlungen',
                 record: 'Zahlung erfassen',
                 recordTitle: 'Zahlung erfassen',
+                invoiceContext: 'Zahlung für Rechnung {{number}}',
                 summary: 'Erhalten {{paid}} · offen {{outstanding}}',
                 summaryCancelled: 'Erhalten {{paid}} · die Rechnung ist storniert',
                 empty: 'Noch keine Zahlungen erfasst.',

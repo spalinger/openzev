@@ -226,20 +226,24 @@ describe('useInvoiceActions hook', () => {
       .map((item) => item.key)).not.toContain('open-pdf')
   })
 
-  it('marks only the rest as paid once money has been received', () => {
+  it('labels a partly paid row for the rest and books it through mark-paid', () => {
     const { Harness, getResult } = createHarness()
     act(() => root.render(createElement(Harness)))
-    const sent = (paidChf: string) => ({
+    const sent = (paidChf: string, outstandingChf: string) => ({
       participant_id: 'participant-4',
       invoice: {
-        id: 'invoice-sent', status: 'sent', paid_chf: paidChf,
-        outstanding_chf: paidChf === '0.00' ? '100.00' : '75.00',
+        id: 'invoice-sent', status: 'sent', paid_chf: paidChf, outstanding_chf: outstandingChf,
         total_chf: '100.00', amount_due_chf: '100.00',
       },
     } as any)
 
-    expect(getResult()!.getPrimaryRowAction(sent('0.00'))?.label).toBe('pages.invoices.markPaid')
-    expect(getResult()!.getPrimaryRowAction(sent('25.00'))?.label).toBe('pages.invoices.markRestPaid')
+    expect(getResult()!.getPrimaryRowAction(sent('0.00', '100.00'))?.label).toBe('pages.invoices.markPaid')
+    const restAction = getResult()!.getPrimaryRowAction(sent('25.00', '75.00'))
+    expect(restAction?.label).toBe('pages.invoices.markRestPaid')
+
+    const markPaid = getResult()!.markPaidMutation
+    act(() => restAction!.onClick())
+    expect(markPaid.mutate).toHaveBeenCalledWith('invoice-sent')
   })
 
   it('offers record payment in the row menu while a sent invoice still collects money', () => {
@@ -256,19 +260,42 @@ describe('useInvoiceActions hook', () => {
     const item = result.getRowMenuItems(sent).find((entry) => entry.key === 'record-payment')
     expect(item?.label).toBe('pages.invoiceDetail.payments.record')
     item?.onClick()
-    expect(onRecordPaymentClick).toHaveBeenCalledWith(sent.invoice)
+    expect(onRecordPaymentClick).toHaveBeenCalledWith('invoice-sent')
 
-    // A payout and an invoice nothing is left on are settled with mark-paid only.
-    expect(result.getRowMenuItems(row({
-      id: 'invoice-payout', status: 'sent', paid_chf: '-40.00', outstanding_chf: '-40.00', total_chf: '-40.00',
-    })).map((entry) => entry.key)).not.toContain('record-payment')
-    expect(result.getRowMenuItems(row({
-      id: 'invoice-covered', status: 'sent', paid_chf: '0.00', outstanding_chf: '0.00',
-      total_chf: '100.00', amount_due_chf: '100.00',
-    })).map((entry) => entry.key)).not.toContain('record-payment')
+    // These invoices do not offer manual payment recording.
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ['payout', {
+        id: 'invoice-payout', status: 'sent',
+        paid_chf: '0.00', outstanding_chf: '-40.00', amount_due_chf: '-40.00', total_chf: '-40.00',
+      }],
+      ['credit-covered', {
+        id: 'invoice-covered', status: 'sent',
+        paid_chf: '0.00', outstanding_chf: '0.00', amount_due_chf: '0.00', total_chf: '100.00',
+        credit_applied_chf: '100.00',
+      }],
+      ['settled', {
+        id: 'invoice-settled', status: 'sent',
+        paid_chf: '100.00', outstanding_chf: '0.00', amount_due_chf: '100.00', total_chf: '100.00',
+      }],
+      ['missing-outstanding', {
+        id: 'invoice-missing-balance', status: 'sent', amount_due_chf: '100.00', total_chf: '100.00',
+      }],
+      ['stale-outstanding', {
+        id: 'invoice-stale', status: 'sent',
+        paid_chf: '0.00', outstanding_chf: '75.00', amount_due_chf: '0.00', total_chf: '100.00',
+        credit_applied_chf: '100.00',
+      }],
+      ['paid', {
+        id: 'invoice-paid', status: 'paid',
+        paid_chf: '100.00', outstanding_chf: '0.00', amount_due_chf: '100.00', total_chf: '100.00',
+      }],
+    ]
+    for (const [name, invoice] of cases) {
+      expect(result.getRowMenuItems(row(invoice)).map((entry) => entry.key), name).not.toContain('record-payment')
+    }
   })
 
-  it('books a row payment through the API and refreshes the period', async () => {
+  it('books a row payment through the API and refreshes the list, cockpit and period', async () => {
     const { Harness, getResult } = createHarness()
     act(() => root.render(createElement(Harness)))
     const instance = mutationInstances.find((item) => item.mutate === getResult()!.recordPaymentMutation.mutate)!
@@ -276,14 +303,41 @@ describe('useInvoiceActions hook', () => {
       invoiceId: 'invoice-sent',
       values: { amount_chf: '75.00', paid_on: '2026-05-10', note: 'E-Banking' },
     }
+    act(() => getResult()!.recordRowPayment(variables.invoiceId, variables.values, vi.fn()))
+    const submitted = instance.mutate.mock.calls[0][0]
 
-    await (instance.options.mutationFn as (vars: typeof variables) => Promise<unknown>)(variables)
+    await (instance.options.mutationFn as (vars: typeof submitted) => Promise<unknown>)(submitted)
     expect(vi.mocked(recordPayment)).toHaveBeenCalledWith('invoice-sent', variables.values)
 
     invalidateQueries.mockClear()
-    act(() => (instance.options.onSuccess as () => void)())
+    act(() => (instance.options.onSuccess as (result: unknown, vars: typeof submitted) => void)(undefined, submitted))
     expect(pushToast).toHaveBeenCalledWith('pages.invoiceDetail.payments.recorded', 'success')
-    expect(invalidateQueries).toHaveBeenCalled()
+    const invalidatedKeys = invalidateQueries.mock.calls.map((call) => (call[0] as { queryKey: unknown }).queryKey)
+    expect(invalidatedKeys).toEqual(expect.arrayContaining([
+      ['invoices', 'period-overview', 'zev-1', '2026-05-01', '2026-05-31'],
+      ['invoices', 'list'],
+      ['invoices', 'mine'],
+      ['invoices', 'readiness', 'zev-1'],
+      ['invoices', 'readiness-list', 'zev-1'],
+      ['invoices', 'attention', 'zev-1'],
+    ]))
+
+    const onError = instance.options.onError as (error: unknown, vars: typeof submitted) => void
+    act(() => onError(new Error('network down'), submitted))
+    expect(pushToast).toHaveBeenLastCalledWith('pages.invoiceDetail.payments.recordFailed', 'error')
+  })
+
+  it('rejects a retained payment submission after write access is revoked', () => {
+    const { Harness, getResult } = createHarness()
+    act(() => root.render(createElement(Harness)))
+    const instance = mutationInstances.find(item => item.mutate === getResult()!.recordPaymentMutation.mutate)!
+    act(() => getResult()!.recordRowPayment('invoice-sent', { amount_chf: '10.00', paid_on: '2026-05-10', note: '' }, vi.fn()))
+    const submitted = instance.mutate.mock.calls[0][0]
+    act(() => root.render(createElement(Harness, { options: { canWrite: false } })))
+    vi.mocked(recordPayment).mockClear()
+    expect(() => (instance.options.mutationFn as (vars: typeof submitted) => unknown)(submitted))
+      .toThrow('common.scopeGuard.loadFailed')
+    expect(recordPayment).not.toHaveBeenCalled()
   })
 
 })

@@ -2890,6 +2890,7 @@ export const it = {
                 title: 'Pagamenti',
                 record: 'Registra pagamento',
                 recordTitle: 'Registra un pagamento',
+                invoiceContext: 'Pagamento per la fattura {{number}}',
                 summary: 'Ricevuto {{paid}} · aperto {{outstanding}}',
                 summaryCancelled: 'Ricevuto {{paid}} · la fattura è annullata',
                 empty: 'Nessun pagamento registrato.',

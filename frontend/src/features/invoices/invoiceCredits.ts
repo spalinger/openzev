@@ -50,6 +50,15 @@ export function amountDueChf(invoice: Pick<Invoice, 'total_chf' | 'amount_due_ch
     return Number(invoice.amount_due_chf ?? invoice.total_chf)
 }
 
+/** Whether the invoice can accept a manual payment. */
+export function canRecordPayment(
+    invoice: Pick<Invoice, 'status' | 'total_chf' | 'amount_due_chf' | 'outstanding_chf'>,
+): boolean {
+    return invoice.status === 'sent'
+        && Number(invoice.outstanding_chf ?? 0) > 0
+        && amountDueChf(invoice) > 0
+}
+
 /** Show the amount due beside the total when credit reduced it (a cancelled invoice asks for nothing). */
 export function hasCreditApplied(
     invoice: Pick<Invoice, 'status' | 'total_chf' | 'credit_applied_chf' | 'amount_due_chf'>,

@@ -10,7 +10,8 @@ import { formatShortDate, useAppSettings } from '../../lib/appSettings'
 import { formatChf, formatChfAmount } from '../../lib/numbers'
 import { useToast } from '../../lib/toast'
 import type { Invoice, Payment } from '../../types/api'
-import { amountDueChf } from './invoiceCredits'
+import { canRecordPayment } from './invoiceCredits'
+import { isPartlyPaid } from './invoiceStatus'
 import { RecordPaymentModal } from './RecordPaymentModal'
 
 /**
@@ -39,8 +40,6 @@ export function InvoicePaymentsCard({
     const canRecord = canManage && invoice.status === 'sent'
     // Once credit notes exist the payments they were issued against are fixed.
     const hasCredits = (invoice.credits ?? []).length > 0
-    // A payout, a zero total or an invoice the applied credit covers is settled in one step.
-    const collectsMoney = amountDueChf(invoice) > 0
 
     const recordMutation = useMutation({
         mutationFn: (values: { amount_chf: string; paid_on: string; note: string }) => recordPayment(invoice.id, values),
@@ -76,7 +75,7 @@ export function InvoicePaymentsCard({
                 <h3 id="invoice-payments-title">{t('pages.invoiceDetail.payments.title')}</h3>
                 {canRecord ? (
                     <div className="actions-row actions-row-wrap">
-                        {collectsMoney ? (
+                        {canRecordPayment(invoice) ? (
                             <button type="button" className="button button-secondary" onClick={() => setRecording(true)}>
                                 <FontAwesomeIcon icon={faPlus} fixedWidth />
                                 {t('pages.invoiceDetail.payments.record')}
@@ -89,7 +88,7 @@ export function InvoicePaymentsCard({
                             onClick={() => markPaidMutation.mutate()}
                         >
                             <FontAwesomeIcon icon={faMoneyBillWave} fixedWidth />
-                            {payments.length > 0 ? t('pages.invoices.markRestPaid') : t('pages.invoices.markPaid')}
+                            {isPartlyPaid(invoice) ? t('pages.invoices.markRestPaid') : t('pages.invoices.markPaid')}
                         </button>
                     </div>
                 ) : null}

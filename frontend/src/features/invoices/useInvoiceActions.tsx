@@ -11,6 +11,7 @@ import {
     faFilePdf,
     faMoneyBillWave,
     faPaperPlane,
+    faPlus,
     faRotate,
     faTrash,
     faTriangleExclamation,
@@ -41,7 +42,7 @@ import { liveInvoice, type InvoiceRowWork } from './invoiceRowState'
 import { getLatestEmailLog } from './emailLogs'
 import { useEmailDelivery } from './useEmailDelivery'
 import { invoiceRowCounts } from './invoiceRowFilters'
-import { amountDueChf } from './invoiceCredits'
+import { canRecordPayment } from './invoiceCredits'
 import { isPartlyPaid } from './invoiceStatus'
 import type { RecordPaymentValues } from './RecordPaymentModal'
 import type { ActionMenuItem } from '../../components/ActionMenu'
@@ -85,8 +86,7 @@ export function useInvoiceActions({
     canWrite?: boolean
     accountId?: number
     onDeleteClick: (invoiceId: string) => void
-    /** Opens the record-payment dialog; the page owns the modal and its state. */
-    onRecordPaymentClick: (invoice: Invoice) => void
+    onRecordPaymentClick: (invoiceId: string) => void
     /** Called when an action queued PDF work the operator should see arrive. */
     onPdfQueued: (generationParticipantIds?: string[]) => void
 }) {
@@ -96,7 +96,7 @@ export function useInvoiceActions({
     const { pushToast } = useToast()
     const { settings } = useAppSettings()
 
-    const { scope, isCurrent } = useWriteScope({
+    const { scope, isCurrent, assertWritable } = useWriteScope({
         selectedZevId,
         scopeKey: `${period.period_start}|${period.period_end}`,
         accountId,
@@ -123,16 +123,20 @@ export function useInvoiceActions({
 
     // Billing mutations also move Overview's period cards: readiness steps
     // and cross-period attention derive from the same invoice states.
-    const invalidateCockpit = useCallback(() => {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.readiness(selectedZevId) })
-        void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.readinessList(selectedZevId) })
-        void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.attention(selectedZevId) })
+    const invalidateCockpit = useCallback((zevId = selectedZevId) => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.readiness(zevId) })
+        void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.readinessList(zevId) })
+        void queryClient.invalidateQueries({ queryKey: queryKeys.invoices.attention(zevId) })
     }, [queryClient, selectedZevId])
 
     const refreshRelated = useCallback(() => {
         invalidateInvoicesList()
         invalidateCockpit()
     }, [invalidateInvoicesList, invalidateCockpit])
+    const invalidateAfterPaymentChange = useCallback(() => {
+        invalidatePeriodOverview()
+        refreshRelated()
+    }, [invalidatePeriodOverview, refreshRelated])
     const delivery = useEmailDelivery({ rows, scope, refreshOverview: invalidatePeriodOverview, refreshRelated })
 
     const showGenerationError = (error: unknown, fallback: string) => {
@@ -231,24 +235,43 @@ export function useInvoiceActions({
         mutationFn: (invoiceId: string) => markInvoicePaid(invoiceId),
         onSuccess: () => {
             pushToast(t('pages.invoices.messages.markedPaid'), 'success')
-            invalidatePeriodOverview()
-            invalidateInvoicesList()
-            invalidateCockpit()
+            invalidateAfterPaymentChange()
         },
         onError: (error) => pushToast(formatApiError(error, t('pages.invoices.messages.markPaidFailed')), 'error'),
     })
 
     const recordPaymentMutation = useMutation({
-        mutationFn: ({ invoiceId, values }: { invoiceId: string; values: RecordPaymentValues }) =>
-            recordPayment(invoiceId, values),
-        onSuccess: () => {
-            pushToast(t('pages.invoiceDetail.payments.recorded'), 'success')
-            invalidatePeriodOverview()
-            invalidateInvoicesList()
-            invalidateCockpit()
+        mutationFn: ({ invoiceId, values, submittedScope }: {
+            invoiceId: string
+            values: RecordPaymentValues
+            submittedScope: typeof scope
+            queryKey: typeof periodOverviewInvalidationKey
+        }) => {
+            assertWritable(submittedScope)
+            return recordPayment(invoiceId, values)
         },
-        onError: (error) => pushToast(formatApiError(error, t('pages.invoiceDetail.payments.recordFailed')), 'error'),
+        onSuccess: (_updated, { submittedScope, queryKey }) => {
+            void queryClient.invalidateQueries({ queryKey })
+            invalidateInvoicesList()
+            invalidateCockpit(submittedScope.selectedZevId)
+            if (!isCurrent(submittedScope)) return
+            pushToast(t('pages.invoiceDetail.payments.recorded'), 'success')
+        },
+        onError: (error, { submittedScope }) => {
+            if (isCurrent(submittedScope)) {
+                pushToast(formatApiError(error, t('pages.invoiceDetail.payments.recordFailed')), 'error')
+            }
+        },
     })
+
+    const paymentPending = markPaidMutation.isPending || recordPaymentMutation.isPending
+    const recordRowPayment = (invoiceId: string, values: RecordPaymentValues, onSuccess: () => void) => {
+        if (paymentPending) return
+        recordPaymentMutation.mutate(
+            { invoiceId, values, submittedScope: scope, queryKey: periodOverviewInvalidationKey },
+            { onSuccess: () => { if (isCurrent(scope)) onSuccess() } },
+        )
+    }
 
     // ── Batch mutations ──────────────────────────────────────────────
 
@@ -459,7 +482,7 @@ export function useInvoiceActions({
                     : t('pages.invoices.markPaid'),
                 icon: <FontAwesomeIcon icon={faMoneyBillWave} fixedWidth />,
                 onClick: () => markPaidMutation.mutate(invoice.id),
-                disabled: markPaidMutation.isPending,
+                disabled: paymentPending,
             }
         }
 
@@ -520,18 +543,15 @@ export function useInvoiceActions({
             })
         }
 
-        if (invoice.status === 'sent') {
-            // Same eligibility as the detail card: a payout or an invoice whose
-            // credit covers it is settled with mark-paid, not a payment row.
-            if (amountDueChf(invoice) > 0 && Number(invoice.outstanding_chf ?? 0) > 0) {
-                items.push({
-                    key: 'record-payment',
-                    label: t('pages.invoiceDetail.payments.record'),
-                    icon: <FontAwesomeIcon icon={faMoneyBillWave} fixedWidth />,
-                    section: t('pages.invoices.menuSections.invoice'),
-                    onClick: () => onRecordPaymentClick(invoice),
-                })
-            }
+        if (canRecordPayment(invoice)) {
+            items.push({
+                key: 'record-payment',
+                label: t('pages.invoiceDetail.payments.record'),
+                icon: <FontAwesomeIcon icon={faPlus} fixedWidth />,
+                section: t('pages.invoices.menuSections.invoice'),
+                onClick: () => onRecordPaymentClick(invoice.id),
+                disabled: paymentPending,
+            })
         }
 
         if (hasDeletePermission(invoice, userRole)) {
@@ -588,6 +608,8 @@ export function useInvoiceActions({
         markSentMutation,
         markPaidMutation,
         recordPaymentMutation,
+        recordRowPayment,
+        paymentPending,
         generateAllMutation,
         approveAllMutation,
         sendAllMutation,

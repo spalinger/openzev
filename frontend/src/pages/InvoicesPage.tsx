@@ -6,7 +6,7 @@ import { repeatedParties } from '../features/invoices/invoiceRowState'
 import { InvoiceBatchActions } from '../features/invoices/InvoiceBatchActions'
 import { InvoiceRowFilterTabs } from '../features/invoices/InvoiceRowFilterTabs'
 import { InvoiceDeleteModal } from '../features/invoices/InvoiceDeleteModal'
-import { RecordPaymentModal } from '../features/invoices/RecordPaymentModal'
+import { RecordPaymentModal, type RecordPaymentValues } from '../features/invoices/RecordPaymentModal'
 import { InvoicesEmptyState } from '../features/invoices/InvoicesEmptyState'
 import { useInvoiceActions } from '../features/invoices/useInvoiceActions'
 import {
@@ -97,8 +97,7 @@ export function InvoicesContent() {
     // into another period, community or account.
     const [rowFilter, setRowFilter] = useState<InvoiceRowFilter>(null)
 
-    // A deletion or record-payment dialog targets one community's invoice:
-    // never let it survive an account, community, write-access or period change.
+    // A dialog targets one community's invoice: reset it on scope change.
     const { isZevScope: isManagedScope, canWriteSelectedCommunity } = useCommunityAccess()
     useEffect(() => {
         setDeleteModalInvoiceId(null)
@@ -151,7 +150,8 @@ export function InvoicesContent() {
 
     const {
         deleteMutation,
-        recordPaymentMutation,
+        paymentPending,
+        recordRowPayment,
         downloadAllPdfsMutation,
         anyBatchPending,
         rowCounts,
@@ -170,7 +170,7 @@ export function InvoicesContent() {
         canGenerate: wholePeriod,
         generationParticipantIds: pdfWatch?.generationParticipantIds,
         onDeleteClick: (invoiceId) => setDeleteModalInvoiceId(invoiceId),
-        onRecordPaymentClick: (invoice) => setRecordPaymentInvoiceId(invoice.id),
+        onRecordPaymentClick: setRecordPaymentInvoiceId,
         onPdfQueued: startPdfWatch,
     })
 
@@ -191,6 +191,16 @@ export function InvoicesContent() {
     const recordPaymentInvoice = recordPaymentInvoiceId
         ? rows.find((row) => row.invoice?.id === recordPaymentInvoiceId)?.invoice ?? null
         : null
+    // A late success must not close a dialog opened for another invoice.
+    const handleRecordPaymentSubmit = (values: RecordPaymentValues) => {
+        if (!recordPaymentInvoice) return
+        const submittedInvoiceId = recordPaymentInvoice.id
+        recordRowPayment(
+            submittedInvoiceId,
+            values,
+            () => setRecordPaymentInvoiceId((current) => current === submittedInvoiceId ? null : current),
+        )
+    }
 
     const content = (
         <div className="invoice-period-view">
@@ -306,16 +316,11 @@ export function InvoicesContent() {
 
             <RecordPaymentModal
                 isOpen={recordPaymentInvoice !== null}
-                isPending={recordPaymentMutation.isPending}
+                isPending={paymentPending}
                 outstandingChf={recordPaymentInvoice?.outstanding_chf ?? '0.00'}
+                invoiceNumber={recordPaymentInvoice?.invoice_number}
                 onClose={() => setRecordPaymentInvoiceId(null)}
-                onSubmit={(values) => {
-                    if (!recordPaymentInvoice) return
-                    recordPaymentMutation.mutate(
-                        { invoiceId: recordPaymentInvoice.id, values },
-                        { onSuccess: () => setRecordPaymentInvoiceId(null) },
-                    )
-                }}
+                onSubmit={handleRecordPaymentSubmit}
             />
         </div>
     )

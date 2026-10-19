@@ -2901,6 +2901,7 @@ export const en = {
                 title: 'Payments',
                 record: 'Record payment',
                 recordTitle: 'Record a payment',
+                invoiceContext: 'Payment for invoice {{number}}',
                 summary: 'Received {{paid}} · outstanding {{outstanding}}',
                 summaryCancelled: 'Received {{paid}} · the invoice is cancelled',
                 empty: 'No payments recorded yet.',
