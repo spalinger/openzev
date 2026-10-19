@@ -102,7 +102,7 @@ for (const role of ['admin', 'manager', 'viewer'] as const) {
     const errors = await mockApi(page, { role, populated: true })
     await sourceApi(page)
     await page.goto('/tariffs?tariff=42%3ADynamic+tariff')
-    const drawer = page.locator('.tariff-drawer')
+    const drawer = page.locator('.tariff-pane')
     await expect(drawer).toBeVisible()
     await expect(drawer).toContainText('Across the platform: 7 tariffs · 3 ZEVs')
     await expect(drawer).toContainText('Disabled')
@@ -119,7 +119,9 @@ for (const role of ['admin', 'manager', 'viewer'] as const) {
     } else {
       await page.getByRole('button', { name: 'New Tariff', exact: true }).click()
       await page.getByRole('button', { name: 'Create a new dynamic source', exact: true }).click()
-      await expect(page.getByRole('dialog').last()).toContainText('URL')
+      // An inline section of the pane's form, not a dialog over it.
+      await expect(page.locator('.tariff-pane-section')).toContainText('URL')
+      await expect(page.getByRole('dialog')).toHaveCount(0)
     }
     expect(errors).toEqual([])
   })
@@ -147,7 +149,7 @@ test('tariff links reach source activity and its filters survive reload and clea
   await sourceApi(page)
   const requests = await auditApi(page)
   await page.goto('/tariffs?tariff=42%3ADynamic+tariff')
-  await page.locator('.tariff-drawer').getByRole('link', { name: 'Manage source in platform admin' }).click()
+  await page.locator('.tariff-pane').getByRole('link', { name: 'Manage source in platform admin' }).click()
   await expect(page).toHaveURL(/\/admin\/dynamic-sources\?source=s1$/)
   await page.locator('tbody tr').getByRole('button', { name: 'Actions', exact: true }).click()
   await page.getByRole('menuitem', { name: 'View fetch log', exact: true }).click()
