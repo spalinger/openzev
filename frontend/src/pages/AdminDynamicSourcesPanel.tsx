@@ -342,12 +342,14 @@ export function AdminDynamicSourcesPanel() {
             }]}
           />
         ) : (
-          <DataTable
-            data={visibleSources}
-            columns={columns}
-            getRowId={(source) => source.id}
-            emptyMessage={t('pages.dynamicSources.sourceNotFound')}
-          />
+          <div className="table-card">
+            <DataTable
+              data={visibleSources}
+              columns={columns}
+              getRowId={(source) => source.id}
+              emptyMessage={t('pages.dynamicSources.sourceNotFound')}
+            />
+          </div>
         )}
       </PageState>
 
@@ -382,12 +384,14 @@ export function AdminDynamicSourcesPanel() {
               {t('pages.dynamicSources.activity.refreshError')}
             </Notice>
           )}
-          <DataTable
-            data={activityQuery.data?.results ?? []}
-            columns={activityColumns}
-            getRowId={(event) => event.id}
-            emptyMessage={t('pages.dynamicSources.activity.empty')}
-          />
+          <div className="table-card">
+            <DataTable
+              data={activityQuery.data?.results ?? []}
+              columns={activityColumns}
+              getRowId={(event) => event.id}
+              emptyMessage={t('pages.dynamicSources.activity.empty')}
+            />
+          </div>
         </PageState>
       </FormModal>
 
