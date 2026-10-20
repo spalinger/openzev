@@ -8,7 +8,7 @@
 - Created: 2026-09-30
 - Target Release: 1.21.0
 - Related Issues: —
-- Related ADRs: [0013](../adr/0013-shared-allocation-service.md) (readings attributed at their timestamp), [0017](../adr/0017-async-export-jobs.md) (async exports), [0026](../adr/0026-swiss-civil-time-for-billing.md) (Swiss civil time)
+- Related ADRs: [0013](../adr/0013-shared-allocation-service.md) (readings attributed at their timestamp), [0017](../adr/0017-async-export-jobs.md) (async exports), [0026](../adr/0026-swiss-civil-time-for-billing.md) (Swiss civil time), [0043](../adr/0043-annual-report-sql-aggregation.md) (SQL read model)
 - Impacted Areas: backend | frontend | docs
 
 ---
@@ -38,9 +38,9 @@ ZEV-wide picture.
 followed by **Annual documents**: the tax overview PDF and the
 annual-statement ZIP, which moved here from Billing.
 
-Nothing is computed a new way. Energy figures come from the Energy balance
-analytics, and savings from the annual statement's calculation, so the report
-agrees with both.
+Energy figures use the Energy balance dashboard's definitions, implemented
+through SQL aggregation; savings reuse the annual statement's calculation, so
+the report agrees with both.
 
 ## 2. Scope
 
@@ -48,8 +48,8 @@ agrees with both.
 
 | Area | Details |
 |---|---|
-| Backend — analytics | `metering/analytics.py`: ZEV-wide balance extracted from `owner_dashboard_summary` into `_zev_balance(base)`; new public `zev_balance_timeline(qs, trunc_fn)` |
-| Backend — report | New `invoices/annual_report.py` with `build_annual_report(zev, year)` |
+| Backend — analytics | `metering/analytics.py`: `_zev_balance(qs, trunc_fn)` and public `zev_balance_timeline(qs, trunc_fn)` supply the dashboard's ZEV-wide balance |
+| Backend — report | New `invoices/annual_report.py` with `build_annual_report(zev, year)`; year energy aggregated in SQL by `metering/annual_balance.py` (see §5) |
 | Backend — savings | `invoices/annual_statement.py`: `_compute_savings` renamed to public `compute_savings` (behaviour unchanged) |
 | Backend — API | `AnnualReportView` in `invoices/views_reports.py`, `GET /api/v1/invoices/invoices/annual-report/` |
 | Frontend — report | New `features/reports/AnnualReportSection.tsx` on the owner/admin branch of `ReportsPage` |
@@ -119,7 +119,7 @@ Validation order: year, then zev_id, then ZEV lookup and authorisation.
   "totals": { /* Balance */ },
   "previous_totals": { /* Balance */ } | null,
   "months": [ /* 12 × Month, January first */ ],
-  "participants": [ /* Participant, sorted by name (case-insensitive) */ ],
+  "participants": [ /* Participant, sorted by case-insensitive name, then participant_id */ ],
   "savings_total_chf": "504.30" | null
 }
 ```
@@ -147,9 +147,8 @@ participant who personally held a metering point with
 unaffected. A participant added only because they have savings but no
 readings that year always gets `has_behind_meter_generation: false`. Top-level
 `has_behind_meter_generation` is true when any metering point with generation
-behind it had readings in the year (`owner_dashboard_summary`'s
-`zev_has_behind_meter_generation`, computed over the year's readings). ZEV-wide
-`totals`, `previous_totals`, and `months` are never affected by the flag.
+behind it had readings in the year (`YearEnergy.has_behind_meter_generation`).
+ZEV-wide `totals`, `previous_totals`, and `months` are never affected by the flag.
 
 ### Definitions
 
@@ -161,7 +160,7 @@ behind it had readings in the year (`owner_dashboard_summary`'s
 
 These are the Energy balance page's definitions (`DashboardPage`
 `ownerSelfConsumption` / `fromZevRate`). Import and export are netted per
-timestamp, then summed (`_zev_balance`).
+timestamp, then summed, in both the dashboard and the annual report.
 
 ### How the figures are computed
 
@@ -169,15 +168,14 @@ timestamp, then summed (`_zev_balance`).
   `period_start_dt(Jan 1) <= timestamp < period_end_exclusive_dt(Dec 31)`, the
   civil year in `Europe/Zurich` (ADR 0026). A reading at local midnight on
   1 January belongs to the new year.
-- **Current year**: `owner_dashboard_summary(readings, TruncMonth(tz=business_tz()), None)`.
-  `zev_totals` → `totals`, `timeline` → months (bucket ISO string, month =
-  characters 5–6), `participant_stats` → participant energy columns. Readings
-  are attributed at their timestamp, and community metering points by
-  allocation weight (ADR 0013), exactly as on the dashboard.
-- **Previous year**: `zev_balance_timeline(previous_readings, trunc)`, the
-  ZEV-wide half only, and only if `previous_readings.exists()`. Otherwise
-  `previous_totals` is `null`.
-- **`has_data`**: `readings.exists()` for the selected year.
+- **Current year**: `metering.annual_balance.year_energy(zev, year,
+  with_participants=True)` aggregates the year in the database and returns
+  `YearEnergy` for the monthly balance and participant energy columns.
+- **Previous year**: `year_energy(zev, year - 1)` with monthly buckets only
+  (no participant query). `previous_totals` is `null` when that year has no
+  readings.
+- **`has_data`**: `YearEnergy.has_data` — at least one monthly bucket for the
+  selected year.
 - **Savings**: invoices of the ZEV with `period_start >= Jan 1`,
   `period_end <= Dec 31`, excluding `CANCELLED`, grouped by participant, each
   group passed to `compute_savings` (the annual statement's function, same
@@ -187,11 +185,38 @@ timestamp, then summed (`_zev_balance`).
   `{local_kwh, local_chf, local_rp, grid_rp, hypothetical_chf, saved_chf}`,
   where `hypothetical_chf = local_kwh × grid_rp / 100` and
   `saved_chf = hypothetical_chf − local_chf`.
-- **Participants**: everyone in `participant_stats`, plus anyone with savings
-  but no readings that year (still a participant of the ZEV), with zero energy
-  and `null` rate.
+- **Participants**: everyone in `YearEnergy.participants`, plus anyone with
+  savings but no readings that year (still a participant of the ZEV), with
+  zero energy and `null` rate. Historical cross-ZEV assignments retain the
+  attributed participant's name, matching the dashboard.
 - **`savings_total_chf`**: sum of `saved_chf` over rows with savings, two
   decimals, or `null` when no row has savings.
+
+### SQL aggregation (`metering/annual_balance.py`)
+
+- Readings are netted per timestamp (`in` = consumed, `out` = produced)
+  before the monthly sums.
+- Any negative source `energy_kwh` in the selected or previous civil year
+  raises `InvalidAllocationInputError`, including unassigned readings and
+  negatives offset by positive readings at the same timestamp. The minimum
+  reading is carried through the existing SQL aggregation; no extra query
+  is needed. Other ZEVs and years are outside this check.
+- Each reading is attributed on its civil day: personal assignments go wholly
+  to the holder, community assignments split by normalized
+  `allocation_weight` among the participants valid that day, and days in a gap
+  go to nobody while still counting in the ZEV totals.
+- A consumer's local part is
+  `energy × min(produced, consumed) / consumed` at its own timestamp
+  (`split_consumption`'s formula).
+- A participant is net-metered only when a **personal** assignment attributes
+  a reading of a flagged metering point to them; community assignments never
+  do. The top-level flag is true when any flagged metering point had a reading
+  in the year.
+
+The query uses Django's backend month/date SQL hooks for PostgreSQL and SQLite.
+`AssignmentWindows` rejects overlapping assignments before they can duplicate
+energy in the join. [ADR 0043](../adr/0043-annual-report-sql-aggregation.md)
+records the separate SQL implementation and its validation requirements.
 
 ## 6. Async and integration behavior
 
@@ -351,9 +376,10 @@ Behind-the-meter generation reuses the shared top-level namespace
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Response time: a year of 15-minute readings goes through the per-timestamp dashboard pass (≈3.7 s for the demo ZEV) | Medium | Previous year uses only the ZEV-wide pass; skeleton while loading; TanStack Query caches per ZEV/year. Caching or pre-aggregation is a follow-up if real ZEVs are slower |
+| Response time on a full year | Medium | SQL aggregation, no cache; see [ADR 0043](../adr/0043-annual-report-sql-aggregation.md) |
+| SQL aggregation drifts from the dashboard's per-reading rules | High | `metering.analytics.owner_dashboard_summary` stays the reference for the dashboard; `test_annual_report_aggregation.py` builds randomized fixtures (reassignments, community meters, membership changes, gaps, flags, DST, two years) and asserts every monthly and participant field agrees |
 | Savings disagree with the statements | Medium | Same function (`compute_savings`) and invoice filter as the annual statement; test asserts equality |
-| Rates disagree with Energy balance | Low | Same analytics function and rate definitions |
+| Rates disagree with Energy balance | Low | Same per-timestamp netting and split formulas; differential test compares totals, months and participant rows |
 | Old `/billing/statements` bookmarks | Low | Alias redirect to `/reports`; route-guard matrix covers it |
 | Year with no data looks broken | Low | `has_data` → explicit notice; documents stay available |
 
@@ -361,7 +387,7 @@ Behind-the-meter generation reuses the shared top-level namespace
 
 ### Backend — `backend/invoices/test_annual_report.py`
 
-**`AnnualReportContentTests`** (13 tests):
+**`AnnualReportContentTests`** (21 tests; producer uplift cases are covered below):
 
 | Test | Asserts |
 |---|---|
@@ -371,13 +397,21 @@ Behind-the-meter generation reuses the shared top-level namespace
 | `test_previous_totals_are_null_without_previous_year_readings` | `previous_totals` null, all previous month rates null |
 | `test_year_follows_swiss_civil_time` | local-midnight reading in January of the new year; 23:45 on 31 Dec in the previous year |
 | `test_participants_carry_their_split_and_rate` | consumer split and rate; producer rate `null` |
+| `test_participant_from_another_zev_keeps_their_name` | cross-ZEV/historical assignment's name resolved from the global participant |
 | `test_net_metered_participant_has_null_rate_and_flag` | flagged holder's `self_sufficiency_rate` null and `has_behind_meter_generation` true; kWh/savings unchanged; top-level flag true (SPEC-2026-behind-the-meter-generation) |
 | `test_totals_are_unchanged_by_the_flag` | `totals` identical with the flag toggled on an otherwise-unchanged reading set |
 | `test_participants_are_sorted_by_name` | name order |
+| `test_equal_names_are_sorted_by_participant_id` | an energy row and an invoice-only row with equal names use participant ID as the tie-breaker |
 | `test_savings_match_the_annual_statement` | `savings == compute_savings([invoice])`, `saved_chf`, total |
 | `test_cancelled_invoices_and_other_years_do_not_count` | no savings, total `null` |
 | `test_invoiced_participant_without_readings_keeps_a_row` | row present with savings |
 | `test_year_without_readings_reports_no_data` | `has_data` false, null rates, no participants, 12 months |
+
+**`AnnualReportValidationTests`** (2 tests):
+`test_negative_readings_are_rejected_even_when_timestamp_totals_are_positive`
+checks both directions in the selected and previous year;
+`test_negative_readings_outside_the_zev_and_report_years_are_ignored` checks
+ZEV scoping and the Swiss civil-year boundaries.
 
 **`AnnualReportAccessTests`** (7 tests): `test_admin_can_read_any_zev`,
 `test_owner_cannot_read_another_owners_zev` (403),
@@ -385,8 +419,16 @@ Behind-the-meter generation reuses the shared top-level namespace
 `test_zev_id_is_required` (400), `test_year_is_required_and_bounded` (400 for
 missing and for `year=1`), `test_unknown_or_malformed_zev_is_404`.
 
-The existing metering dashboard tests cover the `_zev_balance` extraction
-unchanged.
+### Backend — `backend/invoices/test_annual_report_aggregation.py`
+
+`AnnualReportReferenceTests` compares three seeded two-year fixtures against
+the dashboard, covering assignments, community shares, gaps, flags and civil
+boundaries. UTC normalization preserves both autumn instants, whose database
+presence is asserted explicitly. Independent expected-value tests cover a
+personal handover and community membership change at Swiss midnight, both
+autumn instants, whole-number SQLite allocation, and rejection of overlapping
+assignments. Existing dashboard and allocation reconciliation tests cover
+selected-producer exports, mixed personal/community energy and separate ZEV pools.
 
 ### Frontend
 

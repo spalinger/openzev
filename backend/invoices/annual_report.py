@@ -3,37 +3,23 @@ participation saved each consumer, and what selling locally earned each
 producer over feeding the grid.
 
 Owner/admin view of one ZEV and one calendar year (docs/specs/
-2026-09-annual-zev-report.md). Nothing here is computed afresh: the energy
-figures are the Energy balance dashboard's (``metering.analytics``) over the
-civil year in monthly buckets, the savings are the annual statement's
-(``compute_savings``) summed per participant, and the producer uplift sums the
-per-invoice figures the engine stored, so the report reconciles with the
-invoices.
+2026-09-annual-zev-report.md). Energy figures come from
+``metering.annual_balance``; the dashboard's per-reading path remains the
+reference. Savings are the annual statement's (``compute_savings``) summed per
+participant, and the producer uplift sums the per-invoice figures the engine
+stored, so the report reconciles with the invoices.
 """
 
 from datetime import date
 from decimal import Decimal
-from functools import partial
 
-from django.db.models.functions import TruncMonth
-
-from allocation.validity import business_tz, period_end_exclusive_dt, period_start_dt
-from metering.analytics import owner_dashboard_summary, zev_balance_timeline
-from metering.models import MeterReading
+from metering.annual_balance import year_energy
 from metering.supplementary.stats import civil_window
 from metering.supplementary.surfaces import participants_gross
+from zev.models import Participant
 
 from .annual_statement import compute_savings
 from .models import billed_invoices
-
-
-def _year_readings(zev, year: int):
-    """The ZEV's readings in civil ``year`` (ADR 0026)."""
-    return MeterReading.objects.filter(
-        metering_point__zev=zev,
-        timestamp__gte=period_start_dt(date(year, 1, 1)),
-        timestamp__lt=period_end_exclusive_dt(date(year, 12, 31)),
-    )
 
 
 def _rate(numerator: float, denominator: float) -> float | None:
@@ -48,7 +34,6 @@ def _balance(entry: dict) -> dict:
 
     Self-consumption rate: share of production used inside the ZEV.
     Self-sufficiency rate: share of consumption covered by the ZEV.
-    Both use the dashboard's definitions, so the numbers agree.
     """
     self_consumed = max(entry["produced_kwh"] - entry["exported_kwh"], 0.0)
     return {
@@ -60,15 +45,6 @@ def _balance(entry: dict) -> dict:
         "self_consumption_rate": _rate(self_consumed, entry["produced_kwh"]),
         "self_sufficiency_rate": _rate(self_consumed, entry["consumed_kwh"]),
     }
-
-
-def _by_month(timeline: list[dict]) -> dict[int, dict]:
-    """Timeline entries keyed by calendar month.
-
-    Buckets are ISO datetimes truncated in the business timezone, so the
-    month is the civil month the readings belong to.
-    """
-    return {int(entry["bucket"][5:7]): entry for entry in timeline}
 
 
 def _empty_month() -> dict:
@@ -127,24 +103,13 @@ def compute_producer_uplift(invoices) -> dict | None:
 
 def build_annual_report(zev, year: int) -> dict:
     """The annual report payload for ``zev`` and civil ``year``."""
-    trunc_month = partial(TruncMonth, tzinfo=business_tz())
-
-    readings = _year_readings(zev, year)
-    has_data = readings.exists()
-    summary = owner_dashboard_summary(readings, trunc_month, None)
-    current = _by_month(summary["timeline"])
-
-    previous_readings = _year_readings(zev, year - 1)
-    previous_has_data = previous_readings.exists()
-    previous_timeline, previous_totals = (
-        zev_balance_timeline(previous_readings, trunc_month) if previous_has_data else ([], None)
-    )
-    previous = _by_month(previous_timeline)
+    current = year_energy(zev, year, with_participants=True)
+    previous = year_energy(zev, year - 1)
 
     months = []
     for month in range(1, 13):
-        row = {"month": month, **_balance(current.get(month, _empty_month()))}
-        prior = _balance(previous[month]) if month in previous else None
+        row = {"month": month, **_balance(current.months.get(month, _empty_month()))}
+        prior = _balance(previous.months[month]) if month in previous.months else None
         row["previous_self_consumption_rate"] = prior["self_consumption_rate"] if prior else None
         row["previous_self_sufficiency_rate"] = prior["self_sufficiency_rate"] if prior else None
         months.append(row)
@@ -153,24 +118,32 @@ def build_annual_report(zev, year: int) -> dict:
     savings = {pid: compute_savings(rows) for pid, rows in invoices.items()}
     uplift = {pid: compute_producer_uplift(rows) for pid, rows in invoices.items()}
     names = {str(p.id): f"{p.first_name} {p.last_name}".strip() for p in zev.participants.all()}
+    # Historical or direct-DB assignments may reference a participant outside
+    # this ZEV; the dashboard still names those rows.
+    missing_names = [pid for pid in current.participants if pid not in names]
+    if missing_names:
+        names.update(
+            {
+                str(p.id): f"{p.first_name} {p.last_name}".strip()
+                for p in Participant.objects.filter(id__in=missing_names)
+            }
+        )
 
     participants = {}
-    for stat in summary["participant_stats"]:
-        pid = stat["participant_id"]
-        has_behind_meter_generation = stat["has_behind_meter_generation"]
+    for pid, stat in current.participants.items():
         participants[pid] = {
             "participant_id": pid,
-            "participant_name": stat["participant_name"] or names.get(pid, ""),
-            "consumed_kwh": stat["total_consumed_kwh"],
-            "produced_kwh": stat["total_produced_kwh"],
-            "from_zev_kwh": stat["from_zev_kwh"],
-            "from_grid_kwh": stat["from_grid_kwh"],
+            "participant_name": names.get(pid, ""),
+            "consumed_kwh": stat.consumed_kwh,
+            "produced_kwh": stat.produced_kwh,
+            "from_zev_kwh": stat.from_zev_kwh,
+            "from_grid_kwh": stat.from_grid_kwh,
             "self_sufficiency_rate": (
                 None
-                if has_behind_meter_generation
-                else _rate(stat["from_zev_kwh"], stat["total_consumed_kwh"])
+                if stat.has_behind_meter_generation
+                else _rate(stat.from_zev_kwh, stat.consumed_kwh)
             ),
-            "has_behind_meter_generation": has_behind_meter_generation,
+            "has_behind_meter_generation": stat.has_behind_meter_generation,
             "savings": savings.get(pid),
             "uplift": uplift.get(pid),
         }
@@ -201,12 +174,15 @@ def build_annual_report(zev, year: int) -> dict:
     return {
         "zev_id": str(zev.id),
         "year": year,
-        "has_data": has_data,
-        "has_behind_meter_generation": summary["zev_has_behind_meter_generation"],
-        "totals": _balance(summary["zev_totals"]),
-        "previous_totals": _balance(previous_totals) if previous_totals else None,
+        "has_data": current.has_data,
+        "has_behind_meter_generation": current.has_behind_meter_generation,
+        "totals": _balance(current.totals),
+        "previous_totals": _balance(previous.totals) if previous.has_data else None,
         "months": months,
-        "participants": sorted(participants.values(), key=lambda row: row["participant_name"].lower()),
+        "participants": sorted(
+            participants.values(),
+            key=lambda row: (row["participant_name"].lower(), row["participant_id"]),
+        ),
         "savings_total_chf": f"{sum(saved, Decimal('0')):.2f}" if saved else None,
         "uplift_total_chf": f"{sum(uplifts, Decimal('0')):.2f}" if uplifts else None,
     }

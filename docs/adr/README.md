@@ -46,6 +46,7 @@ This directory captures key architectural decisions for OpenZEV.
 - [0040: Choose containers by task; one detail pane; validate on tariffs, then roll out](0040-overlay-and-disclosure-pattern-rules.md) (Proposed)
 - [0041: Serialize billing-input writes and generation with a per-ZEV advisory lock](0041-billing-input-advisory-lock.md)
 - [0042: Serialize meter identities and protect historical reading configuration](0042-meter-identity-and-history-write-boundary.md)
+- [0043: Aggregate annual-report energy in SQL](0043-annual-report-sql-aggregation.md)
 
 ## Conventions
 
