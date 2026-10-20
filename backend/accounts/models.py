@@ -755,7 +755,17 @@ class SocialAccount(models.Model):
 class OAuthState(models.Model):
     """Short-lived CSRF state token for an in-flight OAuth authorisation request."""
 
+    TTL = timedelta(minutes=10)
+
     state = models.CharField(max_length=64, unique=True, db_index=True)
+    # Browser binding. ``state`` alone is bearer material: whoever presents it
+    # gets signed in. An attacker can mint a state, authenticate at the IdP as
+    # themselves and hand the callback URL to a victim, so the row also carries
+    # a per-attempt secret that only the browser that started the flow holds,
+    # as an HttpOnly cookie. Stored as a SHA-256 hash (same treatment as API
+    # keys) so a database read alone cannot replay a callback, and empty on
+    # rows created before the binding existed — those are refused, not trusted.
+    binding = models.CharField(max_length=64, default="", editable=False)
     provider = models.ForeignKey(OAuthProvider, on_delete=models.CASCADE)
     # If set, this is a *link* request; the completed callback attaches the
     # social account to this user instead of creating a new session.
@@ -765,7 +775,7 @@ class OAuthState(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def is_valid(self) -> bool:
-        return timezone.now() < self.created_at + timedelta(minutes=10)
+        return timezone.now() < self.created_at + self.TTL
 
 
 class OAuthExchangeCode(models.Model):

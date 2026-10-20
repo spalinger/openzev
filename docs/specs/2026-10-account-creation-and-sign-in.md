@@ -179,6 +179,25 @@ admin, admin MFA reset, and promotion. Reactivating an account does not revive o
 
 ### 5.7 OAuth
 
+- **The login/link state is bound to the initiating browser.** `POST /auth/oauth/login/<slug>/`
+  and `POST /auth/oauth/link/<slug>/` mint a 256-bit per-attempt secret, store only its
+  SHA-256 in `OAuthState.binding` (`accounts.0031_oauthstate_browser_binding`; the table is
+  useless for replay), and hand the raw value to that browser as the cookie
+  `openzev_oauth_binding`: `HttpOnly`, `SameSite=Lax` (a top-level GET from the provider is
+  exactly what Lax allows; `Strict` would break the flow), `Secure` when `DEBUG=False`,
+  `path=/api/v1/auth/oauth/`, max-age 10 minutes (`OAuthState.TTL`). The callback compares the
+  cookie with the stored hash in constant time before any provider I/O or account work, and
+  refuses a missing cookie, a wrong value, a value from another attempt, and a row with no
+  stored binding (an in-flight login from before this shipped) with `invalid_state` — audited
+  as `state_binding_missing` / `state_not_bound` — consuming the state. The cookie is cleared on
+  every callback exit path. Without this, `state` was bearer material: an attacker could
+  authenticate at the provider as themselves and hand the callback URL to a victim, whose
+  browser then completed the flow into the attacker's account (login CSRF / account confusion).
+- **PKCE is deliberately not implemented.** These are confidential clients (a `client_secret`
+  is always sent), and PKCE S256 guards code interception, a different attack from the state
+  transfer above. It would need a browser-bound verifier cookie and a per-provider opt-in
+  (`OAuthProvider.use_pkce`), because a provider that rejects `code_verifier` would otherwise
+  break every login. Revisit as defense in depth, not as part of the state fix.
 - A new identity is matched to an existing account by email only when the provider asserts
   `email_verified: true`. A new account is provisioned only on the same condition, unless the
   provider has `trust_missing_email_verified` and omitted the claim.

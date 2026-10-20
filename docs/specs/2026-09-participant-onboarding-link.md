@@ -236,6 +236,11 @@ codes alone do not qualify. Otherwise access creation uses an inactive-account
 invitation; direct promotion fails until an invitation exists. Verification
 establishes an independent session for fresh enrollment.
 
+Every in-flight OAuth state — login and link alike — is bound to the browser that started
+it by `OAuthState.binding` (a hashed per-attempt secret handed back as an HttpOnly cookie;
+see [account creation §5.7](2026-10-account-creation-and-sign-in.md#57-oauth)). A callback
+presented by any other client is refused as `invalid_state` before the link is attempted.
+
 OAuth linking records `OAuthState.session_version` (`PositiveIntegerField`, nullable,
 non-editable) from the locked initiating account. Login states leave it null. After
 provider I/O, the callback locks the active account and requires the recorded version

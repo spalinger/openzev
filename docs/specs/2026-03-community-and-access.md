@@ -661,7 +661,11 @@ would need a duplicate-data and blank-address policy across all provisioning pat
 
 OAuth exchange codes are consumed under a user lock followed by the code lock.
 Redemption requires an active account and a valid 60-second code; concurrent
-redemptions allow one success. Callback issuance locks/rechecks the active user's
+redemptions allow one success. A callback must also come from the browser that
+started the flow: `OAuthState.binding` holds a hashed per-attempt secret whose
+raw value was handed to that browser as an HttpOnly cookie, and a callback
+without the matching cookie is refused as `invalid_state` before any provider
+I/O (account creation §5.7). Callback issuance locks/rechecks the active user's
 session version before creating a code. Any session revocation discards pending
 codes, so an exchange racing recovery either precedes revocation (its JWT is
 then invalid) or fails. Account deactivation refuses redemption.
@@ -2261,7 +2265,7 @@ lists the test classes per module (test counts are the `test_*` methods).
 | `test_password_recovery.py` | 2 | 30 | Password preservation, real TOTP/provenance, legacy challenges, recovery, retirement, managed email, audit accuracy/rollback, stale profile writes, OAuth retirement and PostgreSQL consumption/reset/issuance races |
 | `test_admin_account_actions.py` | 2 | 12 | Account creation (generated password when omitted, returned once and never re-listed, two accounts get different passwords, a supplied password is still accepted, mismatched/weak supplied passwords rejected, generated password passes the validators anyway, response carries the new id, non-admin blocked); self-deactivation guard (blocked with a field error, deactivating someone else works and is audited, reactivating your own account is unaffected, deactivating someone else still revokes their sessions) |
 | `test_api_keys.py` | 10 | 81 | Generation, hashing, auth, read-only keys, scope deny-list, audit, throttling, CRUD, admin management |
-| `test_oauth.py` | 16 | 91 | Public endpoint validation and bounded provider data; provider configuration, callback guards, verified-email provisioning/linking and MFA claims; linking-session revocation before/during provider I/O, deleted/unbound state refusal, identity-owner and PostgreSQL competing-link races; exchange single-use/revocation |
+| `test_oauth.py` | 19 | 106 | Public endpoint validation and bounded provider data; provider configuration, callback guards, verified-email provisioning/linking and MFA claims; browser-bound state (cross-client, missing/wrong/stale binding, cookie attributes and clearing); linking-session revocation before/during provider I/O, deleted/unbound state refusal, identity-owner and PostgreSQL competing-link races; exchange single-use/revocation |
 | `test_passkeys.py` | 8 | 65 | Passkey registration and passwordless sign-in against a software authenticator, MFA policy and grace arithmetic, removal guard, admin reset, RP-ID/origin system checks |
 | `test_mfa.py` | 4 | 28 | TOTP enrolment/removal/recovery codes, two-step login, MFA at the magic-link/onboarding/OAuth/impersonation/email-verification doors, per-account throttle (`SPEC-2026-09-two-factor-authentication`) |
 | `test_registration_concurrency.py` | — (3 functions) | 7 cases | PostgreSQL cancellation/verification/resend row-lock ordering; SMTP outside transactions; transitions during delivery; late cleanup preserves newer links |
