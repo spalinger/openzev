@@ -755,7 +755,11 @@ class SocialAccount(models.Model):
 class OAuthState(models.Model):
     """Short-lived CSRF state token for an in-flight OAuth authorisation request."""
 
+    TTL = timedelta(minutes=10)
+
     state = models.CharField(max_length=64, unique=True, db_index=True)
+    # SHA-256 of the browser cookie; empty legacy bindings are refused.
+    binding = models.CharField(max_length=64, default="", editable=False)
     provider = models.ForeignKey(OAuthProvider, on_delete=models.CASCADE)
     # If set, this is a *link* request; the completed callback attaches the
     # social account to this user instead of creating a new session.
@@ -765,7 +769,7 @@ class OAuthState(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def is_valid(self) -> bool:
-        return timezone.now() < self.created_at + timedelta(minutes=10)
+        return timezone.now() < self.created_at + self.TTL
 
 
 class OAuthExchangeCode(models.Model):
