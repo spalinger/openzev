@@ -328,8 +328,9 @@ test.describe('User Guide Screenshots', () => {
     await screenshotFull(page, '07b-tariff-versions')
   })
 
-  // 07d — A dynamic tariff's detail pane, showing its source and locally
-  // seeded price history (stats, chart and point table, opened from a disclosure).
+  // 07d — A dynamic tariff's detail pane: its source with the details
+  // disclosure opened. The fetched prices sit in a second disclosure whose
+  // point table would make the capture several screens tall, so it stays shut.
   test('07d-tariff-dynamic-source', async ({ page }) => {
     await requireDemoDynamicSource(page)
     await navigateTo(page, '/tariffs')
@@ -337,9 +338,9 @@ test.describe('User Guide Screenshots', () => {
     await row.waitFor({ timeout: 10_000 })
     await row.click()
     const pane = page.locator('.tariff-pane')
-    await pane.locator('.tariff-disclosure > summary').first().click()
-    await expect(pane.locator('.recharts-surface'), `Dynamic price chart missing — ${SEED_HINT}`).toBeVisible()
-    await expect(pane.locator('tbody tr').first()).toBeVisible()
+    const details = pane.locator('.tariff-period-section .tariff-disclosure > summary').first()
+    await details.click()
+    await expect(pane.locator('.tariff-period-section .tariff-disclosure[open]'), `Dynamic source details missing — ${SEED_HINT}`).toBeVisible()
     await screenshotFull(page, '07d-tariff-dynamic-source')
   })
 

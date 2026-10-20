@@ -235,6 +235,8 @@ range can still contain gaps; check the price history for the period you need.
 Administrators can follow **Manage source in platform admin** to its operational
 row; managers create and reuse sources in the tariff form.
 
+![A dynamic tariff's detail pane with its source details](screenshots/07d-tariff-dynamic-source.png)
+
 ### Reading a dynamic tariff's price
 
 An operator's fetched price changes every quarter-hour, so the Tariffs page
