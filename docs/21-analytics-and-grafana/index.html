@@ -1631,6 +1631,15 @@
 
 
 <h1 id="analytics-data-and-grafana">Analytics Data and Grafana<a class="headerlink" href="#analytics-data-and-grafana" title="Permanent link">&para;</a></h1>
+<div class="admonition warning">
+<p class="admonition-title">Beta</p>
+<p>The analytics data, analytics tokens and the Grafana example are a <strong>beta feature</strong>. They are
+new and may still change in later releases: columns, parameters, limits (the maximum range per
+granularity in particular), how tokens are created, and the example dashboard. If you build
+dashboards or scripts on top of them, check the release notes when you update OpenZEV and
+expect to adjust them. Feedback is welcome on the
+<a href="https://github.com/splattner/openzev/issues/1058">issue tracker</a>.</p>
+</div>
 <p>OpenZEV can hand your metering data to tools that draw charts better than a fixed
 dashboard can — Grafana, a spreadsheet, a script. It does so through one read-only
 endpoint, the <strong>analytics series</strong>, that returns the same numbers your invoices and
@@ -1698,7 +1707,9 @@ the invoices.</p>
 <li><strong>ZEV-wide totals</strong> (<code>group_by=zev</code>) are shown to participants only when at least
   five participants shared the ZEV on every day of the range. In a smaller community
   "the ZEV total minus mine" would be somebody else's load profile. Managers always
-  see the totals. The threshold is <code>ANALYTICS_MIN_PARTICIPANTS_FOR_ZEV_AGGREGATE</code>.</li>
+  see the totals. An administrator can change the number under <strong>Platform → Settings →
+  Security → Analytics privacy</strong> (never below 3); left empty it follows the platform
+  default, which is 5 unless <code>ANALYTICS_MIN_PARTICIPANTS_FOR_ZEV_AGGREGATE</code> says otherwise.</li>
 </ul>
 <p>Data from your own system behind the meter (see <a href="../20-energy-data/">Your Own Energy Data</a>)
 is not part of the dataset.</p>
@@ -1780,24 +1791,20 @@ create an <strong>analytics token</strong> instead. It can read this one endpoin
 one participant of it) and nothing else, expires, and can be revoked on its own.</p>
 <p>An administrator first switches on <strong>Platform → Settings → Functions → analytics
 tokens</strong>, because a token lets data leave OpenZEV for wherever the tool runs.</p>
-<p>Tokens are created through the API for now; a screen for it is planned. Sign in
-(a token cannot create tokens, and neither can an API key), then:</p>
-<div class="highlight"><pre><span></span><code><span class="err">POST /api/v1/analytics/tokens/</span>
-<span class="err">{"name": "Grafana", "zev": "&lt;zev-id&gt;"}</span>
-</code></pre></div>
-<p>Add <code>"participant": "&lt;participant-id&gt;"</code> to limit it to one participant. Managers and
-viewers can create ZEV-wide tokens; participants can create a token for themselves;
-managers can create one for a participant. The answer contains the token <strong>once</strong>:</p>
+<p>Create one under <strong>Account → Tokens &amp; keys → New analytics token</strong>: give it a name,
+choose what it may read (a whole community you can view, or only your own data in it)
+and an expiry. Administrators can choose any community. The token is shown <strong>once</strong>:</p>
 <div class="highlight"><pre><span></span><code>oza_3f9a1c04b7e2_kR8vN2pQ...
 </code></pre></div>
 <p>Copy it now; OpenZEV keeps only a hash. Use it as a bearer token:</p>
 <div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer oza_3f9a1c04b7e2_kR8vN2pQ..."</span><span class="w"> </span><span class="se">\</span>
 <span class="w">  </span><span class="s2">"https://your-openzev.example.com/api/v1/analytics/series/?from=2026-06-01&amp;to=2026-06-30"</span>
 </code></pre></div>
-<p>A token that is scoped to a ZEV needs no <code>zev</code> parameter. <code>GET /api/v1/analytics/tokens/</code>
-lists the tokens you created (managers also see those of their ZEVs) and
-<code>DELETE /api/v1/analytics/tokens/&lt;id&gt;/</code> revokes one at once. Creating and revoking
-are in the audit log.</p>
+<p>A token that is scoped to a ZEV needs no <code>zev</code> parameter. The tab lists your tokens and
+revokes one at once; the same is available as <code>GET /api/v1/analytics/tokens/</code> and
+<code>DELETE /api/v1/analytics/tokens/&lt;id&gt;/</code>. A token is private to the account that created
+it: a manager does not see a participant's tokens (an administrator can list and revoke
+every credential on the platform). Creating and revoking are in the audit log.</p>
 <p>A token is only as strong as the account behind it: if its creator loses access to the
 ZEV (or a participant leaves), the token stops working.</p>
 <h2 id="grafana">Grafana<a class="headerlink" href="#grafana" title="Permanent link">&para;</a></h2>
