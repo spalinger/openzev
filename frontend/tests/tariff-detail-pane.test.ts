@@ -61,7 +61,7 @@ describe('TariffDetailPane', () => {
         const container = await pane({ shownVersionId: 'past' })
         expect(container.querySelector<HTMLDetailsElement>('.tariff-disclosure')!.open).toBe(true)
         expect(container.querySelector('.tariff-version-row.is-shown.is-ended')).not.toBeNull()
-        expect(container.querySelector('.info-banner')?.textContent).toBe('pages.tariffs.versions.viewingOldVersion')
+        expect(container.querySelector('.tariff-version-card .badge')?.textContent).toBe('pages.tariffs.versions.statusEnded')
     })
 
     it('carries no status pill or version count in its heading', async () => {

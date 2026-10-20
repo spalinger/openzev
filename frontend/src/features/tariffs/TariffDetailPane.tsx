@@ -2,6 +2,7 @@ import { useId, type KeyboardEvent, type ReactNode, type Ref } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
     faClone,
+    faEllipsisVertical,
     faPen,
     faPlus,
     faTag,
@@ -10,6 +11,7 @@ import {
     faXmark,
 } from '@fortawesome/free-solid-svg-icons'
 import { useTranslation } from 'react-i18next'
+import { ActionMenu } from '../../components/ActionMenu'
 import { formatShortDate } from '../../lib/appSettings'
 import { todayBusinessIso } from '../../lib/dates'
 import type { AppSettings, TariffPeriod, TariffSeries, TariffVersion } from '../../types/api'
@@ -86,10 +88,10 @@ type TariffDetailPaneProps = {
     deleteTariffDisabled: boolean
     deletePeriodDisabled: boolean
     onClose: () => void
-    onEditTariff: (tariff: TariffVersion) => void
+    onEditTariff: (tariff: TariffVersion, actionKey: string) => void
     onDeleteTariff: (tariff: TariffVersion) => void
     onOpenCreatePeriod: (tariffId: string) => void
-    onEditPeriod: (period: TariffPeriod) => void
+    onEditPeriod: (period: TariffPeriod, actionKey: string) => void
     onDeletePeriod: (period: TariffPeriod) => void
     onNewVersion: (series: TariffSeries, source: TariffVersion) => void
     onDuplicate: (series: TariffSeries, source: TariffVersion) => void
@@ -199,33 +201,18 @@ export function TariffDetailPane({
                     <span className="tariff-version-window">{dateWindow(version)}</span>
                     <strong>{priceSummary(series, version)}</strong>
                 </button>
-                {/* Edit sits on the row, not only in the actions above:
-                    correcting a superseded version's end date is a normal
-                    follow-up to adding a new one, and going through "select
-                    the row, then use the actions above" made it look
-                    unsupported. */}
-                {!readOnly && (<>
-                    <button
-                        className="button button-secondary button-compact"
-                        type="button"
-                        data-action-key={`edit-${version.id}`}
-                        onClick={() => onEditTariff(version)}
-                        title={t('pages.tariffs.versions.editVersion')}
-                        aria-label={t('pages.tariffs.versions.editVersion')}
-                    >
-                        <FontAwesomeIcon icon={faPen} fixedWidth />
-                    </button>
-                    <button
-                        className="button button-danger button-compact"
-                        type="button"
-                        disabled={deleteTariffDisabled}
-                        onClick={() => onDeleteTariff(version)}
-                        title={t('pages.tariffs.versions.deleteVersion')}
-                        aria-label={t('pages.tariffs.versions.deleteVersion')}
-                    >
-                        <FontAwesomeIcon icon={faTrash} fixedWidth />
-                    </button>
-                </>)}
+                {!readOnly && (
+                    <ActionMenu
+                        label={t('pages.tariffs.versions.actions')}
+                        icon={<FontAwesomeIcon icon={faEllipsisVertical} fixedWidth />}
+                        iconOnly
+                        actionKey={`menu-${version.id}`}
+                        items={[
+                            { key: 'edit', label: t('pages.tariffs.versions.editVersion'), icon: <FontAwesomeIcon icon={faPen} fixedWidth />, onClick: () => onEditTariff(version, `menu-${version.id}`) },
+                            { key: 'delete', label: t('pages.tariffs.versions.deleteVersion'), icon: <FontAwesomeIcon icon={faTrash} fixedWidth />, danger: true, disabled: deleteTariffDisabled, onClick: () => onDeleteTariff(version) },
+                        ]}
+                    />
+                )}
             </li>
         )
     }
@@ -262,10 +249,6 @@ export function TariffDetailPane({
                             <FontAwesomeIcon icon={faPlus} fixedWidth />
                             {t('pages.tariffs.versions.schedule')}
                         </button>
-                        <button className="button button-secondary button-compact" type="button" data-action-key={`edit-${shown.id}`} onClick={() => onEditTariff(shown)}>
-                            <FontAwesomeIcon icon={faPen} fixedWidth />
-                            {t('common.edit')}
-                        </button>
                         <button
                             className="button button-secondary button-compact"
                             type="button"
@@ -287,26 +270,35 @@ export function TariffDetailPane({
                     </div>
                 )}
 
-                {shownState !== 'active' && (
-                    <p className="info-banner" role="status">
-                        {t(shownState === 'scheduled'
-                            ? 'pages.tariffs.versions.viewingUpcomingVersion'
-                            : 'pages.tariffs.versions.viewingOldVersion')}
-                    </p>
-                )}
-
-                <div className="tariff-card-summary-row">
-                    {!usesPeriods && (
-                        <div className="tariff-detail-card">
-                            <span className="tariff-detail-label">{t('pages.tariffs.col.pricing')}</span>
-                            <span className="tariff-detail-value" title={pricingTooltip}>{pricingLabel}</span>
+                <section className="tariff-version-card" aria-label={t('pages.tariffs.versions.shown')}>
+                    <div className="tariff-version-card-head">
+                        <div className="tariff-version-card-title">
+                            <strong className="tariff-version-card-window">{dateWindow(shown)}</strong>
+                            <span className={`badge ${shownState === 'active' ? 'badge-success' : shownState === 'scheduled' ? 'badge-info' : 'badge-neutral'}`}>
+                                {t(shownState === 'active'
+                                    ? 'pages.tariffs.overview.current'
+                                    : shownState === 'scheduled'
+                                        ? 'pages.tariffs.overview.upcoming'
+                                        : 'pages.tariffs.versions.statusEnded')}
+                            </span>
                         </div>
-                    )}
-                    <div className="tariff-detail-card">
-                        <span className="tariff-detail-label">{t('pages.tariffs.rateCard.valid')}</span>
-                        <span className="tariff-detail-value">{dateWindow(shown)}</span>
+                        {!readOnly && (
+                            <button
+                                className="button button-secondary button-compact"
+                                type="button"
+                                data-action-key={`edit-${shown.id}`}
+                                onClick={() => onEditTariff(shown, `edit-${shown.id}`)}
+                            >
+                                <FontAwesomeIcon icon={faPen} fixedWidth />
+                                {t('common.edit')}
+                            </button>
+                        )}
                     </div>
-                </div>
+                    {!usesPeriods && (
+                        <p className="tariff-version-card-price" title={pricingTooltip}>{pricingLabel}</p>
+                    )}
+                    {notes && <p className="tariff-version-card-notes">{notes}</p>}
+                </section>
 
                 {series.gaps.length > 0 && (
                     <div className="tariff-gap-warning">
@@ -319,15 +311,6 @@ export function TariffDetailPane({
                                 )).join(', ')}
                             </p>
                             <p className="muted">{t('pages.tariffs.versions.gapWarningBody')}</p>
-                        </div>
-                    </div>
-                )}
-
-                {notes && (
-                    <div className="tariff-card-details">
-                        <div className="tariff-detail-card tariff-detail-card-wide">
-                            <span className="tariff-detail-label">{t('pages.tariffs.form.notes')}</span>
-                            <span className="tariff-detail-value">{notes}</span>
                         </div>
                     </div>
                 )}
@@ -400,18 +383,25 @@ export function TariffDetailPane({
 
                                         {!readOnly && (
                                             <div className="tariff-period-actions">
-                                                <button className="button button-secondary button-compact" type="button" data-action-key={`edit-period-${period.id}`} onClick={() => onEditPeriod(period)}>
+                                                <button
+                                                    className="button button-secondary button-compact"
+                                                    type="button"
+                                                    data-action-key={`edit-period-${period.id}`}
+                                                    onClick={() => onEditPeriod(period, `edit-period-${period.id}`)}
+                                                    title={t('common.edit')}
+                                                    aria-label={t('common.edit')}
+                                                >
                                                     <FontAwesomeIcon icon={faPen} fixedWidth />
-                                                    {t('common.edit')}
                                                 </button>
                                                 <button
                                                     className="button button-danger button-compact"
                                                     type="button"
                                                     disabled={deletePeriodDisabled}
                                                     onClick={() => onDeletePeriod(period)}
+                                                    title={t('common.delete')}
+                                                    aria-label={t('common.delete')}
                                                 >
                                                     <FontAwesomeIcon icon={faTrash} fixedWidth />
-                                                    {t('common.delete')}
                                                 </button>
                                             </div>
                                         )}
@@ -422,7 +412,7 @@ export function TariffDetailPane({
                     </section>
                 )}
 
-                <section className="tariff-version-section">
+                {versions.length > 1 && <section className="tariff-version-section">
                     <h3>{t('pages.tariffs.versions.history')}</h3>
                     {groups.map((group) => {
                         const list = <ul className="tariff-version-list">{group.rows.map(versionRow)}</ul>
@@ -443,7 +433,7 @@ export function TariffDetailPane({
                             </div>
                         )
                     })}
-                </section>
+                </section>}
 
                 {series.version_count > 1 && (
                     <TariffDisclosure summary={t('pages.tariffs.priceHistory.title')}>

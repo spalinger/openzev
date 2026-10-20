@@ -1818,7 +1818,6 @@ export const en = {
             createPeriod: 'Create Tariff Period',
             viewDetails: 'View details',
             col: {
-                pricing: 'Pricing',
             },
             rateCard: {
                 applies: 'Applies',
@@ -1994,8 +1993,9 @@ export const en = {
                 renameHint_other: 'Renaming applies to all {{count}} versions — the name is what keeps them together.',
                 editVersion: 'Edit this version',
                 deleteVersion: 'Delete this version',
-                viewingOldVersion: 'Viewing an older version',
-                viewingUpcomingVersion: 'Viewing an upcoming version',
+                actions: 'Version actions',
+                shown: 'Selected version',
+                statusEnded: 'Ended',
                 gapBadge_one: '{{count}} gap',
                 gapBadge_other: '{{count}} gaps',
                 gapTooltip: 'Part of this tariff\u2019s timeline has no version, so energy there is billed at nothing.',
@@ -2037,6 +2037,7 @@ export const en = {
             noCoverage: "No stored prices yet.",
             coverageHint: 'Stored coverage may contain gaps.',
             manageSource: 'Manage source in platform admin',
+            sourceDetails: 'Source details',
             showAllSources: "Show all sources",
             sourceFilter: 'Source: {{label}}',
             sourceNotFound: 'Source not found.',

@@ -209,10 +209,13 @@ td.tariff-table-valid {
     box-shadow: none;
   }
 
+  /* The row is the card, so the row carries the ground; the cells are grid
+     areas and would tint only their own text. */
   .tariff-list .tariff-table tbody tr:hover > td {
-    background: var(--surface);
+    background: transparent;
   }
 
+  .tariff-list .tariff-table tbody tr:hover,
   .tariff-list .tariff-table tbody tr.is-selected,
   .tariff-list .tariff-table tbody tr:has(:focus-visible) {
     background: var(--surface);

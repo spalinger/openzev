@@ -1807,7 +1807,6 @@ export const it = {
             createPeriod: 'Crea periodo tariffario',
             viewDetails: 'Visualizza dettagli',
             col: {
-                pricing: 'Prezzi',
             },
             rateCard: {
                 applies: 'Applicazione',
@@ -1983,8 +1982,9 @@ export const it = {
                 renameHint_other: 'La ridenominazione riguarda tutte le {{count}} versioni \u2014 il nome \u00e8 ci\u00f2 che le tiene insieme.',
                 editVersion: 'Modifica questa versione',
                 deleteVersion: 'Elimina questa versione',
-                viewingOldVersion: 'Versione precedente visualizzata',
-                viewingUpcomingVersion: 'Versione futura visualizzata',
+                actions: 'Azioni della versione',
+                shown: 'Versione selezionata',
+                statusEnded: 'Conclusa',
                 gapBadge_one: '{{count}} lacuna',
                 gapBadge_other: '{{count}} lacune',
                 gapTooltip: 'Una parte della cronologia non ha alcuna versione: l\u2019energia vi \u00e8 fatturata a zero.',
@@ -2026,6 +2026,7 @@ export const it = {
             noCoverage: "Nessun prezzo memorizzato per ora.",
             coverageHint: 'I dati memorizzati possono contenere lacune.',
             manageSource: 'Gestisci la fonte nell’amministrazione della piattaforma',
+            sourceDetails: 'Dettagli della fonte',
             showAllSources: "Mostra tutte le fonti",
             sourceFilter: 'Fonte: {{label}}',
             sourceNotFound: 'Fonte non trovata.',

@@ -676,9 +676,9 @@ Managers/admins discover and create sources from the energy-tariff form.
 Viewers read linked tariffs/history; existing-source maintenance is admin-only.
 
 `DynamicSourceSummary` in the tariff detail pane shows the linked source's
-label, endpoint, protocol, component/product, fetch status, disabled state,
-last success, user-safe fetch error, stored range/point count and global
-linked-tariff/ZEV totals. A positive point count shows stored coverage and a gap
+label, fetch status, disabled state, last success and user-safe fetch error
+up front, and the endpoint, protocol, component/product, stored range/point
+count and global linked-tariff/ZEV totals in a “Source details” disclosure. A positive point count shows stored coverage and a gap
 hint; zero points show “No stored prices yet.” Last success is shown only when
 its timestamp is present. The history panel is scoped to the shown tariff's validity.
 Only admins see the maintenance link to `/admin/dynamic-sources?source=<id>`.

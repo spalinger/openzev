@@ -1807,7 +1807,6 @@ export const de = {
             createPeriod: 'Tarifperiode erstellen',
             viewDetails: 'Details anzeigen',
             col: {
-                pricing: 'Preis',
             },
             rateCard: {
                 applies: 'Gilt für',
@@ -1983,8 +1982,9 @@ export const de = {
                 renameHint_other: 'Die Umbenennung betrifft alle {{count}} Versionen \u2014 der Name h\u00e4lt sie zusammen.',
                 editVersion: 'Diese Version bearbeiten',
                 deleteVersion: 'Diese Version l\u00f6schen',
-                viewingOldVersion: '\u00c4ltere Version angezeigt',
-                viewingUpcomingVersion: 'Bevorstehende Version angezeigt',
+                actions: 'Versionsaktionen',
+                shown: 'Ausgewählte Version',
+                statusEnded: 'Beendet',
                 gapBadge_one: '{{count}} L\u00fccke',
                 gapBadge_other: '{{count}} L\u00fccken',
                 gapTooltip: 'Ein Teil des Zeitverlaufs hat keine Version \u2014 Energie darin wird mit null verrechnet.',
@@ -2026,6 +2026,7 @@ export const de = {
             noCoverage: "Noch keine gespeicherten Preise.",
             coverageHint: 'Gespeicherte Preisdaten können Lücken enthalten.',
             manageSource: 'Quelle in der Plattformverwaltung öffnen',
+            sourceDetails: 'Quellendetails',
             showAllSources: "Alle Quellen anzeigen",
             sourceFilter: 'Quelle: {{label}}',
             sourceNotFound: 'Quelle nicht gefunden.',

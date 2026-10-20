@@ -39,7 +39,7 @@ test('Upcoming opens the displayed version through the URL and keyboard', async 
     await page.keyboard.press(key)
     await expect(page).toHaveURL(/version=next/)
     await expect(page.locator('.tariff-version-row.is-shown')).toContainText('0.315')
-    await expect(page.locator('.tariff-pane')).toContainText('Viewing an upcoming version')
+    await expect(page.locator('.tariff-version-card .badge')).toHaveText('Upcoming')
     await page.locator('.tariff-version-select').filter({ hasText: '01.01.2028' }).click()
     await expect(page).toHaveURL(/version=later/)
     // The list highlights the row for the version shown, not another of the series.

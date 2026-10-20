@@ -228,10 +228,10 @@ moment, negative prices included.
 
 Managers can choose an existing shared source or create a new source from
 the energy-tariff form. Viewers can inspect linked sources and price history.
-Click a dynamic tariff to see its source label, endpoint,
-protocol, product, fetch status, last successful fetch and stored coverage.
-Usage counts cover the whole platform. A stored date range can
-still contain gaps; check the price history for the period you need.
+Click a dynamic tariff to see its source name, fetch status and last
+successful fetch. **Source details** unfolds the endpoint, protocol, product,
+stored coverage and usage. Usage counts cover the whole platform. A stored date
+range can still contain gaps; check the price history for the period you need.
 Administrators can follow **Manage source in platform admin** to its operational
 row; managers create and reuse sources in the tariff form.
 
@@ -667,20 +667,25 @@ both sides.
 The Tariffs page shows **one entry per tariff**, using the version selected by
 the current list view rather than listing every version separately. Click it
 to open the detail pane beside the list with
-everything else:
-the dates, price bands, notes, the version history and the price chart.
+everything else.
+
+At the top of the pane, **Schedule price change**, **Rename** and **Duplicate**
+act on the whole tariff. Under them, the version being shown has its validity
+window, a **Current**, **Upcoming** or **Ended** label so you can't mistake an
+old or future version for the current rate, and its own **Edit** button. Below
+come the notes, the dynamic source if there is one, the price bands (each with
+edit and delete buttons) and the version history.
 
 **Version history** lists the versions with their window and price: the current
 one first, then **Scheduled changes**, then **Past versions** (folded away
-unless you are looking at one). Click one to make the *pane* show that version
-— its price bands switch to the ones in force then, and a **Viewing an older
-version** (or, for one that has not started yet, **Viewing an upcoming
-version**) note appears so you can't mistake it for the current rate.
-Switching versions in the detail pane does not change the version shown in the
-list. Click the current version to go back.
+unless you are looking at one). A tariff with only one version has no history
+section. Click a row to make the *pane* show that version — its price bands
+switch to the ones in force then. Switching versions in the detail pane does not
+change the version shown in the list. Click the current version to go back.
 
-Each row has its own edit and delete buttons, because correcting a superseded
-version's end date is a normal follow-up to adding a new one.
+Each row has a **⋮** menu with **Edit** and **Delete** for that version, because
+correcting a superseded version's end date is a normal follow-up to adding a
+new one.
 
 The pane stays open across a page reload or a shared link — the URL records
 which tariff and version you're looking at. **X**, **Escape** and the browser's
@@ -825,7 +830,7 @@ Set **Valid To** to exclude from future invoices:
 
 > **Important:** Never delete a tariff—always set Valid To instead. This preserves invoice audit trail.
 
-This applies to the delete button on a **version** row too. Deleting a version
+This applies to **Delete** in a **version** row's menu too. Deleting a version
 removes the prices that applied in its window, which leaves a gap: energy in
 those days is then billed at nothing. Reserve it for a version created by
 mistake — one you have not billed against.

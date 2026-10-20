@@ -498,10 +498,10 @@ export function TariffsPage() {
                         deleteTariffDisabled={deleteTariffPending || dialogLoading}
                         deletePeriodDisabled={deletePeriodPending || dialogLoading}
                         onClose={escapePane}
-                        onEditTariff={(version) => beginEditing(`edit-${version.id}`, () => startTariffEdit(version))}
+                        onEditTariff={(version, actionKey) => beginEditing(actionKey, () => startTariffEdit(version))}
                         onDeleteTariff={confirmDeleteTariff}
                         onOpenCreatePeriod={(versionId) => beginEditing('add-period', () => openCreatePeriod(versionId))}
-                        onEditPeriod={(period) => beginEditing(`edit-period-${period.id}`, () => startPeriodEdit(period))}
+                        onEditPeriod={(period, actionKey) => beginEditing(actionKey, () => startPeriodEdit(period))}
                         onDeletePeriod={confirmDeletePeriod}
                         onNewVersion={(series, source) => beginEditing('new-version', () => versions.openNewVersion(series, source))}
                         onDuplicate={(series, source) => beginEditing('duplicate', () => versions.openDuplicate(series, source))}
