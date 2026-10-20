@@ -16,7 +16,7 @@ import { useToast } from '../../lib/toast'
  */
 export function EmailChangeForm() {
     const { t } = useTranslation()
-    const { user } = useAuth()
+    const { user, isImpersonating } = useAuth()
     const managed = user?.can_change_email === false || user?.has_usable_password === false
     const { pushToast } = useToast()
 
@@ -55,7 +55,7 @@ export function EmailChangeForm() {
                 <input type="email" value={user?.email ?? ''} disabled style={{ cursor: 'not-allowed' }} />
             </label>
 
-            {managed && <small className="muted">{t('account.emailChange.managed')}</small>}
+            {managed && !isImpersonating && <small className="muted">{t('account.emailChange.managed')}</small>}
 
             {!managed && !open && (
                 <div>

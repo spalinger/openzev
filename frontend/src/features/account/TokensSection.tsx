@@ -178,9 +178,9 @@ export function TokensSection({ onRevoke, onRotate }: Props) {
 
             {creating === null && (
                 <div className="actions-row actions-row-wrap" style={{ marginBottom: '1.5rem' }}>
-                    <button type="button" className="button button-primary" onClick={() => setCreating('api_key')}>
+                    {query.data?.can_create.api_key && <button type="button" className="button button-primary" onClick={() => setCreating('api_key')}>
                         {t('account.tokens.newApiKey')}
-                    </button>
+                    </button>}
                     {canCreateAnalytics && (
                         <button type="button" className="button button-secondary" onClick={() => setCreating('analytics')}>
                             {t('account.tokens.newAnalytics')}

@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 
 from .authentication import CookieJWTAuthentication
 from .credentials import KINDS, STATUSES, can_create, list_credentials
+from .jwt_utils import impersonator_of
 from .permissions import IsAdmin
 
 
@@ -22,7 +23,13 @@ class MyCredentialsView(APIView):
 
     @extend_schema(summary="Your tokens and keys", responses={200: dict})
     def get(self, request):
-        return Response({"credentials": list_credentials(request.user), "can_create": can_create(request.user)})
+        credentials = list_credentials(request.user)
+        allowed = can_create(request.user)
+        if impersonator_of(request.auth):
+            allowed = {kind: False for kind in allowed}
+            for credential in credentials:
+                credential["actions"] = ["revoke"]
+        return Response({"credentials": credentials, "can_create": allowed})
 
 
 class AdminCredentialsView(APIView):

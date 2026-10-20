@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useAuth } from '../../lib/auth'
 import type { EligibleMeteringPoint, SupplementarySource } from '../../types/api'
 import { MeteringDataLink } from './MeteringDataLink'
 import { SupplementarySourceCard } from './SupplementarySourceCard'
@@ -30,6 +31,7 @@ interface Props {
  */
 export function MeteringPointEnergyData({ point, source, sourcesUnavailable, onRetrySources, confirm }: Props) {
     const { t } = useTranslation()
+    const { isImpersonating } = useAuth()
     const [connecting, setConnecting] = useState(false)
 
     // The modal is rendered next to whichever card shows, never inside one: creating a source makes
@@ -74,7 +76,7 @@ export function MeteringPointEnergyData({ point, source, sourcesUnavailable, onR
                 </div>
                 <p className="muted" style={{ margin: 0 }}>{t('supplementary.section.notConnected')}</p>
                 <div className="actions-row actions-row-wrap">
-                    <button type="button" className="button button-primary" onClick={() => setConnecting(true)}>
+                    <button type="button" className="button button-primary" disabled={isImpersonating} title={isImpersonating ? t('account.impersonationRestrictions') : undefined} onClick={() => setConnecting(true)}>
                         {t('supplementary.section.connect')}
                     </button>
                     <MeteringDataLink meteringPointId={point.metering_point} />

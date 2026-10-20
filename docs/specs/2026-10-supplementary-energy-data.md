@@ -112,7 +112,11 @@ household is described.
 `metering/permissions.py`), built on `BaseZevScopedPermission` semantics for scoping, with the
 per-action rules above enforced in the view (`create`, `rotate_push_token`, credential writes
 require the holder-or-admin check). Disabled ZEVs follow the existing rule: read-only for
-non-admins.
+non-admins. The viewset also lists `accounts.permissions.NotWhileImpersonating`: an
+impersonation session is refused `create` and `rotate_push_token` (`403`, the
+`NOT_WHILE_IMPERSONATING` body) and audited as `auth.impersonation.refused` (`DENIED`).
+Data-management actions stay available
+(`SPEC-2026-10-account-creation-and-sign-in` §5.10).
 
 **Frontend routes:** the participant UI lives on `/me/metering-points` ("My metering points", §7.1;
 shell roles `participant`, plus managers and viewers who are participants themselves, who reach it
@@ -285,7 +289,7 @@ All answer `404` while the feature flag is off.
 | `/sources/{id}/purge/` | POST | holder, manager, admin | Body `{date_from?, date_to?}` (civil dates; both absent = everything). Deletes readings only. Audited `supplementary_source.purge` with the count |
 | `/sources/{id}/test/` | POST | holder or admin | `solar_manager`: refresh (a rotated key is stored) + one hour of data; `{"ok": true}` or `400 {"detail"}` with a safe message. A rejected key also sets `reconnect_required`. Never echoes credentials or a raw vendor response. `400` for a push, disconnected or unregistered source |
 | `/sources/{id}/sync/` | POST | holder or admin | Queues a sync now, `202 {"queued": true}`. At most one per source per 5 minutes (`429` with `Retry-After: 300` otherwise). `400` for a push or disconnected source and for one that is `reconnect_required` (enter the key again first) |
-| `/sources/{id}/rotate-push-token/` | POST | holder or admin | `push` only. Issues a new token, returned once; the old one stops working at once; sets `push_token_created_at` |
+| `/sources/{id}/rotate-push-token/` | POST | holder or admin | `push` only. Issues a new token, returned once; the old one stops working at once; sets `push_token_created_at`. Refused during impersonation (`403`), as is `POST /sources/` |
 | `/sources/{id}/revoke-push-token/` | POST | holder or admin | `push` only; `400` when there is no token. Drops only the token (prefix, hash and both timestamps); the source and its readings stay and nothing is accepted until rotate issues a new token. Audited `supplementary_source.revoke_push_token` (SPEC-2026-tokens-and-keys) |
 | `/sources/{id}/reconciliation/` | GET | scoped | The newest 14 comparable days with per-day totals (§6.5), computed on demand |
 | `/sources/{id}/import-csv/` | POST | holder or admin | Multipart `file`; `?dry_run=true` validates only. Columns `timestamp,consumption_kwh,production_kwh,import_kwh,export_kwh`. All-or-nothing: one invalid row rejects the file with per-row errors. Same response as ingest |
@@ -959,7 +963,7 @@ CI runs `npm run lint`, `npm run lint:style`, `node ../scripts/check-frontend-he
   not hold; the hint on who flags a meter; nothing about energy data while the feature is off; only
   the selected community's meters; a manager sees only their own flagged meters and no community
   list; the empty state per audience.
-- **`tests/metering-point-energy-data.test.ts`** (included in the 23): the metering data link; a push source's one-time token surviving the refreshed source list; a meter whose source details are loading or failed offering a retry, not Connect. The page test also covers the link on plain meters, a manager not seeing the community list or its error left in the shared cache, and a failed eligibility check with retry.
+- **`tests/metering-point-energy-data.test.ts`** (26): impersonation disables source connection and token rotation while preserving CSV import; the metering data link; a push source's one-time token surviving the refreshed source list; a meter whose source details are loading or failed offering a retry, not Connect. The page test also covers the link on plain meters, a manager not seeing the community list or its error left in the shared cache, and a failed eligibility check with retry.
 - **`tests/layout-nav.test.ts`** (+2) and **`tests/supplementary-owner-status.test.ts`** (+2): the sidebar entry for a
   manager or viewer who holds a flagged meter, and not otherwise; the marker link and panel link on one's own meter.
 - **`tests/system-settings-tabs.test.ts`** (+3): the Functions hint that a flag follows the default, the environment-controlled note with a disabled switch, and the cache invalidation after a toggle. **`tests/route-guard-matrix.test.ts`**: `/me/metering-points` for every role.

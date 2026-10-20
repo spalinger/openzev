@@ -286,3 +286,40 @@ def test_admin_sees_every_token(community, other):
     create(other.manager, other)
 
     assert len(client_for(AdminFactory()).get(TOKENS).json()) == 2
+
+
+def test_an_impersonation_session_cannot_mint_a_token(community):
+    """The token outlives the impersonation and is used as the account afterwards."""
+    from accounts.jwt_utils import make_jwt_for_user
+
+    admin = make_user("an_token_imp_admin")
+    client = APIClient()
+    client.credentials(
+        HTTP_AUTHORIZATION=f"Bearer {make_jwt_for_user(community.manager, impersonated_by=admin.pk)['access']}"
+    )
+
+    response = client.post(TOKENS, {"name": "planted", "zev": str(community.zev.pk)}, format="json")
+
+    assert response.status_code == 403
+    assert not AnalyticsToken.objects.exists()
+    assert "not available while impersonating" in response.json()["detail"]
+    event = AuditEvent.objects.get(action_type="auth.impersonation.refused")
+    assert event.status == "denied"
+    assert event.metadata_json["impersonated_by"] == admin.pk
+    assert event.metadata_json["url_name"] == response.wsgi_request.resolver_match.url_name
+
+
+def test_an_impersonation_session_can_revoke_a_token(community):
+    from accounts.jwt_utils import make_jwt_for_user
+
+    token = create(community.manager, community).json()
+    admin = AdminFactory()
+    client = APIClient()
+    client.credentials(
+        HTTP_AUTHORIZATION=f"Bearer {make_jwt_for_user(community.manager, impersonated_by=admin.pk)['access']}"
+    )
+
+    assert client.delete(f"{TOKENS}{token['id']}/").status_code == 204
+    assert AnalyticsToken.objects.get(pk=token["id"]).revoked_at is not None
+    event = AuditEvent.objects.get(action_type="analytics_token.revoke")
+    assert event.metadata_json["impersonated_by"] == admin.pk

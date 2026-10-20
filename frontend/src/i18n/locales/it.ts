@@ -501,6 +501,7 @@ export const it = {
         copyFailed: 'La copia non ha funzionato. Selezionalo e copialo a mano.',
     },
     account: {
+        impersonationRestrictions: 'Durante l’impersonificazione non è possibile modificare la sicurezza dell’account o creare credenziali.',
         title: 'Account',
         titleDescription: 'Gestisci profilo, password, account collegati, token e chiavi.',
         profileSection: 'Profilo',

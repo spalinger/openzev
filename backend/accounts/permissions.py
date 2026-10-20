@@ -1,5 +1,24 @@
 from rest_framework.permissions import SAFE_METHODS, BasePermission
 
+from .authentication import NOT_WHILE_IMPERSONATING, audit_impersonation_refusal
+from .jwt_utils import impersonator_of
+
+
+class NotWhileImpersonating(BasePermission):
+    """Refuse credential writes except the view's impersonation_exempt_actions."""
+
+    message = NOT_WHILE_IMPERSONATING["detail"]
+
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS or impersonator_of(request.auth) is None:
+            return True
+        exempt = getattr(view, "impersonation_exempt_actions", ())
+        if getattr(view, "action", None) in exempt:
+            return True
+        audit_impersonation_refusal(request, request.user)
+        return False
+
+
 class IsAdmin(BasePermission):
     def has_permission(self, request, view):
         return request.user.is_authenticated and request.user.is_admin

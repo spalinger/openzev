@@ -71,8 +71,10 @@ revokes tokens of their ZEV is removed: a participant's token is their own busin
 for it (a manager can already read everything in the ZEV, and an account losing its access takes its tokens
 with it, SPEC-2026-analytics-dataset-api §8). Admin oversight is kept, as for API keys.
 
-Creating a credential is unchanged: API key by any session, analytics token by the rules of
-`analytics.scope.can_create_token`, push token with a source.
+Creating a credential is unchanged *for an ordinary session*: API key by any session, analytics
+token by the rules of `analytics.scope.can_create_token`, push token with a source. An
+impersonation session is refused all three (`403`): each one outlives the impersonation
+(`SPEC-2026-10-account-creation-and-sign-in` §5.10). Revocation remains available for all three kinds.
 
 ## 4. Data model
 
@@ -132,6 +134,8 @@ The admin list adds `owner: {id, username, email}` to each row.
 }
 ```
 
+During impersonation both `can_create` flags are false and each credential offers only `revoke`.
+
 `credentials` is sorted by `created_at` descending, rows without one last, then `kind`, `id`. Sources:
 
 - API keys: `ApiKey` of the account, not revoked.
@@ -140,8 +144,8 @@ The admin list adds `owner: {id, username, email}` to each row.
   while the energy data feature is on (`metering.supplementary.permissions.feature_enabled()`); `manage_url` is
   the metering-point energy data page of the source.
 
-`can_create.analytics` is `analytics_tokens_enabled` and the account can create at least a participant-scoped
-or ZEV-scoped token (it has a live participant link or a viewable ZEV). `can_create.api_key` is always `true`.
+`can_create.analytics` requires the feature flag and a live participant link or viewable ZEV.
+`can_create.api_key` is true for an ordinary session. Both are false during impersonation.
 
 ### 5.2 `GET /api/v1/auth/credentials/` (admin)
 
@@ -194,7 +198,7 @@ the old `?tab=api-keys` to `tokens`, so existing links keep working. `AccountPro
   expiry"); "expired" / "expires soon" badge as `apiKeyStatus` does today (reused for any row with `expires_at`).
 - Row actions by `actions`: **Revoke** (confirmation dialog, danger) calling the endpoint of §5.3; **Rotate** for
   energy tokens (confirmation, opens the secret panel with the new token); a "Manage source" link for energy tokens.
-- "New" buttons: **API key** (the existing form: name, expiry, read-only), **Analytics token** (shown when
+- "New" buttons: **API key** (shown when `can_create.api_key`; name, expiry, read-only), **Analytics token** (shown when
   `can_create.analytics`), and **Connect energy data**, a link to the energy data page (`/me/metering-points`) with a hint that an
   energy token is created with a source.
 - Analytics form: name; scope select built by `analyticsScopeOptions(memberships, allZevs?)`: "Whole community:
@@ -240,8 +244,8 @@ Backend (near the affected modules):
 
 | Module | Count | Covers |
 |---|---|---|
-| `accounts/test_credentials.py` | 16 | `MyCredentialsTests` (11): the three kinds in one row shape, no secret or hash listed, newest first, revoked excluded and expired flagged, push token created/last-used, a revoked push token leaves the list, flags off hide analytics and energy rows, only the account's own credentials appear, a manager sees no participant's tokens, `can_create`, anonymous 401 and an API key or analytics token cannot list; `AdminCredentialsTests` (5): non-admin 403, every kind of every owner with the owner, revoked included and filterable, `kind`/`user` filters, bad filters 400 |
-| `analytics/test_tokens.py` | 29 | updated: `test_a_manager_neither_sees_nor_revokes_a_participants_token` replaces the manager-sees-ZEV-tokens test, `test_a_manager_sees_the_tokens_they_made_themself` added; admin still sees all |
+| `accounts/test_credentials.py` | 17 | `MyCredentialsTests` (12): the three kinds in one row shape, no secret or hash listed, newest first, revoked excluded and expired flagged, push token created/last-used, a revoked push token leaves the list, flags off hide analytics and energy rows, only the account's own credentials appear, a manager sees no participant's tokens, `can_create`, impersonation offers revocation only, anonymous 401 and an API key or analytics token cannot list; `AdminCredentialsTests` (5): non-admin 403, every kind of every owner with the owner, revoked included and filterable, `kind`/`user` filters, bad filters 400 |
+| `analytics/test_tokens.py` | 31 | updated: `test_a_manager_neither_sees_nor_revokes_a_participants_token` replaces the manager-sees-ZEV-tokens test, `test_a_manager_sees_the_tokens_they_made_themself` added; admin still sees all; impersonation refuses and audits creation but allows attributed revocation |
 | `metering/test_supplementary_api.py` | +9 | `RevokePushTokenTests`: creation time on issue, holder revokes and keeps source and readings, the token stops working, rotate issues a new one afterwards, revoking twice 400, admin only besides the holder, audited without the secret, solar manager source 400, a disabled ZEV hides the source from its participant |
 | `metering/test_supplementary_ingest.py` | +1 | `push_token_last_used_at` set on first use and not rewritten within the window |
 | `zev/test_transfer.py` | – | `SchemaParityTests` lists the two new fields as excluded from the archive (transfer archives carry no credentials) |
@@ -250,7 +254,7 @@ Frontend (`frontend/tests/`):
 
 | File | Count | Covers |
 |---|---|---|
-| `tokens-section.test.ts` | 14 | list rows with type, access, scope and prefix; filter chips; expiring badge; empty state; rotate and manage link only on energy tokens; revoke through confirmation and the kind's endpoint; rotate shows the new token once; create API key and analytics token (scope options, participant scope, ready-made command); an administrator can pick any community and an ordinary account triggers no community lookup; analytics entry hidden when not allowed; link to the energy data page |
+| `tokens-section.test.ts` | 15 | list rows with type, access, scope and prefix; filter chips; expiring badge; empty state; rotate and manage link only on energy tokens; revoke through confirmation and the kind's endpoint; rotate shows the new token once; create API key and analytics token (scope options, participant scope, ready-made command); an administrator can pick any community and an ordinary account triggers no community lookup; creation/rotation hidden when unavailable, revocation preserved; link to the energy data page |
 | `credentials-helpers.test.ts` | 6 | counts and filters; `analyticsScopeOptions` for grants, roles, participant records, ended rows, disabled communities, the administrator's extra communities, no memberships |
 | `secret-reveal.test.ts` | 3 | shows, copies and dismisses; copy failure; caller wording and test id |
 | `admin-credentials-page.test.ts` | 4 | every kind with owner and counts; revoke only for non-revoked; revoke as admin through the kind after confirmation; type filter reaches the server |

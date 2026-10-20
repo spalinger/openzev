@@ -729,3 +729,21 @@ class WebAuthnRpCheckTests(TestCase):
     @override_settings(DEBUG=False, WEBAUTHN_RP_ID="zev.example.ch", WEBAUTHN_ORIGIN="https://zev.example.ch")
     def test_silent_once_configured(self):
         self.assertEqual(self._ids(), [])
+
+
+class PasskeyImpersonationTests(TestCase):
+    """A passkey is a passwordless login: an impersonation session must not add one."""
+
+    def test_registration_ceremonies_are_refused_while_impersonating(self):
+        from .jwt_utils import make_jwt_for_user
+
+        admin = make_user("pk_imp_admin")
+        target = make_user("pk_imp_target", UserRole.USER)
+        client = APIClient()
+        token = make_jwt_for_user(target, impersonated_by=admin.pk)["access"]
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        for path in (REGISTER_BEGIN_URL, REGISTER_COMPLETE_URL):
+            with self.subTest(path=path):
+                self.assertEqual(client.post(path).status_code, 403)
+        self.assertFalse(WebAuthnCredential.objects.filter(user=target).exists())

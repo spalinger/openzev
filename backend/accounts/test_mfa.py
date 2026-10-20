@@ -429,3 +429,26 @@ class MfaThrottleTests(TestCase):
 
         key = throttle.get_cache_key(_FakeRequest(), None)
         self.assertIn("203.0.113.5", key)
+
+
+class MfaImpersonationTests(TestCase):
+    """An impersonation session must not enrol a factor for the account it drives."""
+
+    def test_no_factor_can_be_created_while_impersonating(self):
+        from .jwt_utils import make_jwt_for_user
+
+        admin = make_user("mfa_imp_admin")
+        target = make_user("mfa_imp_target", UserRole.USER)
+        client = APIClient()
+        token = make_jwt_for_user(target, impersonated_by=admin.pk)["access"]
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        for path, table in (
+            ("/api/v1/auth/me/mfa/totp/", TotpDevice),
+            ("/api/v1/auth/me/mfa/recovery-codes/", MfaRecoveryCode),
+        ):
+            with self.subTest(path=path):
+                before = table.objects.count()
+                response = client.post(path)
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(table.objects.count(), before)

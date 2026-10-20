@@ -171,6 +171,19 @@ describe('TokensSection actions', () => {
 })
 
 describe('TokensSection creating', () => {
+    it('keeps revocation available when creation and rotation are unavailable', async () => {
+        credentialsApi.fetchMyCredentials.mockResolvedValue({
+            credentials: [row({}), analytics, { ...energy, actions: ['revoke'] }],
+            can_create: { api_key: false, analytics: false },
+        })
+        const { container } = await mount()
+
+        expect(buttons(container).some((button) => button.textContent?.includes('account.tokens.newApiKey'))).toBe(false)
+        expect(buttons(container).some((button) => button.textContent?.includes('account.tokens.newAnalytics'))).toBe(false)
+        expect(buttons(container).some((button) => button.textContent?.includes('account.tokens.rotate'))).toBe(false)
+        expect(buttons(container).filter((button) => button.getAttribute('aria-label')?.includes('account.tokens.revokeNamed'))).toHaveLength(3)
+    })
+
     it('creates an API key and shows its secret once', async () => {
         authApi.createApiKey.mockResolvedValue({ id: 'k2', name: 'New', key: 'ozv_zzzz_secret', prefix: 'zzzz' })
         const { container } = await mount()

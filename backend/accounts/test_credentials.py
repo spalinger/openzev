@@ -123,6 +123,21 @@ class MyCredentialsTests(CredentialsTestCase):
         self.assertEqual(client_for(self.stranger).get(ME).json()["can_create"], {"api_key": True, "analytics": False})
         self.assertEqual(client_for(self.manager).get(ME).json()["can_create"]["analytics"], True)
 
+    def test_impersonation_only_offers_revocation(self):
+        from accounts.jwt_utils import make_jwt_for_user
+
+        client = APIClient()
+        client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {make_jwt_for_user(self.holder_user, impersonated_by=self.admin.pk)['access']}"
+        )
+
+        body = client.get(ME).json()
+
+        self.assertEqual(body["can_create"], {"api_key": False, "analytics": False})
+        self.assertEqual({row["kind"] for row in body["credentials"]}, {"api_key", "analytics", "energy_push"})
+        for row in body["credentials"]:
+            self.assertEqual(row["actions"], ["revoke"])
+
     def test_anonymous_is_401_and_credentials_cannot_list_credentials(self):
         self.assertEqual(APIClient().get(ME).status_code, 401)
         full, prefix, hashed = generate_key()

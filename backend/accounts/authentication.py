@@ -6,7 +6,7 @@ from rest_framework.permissions import SAFE_METHODS
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from .api_keys import split_key, verify_secret
-from .jwt_utils import IMPERSONATOR_CLAIM
+from .jwt_utils import IMPERSONATOR_CLAIM, impersonator_of
 from .session_revocation import is_session_current
 
 ACCESS_COOKIE = "openzev_access"
@@ -64,8 +64,68 @@ class CookieJWTAuthentication(JWTAuthentication):
             result = (user, validated_token)
 
         if result is not None:
+            # Audit events inside authentication cannot read request.auth without recursing.
+            request.impersonator_id = impersonator_of(result[1])
+            enforce_impersonation_limits(request, *result)
             enforce_mfa_enrolment(request, *result)
         return result
+
+
+# Default-deny account writes during impersonation, including newly added URLs.
+# Authentication enforces this even when a view replaces its permission classes.
+# URL name -> methods allowed even during impersonation, or ``None`` for all.
+IMPERSONATION_ALLOWED_URL_NAMES: dict[str, frozenset[str] | None] = {
+    "token_refresh": None,
+    "token-mfa": None,
+    "stop-impersonation": None,
+    "logout": None,
+    # SelfUserSerializer makes security fields read-only.
+    "me": frozenset({"PATCH"}),
+    # Revoking a key removes capability instead of granting it.
+    "api-key-detail": frozenset({"DELETE"}),
+}
+
+NOT_WHILE_IMPERSONATING = {"detail": "This is not available while impersonating another account."}
+
+
+def enforce_impersonation_limits(request, user, token) -> None:
+    """Limit account writes; external issuers use NotWhileImpersonating."""
+    if request.method in SAFE_METHODS or impersonator_of(token) is None:
+        return
+    if not _view_is_in_accounts_app(request):
+        return
+
+    url_name = getattr(getattr(request, "resolver_match", None), "url_name", None)
+    allowed_methods = IMPERSONATION_ALLOWED_URL_NAMES.get(url_name, frozenset())
+    if allowed_methods is None or request.method in allowed_methods:
+        return
+
+    audit_impersonation_refusal(request, user)
+    raise exceptions.PermissionDenied(NOT_WHILE_IMPERSONATING)
+
+
+def audit_impersonation_refusal(request, user) -> None:
+    from audit.models import AuditActionCategory, AuditEventStatus
+    from audit.services import record_audit_event
+
+    url_name = getattr(getattr(request, "resolver_match", None), "url_name", None)
+    record_audit_event(
+        request=request,
+        action_category=AuditActionCategory.AUTH,
+        action_type="auth.impersonation.refused",
+        target_type="accounts.User",
+        target=user,
+        target_id=str(user.pk),
+        target_display=user.email or user.username,
+        summary=f"Refused {request.method} {url_name or request.path} during "
+                f"impersonation of {user.email or user.username}.",
+        user=user,
+        status=AuditEventStatus.DENIED,
+        metadata={
+            "method": request.method,
+            "url_name": url_name,
+        },
+    )
 
 
 # ── MFA policy enforcement ────────────────────────────────────────────────────
