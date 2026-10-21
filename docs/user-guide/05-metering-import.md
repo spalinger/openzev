@@ -209,6 +209,11 @@ the file and preserve the existing data. Corrections that touch already
 invoiced periods flag those invoices for review instead of changing them —
 see [Invoice Management](09-invoice-management.md#metering-corrections-on-issued-invoices).
 
+Cancellation deliveries (`Status 1`) are rejected with a cancellation error in
+the import protocol, without changing readings or invoices or blocking billing.
+For corrected readings, request a replacement delivery (`Status 5`) from your
+grid operator.
+
 SDAT-CH uploads open the result protocol even for held-only files and
 unchanged replays. Its counters distinguish billable writes, held values and
 intentional skips. A multi-file upload opens one protocol; the other files

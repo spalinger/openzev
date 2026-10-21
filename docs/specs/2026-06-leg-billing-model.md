@@ -6,7 +6,7 @@
 - Type: Feature
 - Owners: —
 - Created: 2026-06-09
-- Updated: 2026-10-11
+- Updated: 2026-10-22
 - Target Release: —
 - Related Issues: #515
 - Related ADRs: 0001, 0006, 0011, 0013, 0026, 0027, 0028, 0029, 0030; a new ADR is required before implementation (§1.2)
@@ -47,7 +47,7 @@ For a LEG, VNB settlement quantities replace `MeterReading` + OpenZEV allocation
 - **Supported by design:** any Swiss LEG that uses central settlement (§1.1) and individual VNB billing (`CommunityType CT01`), when OpenZEV receives complete, authorised per-member local and residual quantities in a supported import format.
 - **Standard format supported:** SDAT-CH 2025 LEG messages (§4.3) that pass the tested schema and process profile, whichever VNB or data hub sends them. The user guide lists the senders and delivery routes actually verified (§6.1).
 - **Other formats:** a VNB CSV or portal export only once its parser profile has a sample, a field mapping and tests. A member's raw smart-meter export is not a settlement file.
-- **Unsupported, and detected as such:** collective billing (`CT02`), unknown community, product or document codes, unresolved member points, missing values or periods, missing producer quantities, values cancelled without a replacement, cancellations that do not state their scope (until resolved), conflicting messages with the same creation time, or a delivery route the operator cannot access.
+- **Unsupported, and detected as such:** collective billing (`CT02`), unknown community, product or document codes, unresolved member points, missing values or periods, missing producer quantities, conflicting messages with the same creation time, or a delivery route the operator cannot access. Detecting cancelled values and resolving cancellations without stated scope are conditional proposals (§4.3 gate).
 
 ### In scope
 
@@ -170,6 +170,15 @@ LEG rules (assignment serializer + `MeteringPointAssignment.clean()`):
 
 ### 4.3 Settlement data (new)
 
+**Cancellation conformance gate (2026-10-22):** the pinned E66 1p6 XSD
+permits only Status 9/5, including C40, while the LEG-specific process diagram
+§1.12.3 (p. 53/59) lists 1/5/9; that diagram/schema conflict remains unresolved.
+All source-cancellation fields, tombstones, resolution workflows, blocking,
+API/types and tests in this draft are conditional proposals, requiring a
+confirmed profile/schema and product decision before implementation.
+The [manual E88/C38 import contract](2026-03-metering-import-and-quality.md#42-sdat-ch-ebix-xml-importer)
+rejects cancellation; invoice cancel/regenerate is a separate workflow.
+
 The import contract is the **SDAT-CH 2025 LEG exchange** (§10). The VNB sends the LEG representative, or the service provider it mandates, the per-member flows of the process "Messdatenaustausch LGZ/EGZ an LEG-Vertreter" (SDAT-CH Messdatenaustauschprozesse 2025 V2 §1.12), and optionally the community aggregates of §1.13. No VNB-specific rule lives in the model or the billing engine. A VNB whose deliveries deviate from the standard gets a named parser profile, backed by its own sample and conformance tests (§6.1).
 
 ```text
@@ -194,7 +203,9 @@ Per member metering point, the VNB sends three products for the point's flow, at
 | LGZ-LEGR / EGZ-LEGR (residual) | either | `2404050010124` Residual active energy | `reconcile_only` |
 | LGZ-LEGT / EGZ-LEGT (total measured) | either | `8716867000030` Energy active | `reconcile_only` |
 
-The header carries: `ValidatedMeteredData` (`DocumentType E66`, sender role `MDR`) for member flows, or `AggregatedMeteredData` (`E31`, sender role `DEA`) for the community sums; receiver role `CEM` (Community Energy Manager); `BusinessReason C40` (metered data for community management); a `Community` with `CommunityID` and `CommunityType`; `DocumentFunction` `9` original, `5` replace or `1` cancellation. Each observation has `Position`, `Volume` and an optional `Condition` (`21` temporary, `56` estimated). A missing `Condition` means only that the observation carries no quality flag. The standard keeps measurement status apart from the VNB's plausibility check, so the absence of a flag is not proof that a value is final.
+The header carries: `ValidatedMeteredData` (`DocumentType E66`, sender role `MDR`) for member flows, or `AggregatedMeteredData` (`E31`, sender role `DEA`) for the community sums; receiver role `CEM` (Community Energy Manager); `BusinessReason C40` (metered data for community management); a `Community` with `CommunityID` and `CommunityType`; `DocumentFunction` `9` original or `5` replace. The LEG diagrams also list
+`1` cancellation, but it is not an accepted E66 1p6 value; cancellation
+support remains conditional under the conformance gate above. Each observation has `Position`, `Volume` and an optional `Condition` (`21` temporary, `56` estimated). A missing `Condition` means only that the observation carries no quality flag. The standard keeps measurement status apart from the VNB's plausibility check, so the absence of a flag is not proof that a value is final.
 
 Rules of the standard the import relies on (SDAT-CH Hauptdokument 2025 §4.8–§4.11; Messdatenaustauschprozesse 2025 V2 §1.1–§1.2, §1.12–§1.13):
 
@@ -216,7 +227,7 @@ Rules of the standard the import relies on (SDAT-CH Hauptdokument 2025 §4.8–�
 | `parser_profile` | `CharField(40)` | `sdat_ch_2025_leg` in v1 |
 | `document_id` | `CharField(35)` | `InstanceDocument/DocumentID` |
 | `document_type` | `CharField(3)` | `E66` member flows, `E31` community aggregates |
-| `document_function` | `CharField(1)` | `9` original, `5` replace, `1` cancellation |
+| `document_function` | `CharField(1)` | `9` original, `5` replace; `1` cancellation only in the conditional proposal (§4.3 gate) |
 | `source_created_at` | `DateTimeField` | `InstanceDocument/Creation`; decides which version applies |
 | `sender_eic` / `receiver_eic` | `CharField(16)` | Header parties; the receiver role must be `CEM` |
 | `business_reason` | `CharField(3)` | Must be `C40` |
@@ -237,25 +248,25 @@ Rules of the standard the import relies on (SDAT-CH Hauptdokument 2025 §4.8–�
 | `flow` | `CharField(11)` | `consumption\|production`, from the metering point element (`E66`) or `FlowCharacteristic` `E17`/`E18` (`E31`) |
 | `product` | `CharField(13)` | `2404050010123\|2404050010124\|8716867000030`; any other → `leg_unknown_product` |
 | `interval_start` / `interval_end` | `DateTimeField` (UTC) | `Interval` start + (`Position` − 1) × resolution; half-open |
-| `is_cancellation` | `BooleanField`, default `False` | `True` for a key explicitly listed by a cancellation message: this row is a tombstone, not a delivered value |
-| `quantity_kwh` | `Decimal(14,4)`, null | Normalised for value rows; `NULL` for tombstones. `source_quantity_text` and `source_unit` kept beside it, blank for tombstones |
+| `is_cancellation` (conditional) | `BooleanField`, default `False` | `True` for a key explicitly listed by a cancellation message: this row is a tombstone, not a delivered value |
+| `quantity_kwh` | `Decimal(14,4)`, null | Normalised for value rows; `NULL` and blank `source_quantity_text` / `source_unit` for tombstones only under the conditional proposal (§4.3 gate). Source quantity and unit are kept beside value rows |
 | `condition` | `CharField(2)`, blank | `""` no quality flag, `21` temporary, `56` estimated. An unflagged value is eligible subject to the other checks; the parser never claims it is final |
 
-`UniqueConstraint(message, source_point_id, flow, product, interval_start)`; `CheckConstraint((is_cancellation = True AND quantity_kwh IS NULL) OR (is_cancellation = False AND quantity_kwh IS NOT NULL AND quantity_kwh >= 0))`; `CheckConstraint(interval_end > interval_start)`. Tombstones keep the same point, flow, product and interval key as values, with `condition = ""`; import permits them only when `message.document_function == "1"`.
+`UniqueConstraint(message, source_point_id, flow, product, interval_start)`; `CheckConstraint(interval_end > interval_start)`; non-null, non-negative quantities for value rows. **Conditional cancellation proposal (§4.3 gate):** `CheckConstraint((is_cancellation = True AND quantity_kwh IS NULL) OR (is_cancellation = False AND quantity_kwh IS NOT NULL AND quantity_kwh >= 0))`. Tombstones keep the same point, flow, product and interval key as values, with `condition = ""`; import permits them only when `message.document_function == "1"`.
 
 Import (`metering/importers/leg_sdat.py`, one transaction per file). Any error below stores nothing for that file and answers `400` with its findings:
 
 1. Hardening: `lxml` with entities, DTD and network off; at most one gzip layer; compressed size ≤ `MAX_UPLOAD_BYTES` (50 MB, the standard's own limit) and a cap on the decompressed size. Malformed gzip/XML, schema-invalid content or a hardening-limit violation → `leg_parse_error`; the specific semantic codes below take precedence for their conditions.
 2. Header: known root and `DocumentType`, `C40` and receiver role `CEM` (`leg_wrong_process` otherwise; for example a supplier's residual flow with `E88`); `CommunityType CT01` (`leg_community_type_unsupported`); `CommunityID == Zev.leg_community_id` (`leg_community_mismatch`, or `leg_community_id_missing` while the field is empty); receiver EIC equal to `Zev.leg_receiver_eic` when that is set (`leg_receiver_mismatch`).
 3. Values: an unknown `VSENationalID` → `leg_unmapped_point` naming it (a point of another ZEV reads the same); a flow contradicting a consumption-only or production-only point → `leg_flow_mismatch`; values outside every assignment window of the point → `leg_outside_assignment`; positions not matching interval and resolution → `leg_position_mismatch`.
-4. A `cancellation` message is always stored. Only what the message itself states becomes data:
+4. **Conditional cancellation proposal (§4.3 gate):** a `cancellation` message is stored. Only what the message itself states becomes data:
    - **Keys it lists** (point, flow, product and positions) are stored as `LegSourceValue` rows with `is_cancellation=True` and `quantity_kwh=NULL`: tombstones for exactly those keys (assembly, below), with the message as their provenance. No quantity is invented even if the cancellation includes a volume.
    - **A cancellation that lists no keys** produces no tombstones; OpenZEV does not invent its scope. Every batch whose period overlaps the message's `ReportPeriod` (for the points it names, or for the whole community if it names none) gets the blocking finding `leg_cancellation_unresolved`, assembled and approved batches alike, so generation for those periods stops. Blocking broadly is deliberate; recording a guessed scope as if the VNB had supplied it is not allowed.
    - Such a cancellation is resolved either by a parser profile that interprets it from the applicable 2025 XSD and examples, or by a manager's **resolution backed by external evidence** (`LegCancellationResolution`, below). Without evidence it stays blocking. A later replacement covering the keys supersedes either outcome.
 
-**Messages are append-only.** There is no delete endpoint. Every stored message has passed the community, type, process and receiver checks, so it is VNB data for this LEG. Deleting one could hide a later correction or a cancellation, even one that no batch references yet. Only a ZEV purge removes messages.
+**Messages are append-only.** There is no delete endpoint. Every stored message has passed the community, type, process and receiver checks, so it is VNB data for this LEG. Deleting one could hide a later correction (or a cancellation under the conditional proposal, §4.3 gate), even one that no batch references yet. Only a ZEV purge removes messages.
 
-#### `LegCancellationResolution` (append-only)
+#### `LegCancellationResolution` (conditional proposal, append-only)
 
 A manager's decision on a cancellation that lists no keys. The rule that a decision needs external evidence is an OpenZEV safety rule; SDAT-CH does not define this step.
 
@@ -279,11 +290,11 @@ Rules:
 
 #### `LegSettlementBatch`: an assembled, approvable snapshot
 
-A batch is created by **assembling** a period from the stored messages, never by an upload. Entries are `LegSourceValue` rows (values and tombstones), plus the keys of each cancellation's current `LegCancellationResolution` with outcome `keys`; those manual tombstones use the cancellation message's `source_created_at` and retain the resolution as evidence, without adding or changing source rows. For every key `(metering point or community, flow, product, interval)` inside the period, the entries of all messages are ordered by `source_created_at` and the newest decides:
+A batch is created by **assembling** a period from the stored messages, never by an upload. Entries are `LegSourceValue` rows. **Conditional cancellation proposal (§4.3 gate):** entries also include source tombstones and the keys of each cancellation's current `LegCancellationResolution` with outcome `keys`; those manual tombstones use the cancellation message's `source_created_at` and retain the resolution as evidence, without adding or changing source rows. For every key `(metering point or community, flow, product, interval)` inside the period, the entries of all messages are ordered by `source_created_at` and the newest decides:
 
 - a value (`is_cancellation=False`) → copied into a `LegSettlementQuantity`, whose `source_value` records which message's value won (so a bill assembled from several files stays explainable value by value); tombstone rows never become quantities;
-- a tombstone (the newest entry is a cancellation) → no quantity; the key is a gap, reported as `leg_cancelled_values` and caught by completeness. A later original or replacement for the key supersedes the tombstone;
-- **a tie**: two messages with the same `Creation` that disagree on the key (different value or condition, or a value against a tombstone) → `leg_ambiguous_source`, blocking. Upload order never decides. Identical entries are not a tie.
+- **Conditional (§4.3 gate):** a tombstone (the newest entry is a cancellation) → no quantity; the key is a gap, reported as `leg_cancelled_values` and caught by completeness. A later original or replacement for the key supersedes the tombstone;
+- **a tie**: two messages with the same `Creation` that disagree on the key (different value or condition; a value against a tombstone only under the conditional proposal, §4.3 gate) → `leg_ambiguous_source`, blocking. Upload order never decides. Identical entries are not a tie.
 
 Batches and quantities are immutable.
 
@@ -315,7 +326,7 @@ Predicates (never inferred from enum order):
   1. LEG setup complete for the period (§4.6);
   2. the approved batches overlapping the period cover every civil day of it (a `superseded` batch never counts); otherwise `leg_period_not_covered`;
   3. **series completeness against today's assignments**: every point assigned during the period has complete values (below) for its effective window in those batches. Re-checked at generation, so an assignment added or extended after approval blocks with `leg_incomplete_series` instead of billing low;
-  4. **no unprocessed later change**: re-running the assembly rule over today's messages yields exactly the quantities of each of those approved batches (no changed value or condition, no new tombstone, no tie). Otherwise `leg_newer_source_data`, blocking;
+  4. **no unprocessed later change**: re-running the assembly rule over today's messages yields exactly the quantities of each of those approved batches (no changed value or condition, no tie; new tombstones only under the conditional proposal, §4.3 gate). Otherwise `leg_newer_source_data`, blocking;
   5. no LEG document overlapping the period is stale and unresolved (§4.5.2, `leg_stale_documents`).
 
   Batch date coverage alone never satisfies 3.
@@ -329,8 +340,8 @@ Reconcile (`reconcile_batch`). Findings are blocking, overridable (approval need
 | Community, per interval and over the period: Σ local consumption = Σ local production | `leg_community_balance` | blocking |
 | Community aggregates (`E31`), when delivered, equal the sums of the member values per flow, product and interval | `leg_aggregate_mismatch` | blocking |
 | Local consumption without any local production in the period, or the reverse | `leg_missing_seller_data` | blocking |
-| A key's newest entry is a tombstone (listed by the cancellation, or by a manager's resolution) | `leg_cancelled_values` (keys listed, with provenance) | blocking |
-| A cancellation without listed keys overlaps the period and is unresolved | `leg_cancellation_unresolved` | blocking |
+| Conditional (§4.3 gate): a key's newest entry is a tombstone (listed by the cancellation, or by a manager's resolution) | `leg_cancelled_values` (keys listed, with provenance) | blocking |
+| Conditional (§4.3 gate): a cancellation without listed keys overlaps the period and is unresolved | `leg_cancellation_unresolved` | blocking |
 | Two messages with the same `Creation` disagree on a key | `leg_ambiguous_source` | blocking |
 | A member value has `Condition 21` (temporary) | `leg_temporary_values` | overridable |
 | Early-approval warning: assembled before the date by which the standard expects plausibilised data | `leg_before_plausibilisation` | overridable |
@@ -355,7 +366,7 @@ Approval certifies quantities, not prices: it does not look at tariffs, issuer, 
 
 **A later change blocks billing; it is never applied silently.** After each import, the assembly rule is re-run for every assembled, reconciled or approved batch the new message overlaps:
 
-- **Changed** (a different value or condition, a new tombstone, or a tie) → `leg_newer_source_data`, **blocking**. An assembled or reconciled batch can no longer be approved, and generation for the approved batch's period is refused (`may_generate` 4). Readiness lists the already issued documents of that period as affected. They become stale, and follow §4.5.2, once the new revision is approved.
+- **Changed** (a different value or condition, or a tie; a new tombstone only under the conditional proposal, §4.3 gate) → `leg_newer_source_data`, **blocking**. An assembled or reconciled batch can no longer be approved, and generation for the approved batch's period is refused (`may_generate` 4). Readiness lists the already issued documents of that period as affected. They become stale, and follow §4.5.2, once the new revision is approved.
 - **Unchanged** (the later message repeats the selected values) → `leg_newer_source_unchanged`, informational.
 
 The manager resolves a change by assembling a new revision, reconciling it and approving it, which supersedes the old batch. Approved batches stay immutable: the change is computed from the stored messages and is not written into the approved batch.
@@ -498,13 +509,13 @@ A `CheckConstraint` cannot see another table's `zev_type`, and `clean()` is not 
 | LEG assignment `personal`; `tariff_group` only on LEG | — | assignment serializer | yes |
 | No overlapping windows per point | — | existing `_validate_no_overlap` (`save()` and `clean()`) | yes |
 | `leg_*` tariffs only on LEG; legacy types never on LEG; one flat band | — | tariff serializer + pricing | yes |
-| Source rows are either non-cancellation with a non-null, non-negative value or cancellation with a null value; `interval_end > interval_start`; quantity point null only for `reconcile_only` | `CheckConstraint` | re-validated on import; assembly copies only non-cancellation rows into quantities | — |
-| Source tombstones belong only to cancellation messages | — | import | — |
+| Source rows have a non-null, non-negative value (conditional on §4.3 gate: cancellation rows instead have a null value); `interval_end > interval_start`; quantity point null only for `reconcile_only` | `CheckConstraint` | re-validated on import; assembly copies only value rows into quantities | — |
+| Conditional (§4.3 gate): source tombstones belong only to cancellation messages | — | import | — |
 | Value point belongs to the LEG and lies in an assignment window; null point only for `E31` community aggregates | — | import | — |
 | All three products of each assigned point's flow complete over its window | — | reconcile, and again at generation against current assignments | — |
 | One stored message per `(zev, sender_eic, document_id)` | `UniqueConstraint` | import (idempotent re-upload, `leg_document_id_conflict`) | — |
 | Message community, type, process and receiver match the LEG | — | import | — |
-| Newest `Creation` wins per point, flow, product and interval; cancellations are tombstones; equal `Creation` with disagreeing entries blocks | — | assembly | — |
+| Newest `Creation` wins per point, flow, product and interval (conditional on §4.3 gate: cancellations are tombstones); equal `Creation` with disagreeing entries blocks | — | assembly | — |
 | A later message that changes an approved batch's result blocks generation | — | re-assembly check after each import, at approval and in `may_generate` (`leg_newer_source_data`) | — |
 | No overlapping approved batches; a correction covers what it replaces | partial `UniqueConstraint` (identical periods only) | `approve_batch` under the `Zev` row lock (authoritative) | — |
 | One live document per `(participant, period, kind)` | — | `_discard_replaceable_invoices` (as today) | — |
@@ -536,8 +547,8 @@ Conventions, all existing:
 | `/api/v1/leg-source-messages/` | GET | manager, viewer | List with sender, `document_id`, `document_type`, `document_function`, `source_created_at`, report period, and the batches that use each message |
 | `/api/v1/leg-source-messages/` | POST (multipart: `zev`, one or more `files`) | manager | Each file parsed on its own (§4.3): `201` per stored message, "already imported" for an identical re-upload, or the file's findings with nothing stored for it. The response lists the outcome per file |
 | `/api/v1/leg-source-messages/{id}/` | GET | manager, viewer | Messages are append-only; there is no DELETE (§4.3) |
-| `/api/v1/leg-source-messages/{id}/cancellation-resolutions/` | GET | manager, viewer | The message's resolutions, oldest first, with evidence and supersession |
-| `/api/v1/leg-source-messages/{id}/cancellation-resolutions/` | POST multipart `{outcome, keys?, evidence_reference, evidence_file?, reason, supersedes?}` | manager | Cancellations without listed keys only (`leg_resolution_not_applicable` otherwise); `evidence_reference` and `reason` required (`leg_resolution_evidence_required`); `supersedes` must name the current resolution when one exists (`409 leg_resolution_not_current`). Audited. No PATCH or DELETE |
+| `/api/v1/leg-source-messages/{id}/cancellation-resolutions/` | GET | manager, viewer | Conditional (§4.3 gate): the message's resolutions, oldest first, with evidence and supersession |
+| `/api/v1/leg-source-messages/{id}/cancellation-resolutions/` | POST multipart `{outcome, keys?, evidence_reference, evidence_file?, reason, supersedes?}` | manager | Conditional (§4.3 gate): cancellations without listed keys only (`leg_resolution_not_applicable` otherwise); `evidence_reference` and `reason` required (`leg_resolution_evidence_required`); `supersedes` must name the current resolution when one exists (`409 leg_resolution_not_current`). Audited. No PATCH or DELETE |
 | `/api/v1/leg-settlement-batches/` | GET | manager, viewer | List with `review_state`, `revision`, `findings`, `latest_source_created_at`, `superseded_by`, `may_preview` |
 | `/api/v1/leg-settlement-batches/` | POST `{zev, period_start, period_end}` | manager | Assembles a batch from the stored messages (§4.3); `201` `assembled`, or `400 leg_nothing_to_assemble` |
 | `/api/v1/leg-settlement-batches/{id}/` | GET / DELETE | manager, viewer / manager | DELETE only while `assembled` or `reconciled` (`leg_batch_locked`) |
@@ -553,6 +564,8 @@ Conventions, all existing:
 | `/api/v1/invoices/annual-report/`, `/annual-statement/`, `/financial-summary/` | GET | existing | LEG ZEV → `400 leg_report_unsupported` |
 
 Stable `code`s:
+
+The `leg_resolution_*`, `leg_cancelled_values` and `leg_cancellation_unresolved` codes below are conditional on the §4.3 gate.
 
 - Setup and configuration: `leg_fields_on_non_leg`, `leg_zev_type_locked`, `leg_community_allocation`, `leg_tariff_type`, `leg_setup_incomplete`.
 - Import: `leg_parse_error`, `leg_wrong_process`, `leg_community_type_unsupported`, `leg_community_id_missing`, `leg_community_mismatch`, `leg_receiver_mismatch`, `leg_unknown_product`, `leg_position_mismatch`, `leg_unmapped_point`, `leg_flow_mismatch`, `leg_outside_assignment`, `leg_document_id_conflict`, `leg_resolution_not_applicable`, `leg_resolution_evidence_required`, `leg_resolution_not_current`.
@@ -615,10 +628,10 @@ Behaviour:
 | `mcp_server/tools` `explain_invoice`, `find_invoices`, `period_readiness` | vZEV only | Explain LEG lines from the evidence; `document_kind` in results |
 | `zev/buildings.py` | Every non-vZEV → one building | Only `ZEV` → one building |
 | `ZevSerializer` | `zev_type` writable | Lock + LEG fields (§4.1) |
-| `zev/transfer/schema.py` | `FORMAT_VERSION = 7` | Format 8: new fields in `ZEV_FIELDS` (not the tax confirmation: like `participant_invoice_access`, it is a decision for the instance that runs the ZEV), `PARTY_FIELDS` (`vat_registration`, `vat_registration_since`), `ASSIGNMENT_FIELDS`, `TARIFF_FIELDS`, `INVOICE_FIELDS` (`approved_at`; `replaces` by invoice number); `LegExternalSettlement` travels with its invoice; new section `leg_settlement` (source messages with their files and values, cancellation resolutions with their evidence files, batches, quantities; depends on `metering_points`); evidence travels in the `invoices` section keyed by batch `(period_start, period_end, revision)` and is dropped with a warning when the archive has no `leg_settlement` section. Older archives import with defaults |
-| `backups/registry.py` | `CoverageTests` fail on any unregistered model | Register `metering.LegSourceMessage`, `LegSourceValue`, `LegCancellationResolution`, `LegSettlementBatch` and `LegSettlementQuantity` after `zev.MeteringPoint`, and `invoices.InvoiceLegSettlementEvidence` and `invoices.LegExternalSettlement` after `invoices.Invoice`; `source_file` is copied like other file fields |
-| `zev/purge.py` | Collects invoice PDFs and export files for deletion | Also collects `LegSourceMessage.source_file` and `LegCancellationResolution.evidence_file` |
-| Audit | — | `leg_source_message.create`; `leg_cancellation_resolution.create`; `leg_settlement_batch.create`/`.delete` (mixins), `.reconcile`, `.approve` (override + superseded IDs); `zev.leg_tax_confirm`/`.leg_tax_unconfirm`; `invoice.leg_external_settlement`; `invoice.generate` metadata gains `document_kind` |
+| `zev/transfer/schema.py` | `FORMAT_VERSION = 7` | Format 8: new fields in `ZEV_FIELDS` (not the tax confirmation: like `participant_invoice_access`, it is a decision for the instance that runs the ZEV), `PARTY_FIELDS` (`vat_registration`, `vat_registration_since`), `ASSIGNMENT_FIELDS`, `TARIFF_FIELDS`, `INVOICE_FIELDS` (`approved_at`; `replaces` by invoice number); `LegExternalSettlement` travels with its invoice; new section `leg_settlement` (source messages with their files and values, batches, quantities; conditional on §4.3 gate: cancellation resolutions with their evidence files; depends on `metering_points`); evidence travels in the `invoices` section keyed by batch `(period_start, period_end, revision)` and is dropped with a warning when the archive has no `leg_settlement` section. Older archives import with defaults |
+| `backups/registry.py` | `CoverageTests` fail on any unregistered model | Register `metering.LegSourceMessage`, `LegSourceValue`, `LegSettlementBatch` and `LegSettlementQuantity` after `zev.MeteringPoint`, and `invoices.InvoiceLegSettlementEvidence` and `invoices.LegExternalSettlement` after `invoices.Invoice`; `source_file` is copied like other file fields. Conditional (§4.3 gate): also register `LegCancellationResolution` |
+| `zev/purge.py` | Collects invoice PDFs and export files for deletion | Also collects `LegSourceMessage.source_file`; conditional (§4.3 gate): `LegCancellationResolution.evidence_file` |
+| Audit | — | `leg_source_message.create`; conditional (§4.3 gate): `leg_cancellation_resolution.create`; `leg_settlement_batch.create`/`.delete` (mixins), `.reconcile`, `.approve` (override + superseded IDs); `zev.leg_tax_confirm`/`.leg_tax_unconfirm`; `invoice.leg_external_settlement`; `invoice.generate` metadata gains `document_kind` |
 | `seed_demo` | ZEV + vZEV | Add a LEG demo community fed by self-authored SDAT-CH 2025 LEG messages, for screenshots and the user guide |
 | Baseline specs (update on implementation) | — | tariffs-and-billing-engine, invoice-lifecycle-and-communication, metering-point-management, metering-import-and-quality, admin-governance-and-settings, zev-transfer-archive, buildings-and-sites, backup-and-restore |
 
@@ -646,7 +659,7 @@ interface LegFinding {
 interface LegSourceMessage {
   id: string; zev: string; source_filename: string; parser_profile: string;
   document_id: string; document_type: 'E66' | 'E31';
-  document_function: '9' | '5' | '1';  // original | replace | cancellation
+  document_function: '9' | '5' | '1';  // '1' is conditional on the §4.3 gate
   source_created_at: string; sender_eic: string; receiver_eic: string;
   community_id: string; community_type: 'CT01';
   report_start: string; report_end: string; received_at: string;
@@ -684,7 +697,7 @@ interface LegExternalSettlement {
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Incomplete, unchecked or since-corrected data priced | High | Immutable batches; complete series and balance checks; temporary values and early approval only with an audited override; a later replacement or cancellation that changes an approved batch blocks generation until a new revision is approved; ties block; no auto-approval |
+| Incomplete, unchecked or since-corrected data priced | High | Immutable batches; complete series and balance checks; temporary values and early approval only with an audited override; a later replacement (or cancellation under the conditional proposal, §4.3 gate) that changes an approved batch blocks generation until a new revision is approved; ties block; no auto-approval |
 | Consumer-only billing | High | Producer credits are a first-class document; `leg_missing_seller_data`; separate sale tariff + group key |
 | Double-billing VNB parts | High | Only LEG energy and fees on LEG documents; legacy energy types rejected on LEG; asserted in tests |
 | Incomplete settlement data billed low | High | Expected-series completeness at reconcile and again at generation against current assignments; date coverage alone never suffices |
@@ -738,7 +751,9 @@ interface LegExternalSettlement {
 
 ### Backend — `metering/test_leg_settlement.py` (`TestLegSettlement`)
 
-SDAT-CH conformance, on self-authored messages (§6.1 licensing):
+SDAT-CH conformance, on self-authored messages (§6.1 licensing).
+Cancellation, tombstone and resolution cases below belong to the blocked
+proposal in §4.3, not the accepted E66 1p6 conformance suite:
 
 | Test | Asserts |
 |---|---|
@@ -787,7 +802,7 @@ Manager of LEG-1 gets `404` on LEG-2 batch, quantity, invoice and settings IDs f
 
 ### Transfer and backups
 
-Format 8 round-trip of a LEG ZEV (batches, quantities, files, evidence), including source tombstones with their null quantity and message provenance; a format 7 archive imports with defaults; evidence dropped with a warning without the `leg_settlement` section; `CoverageTests` pass.
+Format 8 round-trip of a LEG ZEV (batches, quantities, files, evidence), including, conditional on the §4.3 gate, source tombstones with their null quantity and message provenance; a format 7 archive imports with defaults; evidence dropped with a warning without the `leg_settlement` section; `CoverageTests` pass.
 
 vZEV and ZEV suites pass unchanged, on SQLite and PostgreSQL.
 
@@ -833,7 +848,7 @@ Section references are to these editions:
 | VNB always bills members | False absolute → collective option Art. 17e(6) ([Swissolar](https://www.swissolar.ch/01_wissen/wirtschaftlichkeit/zev/20241120-be-leg.pdf)); v1 individual billing only, no mode field |
 | One area / one VNB | Validated (area + level + municipality + ≤36 kV) |
 | Discount 40%/20% | Validated, internal kWh only, VNB-computed |
-| SDAT-CH LEG flows | **Validated 2026-10-11** from the standard: `LGZ/EGZ-LEGT` (total), `-LEGR` (residual), `-LEGE` (LEG energy), sent by the VNB (sender `MDR`, `E66`) to receiver role `CEM` with `BusinessReason C40`; products `8716867000030`, `2404050010124`, `2404050010123`; flow from the metering point element; `CommunityID` + `CommunityType` `CT01`/`CT02`; `DocumentFunction` 9/5/1 ([SDAT-CH Messdatenaustauschprozesse 2025 V2](https://www.strom.ch/de/media/13628/download) §1.12–§1.13; [Anhang 3](https://www.strom.ch/de/media/13636/download) §4.24, §5.7; [Anhang 4](https://www.strom.ch/de/media/13631/download) §5.2) |
+| SDAT-CH LEG flows | **Validated 2026-10-11** from the standard: `LGZ/EGZ-LEGT` (total), `-LEGR` (residual), `-LEGE` (LEG energy), sent by the VNB (sender `MDR`, `E66`) to receiver role `CEM` with `BusinessReason C40`; products `8716867000030`, `2404050010124`, `2404050010123`; flow from the metering point element; `CommunityID` + `CommunityType` `CT01`/`CT02`; `DocumentFunction` 9/5 in the pinned E66 1p6 XSD; **cancellation reconciliation 2026-10-22:** the LEG diagram's Status 1 conflicts with that schema and remains gated by §4.3 ([SDAT-CH Messdatenaustauschprozesse 2025 V2](https://www.strom.ch/de/media/13628/download) §1.12–§1.13; [Anhang 3](https://www.strom.ch/de/media/13636/download) §4.24, §5.7; [Anhang 4](https://www.strom.ch/de/media/13631/download) §5.2) |
 | "Final" flag | **None in SDAT-CH.** Per-value `Condition` (`21` temporary, `56` estimated); plausibilised data by the 5th working day after the month; corrections as `replace` messages where the newest `Creation` applies, until the 3-month clearing deadline ([SDAT-CH Messdatenaustauschprozesse 2025 V2](https://www.strom.ch/de/media/13628/download) §1.1.2, §1.2, §1.12) → overridable findings and revisions (§4.3) |
 | Positions, DST, splitting, missing values | Validated → positions from `StartDateTime`, 96 per day, 92/100 on DST days, complete days/months only; files split by metering point above 50 MB gzip; zero is never a substitute for a missing value ([SDAT-CH Hauptdokument 2025](https://www.strom.ch/de/media/13633/download) §4.10–§4.12; [SDAT-CH Messdatenaustauschprozesse 2025 V2](https://www.strom.ch/de/media/13628/download) §1.2.1) |
 | Delivery route, rights, samples | Open → dependencies 1–4 (§6.1): XSD package and any official LEG examples; route, receiver EIC-X and member consent per VNB (members confirm to the representative that it may receive their data, [BD LEG 2025 V2](https://www.strom.ch/de/media/15458/download) §5; receiver registered and authorised, [SDAT-CH Messdatenaustauschprozesse 2025 V2](https://www.strom.ch/de/media/13628/download) §1.12); two independent real deliveries |
