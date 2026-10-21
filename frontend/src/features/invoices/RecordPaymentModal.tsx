@@ -15,6 +15,8 @@ type RecordPaymentModalProps = {
     isPending: boolean
     /** What is still owed; the amount defaults to it and may not exceed it. */
     outstandingChf: string
+    /** Invoice label for list context. */
+    invoiceNumber?: string
     onClose: () => void
     onSubmit: (values: RecordPaymentValues) => void
 }
@@ -30,7 +32,7 @@ export function RecordPaymentModal({ isOpen, ...rest }: RecordPaymentModalProps)
     )
 }
 
-function RecordPaymentForm({ isPending, outstandingChf, onClose, onSubmit }: Omit<RecordPaymentModalProps, 'isOpen'>) {
+function RecordPaymentForm({ isPending, outstandingChf, invoiceNumber, onClose, onSubmit }: Omit<RecordPaymentModalProps, 'isOpen'>) {
     const { t } = useTranslation()
     const today = todayBusinessIso()
     const [amount, setAmount] = useState(outstandingChf)
@@ -46,12 +48,17 @@ function RecordPaymentForm({ isPending, outstandingChf, onClose, onSubmit }: Omi
 
     const handleSubmit = (event: FormEvent) => {
         event.preventDefault()
-        if (amountError || !paidOn) return
+        if (isPending || amountError || !paidOn) return
         onSubmit({ amount_chf: value.toFixed(2), paid_on: paidOn, note: note.trim() })
     }
 
     return (
         <form className="inline-form grid" onSubmit={handleSubmit} noValidate>
+            {invoiceNumber ? (
+                <p className="muted m-0 grid-span-full">
+                    {t('pages.invoiceDetail.payments.invoiceContext', { number: invoiceNumber })}
+                </p>
+            ) : null}
             <p className="muted m-0 grid-span-full">
                 {t('pages.invoiceDetail.payments.outstandingHint', { amount: formatChf(Number(outstandingChf)) })}
             </p>
@@ -87,7 +94,8 @@ function RecordPaymentForm({ isPending, outstandingChf, onClose, onSubmit }: Omi
             </label>
             <FormModalFooter
                 onCancel={onClose}
-                isPending={isPending || !!amountError || !paidOn}
+                isPending={isPending}
+                disabled={!!amountError || !paidOn}
                 submitIcon={<FontAwesomeIcon icon={faMoneyBillWave} fixedWidth />}
                 submitLabel={t('pages.invoiceDetail.payments.record')}
             />

@@ -269,7 +269,7 @@ the rest under **More**:
 | *(none)* / Cancelled | **Generate invoice** / **Generate again** | Delete invoice (cancelled), Open PDF, Generate/Regenerate PDF |
 | Draft | **Approve** | Regenerate invoice, Delete invoice, Open PDF, Generate/Regenerate PDF |
 | Approved | **Send Email** | Mark as Sent, Open PDF, Generate/Regenerate PDF |
-| Sent | **Mark Paid** | Open PDF, Generate/Regenerate PDF, Resend Email |
+| Sent | **Mark Paid** / **Mark rest as paid** | Record payment, Open PDF, Generate/Regenerate PDF, Resend Email |
 | Paid | — | Open PDF, Generate/Regenerate PDF |
 
 **More** groups invoice actions first, then PDF and email actions. **Open PDF**
@@ -456,15 +456,19 @@ Email sending is asynchronous via Celery with automatic retries. For delivery me
 When a participant has paid the whole invoice, click **Mark Paid** on the row
 (shown for `Sent` invoices). It records one payment for the outstanding amount,
 dated today, and the status changes to `Paid`. It is a single-click action.
+Once part of the money has been recorded, the same row action reads **Mark rest
+as paid** and books only what is still open.
 
-For a partial payment, or to record the date the money actually arrived, open
-the invoice and use the **Payments** card:
+To record an amount or a payment date, choose **Record payment** from the row's
+**More** menu or from the invoice's **Payments** card:
 
-1. Click **Record payment**.
-2. Enter the amount (it starts at the outstanding amount and can't exceed it),
+1. Enter the amount (it starts at the outstanding amount and can't exceed it),
    the date it was paid (not in the future) and, optionally, a note such as the
    bank reference.
-3. Click **Record payment**.
+2. Click **Record payment**.
+
+In the period table, **Record payment** and **Mark Paid** (or **Mark rest as paid**)
+stay unavailable while either action is saving, even if you close the payment dialog.
 
 ![Record payment dialog](screenshots/08h-record-payment-dialog.png)
 

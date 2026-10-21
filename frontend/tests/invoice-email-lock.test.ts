@@ -37,6 +37,7 @@ vi.mock('../src/lib/api/invoices', () => ({
   markInvoicePaid: vi.fn(),
   markInvoiceSent: vi.fn(),
   openInvoicePdf: vi.fn(),
+  recordPayment: vi.fn(),
   ...api,
 }))
 
@@ -65,7 +66,7 @@ const hook: { current: Hook | null } = { current: null }
 function Harness({ options }: { options: Options }) {
   const result = useInvoiceActions({
     selectedZevId: 'zev-1', period, rows, userRole: 'admin', accountId: 1, canWrite: true,
-    onDeleteClick: vi.fn(), onPdfQueued: vi.fn(), ...options,
+    onDeleteClick: vi.fn(), onRecordPaymentClick: vi.fn(), onPdfQueued: vi.fn(), ...options,
   })
   useEffect(() => { hook.current = result })
   return null
