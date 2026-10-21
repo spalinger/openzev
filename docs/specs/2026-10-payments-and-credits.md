@@ -59,7 +59,7 @@ participant paid moves onto their next invoice:
 | 0 | this spec | docs | This spec, ADR 0037 |
 | 1 | Payments | model | `Payment`. `Invoice.approved_at`. Data migration creating payments for existing paid invoices and filling `approved_at`. |
 | 1 | Payments | workflow | `record_payment`, `delete_payment`. `mark_invoice_paid` records one full payment. `cancel_invoice` and invoice deletion refuse invoices that have payments. |
-| 1 | Payments | retention | `_discard_replaceable_invoices` and `can_delete_invoice` spare issued invoices |
+| 1 | Payments | retention | Regeneration and `can_delete_invoice` spare issued invoices |
 | 1 | Payments | reports | One aggregation rule, "issued and not cancelled", for the financial summary, annual statement and annual report (§4.6) |
 | 1 | Payments | frontend | Record-payment dialog. Payments card on the invoice detail page. "Partly paid" badge. |
 | 2 | Credits | model | `Credit`, the credit-note number sequence on `Zev`, the credit-note PDF |
@@ -281,8 +281,9 @@ original is kept (§4.5).
 | Admin `DELETE` | any | any invoice **without payments**, and from phase 2 without credits. An admin can still remove an issued invoice that never received money. |
 | `cancel` with payments | — | refused: "Invoices with recorded payments cannot be cancelled." (phase 2 points to `correct`) |
 
-`_discard_replaceable_invoices` filters on
-`status__in=[DRAFT, CANCELLED], approved_at__isnull=True`. `can_delete_invoice` gains the same
+Regeneration selects replacements with
+`status__in=[DRAFT, CANCELLED], approved_at__isnull=True` and deletes them through
+`reading_impact.settle_regeneration` only after creating the replacement. `can_delete_invoice` uses the same
 condition. ADR 0006's "regeneration may replace only draft/cancelled invoices" becomes "only never
 issued draft/cancelled invoices".
 

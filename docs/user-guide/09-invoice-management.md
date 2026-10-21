@@ -331,6 +331,29 @@ they are stored separately and added to the new draft again.
 
 > **Tip:** You can generate invoices even when metering data is incomplete, but totals may be inaccurate. It is best to resolve missing data first.
 
+### Metering corrections on issued invoices
+
+A committed metering correction (or an import deletion) never rewrites an
+invoice — amounts, PDFs and delivery records stay as issued. Instead the
+affected invoices stay in the **Issues** filter and carry a **Data review**
+flag. The period rows and invoice detail page identify them; managers and viewers
+also see source evidence (delivery ID or CSV filename, changed intervals) on the
+detail page. The **Overview** readiness
+check gains a **Data corrections** step linking to the period's billing page.
+
+| Invoice status | What to do |
+| --- | --- |
+| **Draft** | **More → Regenerate invoice** bills the corrected values. |
+| **Approved / Sent** | With no payments, cancel through the API and generate a new invoice. A sent invoice with payments needs **Correct invoice → Reverse the invoice** first. |
+| **Paid** | Use **Correct invoice → Reverse the invoice**, then generate a new invoice. Payments and partial credits leave the review flag open. |
+
+Full reversal is available for a positive invoice with uncredited payments
+or applied credit. If neither remains, the flag stays open for review.
+Zero invoices and payouts cannot be reversed.
+
+Participants see the review flag on their own sent and paid invoices,
+without internal import evidence or management actions.
+
 ## Reviewing Invoices
 
 Click the invoice number in the **Participant** column to view the invoice detail page.
@@ -690,3 +713,12 @@ available after billing. The selected community appears above the page title.
 - **Configure email delivery:** [Email Configuration](10-email-configuration.md)
 - **Understand billing logic:** [Billing & Allocation Explained](08-billing-allocation-explained.md)
 - **Manage tariffs:** [Tariff Configuration](07-tariff-configuration.md)
+
+Legacy CSV timestamp repairs also flag invoices for review, including periods
+on either side of a Swiss date boundary. Their evidence identifies a CSV
+timestamp correction rather than an SDAT delivery or an import deletion.
+
+The Data review notice initially lists the newest 20 corrections. Open the
+invoice detail and choose **Show all** to inspect a longer open history;
+**Show newest 20** collapses it again. Period overview keeps the complete count
+while returning only the newest 20 evidence entries per invoice.

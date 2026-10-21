@@ -847,6 +847,8 @@ export interface MeteringPoint {
     id: string
     zev: string
     meter_id: string
+    /** Alternative identity of the same physical meter, e.g. a second SDAT-CH VSENationalID. */
+    secondary_meter_id: string | null
     meter_type: 'consumption' | 'production' | 'bidirectional'
     is_active: boolean
     location_description?: string
@@ -855,7 +857,9 @@ export interface MeteringPoint {
     /** PV (or other generation) sits behind this meter: it records only the
      * surplus fed in and the residual grid draw (net / surplus metering). */
     has_behind_meter_generation: boolean
-    /** Readings that a delete of this metering point would cascade-delete. */
+    /** True while billable or held history prevents type/community changes and deletion. */
+    history_protected?: boolean
+    /** Billable readings belonging to this metering point. */
     reading_count: number
     /** Assignment windows (any state) that a delete of this metering point would cascade-delete. */
     assignment_count: number
@@ -868,6 +872,8 @@ export interface MeteringPoint {
 export interface MeteringPointInput {
     zev: string
     meter_id: string
+    /** Second VSENationalID of the same physical meter, if any. */
+    secondary_meter_id?: string | null
     meter_type: 'consumption' | 'production' | 'bidirectional'
     is_active: boolean
     location_description?: string
@@ -1180,6 +1186,32 @@ export interface GridOperatorSuggestion {
 
 export type InvoicePdfStatus = 'none' | 'pending' | 'ready' | 'failed'
 
+/** One open reading-correction flag on an invoice (invoice-lifecycle spec §4.6).
+ * `import_log` is the source import (SDAT-CH or CSV); null when the flag came from an
+ * import deletion (whose logs are gone) — `evidence` always keeps the
+ * delivery, filename or batch identity. */
+export interface InvoiceReadingImpact {
+    id: string
+    import_log: string | null
+    evidence: {
+        source: 'sdat-import' | 'csv-import' | 'import-deletion' | 'csv-reanchor'
+        filename?: string
+        delivery_id?: string
+        creation?: string
+        change_count?: number
+        kinds?: string[]
+        day_from?: string
+        day_to?: string
+        deleted_batches?: string[]
+        changed_readings?: number
+        deleted_readings?: number
+        [key: string]: unknown
+    }
+    created_at: string
+    resolution: '' | 'regenerated' | 'cancelled'
+    resolved_at: string | null
+}
+
 export interface Invoice {
     id: string
     invoice_number: string
@@ -1242,6 +1274,12 @@ export interface Invoice {
      * The retry endpoint is log-scoped, so the email-delivery tab needs the
      * log id to offer an inline retry off the list payload. */
     last_email_log_id?: string | null
+    /** True while an open reading correction taints this invoice (list and detail). */
+    needs_data_review?: boolean
+    /** Number of open reading corrections (list and detail). */
+    open_data_impact_count?: number
+    /** Source evidence for callers with ZEV view access; empty without it (detail only). */
+    data_impacts?: InvoiceReadingImpact[]
 }
 
 export type CreditKind = 'reversal' | 'adjustment'
@@ -1420,6 +1458,7 @@ export type ReadinessStepKey =
     | 'metering'
     | 'assignments'
     | 'tariffs'
+    | 'data_corrections'
     | 'generated'
     | 'generation_conflicts'
     | 'charges'
@@ -1433,6 +1472,7 @@ export type ReadinessNextAction =
     | 'fix_metering'
     | 'fix_assignments'
     | 'fix_tariffs'
+    | 'review_data_corrections'
     | 'generate'
     | 'review_generation_conflicts'
     | 'approve'
@@ -1468,6 +1508,10 @@ export interface ReadinessStepDetailData {
     conflict_count?: number
     conflicts?: ReadinessConflict[]
     more_conflicts?: number
+    /** data_corrections warn: invoices tainted by corrected metering data. */
+    correction_count?: number
+    corrections?: ReadinessDataCorrection[]
+    more_corrections?: number
     /** paid todo: active invoices not yet paid. */
     unpaid?: number
     /** charges todo: drafts generated before a charge changed. */
@@ -1490,6 +1534,18 @@ export interface ReadinessConflictInvoice {
     status: string
     start: string
     end: string
+}
+
+/** One invoice tainted by a committed reading correction. */
+export interface ReadinessDataCorrection {
+    invoice_id: string
+    invoice_number: string
+    participant_name: string
+    status: string
+    /** Source delivery identity (empty for deletion-sourced flags). */
+    delivery_id: string
+    flagged_at: string
+    correction_count: number
 }
 
 export interface ReadinessStep {
@@ -1692,15 +1748,86 @@ export interface ImportLog {
     rows_skipped: number
     source: string
     errors?: Array<{ row: number | null; error: string; meter_id?: string | null }>
-    warnings?: Array<{ row: number | null; warning: string }>
+    warnings?: Array<{ row?: number | null; warning: string }>
     /** '' for batches imported before ADR 0026 (offset-less values read as UTC). */
     timestamp_timezone?: ImportTimestampTimezone | ''
     created_at: string
+    /** Machine-readable SDAT-CH outcome; blank for CSV/manual imports. */
+    result_status?: '' | SdatResultStatus
+    /** Typed SDAT-CH observation accounting (created/overwritten/held/promoted/duplicate/stale/excluded/rejected, ...). */
+    result_counts?: SdatResultCounts
+    /** Structured SDAT-CH issues with stable codes; no prose parsing needed. */
+    issues?: SdatIssue[]
+    /** Committed billable-slot changes for invoice-impact consumers. Empty unless the import committed writes. */
+    reading_changes?: SdatReadingChange[]
+    /** SDAT-CH delivery identity (delivery vs block identity, creation, reason, sender/receiver). */
+    source_delivery?: SdatDelivery
+    /** False when the import replaced prior billable or held values and is protected from deletion. */
+    deletable?: boolean
+    /** Stable protection code when `deletable` is false; null when deletable. */
+    deletion_protection_code?: 'overwrite_import_protected' | 'quarantine_replace_protected' | null
+}
+
+/** Machine-readable outcome of an SDAT-CH file import. */
+export type SdatResultStatus = 'accepted' | 'held' | 'unchanged' | 'rejected'
+
+export interface SdatResultCounts {
+    created: number
+    overwritten: number
+    held: number
+    promoted: number
+    duplicate: number
+    /** Original deliveries skipped because a reading already exists. Absent on older logs. */
+    original_existing?: number
+    stale: number
+    excluded: number
+    rejected: number
+    /** Existing quarantine rows updated (replacement protection evidence). */
+    quarantine_overwritten: number
+    reading_changes_truncated?: boolean
+    [key: string]: number | boolean | undefined
+}
+
+export interface SdatIssue {
+    code: string
+    severity: 'error' | 'info'
+    message: string
+    meter_id?: string | null
+    block_id?: string | null
+    [key: string]: unknown
+}
+
+export interface SdatReadingChange {
+    metering_point: string
+    meter_id: string
+    timestamp: string
+    direction: 'in' | 'out'
+    /** availability = slot created, value = energy or resolution changed, metadata = provenance-only refresh. */
+    kind: 'availability' | 'value' | 'metadata'
+    old_energy: string | null
+    new_energy: string
+    promoted: boolean
+    source_document_id: string
+}
+
+export interface SdatDelivery {
+    delivery_id: string
+    creation: string
+    status: string
+    reason: string
+    sender_id: string
+    sender_role: string
+    receiver_id: string
+    receiver_role: string
 }
 
 export interface ImportDeletionResult {
     deleted_logs: number
     deleted_readings: number
+    /** Held (quarantine) readings removed alongside the billable ones. */
+    deleted_quarantined_readings?: number
+    /** True when the audit slot evidence was capped. */
+    deleted_slots_truncated?: boolean
     mode?: 'all' | 'period'
     timezone?: 'Europe/Zurich'
 }
@@ -2522,4 +2649,11 @@ export interface ChargePreview {
     total_billed_chf: string
     /** What the split leaves over after rounding each share to the centime. */
     unrecovered_chf: string
+}
+
+export interface MeteringReadingsDeletionResult {
+    /** Legacy alias of deleted_readings; excludes held observations. */
+    deleted_count: number
+    deleted_readings: number
+    deleted_quarantined_readings: number
 }

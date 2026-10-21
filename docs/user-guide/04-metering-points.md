@@ -100,6 +100,10 @@ its meters.
 2. Enter details:
    - **Meter ID** — required, unique identifier used to match imported readings to this
      metering point. Use the identifier supplied by your data source.
+   - **Secondary meter ID** — second ID of the same physical meter, if any
+     (SDAT-CH delivers consumption and feed-in under different IDs of one
+     meter). Optional; leave empty when the meter has a single ID, or to
+     clear an existing one. Either ID may appear in import files.
    - **Type** — `Consumption`, `Production`, or `Bidirectional`
    - **Active** — inventory status (defaults to on)
    - **Building** — only asked when the community has more than one
@@ -115,6 +119,12 @@ its meters.
 
 4. To bill this meter, assign a participant: click **Assign participant** on
    its entry and set the assignment's validity window — see below.
+
+Meter IDs must be unique across all communities on the instance, including any
+secondary ID configured for another meter. A duplicate is rejected when you
+create or edit a meter, or create meters through the community setup wizard.
+If an SDAT import reports an ambiguous ID in older data, ask an administrator
+to reconcile the conflicting IDs before retrying the import.
 
 > **Tip:** **Active** only tracks whether a meter is in inventory; on its own
 > it does not affect billing. To *stop billing* a meter, end its assignment
@@ -316,14 +326,26 @@ Click a row, or the arrow at its end, to open its details in place:
 
 1. Go to **Metering Points**
 2. Open **⋯ More → Edit**
-3. Update its ID, type, active status, location, or
+3. Update its ID, secondary ID, type, active status, location, or
    [Generation behind the meter](#generation-behind-the-meter) flag
 4. Click **Save Changes**
+
+A secondary ID that collides with another meter's primary or secondary ID
+is rejected with a field error — the conflicting value is named, nothing is
+saved. Clearing the field removes the secondary ID. The meter card shows a
+set secondary ID, and search matches it as well as the primary ID.
 
 > **Warning:** Changing an ID changes which imported readings match the point.
 > If the source starts reporting a different point identifier, create its point
 > and adjust assignment windows. A hardware replacement with an unchanged source
 > identifier needs no new point.
+
+A point with billable or held readings cannot be deleted, moved to another
+community, or changed to another meter type. This protects historical billing.
+Use the protected import-deletion workflow, or ask an admin to use **Delete
+data** first when removal is intended. Reading deletion flags affected invoices
+for review. To retire a meter while preserving its history, end its assignment
+and deactivate it as described below.
 
 ### Decommissioning a Meter
 

@@ -36,12 +36,21 @@ from invoices.models import (
     CreditApplication,
     EmailLog,
     Invoice,
+    InvoiceReadingImpact,
     InvoiceStatus,
     Payment,
 )
 from invoices.pdf import save_invoice_pdf
 from invoices.workflow import correct_invoice
-from metering.models import ImportLog, ImportSource, MeterReading, ReadingDirection, ReadingResolution
+from metering.models import (
+    ImportLog,
+    ImportSource,
+    MeterReading,
+    ReadingChangeKind,
+    ReadingDirection,
+    ReadingResolution,
+    SdatResultStatus,
+)
 from tariffs.dynamic.models import DynamicApiVersion, DynamicTariffSource, DynamicTariffType, FetchStatus
 from tariffs.dynamic.storage import store_points
 from tariffs.dynamic.vse_v1 import PricePoint
@@ -305,6 +314,10 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         if not settings.DEBUG:
             raise CommandError("seed_demo creates demo users with known passwords and is only available when DEBUG=True.")
+        from zev.locks import lock_meter_identities
+
+        # update_or_create locks a point before save; take the identity lock first.
+        lock_meter_identities()
         # Seed relative to today so the period the UI opens on always has data.
         # A fixed window silently goes stale: once today moves past it, the
         # dashboard, charts and invoice pages all render empty.
@@ -717,6 +730,7 @@ class Command(BaseCommand):
             meter_type=MeteringPointType.CONSUMPTION,
             location_description="Apartment 1 consumption meter",
             building=main_building,
+            secondary_meter_id="ZANR-1001",
         )
         participant_two_cons = self._upsert_metering_point(
             zev=zev,
@@ -769,6 +783,7 @@ class Command(BaseCommand):
             meter_type=MeteringPointType.CONSUMPTION,
             location_description="Garage space 4: EV charger",
             building=main_building,
+            secondary_meter_id="ZANR-1002",
         )
 
         self._ensure_assignment(owner_prod, owner_participant, main_valid_from)
@@ -1487,6 +1502,110 @@ class Command(BaseCommand):
         import_log.rows_imported = imported_rows
         import_log.save(update_fields=["rows_total", "rows_imported"])
 
+        # A structured SDAT-CH correction import on the flagship ZEV: the
+        # import protocol shows the "Corrections applied" outcome with the
+        # typed observation accounting, stable findings and the delivery
+        # identity, and its committed overwrites are the correction evidence
+        # behind the data-review badge on Anna's open-quarter invoice.
+        day_a = invoice_period_start + timedelta(days=12)
+        day_b = invoice_period_start + timedelta(days=40)
+        anna_meter = MeteringPoint.objects.get(zev=zev, meter_id="CH-DEMO-CONS-0001")
+        delivery = {
+            "delivery_id": "DEMO-E66-CORR-1001",
+            "creation": f"{invoice_period_end}T23:59:59+00:00",
+            "status": "5",
+            "reason": "E88",
+            "sender_id": "DEMO-VNB-DEMO",
+            "sender_role": "7",
+            "receiver_id": "DEMO-ZEV-DEMO",
+            "receiver_role": "4",
+        }
+        sdat_changes = [
+            {
+                "metering_point": str(anna_meter.pk),
+                "meter_id": anna_meter.meter_id,
+                "timestamp": f"{day_a}T12:15:00+00:00",
+                "direction": "in",
+                "kind": ReadingChangeKind.VALUE,
+                "old_energy": "0.3125",
+                "new_energy": "0.4375",
+                "promoted": False,
+                "source_document_id": "OBS-88",
+            },
+            {
+                "metering_point": str(anna_meter.pk),
+                "meter_id": anna_meter.meter_id,
+                "timestamp": f"{day_b}T18:30:00+00:00",
+                "direction": "in",
+                "kind": ReadingChangeKind.VALUE,
+                "old_energy": None,
+                "new_energy": "0.2500",
+                "promoted": False,
+                "source_document_id": "OBS-113",
+            },
+        ]
+        sdat_log = ImportLog.objects.create(
+            zev=zev,
+            imported_by=owner,
+            source=ImportSource.SDATCH,
+            result_status=SdatResultStatus.ACCEPTED,
+            filename=f"e66-correction-{invoice_period_start:%Y%m}.xml",
+            timestamp_timezone=str(business_tz()),
+            rows_total=14,
+            rows_imported=6,
+            rows_overwritten=6,
+            rows_skipped=6,
+            result_counts={
+                "created": 0,
+                "overwritten": 6,
+                "held": 2,
+                "promoted": 2,
+                "duplicate": 3,
+                "stale": 2,
+                "excluded": 1,
+                "rejected": 0,
+                "quarantine_overwritten": 1,
+            },
+            issues=[
+                {
+                    "code": "stale_superseded",
+                    "severity": "info",
+                    "message": "Skipped 2 observations superseded by newer deliveries; nothing changed.",
+                    "meter_id": "CH-DEMO-CONS-0002",
+                    "position": [19],
+                },
+                {
+                    "code": "duplicate_delivery",
+                    "severity": "info",
+                    "message": "Skipped 3 observations already imported; nothing changed.",
+                    "meter_id": "CH-DEMO-CONS-0004",
+                },
+            ],
+            source_delivery=delivery,
+            reading_changes=sdat_changes,
+            errors=[],
+        )
+        anna_participant = Participant.objects.get(zev=zev, user=anna_user)
+        anna_invoice = Invoice.objects.get(
+            zev=zev, participant=anna_participant, period_end=invoice_period_end
+        )
+        InvoiceReadingImpact.objects.create(
+            invoice=anna_invoice,
+            import_log=sdat_log,
+            evidence={
+                "source": "sdat-import",
+                "delivery_id": delivery["delivery_id"],
+                "creation": delivery["creation"],
+                "status": delivery["status"],
+                "reason": delivery["reason"],
+                "change_count": 2,
+                "kinds": ["value"],
+                "day_from": day_a.isoformat(),
+                "day_to": day_b.isoformat(),
+                "changes_truncated": False,
+            },
+        )
+
         # A second log on the second community with skipped rows + errors, so
         # the import list shows those badges without needing a real bad import.
         ImportLog.objects.create(
@@ -1882,6 +2001,7 @@ class Command(BaseCommand):
         meter_type: str,
         location_description: str,
         building: Building | None = None,
+        secondary_meter_id: str | None = None,
     ) -> MeteringPoint:
         defaults = {
             "zev": zev,
@@ -1889,6 +2009,8 @@ class Command(BaseCommand):
             "is_active": True,
             "location_description": location_description,
         }
+        if secondary_meter_id is not None:
+            defaults["secondary_meter_id"] = secondary_meter_id
         if building is not None:
             defaults["building"] = building
         meter, _ = MeteringPoint.objects.update_or_create(meter_id=meter_id, defaults=defaults)

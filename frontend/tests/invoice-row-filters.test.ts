@@ -32,6 +32,12 @@ const states = (row: InvoicePeriodParticipantRow) =>
     Object.fromEntries((invoiceRowProgress(row) ?? []).map(({ step, state }) => [step, state]))
 
 describe('invoice row filters', () => {
+    it('keeps reading corrections in Issues even after payment', () => {
+        const corrected = { ...base, invoice: { ...invoice, status: 'paid', needs_data_review: true } }
+        expect(invoiceRowCounts([corrected]).issues).toBe(1)
+        expect(filterInvoiceRows([corrected], 'issues')).toEqual([corrected])
+    })
+
     it('counts exactly the rows each segment and batch action names', () => {
         expect(invoiceRowCounts(rows)).toEqual({ all: 5, invoices: 3, drafts: 1, approved: 1, sent: 1, issues: 2, pdfs: 1 })
     })

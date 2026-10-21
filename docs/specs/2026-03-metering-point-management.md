@@ -57,6 +57,7 @@ Defined in `zev.models`.
 | `id` | `UUIDField` (PK) | Auto-generated |
 | `zev` | FK → `Zev` (`CASCADE`) | Owning ZEV community |
 | `meter_id` | `CharField(100)` | Swiss metering-point identifier (e.g. `CH9876543210987000000000044440859`) |
+| `secondary_meter_id` | `CharField(100)`, `unique`, `null`, blank allowed | Second 33-char VSENationalID of the same physical meter (SDAT-CH assigns one per flow direction: Bezug and Abgabe). Either ID matches on SDAT-CH import (see "Meter identity rules" below) |
 | `meter_type` | `MeteringPointType` | `consumption`, `production`, or `bidirectional` |
 | `is_active` | `BooleanField` (default `True`) | Soft-deactivation flag; inactive meters are not deleted |
 | `building` | FK → `Building` (`RESTRICT`, `related_name="metering_points"`) | The building the meter is in (required; [SPEC-2026-10-buildings-and-sites](2026-10-buildings-and-sites.md)). `save()` falls back to the ZEV's default building when unset; `clean()` rejects a building of another ZEV |
@@ -81,6 +82,71 @@ update). Setting it `True` while `meter_type` is `consumption` is rejected:
 metering points can have generation behind the meter."]}`. A PATCH that
 changes `meter_type` to `consumption` while the flag is still `True` on the
 instance is rejected the same way.
+
+### 3.1.1 Meter identity rules
+
+`meter_id` and `secondary_meter_id` are each globally unique (instance-wide,
+not per ZEV). Validation also rejects cross-column collisions and a secondary
+ID equal to its own primary ID.
+
+- **Normalization:** `normalize_secondary_meter_id()` in `zev.models` trims
+  secondary IDs and converts absent/blank values to `NULL`. `save()`, `clean()`
+  and the serializer use it; `save(update_fields=...)` normalizes secondary
+  IDs only when that field is included. Primary IDs retain their existing semantics.
+- **Shared validation:** `validate_meter_identities(meter_id=...,
+  secondary_meter_id=..., exclude_pk=...)` checks both candidate IDs against
+  both columns in one query, excluding the edited point. It raises field-keyed
+  Django `ValidationError` without revealing the other point or its ZEV.
+  `MeteringPoint.clean()` serves admin and archive `full_clean()` paths;
+  `MeteringPointSerializer.validate()` serves CRUD. Per-field uniqueness
+  validation remains enabled. The setup wizard service also calls `full_clean()`
+  before saving each point; collisions, including duplicate IDs within the
+  wizard payload, return `400 {"metering_points": {"meter_id": [...]}}` and
+  roll back the whole setup, including the new owner account.
+- **Lookup:** `resolve_metering_point(zev, source_id, for_update=False)` matches either column
+  within the given ZEV: zero matches return `None`, one returns the point,
+  several raise `AmbiguousMeterIdentity` carrying `identity` and `point_ids`.
+  The SDAT importer uses `for_update=True` inside its billing transaction to
+  resolve and lock current mappings before checking direction and writing.
+- **Legacy inspection:** `find_ambiguous_meter_identities()` reports normalized
+  identities shared by several points (`shared`) or repeated on one point
+  (`redundant`), as `{identity, kind, point_ids}` sorted by identity.
+  `python manage.py check_meter_identities` prints this read-only report and
+  exits non-zero while collisions remain. An operator must identify and
+  correct the wrong secondary ID through the API, Django admin or Django shell;
+  no point or reading is deleted or reassigned automatically.
+- **Migration `0047`:** trims secondary IDs, converts blanks and self-redundant
+  aliases to `NULL`, and adds `metering_point_secondary_differs_from_primary`
+  (`secondary IS NULL OR secondary != meter_id`). If trimming would duplicate
+  secondary IDs, it aborts before changing any IDs and names the points to
+  reconcile before rerunning. Cross-point primary/secondary collisions remain
+  for manual reconciliation. Clearing redundant aliases preserves lookup
+  through the primary; these aliases are cleared before trimmed aliases are saved.
+- **Concurrency:** `MeteringPoint.save()` takes the instance-wide identity
+  advisory lock (`zev.locks`, namespace 1641413), then locks the current point,
+  revalidates both persisted IDs and saves in the same transaction. Partial
+  saves validate only the identities actually persisted. API PATCH refreshes
+  its instance and reruns dependent validation under that lock so omitted
+  fields retain concurrent changes.
+  Admin form POSTs and demo upserts take the identity lock before point locks.
+  Setup and transfer use model saves; community restore takes the identity lock
+  before its ZEV lock and validates identities after raw deserialization.
+  Same-column unique constraints and the per-row inequality CHECK remain.
+  Raw SQL/QuerySet updates and bulk writes bypass model validation and are
+  unsupported for ordinary identity edits; migration/restore code must follow
+  the explicit protocol (ADR 0042).
+- **Reading history:** the read-only `history_protected` response boolean is
+  annotated from billable, held and supplementary readings or a connected supplementary source on lists/details (no extra per-row query).
+  The frontend disables point deletion and the type selector while it is true.
+  Model saves reject changing `zev` or `meter_type` while
+  billable/held/supplementary readings or a supplementary source exists, returning field-keyed API
+  `400`s. Model deletion also refuses either stream (`400` through the API).
+  Admin disables those edits/deletion and removes bulk point deletion. Rehoming also refuses existing assignment history, even with a destination building. The effective building must belong to the destination ZEV on partial updates. Remove supplementary sources/data explicitly before deletion; they cannot silently cascade through point deletion. Imports
+  hold point row locks until readings commit, so a concurrent configuration edit
+  either precedes resolution or observes history and is refused. Delete history
+  through the protected import or admin reading-deletion workflow first; soft
+  deactivation and dated assignments preserve history.
+
 
 ### 3.2 MeteringPointType
 
@@ -214,9 +280,15 @@ An omitted `delete_all` value defaults to false. Missing, malformed, or
 reversed date ranges and invalid boolean values return HTTP 400 with field-keyed
 serializer errors and perform no writes. When `delete_all=true`, dates are
 optional and all readings belonging to the selected meter are deleted. A
-successful response is `{ "deleted_count": integer }`; the audit event stores
-the normalized boolean and ISO date strings (or null dates for an all-reading
-deletion).
+successful response contains `deleted_readings` (billable),
+`deleted_quarantined_readings` (held), and `deleted_count` (a compatibility alias
+of `deleted_readings`). Both streams use the same date window. The audit event
+stores both counts, the normalized boolean and ISO date strings (or null dates
+for an all-reading deletion). The confirmation names both streams; the success
+message reports their separate counts. Held-only deletion does not flag invoices.
+Successful deletion invalidates metering and invoice queries, including period
+and readiness state, before any community-specific UI update. An obsolete
+account/session response does not update the new session's cache.
 
 ### 4.2 Metering point assignments
 
@@ -300,6 +372,7 @@ The `MeteringPointAssignmentViewSet` queryset uses `select_related("metering_poi
 |---|---|---|
 | All model fields | Read/write | `fields = "__all__"` |
 | `id`, `created_at`, `updated_at` | Read-only | Auto-generated |
+| `secondary_meter_id` | Read/write, optional | Blank/`null` normalized to `NULL`; cross-column collisions and self-redundancy rejected via `validate_meter_identities()` with field-keyed 400s (see §3.1.1) |
 | `building` | Read/write, optional | `PrimaryKeyRelatedField`; `validate()` rejects a building of another ZEV and, on create without one, uses the ZEV's only building (several buildings: `"Choose the building of this metering point."`; none: the default building is created) |
 | `building_name` | Read-only | `building.name` |
 
@@ -531,6 +604,7 @@ for eligibility, filtering, formatting and billing rules.
 | Risk | Impact | Mitigation |
 |---|---|---|
 | Overlapping assignment windows causing double-counting in billing | High | Non-overlap constraint in model `clean()` + `save()` + serializer `validate()` with exact overlap query (§3.4 rule 3) |
+| Ambiguous meter identity silently misrouting import data to the wrong point | High | Cross-column validation in model `clean()` + serializer `validate()` (§3.1.1); `AmbiguousMeterIdentity` refusal in `resolve_metering_point()` as importer defense-in-depth; `check_meter_identities` surfacing legacy state |
 | Cross-ZEV assignment or data exposure | High | ZEV-scope checks in permissions + queryset scoping + serializer validation (§3.4 rule 1) |
 | Hard-deleting meters breaks historical billing/import traceability | High | Soft-deactivation via `is_active` flag; CASCADE only on explicit delete (§7) |
 | Assignment dates outside participant validity window | Medium | Containment check in serializer `validate()` (§3.4 rule 4) |
@@ -547,9 +621,11 @@ Tests are distributed across `metering/tests.py` and the invoice test suite.
 | Area | Validated |
 |---|---|
 | Queryset scoping | Admin sees all; owner sees own ZEV; participant sees assigned meters (read-only) |
+| Meter identity | `zev/test_meter_identity.py` (39 methods): primary/secondary collisions in every direction fail with field-keyed 400s on create and update (never 500s); blank/`null`/whitespace aliases, unchanged updates and valid distinct aliases succeed; cross-ZEV collisions rejected without leaking the other tenant; `full_clean`/`save` normalization pinned at model level; `resolve_metering_point` matches either identity, is ZEV-scoped, returns `None` for unknown IDs and raises `AmbiguousMeterIdentity` on legacy ambiguity; `find_ambiguous_meter_identities` + `check_meter_identities` surface direct-DB ambiguity read-only; viewer/participant write refusal and disabled-ZEV rules intact |
+| Meter identity migration | `zev/test_meter_identity_migration.py` (2 methods): trimmed-secondary collisions abort without changing IDs; blanks and self-redundancy normalize, while cross-point collisions remain for reconciliation |
 | Assignment validation | Overlap rejection, ZEV-scope enforcement, participant-validity containment, date integrity |
 | CRUD operations | Create/update/delete for metering points and assignments with permission checks |
-| Reading deletion | `MeteringPointReadingsDeletionTests` (8 methods): admin whole-meter and inclusive-range deletion; false JSON/form values and omission remain bounded; invalid booleans and invalid/incomplete/reversed ranges return 400 without writes; owners are denied |
+| Reading deletion | `MeteringPointReadingsDeletionTests` (11 methods): admin whole-meter and inclusive-range deletion; false JSON/form values and omission remain bounded; invalid booleans and invalid/incomplete/reversed ranges return 400 without writes; owners are denied; held-only/mixed deletion response and audit counts match both streams |
 | Soft deactivation | `is_active = False` preserves history; meter remains queryable |
 | Billing integration | Engine resolves assignments for period; only overlapping assignments contribute readings |
 | Period overview | Assignment-aware gap detection, no-assignment exclusion |
@@ -562,6 +638,15 @@ python -m pytest -q
 ### Frontend
 
 - Form validation and error rendering for metering-point create/edit
+- Secondary meter ID editing in the existing form (`MeteringPointFormModal`):
+  blank clears the alias (payload normalizes to `null`, mirroring
+  `normalize_secondary_meter_id`), server collisions surface as field errors
+  under the field (`meteringPointFieldErrors` reads the field-keyed 400s;
+  editing clears them, scope switches remount the page so they never leak;
+  delayed save results cannot close a newer form or attach errors to it),
+  and the set alias shows on the meter card and matches search. Covered by
+  `frontend/tests/metering-point-secondary-id.test.ts` and
+  `frontend/tests/metering-draft-scope.test.ts`.
 - Assignment date-range picker with overlap/containment feedback
 - Lists support status, attention, search, type and building filters, with sort and filters stored
   in the URL, including same-page navigation.

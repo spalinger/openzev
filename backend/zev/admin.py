@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.db import transaction
 from .models import Building, Zev, Participant, Party, MeteringPoint, MeteringPointAssignment, ZevAccessGrant
 
 
@@ -55,6 +56,29 @@ class MeteringPointAdmin(admin.ModelAdmin):
     search_fields = ("meter_id",)
     # Every ZEV's buildings in one select would invite picking another ZEV's.
     raw_id_fields = ("building",)
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        actions.pop("delete_selected", None)
+        return actions
+
+    def has_delete_permission(self, request, obj=None):
+        return super().has_delete_permission(request, obj) and (
+            obj is None or not obj.has_reading_history()
+        )
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj is not None and obj.has_reading_history():
+            return ("zev", "meter_type")
+        return ()
+
+    @transaction.atomic
+    def changeform_view(self, request, object_id=None, form_url="", extra_context=None):
+        if request.method == "POST":
+            from .locks import lock_meter_identities
+
+            lock_meter_identities()
+        return super().changeform_view(request, object_id, form_url, extra_context)
 
 
 @admin.register(ZevAccessGrant)

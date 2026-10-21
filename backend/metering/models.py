@@ -26,6 +26,28 @@ class ImportSource(models.TextChoices):
     MANUAL = "manual", "Manual entry"
 
 
+class SdatResultStatus(models.TextChoices):
+    """Machine-readable outcome of an SDAT-CH file import.
+
+    Operators (and downstream agents) must be able to tell accepted, held,
+    unchanged and rejected files apart without parsing warning prose.
+    CSV/manual imports leave ``ImportLog.result_status`` blank.
+    """
+
+    ACCEPTED = "accepted", "Accepted"
+    HELD = "held", "Held"
+    UNCHANGED = "unchanged", "Unchanged"
+    REJECTED = "rejected", "Rejected"
+
+
+class ReadingChangeKind(models.TextChoices):
+    """How one committed billable slot changed."""
+
+    AVAILABILITY = "availability", "Availability"
+    VALUE = "value", "Value"
+    METADATA = "metadata", "Metadata"
+
+
 class MeterReading(models.Model):
     """A single energy reading for a metering point."""
 
@@ -41,6 +63,53 @@ class MeterReading(models.Model):
     )
     import_source = models.CharField(max_length=20, choices=ImportSource.choices, default=ImportSource.CSV)
     import_batch = models.UUIDField(null=True, blank=True, help_text="Groups readings from the same import")
+    source_creation = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="SDAT-CH InstanceDocument Creation of the delivery that wrote this reading.",
+    )
+    source_document_id = models.CharField(
+        max_length=40,
+        blank=True,
+        default="",
+        help_text="SDAT-CH MeteringData DocumentID of the delivery that wrote this reading.",
+    )
+    source_delivery_id = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="SDAT-CH outer InstanceDocument DocumentID (delivery identity, distinct from the MeteringData block identity).",
+    )
+    business_reason = models.CharField(
+        max_length=10,
+        blank=True,
+        default="",
+        help_text="SDAT-CH BusinessReason code of the delivery that wrote this reading (E88 billing).",
+    )
+    condition = models.CharField(
+        max_length=5,
+        blank=True,
+        default="",
+        help_text="SDAT-CH observation Condition (empty = measured, 56 = estimated).",
+    )
+    source_product = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        help_text="SDAT-CH Product code of the observation (ebIX/VSE, e.g. 8716867000030 active energy).",
+    )
+    source_unit = models.CharField(
+        max_length=10,
+        blank=True,
+        default="",
+        help_text="SDAT-CH MeasureUnit of the observation (KWH on the supported profile).",
+    )
+    source_meter_id = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Meter identity as observed in the delivery (VSENationalID), before alias resolution.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -56,6 +125,87 @@ class MeterReading(models.Model):
         return (
             f"{self.metering_point.meter_id} {self.timestamp.isoformat()} "
             f"{self.direction} {self.energy_kwh} kWh"
+        )
+
+
+# ---------------------------------------------------------------------------
+# SDAT-CH quarantine
+#
+# Info-only (BusinessReason C38) and temporary (Condition 21) observations are
+# stored here, never in ``MeterReading``. Nothing in allocation, tariffs, the
+# invoice engine, dashboards or charts reads this table, so forecast-grade
+# data cannot leak into billing by construction. A later billable (E88) or
+# Status=5 replace delivery promotes matching rows into ``MeterReading`` and
+# deletes the quarantined row.
+# ---------------------------------------------------------------------------
+
+
+class QuarantinedReading(models.Model):
+    """One SDAT-CH observation held back from billing."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    metering_point = models.ForeignKey(
+        MeteringPoint, on_delete=models.CASCADE, related_name="quarantined_readings"
+    )
+    timestamp = models.DateTimeField(help_text="Start of the measurement interval (UTC)")
+    energy_kwh = models.DecimalField(max_digits=12, decimal_places=4)
+    direction = models.CharField(max_length=5, choices=ReadingDirection.choices, default=ReadingDirection.IN)
+    resolution = models.CharField(
+        max_length=10, choices=ReadingResolution.choices, default=ReadingResolution.FIFTEEN_MIN
+    )
+    import_source = models.CharField(max_length=20, choices=ImportSource.choices, default=ImportSource.SDATCH)
+    import_batch = models.UUIDField(null=True, blank=True, help_text="Groups readings from the same import")
+    business_reason = models.CharField(
+        max_length=10, blank=True, default="", help_text="SDAT-CH BusinessReason code (e.g. C38, E88)"
+    )
+    condition = models.CharField(
+        max_length=5, blank=True, default="", help_text="SDAT-CH Condition code (21 temporary, 56 estimated)"
+    )
+    source_creation = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="SDAT-CH InstanceDocument Creation of the delivery that wrote this row.",
+    )
+    source_document_id = models.CharField(max_length=40, blank=True, default="")
+    source_delivery_id = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="SDAT-CH outer InstanceDocument DocumentID (delivery identity, distinct from the MeteringData block identity).",
+    )
+    source_product = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        help_text="SDAT-CH Product code of the observation (ebIX/VSE).",
+    )
+    source_unit = models.CharField(
+        max_length=10,
+        blank=True,
+        default="",
+        help_text="SDAT-CH MeasureUnit of the observation.",
+    )
+    source_meter_id = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Meter identity as observed in the delivery (VSENationalID), before alias resolution.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["metering_point", "timestamp", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["metering_point", "timestamp", "direction"],
+                name="unique_quarantined_per_point_time_direction",
+            )
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.metering_point.meter_id} {self.timestamp.isoformat()} "
+            f"{self.direction} {self.energy_kwh} kWh ({self.business_reason or '?'}/{self.condition or 'good'})"
         )
 
 
@@ -82,6 +232,29 @@ class ImportLog(models.Model):
     rows_skipped = models.IntegerField(default=0)
     errors = models.JSONField(default=list)
     warnings = models.JSONField(default=list)
+    result_status = models.CharField(
+        max_length=16,
+        choices=SdatResultStatus.choices,
+        blank=True,
+        default="",
+        help_text="Machine-readable SDAT-CH outcome (accepted/held/unchanged/rejected); blank for CSV/manual imports.",
+    )
+    result_counts = models.JSONField(
+        default=dict,
+        help_text="Typed SDAT-CH observation accounting: created/overwritten/held/promoted/duplicate/stale/excluded/rejected (+quarantine_overwritten, reading_changes_truncated).",
+    )
+    issues = models.JSONField(
+        default=list,
+        help_text="Structured SDAT-CH issues: [{code, severity (error/info), message, ...params}]. Stable codes, no prose parsing needed.",
+    )
+    reading_changes = models.JSONField(
+        default=list,
+        help_text="Committed billable-slot changes for invoice-impact consumers: [{metering_point, meter_id, timestamp, direction, kind (availability/value/metadata), old_energy, new_energy, ...}]. Empty unless the import committed writes.",
+    )
+    source_delivery = models.JSONField(
+        default=dict,
+        help_text="SDAT-CH delivery identity: {delivery_id, creation, status, reason, sender_id, sender_role, receiver_id, receiver_role}.",
+    )
     timestamp_timezone = models.CharField(
         max_length=40,
         blank=True,

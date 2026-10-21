@@ -171,3 +171,59 @@ def test_selecting_only_the_later_batch_collides_with_the_earlier_one(meter):
 
     with pytest.raises(CommandError, match="outside the selection"):
         _run("--batch", str(august.batch_id), "--apply")
+
+
+def test_reanchoring_flags_invoices_on_both_swiss_dates(meter):
+    from invoices.models import InvoiceReadingImpact
+
+    assignment = MeteringPointAssignmentFactory(
+        metering_point=meter, participant__zev=meter.zev,
+        valid_from=date(2026, 1, 1), participant__valid_from=date(2026, 1, 1),
+    )
+    invoices = [InvoiceFactory(
+        zev=meter.zev, participant=assignment.participant, status=InvoiceStatus.SENT,
+        period_start=start, period_end=end,
+    ) for start, end in ((date(2026, 5, 1), date(2026, 5, 31)), (date(2026, 6, 1), date(2026, 6, 30)))]
+    log = _batch(meter, [_utc(2026, 5, 31, 23)])
+    _run("--batch", str(log.batch_id), "--apply", "--allow-invoiced")
+    assert _stamps(meter) == [_utc(2026, 5, 31, 21)]
+    impacts = list(InvoiceReadingImpact.objects.order_by("invoice_id"))
+    assert {impact.invoice_id for impact in impacts} == {invoice.pk for invoice in invoices}
+    assert all(impact.evidence["source"] == "csv-reanchor" for impact in impacts)
+    assert all(impact.evidence["day_from"] == "2026-05-31" and impact.evidence["day_to"] == "2026-06-01" for impact in impacts)
+
+
+def test_reanchor_failure_rolls_back_readings_and_invoice_flags(meter):
+    from unittest.mock import patch
+    from invoices.models import InvoiceReadingImpact
+
+    assignment = MeteringPointAssignmentFactory(
+        metering_point=meter, participant__zev=meter.zev,
+        valid_from=date(2026, 1, 1), participant__valid_from=date(2026, 1, 1),
+    )
+    InvoiceFactory(zev=meter.zev, participant=assignment.participant,
+                   period_start=date(2026, 1, 1), period_end=date(2026, 1, 31))
+    log = _batch(meter, [_utc(2026, 1, 15, 12)])
+    with patch("metering.management.commands.reanchor_readings.record_audit_event", side_effect=RuntimeError("audit")):
+        with pytest.raises(RuntimeError, match="audit"):
+            _run("--batch", str(log.batch_id), "--apply", "--allow-invoiced")
+    assert _stamps(meter) == [_utc(2026, 1, 15, 12)]
+    assert not InvoiceReadingImpact.objects.exists()
+    log.refresh_from_db()
+    assert log.timestamp_timezone == ""
+
+
+def test_reanchor_requires_confirmation_for_nonholder_shared_pool_invoice(meter):
+    from invoices.models import InvoiceReadingImpact
+    invoice = InvoiceFactory(
+        zev=meter.zev, participant__zev=meter.zev,
+        participant__valid_from=date(2026, 1, 1), status=InvoiceStatus.SENT,
+        period_start=date(2026, 1, 1), period_end=date(2026, 1, 31),
+    )
+    log = _batch(meter, [_utc(2026, 1, 15, 12)])
+    with pytest.raises(CommandError, match="allow-invoiced"):
+        _run("--batch", str(log.batch_id), "--apply")
+    assert _stamps(meter) == [_utc(2026, 1, 15, 12)]
+    assert not InvoiceReadingImpact.objects.exists()
+    _run("--batch", str(log.batch_id), "--apply", "--allow-invoiced")
+    assert InvoiceReadingImpact.objects.filter(invoice=invoice).exists()

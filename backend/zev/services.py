@@ -421,7 +421,7 @@ def create_zev_with_owner_setup(*, zev_data: dict, owner_data: dict, metering_po
 
     created_metering_points: list[dict] = []
     for metering_point_data in metering_points_data:
-        metering_point = MeteringPoint.objects.create(
+        metering_point = MeteringPoint(
             zev=zev,
             meter_id=metering_point_data['meter_id'],
             meter_type=metering_point_data['meter_type'],
@@ -429,6 +429,8 @@ def create_zev_with_owner_setup(*, zev_data: dict, owner_data: dict, metering_po
             location_description=metering_point_data.get('location_description', ''),
             building=building,
         )
+        metering_point.full_clean()
+        metering_point.save()
         MeteringPointAssignment.objects.create(
             metering_point=metering_point,
             participant=owner_participant,

@@ -147,7 +147,7 @@ class CreateIntoAnotherCommunityTests(_TwoCommunities):
             "metering_point": str(self.victim_meter.id),
             "timestamp": "2026-01-01T00:00:00Z", "energy_kwh": "1.0", "direction": "in",
         }, format="json")
-        self.assertRefused(response, "metering_point")
+        self.assertEqual(response.status_code, 405, response.content)
         self.assertFalse(MeterReading.objects.filter(metering_point=self.victim_meter).exists())
 
 
@@ -170,7 +170,7 @@ class MoveIntoAnotherCommunityTests(_TwoCommunities):
     def test_metering_point(self):
         response = self.client.patch(
             f"{METERING_POINTS}{self.attacker_meter.id}/",
-            {"zev": str(self.victim_zev.id)}, format="json",
+            {"zev": str(self.victim_zev.id), "building": str(self.victim_meter.building_id)}, format="json",
         )
         self.assertRefused(response, "zev")
         self.attacker_meter.refresh_from_db()

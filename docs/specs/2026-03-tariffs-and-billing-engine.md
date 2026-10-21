@@ -497,6 +497,8 @@ produced by the engine:
 
 ## 4. Algorithm: `generate_invoice(participant, period_start, period_end)`
 
+Regeneration refuses partial replacement of an overlapping draft: the new period must contain the entire old period before any pricing or deletion.
+
 The engine runs **inside a single database transaction**.
 
 ### 4.0 Guard rails
@@ -505,12 +507,13 @@ Generation holds its locks until the surrounding transaction ends, in this order
 
 1. PostgreSQL: ZEV `FOR KEY SHARE`, which conflicts with restore's exclusive lock but permits other generators ([ADR 0038](../adr/0038-invoice-generation-lock-order.md)).
 2. Participant `FOR UPDATE`, selecting only its primary key to avoid locking the related party.
-3. All overlapping invoice rows `FOR UPDATE`, ordered by primary key, before checking their status or deleting them. Approval uses the same invoice-row lock.
+3. The community's billing-input advisory lock, shared with SDAT/CSV writes and reading deletions, before reading prices or metering inputs ([ADR 0041](../adr/0041-billing-input-advisory-lock.md)).
+4. Overlapping invoice rows `FOR UPDATE`, ordered by primary key, before checking their status or deleting them. Approval uses the same invoice-row lock.
 
 Pricing and numbering may still serialize on shared dynamic-price sources and the ZEV row.
 
 - An `approved`, `sent` or `paid` invoice overlapping the requested inclusive period for the same participant → **raise `ValueError`**.
-- Delete overlapping drafts and never-approved cancellations (`approved_at` null). Keep issued cancellations with their numbers next to the new draft (ADR 0037, `_discard_replaceable_invoices`).
+- After successfully creating the replacement, delete overlapping drafts and never-approved cancellations (`approved_at` null) through `reading_impact.settle_regeneration`. Keep issued cancellations with their numbers next to the new draft (ADR 0037). `_refuse_locked_regeneration` locks overlaps and checks issued status before pricing.
 
 ### 4.1 Collect metering points
 

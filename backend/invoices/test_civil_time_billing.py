@@ -9,6 +9,7 @@ Spec: docs/specs/2026-09-swiss-civil-time.md §9.
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from io import BytesIO
+import os
 
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -31,6 +32,45 @@ pytestmark = pytest.mark.django_db
 
 def _utc(*args):
     return datetime(*args, tzinfo=timezone.utc)
+
+
+_SDATCH_NS = "http://www.strom.ch"
+_SDATCH_FIXTURES = os.path.join(
+    os.path.dirname(__file__), "..", "metering", "test_fixtures", "sdatch"
+)
+
+
+def _e66_single_observation(*, meter_id, point, start, volume):
+    """A minimal schema-valid E66 file derived from the official example shape."""
+    from lxml import etree
+
+    def q(local):
+        return f"{{{_SDATCH_NS}}}{local}"
+
+    with open(os.path.join(_SDATCH_FIXTURES, "e66_basic.xml"), "rb") as fh:
+        root = etree.fromstring(fh.read())
+    keep = next(md for md in root.iter(q("MeteringData")) if md.find(q(point)) is not None)
+    for md in list(root.iter(q("MeteringData"))):
+        if md is not keep:
+            root.remove(md)
+    keep.find(q("DocumentID")).text = "FIX-SINGLE"
+    keep.find(q("Interval")).find(q("StartDateTime")).text = start
+    keep.find(q("Interval")).find(q("EndDateTime")).text = "2026-07-01T10:15:00Z"
+    keep.find(q(point)).find(q("VSENationalID")).text = meter_id
+    for obs in list(keep.iter(q("Observation"))):
+        keep.remove(obs)
+    obs = etree.SubElement(keep, q("Observation"))
+    pos = etree.SubElement(obs, q("Position"))
+    seq = etree.SubElement(pos, q("Sequence"))
+    seq.text = "1"
+    vol = etree.SubElement(obs, q("Volume"))
+    vol.text = volume
+    header = root.find(q("ValidatedMeteredData_HeaderInformation"))
+    scope = header.find(q("BusinessScopeProcess"))
+    period = scope.find(q("ReportPeriod"))
+    period.find(q("StartDateTime")).text = start
+    period.find(q("EndDateTime")).text = "2026-07-01T10:15:00Z"
+    return etree.tostring(root, xml_declaration=True, encoding="UTF-8")
 
 
 def _grid_tariff(zev, bands):
@@ -135,14 +175,16 @@ def test_mixed_sdat_and_csv_allocate_on_same_instant():
     participant = factories.ParticipantFactory(valid_from=date(2026, 1, 1))
     consumption = factories.assignment_for(participant).metering_point
     production = factories.assignment_for(participant, meter_type=MeteringPointType.PRODUCTION).metering_point
+    # Real E66 files address meters by 33-char VSENationalID (XSD length 33).
+    production.meter_id = "CH9999901234500000000000000000007"
+    production.save(update_fields=["meter_id"])
     _flat_grid_tariff(participant.zev)
-    sdat = (
-        "<MeteringData><MeteringPoint>"
-        f"<MeteringPointID>{production.meter_id}</MeteringPointID>"
-        "<Interval><StartDateTime>2026-07-01T12:00:00+02:00</StartDateTime><Resolution>PT15M</Resolution>"
-        "<Observation><Volume>5</Volume><Direction>OUT</Direction></Observation>"
-        "</Interval></MeteringPoint></MeteringData>"
-    ).encode()
+    sdat = _e66_single_observation(
+        meter_id=production.meter_id,
+        point="ProductionMeteringPoint",
+        start="2026-07-01T10:00:00Z",
+        volume="5",
+    )
     sdat_file = BytesIO(sdat)
     sdat_file.name = "production.xml"
     import_sdatch(sdat_file, participant.zev, zev_manager(participant.zev))

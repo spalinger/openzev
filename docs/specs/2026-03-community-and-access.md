@@ -1522,10 +1522,17 @@ invalid IBAN keeps the billing-settings warning until it is corrected.
 2. Create `User` with `role=user`, `must_change_password=True`, temporary password; its issuer role supplies management access (a grant bridges a future start date).
 3. Create `Zev` with that user as owner.
 4. Create owner `Participant` with `valid_from = zev.start_date`.
-5. Create each `MeteringPoint` → create `MeteringPointAssignment` to owner participant.
+5. Validate each `MeteringPoint` with `full_clean()`, save it, then create its `MeteringPointAssignment` to the owner participant.
 6. Return `{ zev: {id, name}, owner: {id, username, temporary_password, existing_account}, owner_participant_id, metering_points: [{id, meter_id}] }`. For an existing account `temporary_password` is `null` and `existing_account` is `true`.
 
 Model-guard `ValidationError`s raised while promoting the account are returned as `400`.
+
+Meter IDs cannot duplicate a primary or secondary ID anywhere on the instance,
+or another primary ID within the payload. Model validation failures return
+`400 {"metering_points": {"meter_id": [...]}}` and roll back the entire setup,
+including the new owner account. See the [meter identity rules](2026-03-metering-point-management.md#311-meter-identity-rules);
+`MeterIdentityCreateTests.test_setup_wizard_rejects_collisions_and_rolls_back`
+in `zev/test_meter_identity.py` verifies these cases.
 
 ### 7.3 Self-setup
 
@@ -2313,7 +2320,7 @@ proxy trust and conflicting legacy scheme headers.
 | `SeedDemoLegacyNameCollisionTests` | 5 | Legacy row next to an already-migrated row dropped; duplicate legacy rows keep the newest; a duplicate legacy row with invoices is cleared; current-name upsert does not take over another owner's community; only the demo owner is affected |
 | `SeedDemoWindowShiftTests` | 1 | Shifted seed window leaves no readings outside it |
 | `SeedDemoAuditResetTests` | 1 | Audit reset clears demo trails but keeps events on other communities |
-| `SeedDemoReseedTests` | 1 | One seeded-then-re-seeded database (seeded once in `setUpTestData`), checked as four sub-tests of a single test so `--dist=worksteal` cannot split the class and repeat the seed per worker: Anna's invoice PDFs generated after commit, deterministic reseeding, the flagship's representative and contact, access personas |
+| `SeedDemoReseedTests` | 1 | One seeded-then-re-seeded database (seeded once in `setUpTestData`), checked as four sub-tests of a single test so `--dist=worksteal` cannot split the class and repeat the seed per worker: Anna's invoice PDFs generated after commit, deterministic reseeding including three import logs and Anna's open correction-review impact linked to the accepted SDAT delivery, the flagship's representative and contact, access personas |
 | `SeedDemoEndToEndTests` | 7 | Seed runs that need their own database: dynamic tariff rollover on a next-quarter reseed; real-storage PDF lifecycle across a reseed; rollback preserves invoice rows/files; cleanup preserves referenced PDFs; rendering/database and deletion failures are isolated within and between commit callbacks |
 | `ZevVatModeTests` | 5 | ZEV VAT mode: default `not_registered`; `clean()` requires a number for `registered` and forbids one otherwise; a PATCH to `inclusive` is accepted and to `registered` without a number rejected |
 | `SeedDemoFeatureFlagTests` | 3 | Demo seed enables the features that ship off by default (#691): enables the feasibility-calculator flag, re-enables a flag an admin turned off, and is idempotent |

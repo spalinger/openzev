@@ -666,3 +666,11 @@ Tests that encoded UTC days or hours now express the same intent in Swiss time:
 | `docs/user-guide/06-metering-analysis.md` | days and hours are Swiss time |
 | `docs/user-guide/15-glossary.md` | **Timezone** entry |
 | Tariff chapter of the user guide | band hours are Swiss time for every import source |
+
+`reanchor_readings --apply` plans under selected-log and per-community billing
+locks. It flags existing invoices covering either the old or corrected Swiss
+civil date (`csv-reanchor` evidence); timestamps, flags, timezone markers and
+audit commit or roll back together. `--allow-invoiced` permits the repair but
+does not silently rewrite invoices. Cross-month flagging and rollback are
+covered by `test_reanchoring_flags_invoices_on_both_swiss_dates` and
+`test_reanchor_failure_rolls_back_readings_and_invoice_flags`.

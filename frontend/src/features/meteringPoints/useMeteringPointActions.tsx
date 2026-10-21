@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { useConfirmDialog, consumeReportedError } from '../../components/ConfirmDialog'
@@ -23,6 +23,7 @@ import {
 import { formatApiError } from '../../lib/api/errors'
 import { fetchMeteringDataQualityStatus } from '../../lib/api/metering'
 import { queryKeys } from '../../lib/api/queryKeys'
+import { invalidateReadingQueries } from '../../lib/api/invalidateReadingQueries'
 import { formatShortDate, useAppSettings } from '../../lib/appSettings'
 import { todayBusinessIso } from '../../lib/dates'
 import { useToast } from '../../lib/toast'
@@ -36,14 +37,16 @@ import {
     getNextAssignmentGuidance,
     isAssignmentCurrent,
     isMeteringPointHolderLess,
-    meteringPointNeedsAttention,
     METERING_POINT_FILTER_KEYS,
+    meteringPointFieldErrors,
+    meteringPointNeedsAttention,
     METERING_POINT_SORT_KEY,
     readMeteringPointBuildingFilter,
     readMeteringPointSort,
     readMeteringPointTypeFilter,
     readMeteringPointView,
     sortMeteringPoints,
+    toMeteringPointPayload,
     type MeteringPointBuildingFilter,
     type MeteringPointHealth,
     type MeteringPointSort,
@@ -101,6 +104,7 @@ export function getScopedAndFilteredMeteringPoints(
         const matchesType = typeFilter === 'all' || point.meter_type === typeFilter
         const matchesSearch = !normalizedSearch
             || point.meter_id.toLowerCase().includes(normalizedSearch)
+            || (point.secondary_meter_id ?? '').toLowerCase().includes(normalizedSearch)
             || (point.location_description ?? '').toLowerCase().includes(normalizedSearch)
             || (point.building_name ?? '').toLowerCase().includes(normalizedSearch)
             || (participantNamesByMeteringPoint?.get(point.id) ?? '').toLowerCase().includes(normalizedSearch)
@@ -172,9 +176,17 @@ export function useMeteringPointActions({
     const todayIso = todayBusinessIso()
 
     // Metering point modal
-    const [mpForm, setMpForm] = useState<MeteringPointInput>(defaultMeteringPointForm())
+    const [mpForm, setMpFormState] = useState<MeteringPointInput>(defaultMeteringPointForm())
     const [editingMpId, setEditingMpId] = useState<string | null>(null)
     const [showMpModal, setShowMpModal] = useState(false)
+    // A callback from an older form must not reset a newly opened or edited one.
+    const mpFormGeneration = useRef(0)
+    const [mpFieldErrors, setMpFieldErrors] = useState<Record<string, string>>({})
+    function setMpForm(update: React.SetStateAction<MeteringPointInput>) {
+        mpFormGeneration.current += 1
+        setMpFormState(update)
+        setMpFieldErrors({})
+    }
 
     // Assignment modal
     const [assignForm, setAssignForm] = useState<MeteringPointAssignmentInput>(defaultAssignmentForm())
@@ -364,21 +376,27 @@ export function useMeteringPointActions({
             requireWriteAccess(submittingScope)
             return id ? updateMeteringPoint(id, payload) : createMeteringPoint(payload)
         },
-        onMutate: (variables) => ({ selectedZevId: variables.scope.selectedZevId, scope: variables.scope }),
+        onMutate: (variables) => ({ selectedZevId: variables.scope.selectedZevId, scope: variables.scope, generation: mpFormGeneration.current }),
         onSuccess: (_, variables, submittedScope) => {
             if (!ownsCurrentSession(submittedScope)) return
             void queryClient.invalidateQueries({ queryKey: queryKeys.metering.points(submittedScope.selectedZevId || undefined) })
             // A building's metering-point count (and whether it can be deleted) follows its points.
             void queryClient.invalidateQueries({ queryKey: queryKeys.zev.buildings(submittedScope.selectedZevId || '') })
-            if (!isCurrent(submittedScope.scope)) return
+            if (!isCurrent(submittedScope.scope) || submittedScope.generation !== mpFormGeneration.current) return
             closeMpModal()
             pushToast(
                 variables.id ? t('pages.meteringPoints.messages.updated') : t('pages.meteringPoints.messages.created'),
                 'success',
             )
         },
-        onError: (error, variables) => {
-            if (isCurrent(variables.scope) && variables.scope.canWrite) pushToast(formatApiError(error, t('pages.meteringPoints.messages.saveFailed')), 'error')
+        onError: (error, variables, submittedScope) => {
+            if (isCurrent(variables.scope) && variables.scope.canWrite && submittedScope?.generation === mpFormGeneration.current) {
+                const fields = meteringPointFieldErrors(error)
+                setMpFieldErrors(fields)
+                // Field-keyed collisions already render under their field;
+                // only toast when there is nothing field-specific to show.
+                if (Object.keys(fields).length === 0) pushToast(formatApiError(error, t('pages.meteringPoints.messages.saveFailed')), 'error')
+            }
         },
     })
 
@@ -473,9 +491,9 @@ export function useMeteringPointActions({
             if (!ownsCurrentSession(submittedScope)) return
             // Deleted readings affect every reading-derived view (chart, raw
             // data, dashboard summary, data-quality status).
-            void queryClient.invalidateQueries({ queryKey: ['metering'] })
+            invalidateReadingQueries(queryClient)
             if (!isCurrent(submittedScope.scope)) return
-            pushToast(t('pages.meteringPoints.deleteData.success', { count: result.deleted_count }), 'success')
+            pushToast(t('pages.meteringPoints.deleteData.success', { count: result.deleted_readings, held: result.deleted_quarantined_readings }), 'success')
             closeDeleteDataModal()
         },
         onError: (error, variables) => {
@@ -513,23 +531,28 @@ export function useMeteringPointActions({
 
     function openEditMpModal(point: MeteringPoint) {
         if (!isCurrent(scope) || !canWrite) return
+        mpFormGeneration.current += 1
         setEditingMpId(point.id)
-        setMpForm({
+        setMpFormState({
             zev: point.zev,
             meter_id: point.meter_id,
+            secondary_meter_id: point.secondary_meter_id ?? '',
             meter_type: point.meter_type,
             is_active: point.is_active,
             location_description: point.location_description ?? '',
             has_behind_meter_generation: point.has_behind_meter_generation,
             building: point.building,
         })
+        setMpFieldErrors({})
         setShowMpModal(true)
     }
 
     function closeMpModal() {
+        mpFormGeneration.current += 1
         setShowMpModal(false)
         setEditingMpId(null)
-        setMpForm(defaultMeteringPointForm())
+        setMpFormState(defaultMeteringPointForm())
+        setMpFieldErrors({})
     }
 
     function submitMpForm(event: FormEvent<HTMLFormElement>) {
@@ -540,10 +563,7 @@ export function useMeteringPointActions({
             pushToast(t('pages.meteringPoints.messages.selectZev'), 'error')
             return
         }
-        const payload: MeteringPointInput = {
-            ...mpForm,
-            zev: zevForSubmit,
-        }
+        const payload = toMeteringPointPayload(mpForm)
         saveMpMutation.mutate({ id: editingMpId ?? undefined, payload, scope })
     }
 
@@ -779,6 +799,7 @@ export function useMeteringPointActions({
         // Modal form state
         mpForm,
         setMpForm,
+        mpFieldErrors,
         editingMpId,
         showMpModal,
         assignForm,

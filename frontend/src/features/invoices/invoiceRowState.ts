@@ -19,7 +19,7 @@ function latestDeliveryStatus(invoice: Invoice | null): 'pending' | 'sent' | 'fa
 const DELIVERING = new Set(['approved', 'sent'])
 
 /** Problems an operator has to act on before the row can be billed cleanly. */
-type InvoiceRowIssue = 'metering' | 'conflict' | 'pdf' | 'delivery' | 'noEmail'
+type InvoiceRowIssue = 'correction' | 'metering' | 'conflict' | 'pdf' | 'delivery' | 'noEmail'
 
 /** Locally pending invoice, PDF or email work the overview may not show yet. */
 export type InvoiceRowWork = { generating?: boolean; pdfPending?: boolean; sending?: boolean }
@@ -32,6 +32,7 @@ function settledWithoutMeters(row: InvoicePeriodParticipantRow, invoice: Invoice
 export function invoiceRowIssues(row: InvoicePeriodParticipantRow, work: InvoiceRowWork = {}): InvoiceRowIssue[] {
     const invoice = liveInvoice(row)
     const issues: InvoiceRowIssue[] = []
+    if (invoice?.needs_data_review) issues.push('correction')
     if (!row.metering_data_complete && !settledWithoutMeters(row, invoice)) issues.push('metering')
     // A draft whose regeneration is blocked still bills the period; only a
     // row the conflict leaves without an invoice is a problem.

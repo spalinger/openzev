@@ -10,9 +10,14 @@ what a v1 archive contains, and a field removed from the API must not silently
 break every archive already sitting on someone's disk.
 """
 
+# Version 10 preserves invoice reading-impact evidence and resolution state.
 # Bumped whenever the archive layout changes in a way an older importer cannot
-# read. Version 8 adds the charges section (#924): one-off costs passed on to
-# participants. Version 7 adds the opt-in supplementary_data section (a participant's
+# read. Version 9 carries the SDAT-CH replace provenance and held
+# observations: readings rows gain the delivery-identity, quality and
+# observed-meter columns, and quarantined rows travel in ``quarantine/``.
+# Older importers reject version 9 outright rather than restoring it without
+# that state. Version 8 adds the charges section (#924): one-off costs passed
+# on to participants. Version 7 adds the opt-in supplementary_data section (a participant's
 # own energy data sources and readings, never their credentials). Version 6 carries the ZEV's buildings (#890): metering points and
 # landowner roles point at one. Version 5 carries the ZEV's parties and their dated roles (#761):
 # participants point at a party instead of carrying its name and address.
@@ -23,11 +28,12 @@ break every archive already sitting on someone's disk.
 # provenance. Version 1 remains readable for static exports and legacy
 # adapter-based dynamic descriptors. An archive naming a version that is not
 # listed here is rejected outright rather than imported half-understood.
-FORMAT_VERSION = 8
-SUPPORTED_FORMAT_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, 7, 8})
+FORMAT_VERSION = 10
+SUPPORTED_FORMAT_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9, 10})
 
 MANIFEST_NAME = "manifest.json"
 READINGS_DIR = "readings"
+QUARANTINE_DIR = "quarantine"
 SUPPLEMENTARY_READINGS_DIR = "supplementary_readings"
 INVOICE_PDFS_DIR = "invoices/pdf"
 
@@ -122,6 +128,7 @@ SUBCOUNT_SECTIONS = {
     "credits": SECTION_INVOICES,
     "credit_applications": SECTION_INVOICES,
     "supplementary_readings": SECTION_SUPPLEMENTARY,
+    "quarantined_readings": SECTION_READINGS,
 }
 
 # ── Field lists ────────────────────────────────────────────────────────────
@@ -243,6 +250,7 @@ LEGACY_PARTICIPANT_FIELDS = (
 
 METERING_POINT_FIELDS = (
     "meter_id",
+    "secondary_meter_id",
     "meter_type",
     "is_active",
     "location_description",
@@ -442,6 +450,24 @@ INVOICE_ITEM_FIELDS = (
 # stay loadable through the normal metering import — but a backup that silently
 # turned hourly readings into 15-minute ones would not be a backup, so the
 # archive carries them and the archive's own reader restores them.
+#
+# ``source_creation``/``source_document_id`` are the SDAT-CH replace provenance
+# (metering import and quality spec §4.2): without them a transferred ZEV would treat every pre-transfer
+# reading as the oldest delivery and let the next VNB replacement overwrite
+# unconditionally. Format 9 carries the full provenance set, so a restored ZEV
+# keeps its freshness guards: delivery identity (``source_delivery_id``),
+# quality (``business_reason``, ``condition``), product/unit and the observed
+# meter identity (``source_meter_id``, stored as data, never resolved).
+# Archives older than 9 carry only the first two and import with documented
+# defaults (no Creation, blank identity/quality fields).
+#
+# Held (quarantined) observations travel in ``quarantine/`` members with the
+# same columns, counted as ``quarantined_readings`` under the readings
+# section; older archives hold none and import zero held rows. Only meters
+# with held rows get a member (unlike readings, where every meter gets one).
+#
+# Format 10 adds invoice-impact state because older importers would silently
+# drop it. Only additive optional fields with safe defaults need no version bump.
 READING_CSV_COLUMNS = (
     "meter_id",
     "timestamp",
@@ -449,7 +475,19 @@ READING_CSV_COLUMNS = (
     "direction",
     "resolution",
     "import_source",
+    "source_creation",
+    "source_document_id",
+    "source_delivery_id",
+    "business_reason",
+    "condition",
+    "source_product",
+    "source_unit",
+    "source_meter_id",
 )
+
+# Held observations share the billable column layout: same provenance,
+# same defaults for older archives.
+QUARANTINE_CSV_COLUMNS = READING_CSV_COLUMNS
 
 
 class ArchiveError(ValueError):

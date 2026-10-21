@@ -4,7 +4,7 @@ from rest_framework import serializers
 from zev import access
 from zev.models import Participant
 from . import charges as charge_rules
-from .models import Charge, ChargeAllocation, Credit, CreditApplication, CreditKind, Invoice, InvoiceItem, InvoiceStatus, EmailLog, Payment
+from .models import Charge, ChargeAllocation, Credit, CreditApplication, CreditKind, Invoice, InvoiceItem, InvoiceReadingImpact, InvoiceStatus, EmailLog, Payment
 from .description_utils import strip_period_suffix
 
 
@@ -24,6 +24,13 @@ class InvoiceItemSerializer(serializers.ModelSerializer):
         model = InvoiceItem
         fields = "__all__"
         read_only_fields = ["id"]
+
+
+class InvoiceReadingImpactSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InvoiceReadingImpact
+        fields = ("id", "import_log", "evidence", "created_at", "resolution", "resolved_at")
+        read_only_fields = ["id", "created_at"]
 
 
 class EmailLogSerializer(serializers.ModelSerializer):
@@ -169,6 +176,8 @@ class InvoiceListSerializer(serializers.ModelSerializer):
     paid_chf = serializers.SerializerMethodField()
     outstanding_chf = serializers.SerializerMethodField()
     amount_due_chf = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    needs_data_review = serializers.SerializerMethodField()
+    open_data_impact_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Invoice
@@ -254,6 +263,31 @@ class InvoiceListSerializer(serializers.ModelSerializer):
         log = self._latest_email_log(obj)
         return str(log.id) if log else None
 
+    def get_needs_data_review(self, obj) -> bool:
+        """Whether an open reading correction taints this invoice.
+
+        Annotated on the list query; detail shapes reuse the prefetched open
+        impacts, falling back to one EXISTS query only when neither is present.
+        """
+        if "open_data_impact_count" in obj.__dict__:
+            return bool(obj.open_data_impact_count)
+        impacts = getattr(obj, "open_reading_impacts", None)
+        if impacts is not None:
+            return len(impacts) > 0
+        return InvoiceReadingImpact.objects.filter(
+            invoice_id=obj.pk, resolved_at__isnull=True
+        ).exists()
+
+    def get_open_data_impact_count(self, obj) -> int:
+        if "open_data_impact_count" in obj.__dict__:
+            return int(obj.open_data_impact_count or 0)
+        impacts = getattr(obj, "open_reading_impacts", None)
+        if impacts is not None:
+            return len(impacts)
+        return InvoiceReadingImpact.objects.filter(
+            invoice_id=obj.pk, resolved_at__isnull=True
+        ).count()
+
     @staticmethod
     def _latest_email_log(obj):
         # Detail and period-overview already load all logs. Reuse that data,
@@ -281,6 +315,7 @@ class InvoiceSerializer(InvoiceListSerializer):
     email_logs = EmailLogSerializer(many=True, read_only=True)
     access_link = serializers.SerializerMethodField()
     payments = serializers.SerializerMethodField()
+    data_impacts = serializers.SerializerMethodField()
     credits = serializers.SerializerMethodField()
     credit_applications = serializers.SerializerMethodField()
     replaces = serializers.SerializerMethodField()
@@ -365,6 +400,24 @@ class InvoiceSerializer(InvoiceListSerializer):
             "created_at": token.created_at,
             "last_used_at": token.last_used_at,
         }
+
+    def get_data_impacts(self, obj) -> list[dict]:
+        """Open source evidence for callers with ZEV view access, detail reads only.
+
+        Lists carry only the flag/count; period overview prefetches the newest
+        20 while preserving the total count. Explicit detail reads keep full history.
+        """
+        request = self.context.get("request")
+        if request is None or not access.can_view(request.user, obj.zev_id):
+            return []
+        impacts = getattr(obj, "open_reading_impacts", None)
+        if impacts is None:
+            impacts = list(
+                InvoiceReadingImpact.objects.filter(
+                    invoice_id=obj.pk, resolved_at__isnull=True
+                ).order_by("-created_at", "id")
+            )
+        return InvoiceReadingImpactSerializer(impacts, many=True).data
 
 
 class GenerateInvoiceSerializer(serializers.Serializer):
