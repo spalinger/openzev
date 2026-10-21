@@ -29,13 +29,14 @@ from invoices.models import Invoice, InvoiceReadingImpact, InvoiceStatus, Paymen
 from invoices.readiness import compute_readiness
 from invoices.reading_impact import flag_import_impacts
 from invoices.workflow import cancel_invoice, mark_invoice_paid, mark_invoice_sent
-from metering.models import ImportLog, ImportSource, MeterReading, ReadingDirection
+from metering.models import ImportLog, ImportSource, MeterReading, QuarantinedReading, ReadingDirection
 from testing.sdat import (
     CONS_ID,
     PROD_ID,
     build_block,
     build_e66,
     quarter_block,
+    observation,
 )
 from testing.helpers import authenticate as auth, create_managed_zev, make_user
 from zev.models import (
@@ -339,16 +340,15 @@ class SdatImportBase(TestCase):
         )
 
     def _correction(self, **kwargs):
-        obs = "".join(
-            f"<rsm:Observation><rsm:Position><rsm:Sequence>{seq}</rsm:Sequence></rsm:Position>"
-            f"<rsm:Volume>{500 + seq}</rsm:Volume></rsm:Observation>"
+        observations = "".join(
+            observation(seq, str(500 + seq))
             for seq in range(1, 5)
         )
         return self._upload(
             build_e66(
                 [
                     build_block(
-                        CONS_ID, obs, doc="FIX-BLOCK",
+                        CONS_ID, observations, doc="FIX-BLOCK",
                         start="2025-06-02T22:00:00Z", end="2025-06-02T23:00:00Z",
                     )
                 ],
@@ -368,6 +368,29 @@ class SdatImportBase(TestCase):
 
 
 class CorrectionImportTests(SdatImportBase):
+    def test_failure_after_promotion_and_impact_creation_rolls_back_history(self):
+        block = build_block(CONS_ID, observation(1, "1", "21") + "".join(observation(seq, str(seq)) for seq in range(2, 5)))
+        self.assertEqual(self._upload(build_e66([block])).data["result_status"], "accepted")
+        self.assertEqual(QuarantinedReading.objects.count(), 1)
+        self._invoice(inv_status=InvoiceStatus.SENT)
+        models = (MeterReading, QuarantinedReading, Invoice, InvoiceReadingImpact)
+        before = [list(model.objects.order_by("pk").values()) for model in models]
+        observed = {}
+
+        def fail_after_impacts(**kwargs):
+            flag_import_impacts(**kwargs)
+            observed["held"] = QuarantinedReading.objects.count()
+            observed["impacts"] = InvoiceReadingImpact.objects.filter(import_log=kwargs["import_log"]).count()
+            raise RuntimeError("Failure after promotion and impact creation")
+
+        with patch("invoices.reading_impact.flag_import_impacts", side_effect=fail_after_impacts) as recorder:
+            response = self._correction()
+        recorder.assert_called_once()
+        self.assertEqual(observed, {"held": 0, "impacts": 1})
+        self.assertEqual(response.data["result_status"], "rejected")
+        for model, snapshot in zip(models, before):
+            self.assertEqual(list(model.objects.order_by("pk").values()), snapshot)
+
     def test_truncated_delivery_still_flags_every_affected_period(self):
         june = self._invoice()
         july = Invoice.objects.create(

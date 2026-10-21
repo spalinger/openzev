@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 MAX_SDAT_BYTES = MAX_UPLOAD_BYTES
 MAX_SDAT_DECOMPRESSED_BYTES = 100 * 1024 * 1024
 MAX_ISSUES = 200
+PERSIST_BATCH_SIZE = 1000
 
 SDAT_NS = "http://www.strom.ch"
 STRICT_ROOT = "ValidatedMeteredData_16"
@@ -938,16 +939,21 @@ def _apply_plan(*, batch_id, blocks, reason, creation, delivery_id, is_replace, 
                 run.counts["held"] += 1
                 run.counts["quarantine_overwritten"] += 1
 
-    if new_billable:
-        MeterReading.objects.bulk_create(new_billable)
-    if update_billable:
-        MeterReading.objects.bulk_update(update_billable, READING_UPDATE_FIELDS)
-    if new_quarantine:
-        QuarantinedReading.objects.bulk_create(new_quarantine)
-    if update_quarantine:
-        QuarantinedReading.objects.bulk_update(update_quarantine, READING_UPDATE_FIELDS)
-    if drop_quarantine:
-        QuarantinedReading.objects.filter(pk__in=[row.pk for row in drop_quarantine]).delete()
+    for model, new, updated in (
+        (MeterReading, new_billable, update_billable),
+        (QuarantinedReading, new_quarantine, update_quarantine),
+    ):
+        if new:
+            model.objects.bulk_create(new, batch_size=PERSIST_BATCH_SIZE)
+        # Locked rows remain present; PK upserts avoid CASE-expression construction.
+        for start in range(0, len(updated), PERSIST_BATCH_SIZE):
+            model.objects.bulk_create(
+                updated[start:start + PERSIST_BATCH_SIZE],
+                update_conflicts=True, unique_fields=["pk"], update_fields=READING_UPDATE_FIELDS,
+            )
+    for start in range(0, len(drop_quarantine), PERSIST_BATCH_SIZE):
+        batch = drop_quarantine[start:start + PERSIST_BATCH_SIZE]
+        QuarantinedReading.objects.filter(pk__in=[row.pk for row in batch]).delete()
     run.affected_slots = change_log.affected_slots
     return change_log.changes, change_log.truncated
 

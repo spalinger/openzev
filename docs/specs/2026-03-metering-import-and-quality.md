@@ -561,7 +561,13 @@ is a named rejection before any observation write:
     physical point. Stored reading rows are fetched with `select_for_update`
     over coalesced delivered intervals, in bounded query batches; sparse gaps
     are not loaded or locked; the full plan is compared and buffered before any
-    writes. Freshness compares only `Creation` — arrival order
+    writes. Reading inserts, locked-row upserts and quarantine predecessor
+    deletions use SQL batches of at most `PERSIST_BATCH_SIZE = 1000`.
+    Upserts conflict on the locked primary key and update only
+    `READING_UPDATE_FIELDS`, preserving stored identity and `created_at`.
+    Every batch stays inside the same file transaction and billing lock;
+    a later failure rolls back all earlier batches and invoice impacts.
+    Freshness compares only `Creation` — arrival order
     never wins. Originals (`Status=9`) never overwrite: they create or skip.
     A newer original on an occupied slot counts as `original_existing`, with
     `original_exists` guidance on both mixed accepted and unchanged outcomes, rather than pretending the
@@ -1658,6 +1664,12 @@ day/hour/month chart buckets:
 | `test_owner_cannot_read_another_zevs_meter` | 5 | Owner tenant isolation remains enforced |
 
 ### Backend (`metering/test_import_limits.py`, `metering/test_import_sdatch.py`)
+
+`metering/test_import_sdatch_strict.py::BatchedPersistenceTests` covers billable
+and held updates, promotion deletions across batches, distinct stored values,
+identity/provenance preservation and rollback after a later batch fails.
+`invoices/test_reading_impact.py::CorrectionImportTests` also verifies history
+rollback after promotion deletions and invoice-impact creation.
 
 | Test class | Validates |
 |---|---|
