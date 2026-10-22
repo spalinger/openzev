@@ -11,10 +11,10 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
 
-from django.db.models import Exists, F, OuterRef, Q, Subquery, Window
-from django.db.models.functions import RowNumber
+from django.db.models import Count, Exists, F, OuterRef, Q, Subquery, Window
+from django.db.models.functions import RowNumber, TruncDate
 
-from allocation.validity import civil_date, period_window
+from allocation.validity import business_tz, civil_date, period_window
 from metering.models import MeterReading
 from tariffs.dynamic.fetch import coverage_gaps
 from tariffs.dynamic.models import DynamicTariffSource
@@ -531,17 +531,21 @@ def _load_bulk(zev, span_start: date, span_end: date) -> BulkData:
     start_dt, end_dt = period_window(span_start, span_end)
     readings: dict[int, dict[date, int]] = {}
     if mp_ids:
-        # Stream the rows instead of materialising the whole history in memory;
-        # only the per-meter/day counts are kept.
-        reading_rows = MeterReading.objects.filter(
-            metering_point_id__in=mp_ids,
-            timestamp__gte=start_dt,
-            timestamp__lt=end_dt,
-        ).values_list("metering_point_id", "timestamp")
-        for mp_id, ts in reading_rows.iterator():
-            day = civil_date(ts)
-            counts = readings.setdefault(mp_id, {})
-            counts[day] = counts.get(day, 0) + 1
+        # The database buckets the days (never ``timestamp__date``, ADR 0026),
+        # so only one row per meter and day reaches Python, not one per reading.
+        reading_rows = (
+            MeterReading.objects.filter(
+                metering_point_id__in=mp_ids,
+                timestamp__gte=start_dt,
+                timestamp__lt=end_dt,
+            )
+            .annotate(day=TruncDate("timestamp", tzinfo=business_tz()))
+            .values_list("metering_point_id", "day")
+            .annotate(count=Count("id"))
+            .order_by()
+        )
+        for mp_id, day, count in reading_rows:
+            readings.setdefault(mp_id, {})[day] = count
     tariffs = _load_energy_tariffs(zev)
     energy = [t for t in tariffs if t.billing_mode == BillingMode.ENERGY]
     pct = [t for t in tariffs if t.billing_mode == BillingMode.PERCENTAGE_OF_ENERGY]
