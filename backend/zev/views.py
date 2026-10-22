@@ -4,7 +4,8 @@ import tempfile
 from django.conf import settings as django_settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Exists, Max, Min, OuterRef, Prefetch, Q
+from django.db.models import Count, Exists, IntegerField, Max, Min, OuterRef, Prefetch, Q, Subquery, Value
+from django.db.models.functions import Coalesce
 from django.http import FileResponse, Http404, HttpResponse
 from config.http import content_disposition, sanitize_filename
 from django.utils import timezone as dj_timezone
@@ -989,30 +990,45 @@ class MeteringPointViewSet(AuditedCreateDestroyMixin, AuditedUpdateMixin, ZevSco
             raise serializers.ValidationError(exc.messages) from exc
 
     def get_queryset(self):
-        # Annotate the cascade a delete would take with it (readings +
-        # assignment history), so the serializer can surface it without an
-        # N+1 query per metering point. `distinct=True` on each Count keeps
-        # the two independent reverse relations (readings, assignments) from
-        # inflating each other via the join; Min/Max are unaffected by that
-        # same join fan-out since duplicate rows don't change a min or max.
-        # Annotating drops the model's Meta.ordering (Django does not carry
-        # it into a GROUP BY query), so it has to be requested explicitly
-        # again or list responses come back in undefined order.
+        # Aggregate readings and assignment history separately to avoid join
+        # fan-out; clear ordering within each aggregate subquery.
         qs = self.scope_queryset(
             MeteringPoint.objects.select_related("zev", "building", "supplementary_source__participant")
         )
         building = self.request.query_params.get("building")
         if building:
             qs = qs.filter(building_id=building)
+        reading_stats = (
+            MeterReading.objects.filter(metering_point_id=OuterRef("pk"))
+            .order_by()
+            .values("metering_point_id")
+            .annotate(
+                total=Count("pk"),
+                first_timestamp=Min("timestamp"),
+                last_timestamp=Max("timestamp"),
+            )
+        )
+        assignment_stats = (
+            MeteringPointAssignment.objects.filter(metering_point_id=OuterRef("pk"))
+            .order_by()
+            .values("metering_point_id")
+            .annotate(total=Count("pk"))
+        )
         return qs.annotate(
-            reading_count=Count("readings", distinct=True),
+            reading_count=Coalesce(
+                Subquery(reading_stats.values("total"), output_field=IntegerField()),
+                Value(0),
+            ),
             history_protected=Exists(MeterReading.objects.filter(metering_point_id=OuterRef("pk")))
             | Exists(QuarantinedReading.objects.filter(metering_point_id=OuterRef("pk")))
             | Exists(SupplementaryReading.objects.filter(metering_point_id=OuterRef("pk")))
             | Exists(SupplementarySource.objects.filter(metering_point_id=OuterRef("pk"))),
-            assignment_count=Count("assignments", distinct=True),
-            first_reading_at=Min("readings__timestamp"),
-            last_reading_at=Max("readings__timestamp"),
+            assignment_count=Coalesce(
+                Subquery(assignment_stats.values("total"), output_field=IntegerField()),
+                Value(0),
+            ),
+            first_reading_at=Subquery(reading_stats.values("first_timestamp")),
+            last_reading_at=Subquery(reading_stats.values("last_timestamp")),
         ).order_by("meter_id")
 
     def get_audit_create_summary(self, instance):
