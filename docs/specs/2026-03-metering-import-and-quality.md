@@ -386,9 +386,10 @@ roles are deferred):
 | Diagnostic truncation | `too_many_issues` reports omitted details | Truncation does not independently reject a file; `result_status` remains authoritative |
 | Replay outcome | Changed data commits | Fully superseded/duplicate deliveries commit nothing and report info `stale_superseded`/`duplicate_delivery` |
 
-**XSD-gate precedence.** The schema gate (step 3) runs before the header and
-per-block semantic checks, so a value the 1.6 XSD already constrains is
-reported as `schema_invalid` rather than by the specific code named above:
+**XSD-gate precedence.** Except for the Status-1 pre-check in step 3, the
+schema gate runs before the header and per-block semantic checks, so a value
+the 1.6 XSD already constrains is reported as `schema_invalid` rather than by
+the specific code named above:
 `Resolution` is fixed at `15`/`MIN` (so `unsupported_resolution` is a
 defensive handler, unreachable for schema-valid input), `Condition` is
 restricted to `21`/`56` (so `unknown_condition` is likewise defensive),
@@ -407,6 +408,52 @@ normally does too; `invalid_creation` still guards schema-valid timestamps
 outside Python's representable range. The deliberate pre-schema cancellation
 check remains a named `cancellation_rejected` outcome.
 
+**Cancellation policy (#956).** The manual E66 E88/C38 importer rejects
+`InstanceDocument/Status=1` before schema validation, including deliveries
+without `MeteringData`. It returns HTTP 201 with a persisted import log:
+`result_status=rejected`, issue `cancellation_rejected`, zero imported and
+overwritten rows, and empty `reading_changes`.
+
+Existing billable and held readings, invoice documents and review state stay
+unchanged. No billing period is blocked and rejected `Creation` timestamps
+cannot supersede later valid imports. Corrections use `Status=5`, new message
+IDs and a newer `Creation`; originals (`9`) retain skip-existing behavior.
+
+The applicable edition is SDAT-CH 2025, E66 1p6, effective 24 March 2026
+(*Grundlagen* §1.5(1), *Anhang 4* §4; 1p5 expired 23 March).
+The pinned `ValidatedMeteredData_CoreComponents_1p6.xsd`,
+`InstanceDocumentType/Status`, restricts `rsm:DocumentFunctionCodeType` to
+patterns `9` and `5`. *Messdatenaustauschprozesse* §1.2(1)–(2) defines
+corrections as new replacement messages; *Anhang 2* §2(1) directs metering
+errors to updates and limits cancellation rules to switching processes.
+Its §4.2 cancellation target, `ReferenceToOriginalDocumentID`, is absent from
+E66; `ReferenceToRequestingDocumentID` is not a cancellation target.
+
+*Anhang 3* §3.1 explains that generic diagrams show maximum type definitions,
+subject to process-specific restrictions. Its generic E66 diagram includes
+`1`; process 1.4.4, Abbildung 7 (p. 19/59), shows `…`, `5`, `9`, not an
+exhaustive code list. The pinned XSD establishes the supported restriction.
+
+A future cancellation extension requires a documented partner profile and
+sample, a schema admitting it, defined target/scope and ordering rules, and
+an agreed invoice response. No such profile is currently established;
+[LEG settlement](2026-06-leg-billing-model.md#43-settlement-data-new) remains
+separate, blocked design work.
+
+Sources checked 2026-10-22; hashes identify the editions used:
+
+| Source / edition | Exact evidence | SHA-256 |
+|---|---|---|
+| [Grundlagen und Definitionen, 2025 / 4 December 2025](https://www.strom.ch/system/files/media/documents/20251204-be-standardisierter-datenaustausch-ch-grundlagen-und-definitionen.pdf) | §1.5(1), §4.4(1) | `88beaac3f5174c0d01d53ee8fa283f3db035f876712f0115d21e917a706e8f7e` |
+| [Messdatenaustauschprozesse, 2025 V2 / 1 November 2025](https://www.strom.ch/system/files/media/documents/20251204-be-standardisierter-datenaustausch-ch-messdatenaustauschprozesse.pdf) | §1.2(1)–(2), §1.4.4 / Abbildung 7 | `8e25fdda790610ab0131a3dad232413f11800a71469df204380fb2ec98d06035` |
+| [Anhang 2, July 2010 edition](https://www.strom.ch/sites/default/files/media/documents/20181024-be-standardisierter-datenaustausch-ch-anhang2-annullierung-prozessabbruch.pdf) | §2(1), §4.1–§4.2 | `ecf7a61bc583e5758de1d763147aa41ddcd5b52ad6f334ac5425cb082c0f477a` |
+| [Anhang 3, 2025 / 4 December 2025](https://www.strom.ch/system/files/media/documents/20251204-be-standardisierter-datenaustausch-ch-anhang3-core-components.pdf) | §3.1, Abbildung 8, §5.10 (generic definitions) | `c6aa6ce970b4cc9150340069fd673a6f812413c240aab17659a467df969782ea` |
+| [Anhang 4, 2025 / 4 December 2025](https://www.strom.ch/system/files/media/documents/20251204-be-standardisierter-datenaustausch-ch-anhang4-xml-schemas.pdf) | §4, validity of E66 1p6 | `14e9f8a395d14ed5b533c050c959de15d1bc24b206bdef220c610946d26d8179` |
+| [Beispieldateien, SDAT-CH 2025 archive](https://www.strom.ch/de/media/13704/download) | `ValidatedMeteredData_1p6.xsd` and its core type above | `7d715163f1ab7cb2f0e0e5d9d3b8ddb9dc6a4a7786edda459b70eb4492019a3f` |
+
+The self-authored schema example is executable in
+[`StrictHeaderTests.test_derived_e66_schema_permits_original_and_replace_but_not_cancellation`](../../backend/metering/test_import_sdatch_strict.py):
+the same synthetic delivery validates with `9`/`5` and fails with `1`.
 
 Conformance corpus: `backend/metering/test_fixtures/sdatch/e66_1_4_4_customer.xml`
 is an unmodified copy of the official VSE 1_4_4 customer/producer example
@@ -437,16 +484,15 @@ is a named rejection before any observation write:
    other `ValidatedMeteredData_*` versions are `unsupported_schema_version`
    rejections — there is no structural fallback. Grid sums never land on a
    metering point.
-3. XSD gate: every accepted file validates against the vendored
+3. Load the schema, then reject `Status=1` as `cancellation_rejected` before
+   validation. Every accepted file validates against the vendored
    `backend/metering/importers/sdat_xsd/` bundle (54 files, offline);
    schema-invalid files are rejected up front (`schema_invalid`). A local XML
    resolver normalizes the incompatible prohibited attribute in the core schema
    in memory; all vendored files stay pristine. A thread lock protects cached
    compilation; there are no temporary schema copies.
 4. Header: `DocumentType` must be exactly E66 (`unsupported_document_type`
-   otherwise); `Status` `1` (cancellation) is rejected with a named
-   `cancellation_rejected` error (checked before XSD, since the schema only
-   permits 9/5); `Status` `5` means replace (upsert), `9` means original
+   otherwise); `Status` `5` means replace (upsert), `9` means original
    (skip-existing), anything else is rejected. `Creation` is mandatory and
    must carry an explicit zone — a missing or offset-less `Creation` rejects
    the file (`missing_creation`/`invalid_creation`); it is
@@ -1619,6 +1665,8 @@ day/hour/month chart buckets:
 | `XlsxZipLimitTests` | §4.4: XLSX ZIP with too many members or a high-ratio member is rejected before openpyxl inflates it; a non-ZIP `.xlsx` is rejected; a sheet whose width appears only after the first row is rejected (column cap holds per row) |
 | `SdatchLimitTests` | §4.4: SDAT-CH file over the size cap produces an ImportLog error without parsing; the per-row error list is capped at 50 with a truncation sentinel during the parse loop |
 | `SdatchImportTests` (ZEV validation) | §4.2/5.6: SDAT-CH import rejects missing `zev_id` (400), malformed UUID (400), and unknown ZEV (404); foreign-owned ZEV → 403; disabled ZEV for its owner → 400; admins can import into disabled ZEVs |
+| `SdatchImportTests.test_cancellation_is_rejected` | §4.2: older/equal/newer cancellations with listed data or header-only scope preserve all billable and held row fields; a replacement newer than the seed but older than the rejected cancellation still imports |
+| `StrictHeaderTests.test_derived_e66_schema_permits_original_and_replace_but_not_cancellation` | §4.2: the same self-authored message validates directly against E66 1p6 with Status 9/5 and fails with Status 1, independently of the importer's pre-check |
 
 ### Backend (`metering/test_generate_metering_data.py`)
 

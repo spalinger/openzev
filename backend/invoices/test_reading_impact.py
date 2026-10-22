@@ -534,6 +534,32 @@ class CorrectionImportTests(SdatImportBase):
         self.assertEqual(impacts.count(), 1)
         self.assertEqual(impacts.get().evidence["delivery_id"], "ORIG-DELIVERY")
 
+    def test_rejected_cancellation_preserves_invoice_and_readiness(self):
+        from invoices.models import InvoiceItem
+
+        self.assertEqual(self._original().data["result_status"], "accepted")
+        invoice = self._invoice(inv_status=InvoiceStatus.SENT)
+        invoice.pdf_file = "invoices/pdf/issued.pdf"
+        invoice.save(update_fields=["pdf_file"])
+        InvoiceItem.objects.create(
+            invoice=invoice, item_type="local_energy", description="Solar",
+            quantity_kwh=Decimal("5"), total_chf=Decimal("1.00"),
+        )
+        invoices = list(Invoice.objects.values())
+        items = list(invoice.items.values())
+        readiness = compute_readiness(self.zev, *JUNE)
+        cancellation = build_e66([], status="1", creation="2025-06-07T10:00:00Z")
+
+        for _ in range(2):
+            response = self._upload(cancellation)
+
+            self.assertEqual(response.data["result_status"], "rejected")
+            self.assertEqual(response.data["issues"][0]["code"], "cancellation_rejected")
+            self.assertEqual(list(Invoice.objects.values()), invoices)
+            self.assertEqual(list(invoice.items.values()), items)
+            self.assertFalse(InvoiceReadingImpact.objects.exists())
+            self.assertEqual(compute_readiness(self.zev, *JUNE), readiness)
+
 
 class DraftRegenerationTests(ImpactBase):
     def setUp(self):

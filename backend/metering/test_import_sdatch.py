@@ -295,12 +295,46 @@ class SdatchImportTests(TestCase):
         self.assertTrue(any("Exchange" in w["warning"] for w in log.warnings))
 
     def test_cancellation_is_rejected(self):
-        resp = self._upload("cancel.xml", fixture("e66_cancellation.xml"))
+        seed = self._upload("basic.xml", fixture("e66_basic.xml"))
+        self.assertEqual(seed.status_code, 201)
+        self.assertEqual(seed.data["result_status"], "accepted")
+        readings = list(MeterReading.objects.order_by("id").values())
+        held = list(QuarantinedReading.objects.order_by("id").values())
+        self.assertEqual(len(readings), 6)
+        self.assertEqual(len(held), 2)
 
-        self.assertEqual(resp.status_code, 201)
-        self.assertEqual(resp.data["rows_imported"], 0)
-        self.assertIn("cancellation", resp.data["errors"][0]["error"].lower())
-        self.assertEqual(MeterReading.objects.count(), 0)
+        # Cancellation rejection takes precedence over freshness and delivery scope.
+        for creation in ("2025-06-04T15:40:05Z", "2025-06-05T15:40:05Z", "2025-06-06T15:40:05Z"):
+            for has_metering_data in (True, False):
+                with self.subTest(creation=creation, has_metering_data=has_metering_data):
+                    root = etree.fromstring(fixture("e66_cancellation.xml"))
+                    root.find(".//{http://www.strom.ch}Creation").text = creation
+                    if not has_metering_data:
+                        for block in root.findall("{http://www.strom.ch}MeteringData"):
+                            root.remove(block)
+                    resp = self._upload("cancel.xml", etree.tostring(root))
+
+                    self.assertEqual(resp.status_code, 201)
+                    log = ImportLog.objects.get(id=resp.data["id"])
+                    self.assertEqual(log.result_status, "rejected")
+                    self.assertEqual([issue["code"] for issue in log.issues], ["cancellation_rejected"])
+                    self.assertEqual(log.rows_imported, 0)
+                    self.assertEqual(log.rows_overwritten, 0)
+                    self.assertEqual(log.reading_changes, [])
+                    self.assertIn("cancellation", log.errors[0]["error"].lower())
+                    self.assertEqual(list(MeterReading.objects.order_by("id").values()), readings)
+                    self.assertEqual(list(QuarantinedReading.objects.order_by("id").values()), held)
+
+        # This replacement predates the newest rejected cancellation, but follows the seed.
+        replacement = self._upload("replace.xml", fixture("e66_replace.xml"))
+        self.assertEqual(replacement.data["result_status"], "accepted")
+        self.assertEqual(replacement.data["rows_imported"], 2)
+        self.assertEqual(replacement.data["rows_overwritten"], 6)
+        self.assertEqual(QuarantinedReading.objects.count(), 0)
+        self.assertEqual(
+            MeterReading.objects.get(metering_point=self.cons_mp, timestamp=TS1).energy_kwh,
+            Decimal("111.0000"),
+        )
 
     def test_secondary_meter_id_matches_alias(self):
         self.cons_mp.secondary_meter_id = ALT_ID

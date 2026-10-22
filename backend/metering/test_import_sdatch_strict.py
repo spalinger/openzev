@@ -29,6 +29,7 @@ from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
 from django.test import TestCase, TransactionTestCase
+from lxml import etree
 from rest_framework.test import APIClient
 
 from accounts.models import UserRole
@@ -454,6 +455,14 @@ class StrictHeaderTests(StrictBase):
 
         self.assertRejected(resp, "cancellation_rejected")
         self.assertIn("cancellation", resp.data["errors"][0]["error"].lower())
+
+    def test_derived_e66_schema_permits_original_and_replace_but_not_cancellation(self):
+        schema = sdatch_importer._load_schema_16()
+        for status in ("9", "5"):
+            with self.subTest(status=status):
+                schema.assertValid(etree.fromstring(self._four_slot(status=status)))
+        with self.assertRaisesRegex(etree.DocumentInvalid, "Status"):
+            schema.assertValid(etree.fromstring(self._four_slot(status="1")))
 
     def test_derived_missing_creation_is_rejected(self):
         xml = self._four_slot().replace(b"<rsm:Creation>2025-06-05T15:40:05Z</rsm:Creation>", b"")
