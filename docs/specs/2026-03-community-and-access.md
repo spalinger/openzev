@@ -1741,6 +1741,10 @@ reaches every ZEV-scope route and sees its pages read-only
 | `/signin/:token` | public | `MagicSignInPage` (magic sign-in link) |
 | `/i/:prefix` | public | `PublicInvoicePage` (invoice bearer link) |
 
+`LoginPage` and `OAuthCallbackPage` translate `oauth_error=invalid_state` into a
+retry message in all four locales; unknown errors retain the generic message
+(`oauth-callback-page.test.ts`, 11 cases including missing exchange-code handling).
+
 `AccountProfilePage` handles OAuth linking feedback once under React StrictMode,
 shows the result on the Security tab, and removes callback query parameters.
 Unverified mailbox refusals have a specific message; revoked authorization uses
@@ -2277,7 +2281,7 @@ lists the test classes per module (test counts are the `test_*` methods).
 | `test_password_recovery.py` | 2 | 30 | Password preservation, real TOTP/provenance, legacy challenges, recovery, retirement, managed email, audit accuracy/rollback, stale profile writes, OAuth retirement and PostgreSQL consumption/reset/issuance races |
 | `test_admin_account_actions.py` | 2 | 12 | Account creation (generated password when omitted, returned once and never re-listed, two accounts get different passwords, a supplied password is still accepted, mismatched/weak supplied passwords rejected, generated password passes the validators anyway, response carries the new id, non-admin blocked); self-deactivation guard (blocked with a field error, deactivating someone else works and is audited, reactivating your own account is unaffected, deactivating someone else still revokes their sessions) |
 | `test_api_keys.py` | 11 | 83 | Generation, hashing, auth, read-only keys, scope deny-list, audit, throttling, CRUD, admin management; an impersonation session cannot create a key |
-| `test_oauth.py` | 17 | 105 | Public endpoint validation and bounded provider data; provider configuration, callback guards, verified-email provisioning/linking and MFA claims; browser-bound state (cross-client, missing/wrong/stale binding, cookie attributes and expiry, in-flight/stale callback isolation, atomic state consumption, correlated error cleanup); linking-session revocation before/during provider I/O, deleted/unbound state refusal, identity-owner and PostgreSQL competing-link races; exchange single-use/revocation |
+| `test_oauth.py` | 17 | 104 | Public endpoint validation and bounded provider data; provider configuration, callback guards, verified-email provisioning/linking and MFA claims; browser-bound state (cross-client, missing/wrong/stale binding, cookie attributes and expiry, in-flight/stale callback isolation, atomic state consumption, correlated error cleanup); linking-session revocation before/during provider I/O, deleted/unbound state refusal, identity-owner and PostgreSQL competing-link races; exchange single-use/revocation |
 | `test_passkeys.py` | 9 | 66 | Passkey registration and passwordless sign-in against a software authenticator, MFA policy and grace arithmetic, removal guard, admin reset, RP-ID/origin system checks; registration refused while impersonating |
 | `test_mfa.py` | 5 | 29 | TOTP enrolment/removal/recovery codes, two-step login, MFA at the magic-link/onboarding/OAuth/impersonation/email-verification doors, per-account throttle (`SPEC-2026-09-two-factor-authentication`); no factor can be enrolled while impersonating |
 | `test_registration_concurrency.py` | — (3 functions) | 7 cases | PostgreSQL cancellation/verification/resend row-lock ordering; SMTP outside transactions; transitions during delivery; late cleanup preserves newer links |

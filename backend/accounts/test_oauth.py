@@ -419,18 +419,18 @@ class OAuthStateBindingTests(OAuthTestCase):
         exchange.assert_called_once()
         self.assertEqual(OAuthExchangeCode.objects.count(), 1)
 
-    def test_legacy_state_is_refused(self):
-        OAuthState.objects.create(state="legacy", provider=self.provider)
-        self.client.cookies[OAUTH_BINDING_COOKIE] = "anything"
-
-        response = self.callback(code="c", state="legacy")
-
-        self.assert_refused(response)
-
     def test_refusals_name_the_binding_problem_for_triage(self):
-        for present, expected in ((None, "state_binding_missing"), ("wrong", "state_not_bound")):
-            with self.subTest(present=present):
-                self.start_state("bound")
+        """Each refusal reason is distinguishable in the audit trail."""
+        for binding, present, expected in (
+            ("browser-binding", None, "state_binding_missing"),
+            ("browser-binding", "wrong", "state_not_bound"),
+            ("", "browser-binding", "state_binding_unset"),
+        ):
+            with self.subTest(expected=expected):
+                if binding:
+                    self.start_state("bound", binding=binding)
+                else:
+                    OAuthState.objects.create(state="bound", provider=self.provider)
                 if present is None:
                     del self.client.cookies[OAUTH_BINDING_COOKIE]
                 else:

@@ -99,6 +99,8 @@ export const de = {
                 generic: 'OAuth-Fehler: {{code}}',
                 email_not_verified:
                     "Ihr Anbieter hat Ihre E-Mail-Adresse nicht verifiziert. Registrieren oder melden Sie sich zuerst an und verknüpfen Sie den Anbieter dann im Konto.",
+                invalid_state:
+                    'Dieser Anmeldeversuch ist ungültig oder wurde durch einen neueren Versuch ersetzt. Bitte versuchen Sie es erneut.',
                 missingCode: 'Fehlender Autorisierungscode.',
                 exchangeFailed: 'Anmeldung konnte nicht abgeschlossen werden. Bitte versuchen Sie es erneut.',
                 initFailed: 'OAuth-Anmeldung konnte nicht gestartet werden. Bitte versuchen Sie es erneut.',

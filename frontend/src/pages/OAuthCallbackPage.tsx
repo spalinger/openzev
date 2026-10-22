@@ -28,7 +28,9 @@ export function OAuthCallbackPage() {
 
         const oauthError = searchParams.get('oauth_error')
         if (oauthError) {
-            setError(t('auth.oauth.errors.generic', { code: oauthError }))
+            const key = `auth.oauth.errors.${oauthError}`
+            const translated = t(key)
+            setError(translated === key ? t('auth.oauth.errors.generic', { code: oauthError }) : translated)
             return
         }
 

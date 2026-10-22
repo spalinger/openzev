@@ -321,15 +321,6 @@ def _authorization_url(provider: OAuthProvider, state_token: str) -> str:
     return f"{provider.authorization_url}?{urlencode(params)}"
 
 
-def _bind_authorization_response(provider: OAuthProvider, state_token: str, binding: str) -> Response:
-    """Return the authorize URL together with the browser's binding cookie."""
-    response = Response({"redirect_url": _authorization_url(provider, state_token)})
-    set_oauth_binding_cookie(
-        response, binding, max_age=int(OAuthState.TTL.total_seconds()),
-    )
-    return response
-
-
 @api_view(["POST"])
 @permission_classes([AllowAny])
 @throttle_classes([AuthOAuthInitiateThrottle])
@@ -341,7 +332,9 @@ def oauth_login_initiate(request, provider_slug: str):
     OAuthState.objects.create(
         state=state_token, provider=provider, binding=hash_secret(binding),
     )
-    return _bind_authorization_response(provider, state_token, binding)
+    response = Response({"redirect_url": _authorization_url(provider, state_token)})
+    set_oauth_binding_cookie(response, binding, max_age=int(OAuthState.TTL.total_seconds()))
+    return response
 
 
 @api_view(["POST"])
@@ -359,7 +352,9 @@ def oauth_link_initiate(request, provider_slug: str):
         from_participant_link=is_participant_link_session(request.auth),
         binding=hash_secret(binding),
     )
-    return _bind_authorization_response(provider, state_token, binding)
+    response = Response({"redirect_url": _authorization_url(provider, state_token)})
+    set_oauth_binding_cookie(response, binding, max_age=int(OAuthState.TTL.total_seconds()))
+    return response
 
 
 # ── callback (browser-facing, redirects back to frontend) ────────────────────
@@ -373,10 +368,12 @@ def _provider_proves_account_email(user_info, account_email):
     )
 
 
-def _binding_state(request, state_obj: OAuthState) -> str | None:
+def _binding_problem(request, state_obj: OAuthState) -> str | None:
     """Return the binding refusal reason, or ``None`` when it matches."""
+    if not state_obj.binding:
+        return "state_binding_unset"
     presented = request.COOKIES.get(OAUTH_BINDING_COOKIE, "")
-    if not presented or not state_obj.binding:
+    if not presented:
         return "state_binding_missing"
     if not verify_secret(presented, state_obj.binding):
         return "state_not_bound"
@@ -395,7 +392,7 @@ def oauth_callback(request, provider_slug: str):
             state=state_value, provider__name=provider_slug,
         ).first()
     if error or not code or not state_value:
-        if state_obj is not None and _binding_state(request, state_obj) is None:
+        if state_obj is not None and _binding_problem(request, state_obj) is None:
             state_obj.delete()
         # Never reflect the provider-supplied error in the redirect (CWE-601).
         slug = "provider_error" if error else "missing_params"
@@ -413,7 +410,7 @@ def oauth_callback(request, provider_slug: str):
         return HttpResponseRedirect(f"{frontend_url}/login?oauth_error=state_expired")
 
     # Consume mismatched attempts before any provider I/O or account work.
-    binding_problem = _binding_state(request, state_obj)
+    binding_problem = _binding_problem(request, state_obj)
     if binding_problem is not None:
         state_obj.delete()
         _record_login_failure(request, provider_slug, binding_problem)

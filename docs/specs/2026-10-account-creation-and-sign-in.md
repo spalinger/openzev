@@ -188,8 +188,10 @@ admin, admin MFA reset, and promotion. Reactivating an account does not revive o
   erase a newer attempt's cookie. Starting another attempt replaces the binding for callbacks
   not yet validated; an already accepted callback can still finish.
 - **Refusals:** missing or mismatched cookies and legacy rows with an empty binding return
-  `invalid_state`, audited as `state_binding_missing` or `state_not_bound`. Old in-flight
-  logins fail closed at deployment; users retry sign-in.
+  `invalid_state`, audited as `state_binding_missing`, `state_not_bound`, or
+  `state_binding_unset`, respectively. Old in-flight logins fail closed at deployment;
+  users retry sign-in. The frontend translates `invalid_state` to inform users that their
+  sign-in attempt was invalid or superseded.
 - **State lifecycle:** expired and mismatched attempts are discarded. A valid callback must
   delete its state before provider I/O; checking the affected-row count permits only one
   concurrent callback to proceed. Provider errors and missing-code callbacks discard a state

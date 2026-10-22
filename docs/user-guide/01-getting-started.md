@@ -557,6 +557,12 @@ pages look the same, just without data.
 3. Managers land on **Overview**; participants land on their personal dashboard.
    Unlinked guest accounts see an explanation and a link to **Account settings**.
 
+When signing in or linking an account with an OAuth provider, complete the flow
+in the same browser, one attempt at a time. Starting a second login or link
+attempt in another tab replaces the previous pending attempt in that browser;
+if that happens, restart sign-in from the login page. An attempt whose callback
+has already been accepted can still finish.
+
 The interface follows your browser's language (German, French, Italian or
 English). To change it, open the account menu at the foot of the sidebar
 (your name) and pick a **Language**; the choice is remembered in this browser.
