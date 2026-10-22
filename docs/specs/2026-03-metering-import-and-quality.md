@@ -1624,6 +1624,8 @@ preview or quarantine dashboard.
 | `MeteringRawDataEndpointTests` | §5.3: owner gets daily-grouped raw rows with correct direction sums; participant can read own metering point's raw data |
 | `ChartDataEndpointTests` | §5.2: direction aggregates; Swiss day/month boundaries agree with raw data (`test_daily_bucket_uses_the_same_civil_day_as_raw_data`, `test_month_bucket_does_not_cross_the_civil_month_boundary`); hourly buckets stay distinct across both DST transitions |
 | `DashboardCivilDayBucketingTests` | §5.4: a 23:45 Swiss-time reading stays in its civil-day bucket (`+02:00`); 00:00 the next day is excluded |
+| `DashboardBucketParityTests` | §5.4 / ADR 0026: derived day/month and UTC-hour keys match the ORM at month/DST boundaries; bare truncators use Django's current timezone; unsupported truncators and local-hour buckets are rejected; the dashboard's hourly cache keeps both autumn instants |
+| `DashboardAggregationRegressionTests` | §5.4: one row per timestamp combines both directions; explicit zero readings still create buckets; production-only timestamps do not create participant timeline buckets |
 | `DataQualityStatusTests` | §5.5: owner sees gaps and severity; participant sees own meters; default range is the 30 days ending yesterday, and a lone `date_from` of today still yields a one-day window; fully assigned readings report no unassigned; holder-less meter flags every reading; assignment-gap readings flagged unassigned; overlapping windows flag only the corrupt meter (others still report) |
 
 ### Backend (`metering/test_disabled_zev.py`)

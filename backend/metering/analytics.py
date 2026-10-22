@@ -6,11 +6,12 @@ dicts that views can hand straight to Response().  No HTTP or permission logic
 lives here, which makes the calculations independently unit-testable.
 """
 from collections import defaultdict
-from datetime import date as date_type, timedelta
+from datetime import date as date_type, datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal, ROUND_HALF_UP
 
-from django.db.models import Count, Max, Min, Sum
-from django.db.models.functions import TruncDate
+from django.db.models import Count, Max, Min, Q, Sum
+from django.db.models.functions import TruncDate, TruncDay, TruncHour, TruncMonth
+from django.utils.timezone import get_current_timezone
 
 from allocation.errors import OverlappingAssignmentWindowsError
 from allocation.read_model import (
@@ -18,7 +19,14 @@ from allocation.read_model import (
     community_totals_by_timestamp,
     eligible_participant_shares,
 )
-from allocation.validity import active_during, business_tz, civil_date, period_window, wall_clock
+from allocation.validity import (
+    active_during,
+    business_tz,
+    civil_date,
+    period_end_exclusive_dt,
+    period_window,
+    wall_clock,
+)
 from allocation.split import split_consumption, split_production
 from allocation.windows import AssignmentWindows
 from zev import access
@@ -96,6 +104,8 @@ def _distribute_reading(windows, mp_to_zev, shares_by_zev, metering_point_id, ts
     by ``allocation_weight``; a gap (no assignment covers ``ts``) yields
     nothing — matches ``assignment_at``'s contract of distinguishing a true
     gap from a community window rather than conflating both under ``None``.
+    Assignments and eligible shares are constant within a civil day, so callers
+    may reuse this distribution for the rest of that meter/day.
     """
     resolution = windows.assignment_at(metering_point_id, ts)
     if resolution is None:
@@ -156,12 +166,40 @@ def _participant_names(participant_ids) -> dict[str, str]:
     return names
 
 
+def _bucket_bounds(ts, trunc_fn) -> tuple[str, datetime]:
+    """Return the ISO bucket key and exclusive UTC end for sorted-row reuse.
+
+    Day/month buckets use the supplied or current Django timezone. Hour buckets
+    require UTC to keep the repeated autumn hours distinct (ADR 0026).
+    """
+    func = getattr(trunc_fn, "func", trunc_fn)
+    tzinfo = getattr(trunc_fn, "keywords", {}).get("tzinfo") or get_current_timezone()
+    local = ts.astimezone(tzinfo)
+    if func is TruncHour:
+        # ZoneInfo returns zero for UTC but None for date-dependent zones such as Zurich.
+        if tzinfo.utcoffset(None) != timedelta(0):
+            raise ValueError("Hourly dashboard buckets require a UTC timezone.")
+        bucket = local.replace(minute=0, second=0, microsecond=0)
+        next_bucket = bucket + timedelta(hours=1)
+    elif func is TruncMonth:
+        bucket = local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        next_bucket = bucket.replace(day=28) + timedelta(days=4)
+        next_bucket = next_bucket.replace(day=1)
+    elif func is TruncDay:
+        bucket = local.replace(hour=0, minute=0, second=0, microsecond=0)
+        # ZoneInfo keeps wall-clock midnight across DST changes.
+        next_bucket = bucket + timedelta(days=1)
+    else:
+        raise ValueError("Unsupported dashboard truncation.")
+    return bucket.isoformat(), next_bucket.astimezone(dt_timezone.utc)
+
+
 # ---------------------------------------------------------------------------
 # Owner / admin dashboard
 # ---------------------------------------------------------------------------
 
-def _zev_balance(base):
-    """ZEV-wide energy balance of a bucket-annotated readings queryset.
+def _zev_balance(qs, trunc_fn):
+    """ZEV-wide energy balance of a readings queryset.
 
     Import and export are netted per timestamp — what the ZEV could not cover
     locally in that quarter hour — before being summed into buckets, so a
@@ -171,26 +209,37 @@ def _zev_balance(base):
     consumed/produced pivot (the per-participant split needs it), the bucket
     timeline as floats, and the period totals as Decimals.
     """
+    # One row per timestamp with both directions, instead of one row per
+    # timestamp and direction. The bucket is derived in Python (see
+    # ``_bucket_bounds``) rather than truncated for every row in SQL.
     zev_ts_rows = (
-        base.values("bucket", "timestamp", "direction")
-        .annotate(total_kwh=Sum("energy_kwh"))
+        qs.values("timestamp")
+        .annotate(
+            consumed_kwh=Sum("energy_kwh", filter=Q(direction="in")),
+            produced_kwh=Sum("energy_kwh", filter=Q(direction="out")),
+        )
         .order_by("timestamp")
     )
     ts_pivot = {}
+    bucket_key = None
+    bucket_end = None
     for row in zev_ts_rows:
         ts = row["timestamp"]
-        if ts not in ts_pivot:
-            ts_pivot[ts] = {
-                "bucket": row["bucket"].isoformat(),
-                "consumed_kwh": Decimal("0"),
-                "produced_kwh": Decimal("0"),
-            }
-        if row["direction"] == "in":
-            ts_pivot[ts]["consumed_kwh"] = row["total_kwh"] or Decimal("0")
-        elif row["direction"] == "out":
-            ts_pivot[ts]["produced_kwh"] = row["total_kwh"] or Decimal("0")
+        if bucket_key is None or ts >= bucket_end:
+            bucket_key, bucket_end = _bucket_bounds(ts, trunc_fn)
+        ts_pivot[ts] = {
+            "bucket": bucket_key,
+            "consumed_kwh": row["consumed_kwh"] or Decimal("0"),
+            "produced_kwh": row["produced_kwh"] or Decimal("0"),
+        }
 
     # --- Bucket-level aggregation and totals ---
+    timeline, totals = _timeline_and_totals(ts_pivot)
+    return ts_pivot, timeline, totals
+
+
+def _timeline_and_totals(ts_pivot):
+    """Aggregate a ``{timestamp: {bucket, consumed_kwh, produced_kwh}}`` pivot."""
     bucket_pivot = {}
     totals = {
         "produced_kwh": Decimal("0"),
@@ -233,17 +282,17 @@ def _zev_balance(base):
         }
         for _, item in sorted(bucket_pivot.items(), key=lambda entry: entry[0])
     ]
-    return ts_pivot, timeline, totals
+    return timeline, totals
 
 
 def zev_balance_timeline(qs, trunc_fn):
     """``(timeline, totals)`` of the ZEV-wide balance, without the per-participant split.
 
     The cheap half of :func:`owner_dashboard_summary`, for callers that only
-    need the community's figures (the annual report's previous-year line).
+    need the community's figures.
     Totals are floats, like the timeline.
     """
-    _, timeline, totals = _zev_balance(qs.annotate(bucket=trunc_fn("timestamp")))
+    _, timeline, totals = _zev_balance(qs, trunc_fn)
     return timeline, {k: float(v) for k, v in totals.items()}
 
 
@@ -253,16 +302,14 @@ def owner_dashboard_summary(qs, trunc_fn, selected_participant_id):
 
     qs              – MeterReading queryset already filtered to the desired ZEV
                       and date range.
-    trunc_fn        – Django ORM truncation class (TruncDay / TruncHour / …).
+    trunc_fn        – TruncDay/TruncMonth, or TruncHour with a UTC timezone;
+                      partial(..., tzinfo=...) overrides Django's current timezone.
     selected_participant_id – optional UUID str to scope totals & timeline.
 
     Returns a dict matching the existing API response shape.  The caller
     should add the ``"bucket"`` key before returning to the client.
     """
     today = date_type.today()
-    base = qs.annotate(bucket=trunc_fn("timestamp"))
-
-    ts_pivot, timeline, totals = _zev_balance(base)
 
     # --- Per-participant breakdown ---
     # Readings are attributed to the participant whose assignment is active at
@@ -277,42 +324,86 @@ def owner_dashboard_summary(qs, trunc_fn, selected_participant_id):
     net_metered_ids = net_metered_participant_ids(windows, qs, flagged_mp_ids)
 
     participant_rows = (
-        base.filter(direction="in")
-        .values(
+        qs.values_list(
             "metering_point_id",
             "timestamp",
-            "bucket",
         )
-        .annotate(consumed_kwh=Sum("energy_kwh"))
+        .annotate(
+            consumed_kwh=Sum("energy_kwh", filter=Q(direction="in")),
+            produced_kwh=Sum("energy_kwh", filter=Q(direction="out")),
+        )
         .order_by("metering_point_id", "timestamp")
     )
 
-    participant_production_rows = (
-        base.filter(direction="out")
-        .values(
-            "metering_point_id",
-            "timestamp",
-            "bucket",
-        )
-        .annotate(produced_kwh=Sum("energy_kwh"))
-        .order_by("metering_point_id", "timestamp")
-    )
+    # The per-meter rows already contain every reading, so derive the ZEV-wide
+    # per-timestamp pivot from them instead of scanning the readings again.
+    participant_rows = list(participant_rows)
+    ts_pivot = {}
+    current_metering_point_id = None
+    bucket_key = None
+    bucket_end = None
+    for metering_point_id, ts, consumed_kwh, produced_kwh in participant_rows:
+        if metering_point_id != current_metering_point_id:
+            current_metering_point_id = metering_point_id
+            bucket_key = None
+        if bucket_key is None or ts >= bucket_end:
+            bucket_key, bucket_end = _bucket_bounds(ts, trunc_fn)
+        data = ts_pivot.get(ts)
+        if data is None:
+            data = ts_pivot[ts] = {
+                "bucket": bucket_key,
+                "consumed_kwh": Decimal("0"),
+                "produced_kwh": Decimal("0"),
+            }
+        if consumed_kwh is not None:
+            data["consumed_kwh"] += consumed_kwh
+        if produced_kwh is not None:
+            data["produced_kwh"] += produced_kwh
+    timeline, totals = _timeline_and_totals(ts_pivot)
 
     participant_map = {}
-    for row in participant_rows:
-        ts = row["timestamp"]
-        bucket_key = row["bucket"].isoformat()
-        consumed = row["consumed_kwh"] or Decimal("0")
+    pid_cache = {}
+    current_metering_point_id = None
+    day = None
+    day_end = None
+    distributions = ()
+    for metering_point_id, ts, consumed_kwh, produced_kwh in participant_rows:
+        # Rows arrive ordered by meter and timestamp. Assignment validity is
+        # date-granular, so resolve it once per meter/day instead of once per
+        # 15-minute reading.
+        if metering_point_id != current_metering_point_id:
+            current_metering_point_id = metering_point_id
+            day = None
+        if day is None or ts >= day_end:
+            day = civil_date(ts)
+            day_end = period_end_exclusive_dt(day)
+            distributions = tuple(_distribute_reading(
+                windows, mp_to_zev, shares_by_zev, metering_point_id, ts,
+            ))
 
-        zev_at_ts = ts_pivot.get(ts, {})
-        total_consumed = zev_at_ts.get("consumed_kwh", Decimal("0"))
-        total_produced = zev_at_ts.get("produced_kwh", Decimal("0"))
-        from_zev, from_grid = split_consumption(consumed, total_consumed, total_produced)
+        has_consumption = consumed_kwh is not None
+        has_production = produced_kwh is not None
+        consumed = consumed_kwh or Decimal("0")
+        produced = produced_kwh or Decimal("0")
 
-        for raw_pid, share in _distribute_reading(
-            windows, mp_to_zev, shares_by_zev, row["metering_point_id"], ts,
-        ):
-            pid = str(raw_pid)
+        zev_at_ts = ts_pivot[ts]
+        bucket_key = zev_at_ts["bucket"]
+        total_consumed = zev_at_ts["consumed_kwh"]
+        total_produced = zev_at_ts["produced_kwh"]
+        from_zev = from_grid = exported = Decimal("0")
+        if has_consumption:
+            from_zev, from_grid = split_consumption(consumed, total_consumed, total_produced)
+        if has_production:
+            # Exported per timestamp = the producer's share of what the ZEV
+            # could not consume locally — mirrors what the engine bills as
+            # feed-in (ADR 0013), so the chart reconciles with the invoice.
+            _, exported = split_production(produced, total_produced, total_consumed)
+
+        for raw_pid, share in distributions:
+            try:
+                pid = pid_cache[raw_pid]
+            except KeyError:
+                pid = pid_cache[raw_pid] = str(raw_pid)
             if pid not in participant_map:
                 participant_map[pid] = {
                     "participant_id": pid,
@@ -323,63 +414,28 @@ def owner_dashboard_summary(qs, trunc_fn, selected_participant_id):
                     "total_exported_kwh": Decimal("0"),
                     "timeline_map": {},
                 }
-            participant_map[pid]["total_consumed_kwh"] += consumed * share
-            participant_map[pid]["from_zev_kwh"] += from_zev * share
-            participant_map[pid]["from_grid_kwh"] += from_grid * share
-
-            if bucket_key not in participant_map[pid]["timeline_map"]:
-                participant_map[pid]["timeline_map"][bucket_key] = {
+            item = participant_map[pid]
+            participant_timeline = item["timeline_map"]
+            if bucket_key not in participant_timeline:
+                participant_timeline[bucket_key] = {
                     "bucket": bucket_key,
                     "consumed_kwh": Decimal("0"),
                     "produced_kwh": Decimal("0"),
                     "imported_kwh": Decimal("0"),
                     "exported_kwh": Decimal("0"),
                 }
-            participant_map[pid]["timeline_map"][bucket_key]["consumed_kwh"] += consumed * share
-            participant_map[pid]["timeline_map"][bucket_key]["imported_kwh"] += from_grid * share
-
-    for row in participant_production_rows:
-        ts = row["timestamp"]
-        bucket_key = row["bucket"].isoformat()
-        produced = row["produced_kwh"] or Decimal("0")
-
-        # Exported per timestamp = the producer's share of what the ZEV could
-        # not consume locally — mirrors what the engine bills as feed-in
-        # (ADR 0013), so the chart reconciles with the invoice.
-        zev_at_ts = ts_pivot.get(ts, {})
-        _, exported = split_production(
-            produced,
-            zev_at_ts.get("produced_kwh", Decimal("0")),
-            zev_at_ts.get("consumed_kwh", Decimal("0")),
-        )
-
-        for raw_pid, share in _distribute_reading(
-            windows, mp_to_zev, shares_by_zev, row["metering_point_id"], ts,
-        ):
-            pid = str(raw_pid)
-            if pid not in participant_map:
-                participant_map[pid] = {
-                    "participant_id": pid,
-                    "total_consumed_kwh": Decimal("0"),
-                    "total_produced_kwh": Decimal("0"),
-                    "from_zev_kwh": Decimal("0"),
-                    "from_grid_kwh": Decimal("0"),
-                    "total_exported_kwh": Decimal("0"),
-                    "timeline_map": {},
-                }
-            participant_map[pid]["total_produced_kwh"] += produced * share
-            participant_map[pid]["total_exported_kwh"] += exported * share
-
-            if bucket_key not in participant_map[pid]["timeline_map"]:
-                participant_map[pid]["timeline_map"][bucket_key] = {
-                    "bucket": bucket_key,
-                    "consumed_kwh": Decimal("0"),
-                    "produced_kwh": Decimal("0"),
-                    "imported_kwh": Decimal("0"),
-                    "exported_kwh": Decimal("0"),
-                }
-            participant_map[pid]["timeline_map"][bucket_key]["produced_kwh"] += produced * share
-            participant_map[pid]["timeline_map"][bucket_key]["exported_kwh"] += exported * share
+            bucket = participant_timeline[bucket_key]
+            if has_consumption:
+                item["total_consumed_kwh"] += consumed * share
+                item["from_zev_kwh"] += from_zev * share
+                item["from_grid_kwh"] += from_grid * share
+                bucket["consumed_kwh"] += consumed * share
+                bucket["imported_kwh"] += from_grid * share
+            if has_production:
+                item["total_produced_kwh"] += produced * share
+                item["total_exported_kwh"] += exported * share
+                bucket["produced_kwh"] += produced * share
+                bucket["exported_kwh"] += exported * share
 
     names = _participant_names(participant_map)
     for pid, item in participant_map.items():
@@ -448,7 +504,8 @@ def participant_dashboard_summary(zev_qs, trunc_fn, user, zev_ids):
     Compute participant dashboard summary.
 
     zev_qs          – Readings of enabled membership ZEVs, date-filtered.
-    trunc_fn        – Django ORM truncation class.
+    trunc_fn        – TruncDay/TruncMonth, or TruncHour with a UTC timezone;
+                      partial(..., tzinfo=...) overrides Django's current timezone.
     user            – request.user (used to find current_participant_ids).
     zev_ids         – queryset / list of enabled membership ZEV UUIDs.
 
@@ -456,7 +513,6 @@ def participant_dashboard_summary(zev_qs, trunc_fn, user, zev_ids):
     should add the ``"bucket"`` key before returning to the client.
     """
     today = date_type.today()
-    base = zev_qs.annotate(bucket=trunc_fn("timestamp"))
 
     # Cards, timeline and flow use the same readings and attribution windows.
     # A community share belongs to an eligible member even when they hold no
@@ -471,28 +527,30 @@ def participant_dashboard_summary(zev_qs, trunc_fn, user, zev_ids):
         zev_qs.values_list("metering_point_id", flat=True).distinct(), window_start, window_end,
     )
 
-    consumption_rows = (
-        base.filter(direction="in")
-        .values("metering_point_id", "bucket", "timestamp")
-        .annotate(consumed_kwh=Sum("energy_kwh"))
+    reading_rows = list(
+        zev_qs.values_list("metering_point_id", "timestamp")
+        .annotate(
+            consumed_kwh=Sum("energy_kwh", filter=Q(direction="in")),
+            produced_kwh=Sum("energy_kwh", filter=Q(direction="out")),
+        )
         .order_by("metering_point_id", "timestamp")
     )
 
-    zev_rows = (
-        base.values("metering_point__zev_id", "bucket", "timestamp", "direction")
-        .annotate(total_kwh=Sum("energy_kwh"))
-        .order_by("timestamp")
-    )
-
+    # Build the per-ZEV/timestamp pool from the same rows the attribution
+    # loop consumes, instead of scanning the readings a second time.
     zev_pivot = {}
-    for row in zev_rows:
-        key = (row["metering_point__zev_id"], row["timestamp"])
-        if key not in zev_pivot:
-            zev_pivot[key] = {"consumed": Decimal("0"), "produced": Decimal("0")}
-        if row["direction"] == "in":
-            zev_pivot[key]["consumed"] = row["total_kwh"] or Decimal("0")
-        elif row["direction"] == "out":
-            zev_pivot[key]["produced"] = row["total_kwh"] or Decimal("0")
+    for metering_point_id, ts, consumed_kwh, produced_kwh in reading_rows:
+        key = (mp_to_zev[metering_point_id], ts)
+        data = zev_pivot.get(key)
+        if data is None:
+            data = zev_pivot[key] = {
+                "consumed": Decimal("0"),
+                "produced": Decimal("0"),
+            }
+        if consumed_kwh is not None:
+            data["consumed"] += consumed_kwh
+        if produced_kwh is not None:
+            data["produced"] += produced_kwh
 
     timeline_map = {}
     totals = {
@@ -524,28 +582,45 @@ def participant_dashboard_summary(zev_qs, trunc_fn, user, zev_ids):
         {str(pid) for pid in current_participant_ids} & zev_net_metered_ids
     )
 
-    all_production_rows = (
-        base.filter(direction="out")
-        .values(
-            "metering_point_id",
-            "timestamp",
-        )
-        .annotate(produced_kwh=Sum("energy_kwh"))
-        .order_by("metering_point_id", "timestamp")
-    )
-
     participant_map = {}
-    for row in consumption_rows:
-        ts = row["timestamp"]
-        consumed = row["consumed_kwh"] or Decimal("0")
-        zev_at_ts = zev_pivot.get((mp_to_zev[row["metering_point_id"]], ts), {})
-        total_consumed = zev_at_ts.get("consumed", Decimal("0"))
-        total_produced = zev_at_ts.get("produced", Decimal("0"))
-        from_zev, from_grid = split_consumption(consumed, total_consumed, total_produced)
-        for raw_pid, share in _distribute_reading(
-            windows, mp_to_zev, shares_by_zev, row["metering_point_id"], ts,
-        ):
-            pid = str(raw_pid)
+    pid_cache = {}
+    current_metering_point_id = None
+    day = None
+    day_end = None
+    distributions = ()
+    bucket_key = None
+    bucket_end = None
+    for metering_point_id, ts, consumed_kwh, produced_kwh in reading_rows:
+        if metering_point_id != current_metering_point_id:
+            current_metering_point_id = metering_point_id
+            day = None
+            bucket_key = None
+        if day is None or ts >= day_end:
+            day = civil_date(ts)
+            day_end = period_end_exclusive_dt(day)
+            distributions = tuple(_distribute_reading(
+                windows, mp_to_zev, shares_by_zev, metering_point_id, ts,
+            ))
+        if bucket_key is None or ts >= bucket_end:
+            bucket_key, bucket_end = _bucket_bounds(ts, trunc_fn)
+
+        has_consumption = consumed_kwh is not None
+        has_production = produced_kwh is not None
+        consumed = consumed_kwh or Decimal("0")
+        produced = produced_kwh or Decimal("0")
+
+        zev_at_ts = zev_pivot[(mp_to_zev[metering_point_id], ts)]
+        total_consumed = zev_at_ts["consumed"]
+        total_produced = zev_at_ts["produced"]
+        from_zev = from_grid = Decimal("0")
+        if has_consumption:
+            from_zev, from_grid = split_consumption(consumed, total_consumed, total_produced)
+
+        for raw_pid, share in distributions:
+            try:
+                pid = pid_cache[raw_pid]
+            except KeyError:
+                pid = pid_cache[raw_pid] = str(raw_pid)
             if pid not in participant_map:
                 participant_map[pid] = {
                     "participant_id": pid,
@@ -554,40 +629,29 @@ def participant_dashboard_summary(zev_qs, trunc_fn, user, zev_ids):
                     "from_zev_kwh": Decimal("0"),
                     "from_grid_kwh": Decimal("0"),
                 }
-            participant_map[pid]["total_consumed_kwh"] += consumed * share
-            participant_map[pid]["from_zev_kwh"] += from_zev * share
-            participant_map[pid]["from_grid_kwh"] += from_grid * share
 
-            if raw_pid in current_participant_ids:
-                bucket_key = row["bucket"].isoformat()
-                if bucket_key not in timeline_map:
-                    timeline_map[bucket_key] = {
-                        "bucket": bucket_key, **dict.fromkeys(totals, Decimal("0")),
-                    }
-                for total_key, value in (
-                    ("total_consumed_kwh", consumed * share),
-                    ("consumed_from_zev_kwh", from_zev * share),
-                    ("imported_from_grid_kwh", from_grid * share),
-                ):
-                    totals[total_key] += value
-                    timeline_map[bucket_key][total_key] += value
+            item = participant_map[pid]
+            if has_consumption:
+                item["total_consumed_kwh"] += consumed * share
+                item["from_zev_kwh"] += from_zev * share
+                item["from_grid_kwh"] += from_grid * share
 
-    for row in all_production_rows:
-        ts = row["timestamp"]
-        produced = row["produced_kwh"] or Decimal("0")
-        for raw_pid, share in _distribute_reading(
-            windows, mp_to_zev, shares_by_zev, row["metering_point_id"], ts,
-        ):
-            pid = str(raw_pid)
-            if pid not in participant_map:
-                participant_map[pid] = {
-                    "participant_id": pid,
-                    "total_consumed_kwh": Decimal("0"),
-                    "total_produced_kwh": Decimal("0"),
-                    "from_zev_kwh": Decimal("0"),
-                    "from_grid_kwh": Decimal("0"),
-                }
-            participant_map[pid]["total_produced_kwh"] += produced * share
+                if raw_pid in current_participant_ids:
+                    if bucket_key not in timeline_map:
+                        timeline_map[bucket_key] = {
+                            "bucket": bucket_key, **dict.fromkeys(totals, Decimal("0")),
+                        }
+                    bucket = timeline_map[bucket_key]
+                    for total_key, value in (
+                        ("total_consumed_kwh", consumed * share),
+                        ("consumed_from_zev_kwh", from_zev * share),
+                        ("imported_from_grid_kwh", from_grid * share),
+                    ):
+                        totals[total_key] += value
+                        bucket[total_key] += value
+
+            if has_production:
+                item["total_produced_kwh"] += produced * share
 
     timeline = [
         {
