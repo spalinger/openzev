@@ -92,6 +92,7 @@ export const mantineTheme: MantineThemeOverride = {
       styles: {
         label: { fontWeight: 'var(--field-label-weight)', marginBottom: 'var(--field-gap)', color: 'var(--text-body)' },
         description: { color: 'var(--text-muted)', lineHeight: 'var(--field-line-height)' },
+        error: { color: 'var(--danger-700)' },
       },
     },
   },

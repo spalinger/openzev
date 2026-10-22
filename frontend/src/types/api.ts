@@ -980,6 +980,8 @@ export interface TariffInput {
      * from the tariff's own drawer once it exists.
      */
     initial_percentage?: string | null
+    /** Create-only: save a static energy tariff and its initial bands atomically. */
+    initial_periods?: Array<Omit<TariffPeriodInput, 'tariff'>>
     split_key?: 'equal' | 'weight'
     valid_from: string
     valid_to?: string | null

@@ -14,7 +14,7 @@ import {
 import { formatShortDate } from '../../lib/appSettings'
 import { formatUtcIsoDate, todayBusinessIso } from '../../lib/dates'
 import type { AppSettings, TariffSeries } from '../../types/api'
-import { buildPriceHistory, type BandKey, type PriceUnit } from './priceHistory'
+import { buildPriceHistory, hasPriceChanges, type BandKey, type PriceUnit } from './priceHistory'
 import { AXIS_COLOR, CHART_GRID, CHART_GRIDLINE, CONS_COLORS, FLOW_LOCAL_CONS, NEGATIVE_COLOR } from '../../lib/chartTokens'
 import { CHART_AXIS_TICK, CHART_TOOLTIP_STYLE } from '../../lib/chartTheme'
 import { formatNumber } from '../../lib/numbers'
@@ -41,15 +41,13 @@ type Props = {
     series: TariffSeries
     allSeries: TariffSeries[]
     settings: AppSettings
-    /** Off when a disclosure's summary already names the chart. */
-    titled?: boolean
 }
 
 function decimalsFor(unit: PriceUnit): number {
     return unit === 'chf' ? 2 : 5
 }
 
-export function TariffPriceHistoryChart({ series, allSeries, settings, titled = true }: Props) {
+export function TariffPriceHistoryChart({ series, allSeries, settings }: Props) {
     const { t } = useTranslation()
     const today = todayBusinessIso()
 
@@ -65,7 +63,7 @@ export function TariffPriceHistoryChart({ series, allSeries, settings, titled = 
         [history.points],
     )
 
-    if (data.length < 2) return null
+    if (data.length < 2 || !hasPriceChanges(history)) return null
 
     const decimals = decimalsFor(history.unit)
     const axisDecimals = decimals === 5 ? 3 : 2
@@ -76,9 +74,10 @@ export function TariffPriceHistoryChart({ series, allSeries, settings, titled = 
             : '%'
 
     return (
-        <div className="tariff-price-history">
+        <section className="tariff-chart-section" aria-label={t('pages.tariffs.priceHistory.title')}>
+          <h3>{t('pages.tariffs.priceHistory.title')}</h3>
+          <div className="tariff-price-history">
             <div className="tariff-price-history-header">
-                {titled && <h4>{t('pages.tariffs.priceHistory.title')}</h4>}
                 <span className="muted">{unitLabel}</span>
             </div>
 
@@ -159,6 +158,7 @@ export function TariffPriceHistoryChart({ series, allSeries, settings, titled = 
                     ))}
                 </LineChart>
             </ResponsiveContainer>
-        </div>
+          </div>
+        </section>
     )
 }

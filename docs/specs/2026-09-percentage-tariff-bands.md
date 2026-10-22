@@ -241,11 +241,13 @@ instead of CHF/kWh and maps it to `percentage` (with `price_chf_per_kwh: null`).
 Energy mode does the reverse. Everything else (period type, label, window,
 weekday/month chips) is shared.
 
-**Pane (`TariffDetailPane.tsx`)**: the band section is shown when
-`billing_mode === 'energy' && !isDynamic` **or** `billing_mode === 'percentage_of_energy'`.
-A percentage band row shows `"{pct} %"`, plus `"≈ CHF {pct × base}/kWh"` when
-`percentage_base_summary.price_chf_per_kwh` is known. The existing single
-percentage summary is replaced by this list.
+**Pane (`TariffDetailPane.tsx`)**: each validity row includes its bands in the
+price column when `billing_mode === 'energy' && !version.dynamic_source` **or**
+`billing_mode === 'percentage_of_energy'`. The shared `rateLines` formatter
+shows each percentage and its effective price when the base price is known.
+Band edit/delete controls and the add-period action sit in that price column;
+version edit/delete controls sit in the validity column. There is no separate
+band section below the table.
 
 **Series summary (`useTariffDisplay.ts`)**: the percentage label is the single
 percentage when all bands share one, otherwise `"{min}–{max} %"`. The effective

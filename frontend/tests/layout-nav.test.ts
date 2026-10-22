@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { act } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MantineProvider } from '@mantine/core'
 import { Layout } from '../src/components/Layout'
 import { fetchFeasibilityCalculatorEnabled } from '../src/lib/api/feasibility'
 
@@ -106,7 +107,7 @@ async function renderLayout() {
             createElement(
                 MemoryRouter,
                 null,
-                createElement(QueryClientProvider, { client }, createElement(Layout)),
+                createElement(QueryClientProvider, { client }, createElement(MantineProvider, null, createElement(Layout))),
             ),
         )
     })
@@ -134,7 +135,7 @@ async function renderLayoutAt(path: string) {
         createElement(
             MemoryRouter,
             { initialEntries: [path] },
-            createElement(QueryClientProvider, { client }, createElement(Layout)),
+            createElement(QueryClientProvider, { client }, createElement(MantineProvider, null, createElement(Layout))),
         ),
     )
     await act(async () => {

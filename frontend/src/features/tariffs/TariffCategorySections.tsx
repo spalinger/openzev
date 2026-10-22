@@ -1,19 +1,24 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faChevronRight, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
+import { faChevronLeft, faChevronRight, faCircleExclamation, faPen, faPlus, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
 import { useTranslation } from 'react-i18next'
 import { formatShortDate } from '../../lib/appSettings'
 import { todayBusinessIso } from '../../lib/dates'
-import type { AppSettings, Tariff, TariffSeries } from '../../types/api'
+import type { AppSettings, Tariff, TariffPeriod, TariffSeries } from '../../types/api'
+import { bandWindow } from './bands'
 import { seriesKeyOf, useTariffDisplay } from './useTariffDisplay'
 import type { TariffOverviewRow } from './validity'
 import { emphasizedDate } from './datePresentation'
+import { TariffPricesCell } from './TariffPricesCell'
+import { validityState } from './validity'
+import { bandCoverage } from './bandDrafts'
+import { TariffBandCoverage } from './TariffBandEditor'
 
 const DATE_SLOT = '\u0000'
 
 const categoryOrder: Tariff['category'][] = ['energy', 'grid_fees', 'levies', 'metering']
 
 /** What a group of rows is about; it decides how a row words its validity. */
-export type TariffRowsKind = 'current' | 'upcoming' | 'history'
+export type TariffRowsKind = 'current' | 'history'
 
 type TariffCategorySectionsProps = {
     rows: TariffOverviewRow[]
@@ -23,6 +28,8 @@ type TariffCategorySectionsProps = {
     selected: { seriesKey: string, versionId: string } | null
     /** Open the exact version displayed by the row. */
     onOpenDetail: (series: TariffSeries, versionId: string) => void
+    onCloseDetail: () => void
+    onRepairBand?: (series: TariffSeries, versionId: string, period?: TariffPeriod) => void
 }
 
 /**
@@ -35,10 +42,13 @@ export function TariffCategorySections({
     settings,
     selected,
     onOpenDetail,
+    onCloseDetail,
+    onRepairBand,
 }: TariffCategorySectionsProps) {
     const { t } = useTranslation()
     const today = todayBusinessIso()
-    const { sourceById, validityBadge, rateLines, pricingTooltipFor } = useTariffDisplay(settings, today)
+    const display = useTariffDisplay(settings, today)
+    const { sourceById, validityBadge } = display
     const tariffSections = categoryOrder
         .map((category) => ({ category, rows: rows.filter((row) => row.series.category === category) }))
         .filter((section) => section.rows.length > 0)
@@ -60,14 +70,9 @@ export function TariffCategorySections({
                             <th scope="col">
                                 {t(`pages.tariffs.categories.${section.category}` as Parameters<typeof t>[0])}
                             </th>
-                            <th scope="col" className="tariff-table-applies">{t('pages.tariffs.rateCard.applies')}</th>
-                            <th scope="col" className="numeric">{t('pages.tariffs.rateCard.price')}</th>
-                            <th scope="col" className="tariff-table-unit">{t('pages.tariffs.rateCard.unit')}</th>
-                            <th scope="col" id={`tariff-bands-${kind}-${section.category}`} className="tariff-table-bands">
-                                <span className="visually-hidden">
-                                    {t('pages.tariffs.rateCard.applies')} · {t('pages.tariffs.rateCard.price')} · {t('pages.tariffs.rateCard.unit')}
-                                </span>
-                            </th>
+                            <th scope="col" id={`tariff-applies-${kind}-${section.category}`}>{t('pages.tariffs.rateCard.applies')}</th>
+                            <th scope="col" id={`tariff-price-${kind}-${section.category}`} className="numeric">{t('pages.tariffs.rateCard.price')}</th>
+                            <th scope="col" id={`tariff-unit-${kind}-${section.category}`} className="tariff-table-unit">{t('pages.tariffs.rateCard.unit')}</th>
                             <th scope="col" className="tariff-table-valid">{t('pages.tariffs.rateCard.valid')}</th>
                             <th scope="col" className="tariff-table-open">
                                 <span className="visually-hidden">{t('pages.tariffs.viewDetails')}</span>
@@ -75,26 +80,33 @@ export function TariffCategorySections({
                         </tr>
                     </thead>
                     <tbody>
-                        {section.rows.map(({ series, version: shown }) => {
+                        {section.rows.map(row => {
+                            const { series, version: shown } = row
                             const seriesKey = seriesKeyOf(series)
 
                             const dynamicSource = shown.dynamic_source ? sourceById.get(shown.dynamic_source) : undefined
                             const fetchFailed = dynamicSource?.last_fetch_status === 'failed'
-                            const lines = rateLines(series, shown)
-                            const pricingExplanation = pricingTooltipFor(series, shown, dynamicSource)
                             const badge = validityBadge(shown)
                             const notes = shown.notes?.trim()
-                            const isOpen = seriesKey === selected?.seriesKey && shown.id === selected.versionId
+                            const isOpen = seriesKey === selected?.seriesKey
+                            const scheduled = validityState(shown, today) === 'scheduled'
+                            const currentHasEnd = kind === 'current' && !scheduled && Boolean(shown.valid_to)
+                            const incomplete = !shown.dynamic_source && (series.billing_mode === 'energy' || series.billing_mode === 'percentage_of_energy') && shown.periods.length === 0
+                            const bandToReview = shown.periods.find(period => period.period_type !== 'flat' && !bandWindow(period))
+                                ?? bandCoverage(shown.periods).fallbacks[0]?.band
+
                             function openRow() {
-                                onOpenDetail(series, shown.id)
+                                if (isOpen && selected.versionId === shown.id) onCloseDetail()
+                                else onOpenDetail(series, shown.id)
                             }
 
                             return (
                                 <tr
                                     key={`${seriesKey}:${shown.id}`}
                                     data-row-key={`${seriesKey}:${shown.id}`}
+                                    data-series-key={seriesKey}
                                     className={[isOpen && 'is-selected', kind === 'history' && 'is-ended'].filter(Boolean).join(' ') || undefined}
-                                    onClick={openRow}
+                                    onClick={() => { if (!window.getSelection()?.toString()) openRow() }}
                                 >
                                     <td className="tariff-table-tariff">
                                         <div className="tariff-table-name">
@@ -125,43 +137,56 @@ export function TariffCategorySections({
                                                 </span>
                                             )}
                                         </div>
+                                        <div className="tariff-table-context">
                                         {series.energy_type && (
                                             <div className="tariff-table-meta">
                                                 {t(`pages.tariffs.energyTypes.${series.energy_type}` as Parameters<typeof t>[0])}
                                             </div>
                                         )}
-                                        {notes && <div className="tariff-table-notes" title={notes}>{notes}</div>}
-                                    </td>
-                                    <td className="tariff-table-lines tariff-table-applies">
-                                        {lines.map((line, index) => <div key={index} title={line.applies}>{line.applies}</div>)}
-                                    </td>
-                                    <td className="tariff-table-lines numeric" title={pricingExplanation}>
-                                        {lines.map((line, index) => <div key={index}>{line.price}</div>)}
-                                    </td>
-                                    <td className="tariff-table-lines tariff-table-unit">
-                                        {lines.map((line, index) => <div key={index} title={line.unit}>{line.unit}</div>)}
-                                    </td>
-                                    <td className="tariff-table-bands" headers={`tariff-bands-${kind}-${section.category}`}>
-                                        {lines.map((line, index) => (
-                                            <div key={index} className="tariff-table-band" title={pricingExplanation ?? line.applies}>
-                                                <span className="tariff-table-band-applies">{line.applies}</span>
-                                                {line.price && (
-                                                    <span className="tariff-table-band-price">
-                                                        {line.price} CHF{line.unit ? ` ${line.unit}` : ''}
-                                                    </span>
-                                                )}
+                                        {notes && <div className="tariff-table-notes" title={notes}>{series.energy_type && <span aria-hidden="true">· </span>}{notes}</div>}
+                                        </div>
+                                        {!shown.dynamic_source && (series.billing_mode === 'energy' || series.billing_mode === 'percentage_of_energy') && shown.periods.length > 0 && (
+                                            <TariffBandCoverage bands={shown.periods} warningsOnly />
+                                        )}
+                                        {(incomplete || bandToReview) && <div className="tariff-row-repair">
+                                            {onRepairBand ? <button type="button" className="button button-secondary button-compact" data-action-key={`repair-${shown.id}`} onClick={event => {
+                                                event.stopPropagation()
+                                                onRepairBand(series, shown.id, bandToReview)
+                                            }}><FontAwesomeIcon icon={incomplete ? faPlus : faPen} fixedWidth />{t(incomplete ? 'pages.tariffs.ux.addPrices' : 'pages.tariffs.ux.reviewWindow')}</button>
+                                                : <span><FontAwesomeIcon icon={faTriangleExclamation} fixedWidth />{' '}{incomplete ? t('pages.tariffs.workspace.incomplete') : t('pages.tariffs.ux.reviewWindow')}</span>}
+                                        </div>}
+                                        {shown.dynamic_price_summary?.status === 'partial' && <div className="tariff-band-coverage">
+                                            <div className="tariff-band-warning">
+                                                <FontAwesomeIcon icon={faCircleExclamation} fixedWidth aria-hidden="true" />
+                                                <p><button type="button" className="tariff-warning-link" onClick={event => {
+                                                    event.stopPropagation()
+                                                    onOpenDetail(series, shown.id)
+                                                }}>{t('pages.tariffs.ux.partial')}</button></p>
                                             </div>
-                                        ))}
+                                        </div>}
                                     </td>
+                                    <TariffPricesCell row={row} kind={kind} today={today} settings={settings} display={display} onOpenDetail={onOpenDetail} />
                                     <td className="tariff-table-valid">
-                                        {kind === 'upcoming'
+                                        {currentHasEnd ? null : scheduled
                                             ? upcomingStart(shown.valid_from)
                                             : kind === 'history'
                                                 ? <span>{formatShortDate(shown.valid_from, settings)} – {formatShortDate(shown.valid_to ?? shown.valid_from, settings)}</span>
                                                 : <span title={badge.tooltip}>{badge.label}</span>}
                                     </td>
                                     <td className="tariff-table-open">
-                                        <FontAwesomeIcon icon={faChevronRight} fixedWidth />
+                                        <button
+                                            type="button"
+                                            className="button button-ghost button-icon button-compact"
+                                            aria-label={isOpen ? t('common.close') : t('pages.tariffs.viewDetails')}
+                                            aria-expanded={isOpen}
+                                            onClick={(event) => {
+                                                event.stopPropagation()
+                                                if (isOpen) onCloseDetail()
+                                                else openRow()
+                                            }}
+                                        >
+                                            <FontAwesomeIcon icon={isOpen ? faChevronLeft : faChevronRight} fixedWidth />
+                                        </button>
                                     </td>
                                 </tr>
                             )

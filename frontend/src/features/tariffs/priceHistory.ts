@@ -38,6 +38,13 @@ type PriceHistory = {
     derived: boolean
 }
 
+/** A constant rate or absent prices do not need a history chart. */
+export function hasPriceChanges(history: PriceHistory): boolean {
+    const prices = history.points.map((point) => history.bands.map((band) => point.values[band] ?? null))
+    return new Set(prices.filter((values) => values.some((value) => value != null))
+        .map((values) => values.join('|'))).size > 1
+}
+
 const BAND_ORDER: BandKey[] = ['flat', 'high', 'low']
 const DAY_MS = 24 * 60 * 60 * 1000
 

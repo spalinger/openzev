@@ -158,3 +158,14 @@ it('lists but does not switch when the selection is fixed', async () => {
     expect(items[0].disabled || items[0].hasAttribute('data-disabled')).toBe(false)
     expect(items[1].disabled || items[1].hasAttribute('data-disabled')).toBe(true)
 })
+
+
+it('lets the page guard a community change before the selection or preference is mutated', async () => {
+    const onCommunitySwitch = vi.fn()
+    await render({ onCommunitySwitch })
+    await choose('ZEV Süd')
+    expect(state.context!.setSelectedZevId).not.toHaveBeenCalled()
+    expect(onCommunitySwitch).toHaveBeenCalledOnce()
+    await act(async () => onCommunitySwitch.mock.calls[0][0]())
+    expect(state.context!.setSelectedZevId).toHaveBeenCalledExactlyOnceWith('2')
+})

@@ -204,6 +204,15 @@ value has to be refused at entry rather than discovered at invoice time.
 `CheckConstraint` (`tariffperiod_exactly_one_price`) in addition to
 `TariffPeriod.clean()` — see SPEC-2026-percentage-tariff-bands §4.1.
 
+`TariffPeriodSerializer` requires both `time_from` and `time_to` for `high`,
+`low` and `band` on creation and update, returning field errors for missing
+endpoints. Partial updates validate the merged stored/submitted window. The
+same check applies to nested `initial_periods` and explicitly supplied bands
+when scheduling or duplicating a version; `flat`
+continues to allow null endpoints. Existing incomplete rows remain readable.
+`backend/tariffs/test_period_windows.py` covers rejection without writes,
+overnight windows, price-only partial updates and flat bands without times.
+
 **Ordering** is `["period_type", F("time_from").asc(nulls_first=True), "id"]`,
 so a tariff's bands read down the day. The null placement is stated rather than
 inherited: `time_from` is null for flat bands, SQLite and Postgres disagree on
@@ -241,9 +250,10 @@ on the spring day there is no 02:xx reading.
    The number of such periods is irrelevant — a band is matched by its window,
    never by its name, so three or five resolve exactly as two do.
 4. **Fallback:** when no period matches the hour, the day's **first band in this
-   season** — `periods[0]` under the ordering above, which is the earliest
-   window. Preferring an in-season band matters once seasons exist: billing a
-   January night at the summer rate would be the worse guess.
+   season** — the first in-season row under the ordering above. If no band
+   applies in that month, use the tariff's first band overall. Preferring an
+   in-season band matters once seasons exist: billing a January night at the
+   summer rate would be the worse guess.
 
 The month check comes **first, before the flat short-circuit**. A winter-only
 flat band that short-circuited on `period_type` would bill its winter price in
@@ -307,6 +317,14 @@ fallback above is deterministic and stated rather than accidental, and the
 importer warns when a document leaves hours unpriced — but a hand-entered
 tariff can still have a hole. Enforcing coverage would make a half-entered
 tariff invalid mid-edit, the same reason month coverage is not enforced either.
+The frontend overview and band editors warn about uncovered hours with an
+inline red exclamation icon. They name the actual fallback band and its price
+(or percentage), grouped by the months in which it fills a gap. The preview
+uses the model's `period_type`, `time_from` (null first), then `id` ordering,
+preferring the first in-season band and otherwise the first overall. The
+overview offers writers **Review time window**, opening a fallback band's
+editor; viewers see the same explanation without the write action. Complete
+schedules show no coverage notice in the overview. Billing rules are unchanged.
 
 ### 3.2b Seasonal bands
 
@@ -1174,22 +1192,27 @@ one.
 
 ---
 
-### Frontend write dialogs
+### Frontend tariff workspace
 
-Tariff create/edit, price-band, version/duplicate/rename and import dialogs reset
-when account, selected community or effective write capability changes. Pending
-delete confirmations are cancelled and recheck current scope before dispatch.
-CRUD and version completions invalidate the submitting community's series; an
-obsolete completion does not close replacement dialogs or show a toast. The
-validity filter and badges use the business date calculated on each render.
-Tariff and price-band submissions both require a selected community as well as
-effective write capability, including for admins.
+Tariffs, price bands and versions are managed in the detail pane. The canonical
+interaction contract is [Tariff split view, §§4–6](2026-10-tariff-split-view.md#4-overview),
+including overview prices, scheduling versus corrections, creation and draft guards.
+Static-energy creation accepts optional, write-only `initial_periods` on
+`POST /api/v1/tariffs/tariffs/`. Each entry accepts the normal band fields
+except `tariff` and `id`; the server assigns the newly created tariff. The list
+must be nonempty and is accepted only on creation of a static `energy` tariff.
+Every band uses `TariffPeriodSerializer` validation, including seasonal
+flat/timed conflicts. Tariff creation and all bands share one transaction;
+a failure rolls back all of them. The response retains the normal `periods`
+array. Omitting `initial_periods` preserves existing API behavior, so older
+unpriced versions remain repairable. Percentage and dynamic creation are unchanged.
+This does not change billing/versioning semantics.
 
-The tariff series query waits for a matching selected community record. ScopeGuard
-keeps the header visible during scope loading/failure/empty states and retains
-usable cached scope after refresh failures. Missing selection never means all
-communities in the management series filter. Retained tariff/period/version submit
-callbacks and each mutation's API dispatch check the current scope token.
+Writes require the selected community and effective write capability. Scope,
+account or permission changes invalidate the editing session. Delayed completion
+refreshes the submitting community's data but cannot close a replacement task.
+The management query waits for the selected community record and never treats a
+missing selection as a request for every community.
 
 ## 7. Invoice line-item construction
 

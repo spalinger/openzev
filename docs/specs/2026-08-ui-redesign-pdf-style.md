@@ -931,6 +931,9 @@ contracts are unchanged.
 
 ### 15.1 Tokens and type
 
+Native `.field-error` text and Mantine `InputWrapper` error text use
+`--danger-700`, matching the red exclamation icons in tariff warnings.
+
 - `design/tokens.json`: primitive `--line-strong`; semantics
   `--text-heading`, `--border-strong`, `--surface-sunken`, `--accent-rule`,
   `--sidebar-text`, `--sidebar-hover`, `--sidebar-line` (§4.1); field tokens
@@ -1090,7 +1093,7 @@ contracts are unchanged.
   The view is stored in the `view` query param (an unknown value reads as
   All); the type keeps `type`. Filters derive from the URL on every render, including
   same-page and back/forward navigation. Tariffs have no tabs: the list is
-  grouped Current · Upcoming · History, without counts (§15.3 below,
+  grouped as current/upcoming prices together, then Ended tariffs, without counts (§15.3 below,
   SPEC-2026-10-tariff-split-view §4); the tariff overview PDF's scope (valid or
   all) is chosen at its download (SPEC-2026-09-tariff-overview-pdf §11).
 - Participant list (`ParticipantCardsSection`): the billing period's row
@@ -1131,14 +1134,9 @@ contracts are unchanged.
     actions each take a full line.
 - Metering point list: one-line rows inside one sheet per building that open in
   place to their assignments (§15.4); Assign is `button-outline`.
-- Tariff list (`TariffOverview` → `TariffCategorySections`): a rate card like the tariff overview PDF.
-  - Groups: **Current** (the version in force), **Upcoming** (the nearest version still to start) and a folded **History** (`details`, the most recently ended version), each a sheet (`.table-card.invoice-rows.tariff-list`) with a `.tariff-table` per category inside; the group is named by an `h2`, so rows carry no status of their own. A series appears in every group it has a version for; History unfolds on its own when the linked version is a past one. No tariff, fee, band or version totals.
-  - List contents: the header shows the category. One row per series and group with its name, energy type, note first line, applicability, CHF price, unit, and validity as plain text (`since`/`until` in Current, `from` with the date emphasised in Upcoming, the date range in History). One line per band.
-  - Pricing and coverage: `buildRateLines` in `rateLines.ts` (tested in `tariff-rate-lines.test.ts`); per-kWh prices carry at least three decimals, fees two. Applies names the band, weekdays (`formatWeekdays`), window and season; a dynamic average reads "Dynamic, average" or "Dynamic, incomplete average"; a percentage names its share and base with the approximate price; fees name their basis. Applies lines carry their full text as tooltip; the price column carries the pricing explanation; a shown (non-upcoming) validity keeps the full range as tooltip.
-  - Band windows: an unnamed `band` uses its window as its name and prints that window once. Non-flat bands without both time bounds say "time window not configured", preserving any weekday/season text, for energy and percentage rates alike. Sibling count never implies complementary coverage; billing retains its first-band fallback (§3.2 of the billing-engine spec).
-  - Interaction and permissions: the name button owns the open action (`aria-expanded`, row click stays for the row); the row for the series and version shown in the pane is `.is-selected`. The row has no write actions: Edit and version actions live in the detail pane. Warnings beside the name only (gap count, "Price fetch failed"). History rows read greyed (`.is-ended`).
-  - Responsive: the list measures its own container. Below 56rem a row is a small card with one block per band, each with its own CHF, so wrapping cannot detach a price from its hours; validity last. The shared `.invoice-rows` header hiding is overridden for `.tariff-list`, so the category band stays on cards.
-- Tariff detail pane (`TariffDetailPane`, SPEC-2026-10-tariff-split-view §5, §6): in flow beside the list on a wide page (`.tariff-split[data-layout='wide']`, sticky, scrolling on its own), the whole area on a narrow one with the list `hidden`. A `section` named by its `h2`, without `aria-modal`; no scrim, scroll lock or focus trap. The header shows the name, one muted facts line and only the fetch-failure pill; the body shows the version block (validity window, status badge, Edit, the price of a tariff without bands, notes), the gap warning, the dynamic source (details in a disclosure), the bands (icon-only edit/delete), then the version picker (current, scheduled, past folded; hidden for a single version; a `⋮` menu per row) and the price history in a disclosure.
+- Tariffs use category sheets and an in-flow detail pane. Its overview, version
+  actions, source disclosures and editing behavior are specified once in
+  [Tariff split view, §§4–6](2026-10-tariff-split-view.md#4-overview).
 - Buttons: the primary `.button` is flat `--brand-deep` with a small forest
   drop shadow, no gradient or inner highlight; hover lightens it to
   `--brand`.

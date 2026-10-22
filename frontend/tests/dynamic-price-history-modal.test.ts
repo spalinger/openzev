@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   applyMinimumPrice,
   defaultHistoryDateRange,
+  elapsedPriceGaps,
   statsFromPoints,
   type TariffValidityContext,
 } from '../src/features/tariffs/DynamicPriceHistoryModal'
@@ -15,6 +16,25 @@ import type { DynamicPricePoint, DynamicTariffSource } from '../src/types/api'
 // pinned here the same way date-utils.test.ts pins a fixed zone, rather than
 // depending on whatever TZ the machine running the tests happens to have.
 const SAVED_TZ = process.env.TZ
+
+describe('elapsedPriceGaps', () => {
+  const now = Date.parse('2026-10-23T10:00:00Z')
+  it('does not warn about intervals in the future, including one starting exactly now', () => {
+    expect(elapsedPriceGaps([
+      { from: '2026-11-26T23:00:00Z', to: '2026-11-27T23:00:00Z' },
+      { from: '2026-10-23T10:00:00Z', to: '2026-10-23T11:00:00Z' },
+    ], now)).toEqual([])
+  })
+  it('keeps historical gaps and clips a gap spanning now to its elapsed part', () => {
+    expect(elapsedPriceGaps([
+      { from: '2026-10-22T22:00:00Z', to: '2026-10-22T23:00:00Z' },
+      { from: '2026-10-23T09:00:00Z', to: '2026-10-24T10:00:00Z' },
+    ], now)).toEqual([
+      { from: '2026-10-22T22:00:00Z', to: '2026-10-22T23:00:00.000Z' },
+      { from: '2026-10-23T09:00:00Z', to: '2026-10-23T10:00:00.000Z' },
+    ])
+  })
+})
 
 beforeAll(() => {
   process.env.TZ = 'Europe/Zurich'

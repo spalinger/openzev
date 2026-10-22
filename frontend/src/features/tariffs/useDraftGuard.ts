@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, type RefObject } from 'react'
 import { useBlocker } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 
@@ -32,15 +32,22 @@ export function allowNavigation(bypass: RefObject<boolean>, change: () => void) 
   }
 }
 
-/**
- * Asks before unsaved input is dropped (SPEC-2026-10-ui-patterns §6.2): by an
- * action in the pane (`run`), by browser Back/Forward or a link elsewhere in
- * the app (the router blocker), and by a reload or closed tab
- * (`beforeunload`, the browser's own prompt, no recovery afterwards). Staying
- * leaves the draft and the selection as they were.
- */
-export function useDraftGuard({ dirty, saving, confirm, bypass }: DraftGuardParams) {
+export function useDiscardConfirmation(confirm: DraftGuardParams['confirm']) {
   const { t } = useTranslation()
+  return (saving: boolean, onDiscard: () => void, onStay?: () => void) => confirm({
+    title: t('common.unsavedChanges.title'),
+    message: t(saving ? 'common.unsavedChanges.messageSaving' : 'common.unsavedChanges.message'),
+    confirmText: t(saving ? 'common.unsavedChanges.leave' : 'common.unsavedChanges.discard'),
+    cancelText: t('common.unsavedChanges.keepEditing'),
+    isDangerous: true,
+    onConfirm: onDiscard,
+    onCancel: () => onStay?.(),
+  })
+}
+
+/** Protect action, router and browser exits from unsaved or in-flight edits. */
+export function useDraftGuard({ dirty, saving, confirm, bypass }: DraftGuardParams) {
+  const askDiscard = useDiscardConfirmation(confirm)
   const active = dirty || saving
   const activeRef = useRef(active)
   const savingRef = useRef(saving)
@@ -51,15 +58,7 @@ export function useDraftGuard({ dirty, saving, confirm, bypass }: DraftGuardPara
   }, [active, saving])
 
   function ask(onDiscard: () => void, onStay?: () => void) {
-    confirm({
-      title: t('common.unsavedChanges.title'),
-      message: t(savingRef.current ? 'common.unsavedChanges.messageSaving' : 'common.unsavedChanges.message'),
-      confirmText: t('common.unsavedChanges.discard'),
-      cancelText: t('common.unsavedChanges.keepEditing'),
-      isDangerous: true,
-      onConfirm: () => allowNavigation(bypass, onDiscard),
-      onCancel: () => onStay?.(),
-    })
+    askDiscard(savingRef.current, () => allowNavigation(bypass, onDiscard), onStay)
   }
 
   /** Run `action` now, or once the user has agreed to discard the draft. */
@@ -69,11 +68,10 @@ export function useDraftGuard({ dirty, saving, confirm, bypass }: DraftGuardPara
   }
 
   const blocker = useBlocker(() => activeRef.current && !bypass.current)
-  useEffect(() => {
-    if (blocker.state !== 'blocked') return
-    ask(() => blocker.proceed(), () => blocker.reset())
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- asking once per block
-  }, [blocker.state])
+  const askNavigation = useEffectEvent(() => {
+    if (blocker.state === 'blocked') ask(() => blocker.proceed(), () => blocker.reset())
+  })
+  useEffect(() => { askNavigation() }, [blocker])
 
   useEffect(() => {
     if (!active) return

@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useMediaQuery } from '@mantine/hooks'
+import { useFocusTrap, useMediaQuery, useMergedRef } from '@mantine/hooks'
+import { Tooltip } from '@mantine/core'
 import { Link, NavLink, Outlet, matchPath, useLocation, useMatch, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../lib/auth'
@@ -36,16 +37,18 @@ function SidebarLink({ to, label, icon, active, end, className, scope, collapsed
     const ariaCurrent = isActive ? (pathname === to ? 'page' : 'true') : undefined
     const accessibleName = scope ? t('nav.scopedLabel', { scope, label }) : label
     return (
-        <Link
-            to={to}
-            className={`nav-link${isActive ? ' active' : ''}${className ? ` ${className}` : ''}`}
-            title={collapsed ? accessibleName : undefined}
-            aria-label={scope || collapsed ? accessibleName : undefined}
-            aria-current={ariaCurrent}
-        >
-            <span className="nav-icon">{icon}</span>
-            <span className="nav-label">{label}</span>
-        </Link>
+        <Tooltip label={accessibleName} disabled={!collapsed} openDelay={300} position="right" events={{ hover: true, focus: true, touch: false }}>
+            <Link
+                to={to}
+                className={`nav-link${isActive ? ' active' : ''}${className ? ` ${className}` : ''}`}
+                title={collapsed ? accessibleName : undefined}
+                aria-label={scope || collapsed ? accessibleName : undefined}
+                aria-current={ariaCurrent}
+            >
+                <span className="nav-icon">{icon}</span>
+                <span className="nav-label">{label}</span>
+            </Link>
+        </Tooltip>
     )
 }
 
@@ -82,12 +85,23 @@ export function Layout() {
     const userMenuTriggerRef = useRef<HTMLButtonElement | null>(null)
     const mobileMenuButtonRef = useRef<HTMLButtonElement | null>(null)
     const sidebarRef = useRef<HTMLElement | null>(null)
+    const trapRef = useFocusTrap(isMobile && isMobileMenuOpen)
+    const navigationRef = useMergedRef(sidebarRef, trapRef)
+    const wasMobileMenuOpen = useRef(false)
     const sidebarCollapseButtonRef = useRef<HTMLButtonElement | null>(null)
     const previousIsMobileRef = useRef(isMobile)
     const lastNavigationFocusRef = useRef<HTMLElement | null>(null)
     const mainRef = useRef<HTMLElement | null>(null)
 
     useRouteFocus(mainRef)
+
+    useLayoutEffect(() => {
+        if (wasMobileMenuOpen.current && !isMobileMenuOpen && isMobile &&
+            (document.activeElement === document.body || sidebarRef.current?.contains(document.activeElement))) {
+            mobileMenuButtonRef.current?.focus()
+        }
+        wasMobileMenuOpen.current = isMobileMenuOpen
+    }, [isMobileMenuOpen, isMobile])
 
     useEffect(() => {
         window.localStorage.setItem('openzev.sidebarCollapsed', String(isSidebarCollapsed))
@@ -213,7 +227,7 @@ export function Layout() {
                 className={`sidebar-overlay${isMobileMenuOpen ? ' visible' : ''}`}
                 onClick={() => setIsMobileMenuOpen(false)}
             />
-            <aside ref={sidebarRef} id="app-sidebar" className={`sidebar${isNavigationCollapsed ? ' collapsed' : ''}${isMobileMenuOpen ? ' mobile-open' : ''}`}>
+            <aside ref={navigationRef} id="app-sidebar" inert={isMobile && !isMobileMenuOpen} role={isMobile && isMobileMenuOpen ? 'dialog' : undefined} aria-modal={isMobile && isMobileMenuOpen ? true : undefined} aria-label={t('nav.menu')} className={`sidebar${isNavigationCollapsed ? ' collapsed' : ''}${isMobileMenuOpen ? ' mobile-open' : ''}`}>
                 {/* Persistent scope context (replaces switcher on platform routes). */}
                 <div className="sidebar-fixed">
                     <div className="sidebar-brand-row">
@@ -230,11 +244,15 @@ export function Layout() {
                             ref={sidebarCollapseButtonRef}
                             type="button"
                             className="sidebar-collapse-button"
+                            tabIndex={isMobile ? -1 : undefined}
                             onClick={() => setIsSidebarCollapsed((prev) => !prev)}
                             aria-label={isSidebarCollapsed ? t('nav.expandSidebar') : t('nav.collapseSidebar')}
                             title={isSidebarCollapsed ? t('nav.expandSidebar') : t('nav.collapseSidebar')}
                         >
                             <ChevronIcon direction={isSidebarCollapsed ? 'right' : 'left'} />
+                        </button>
+                        <button type="button" className="mobile-sidebar-close" data-autofocus={isMobile && isMobileMenuOpen || undefined} tabIndex={isMobile && isMobileMenuOpen ? 0 : -1} aria-label={t('common.close')} onClick={() => setIsMobileMenuOpen(false)}>
+                            <span aria-hidden="true">×</span>
                         </button>
                     </div>
                 </div>
@@ -382,7 +400,7 @@ export function Layout() {
                 </div>
             </aside>
 
-            <div className="content">
+            <div className="content" inert={isMobile && isMobileMenuOpen}>
                 <header className="top-nav">
                     <div className="mobile-bar">
                         <button

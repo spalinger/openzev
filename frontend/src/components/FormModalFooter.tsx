@@ -15,7 +15,7 @@ type FormModalFooterProps = {
   formId?: string
 }
 
-export function FormModalFooter({ onCancel, isPending, disabled, submitIcon, submitLabel, cancelIcon, compact, formId }: FormModalFooterProps) {
+export function FormModalFooter({ onCancel, isPending, disabled = false, submitIcon, submitLabel, cancelIcon, compact, formId }: FormModalFooterProps) {
   const { t } = useTranslation()
   return (
     <div className={`dialog-actions grid-span-full ${compact ? 'mt-05' : 'mt-1'}`}>

@@ -3,57 +3,80 @@
   gap: 0.375rem;
 }
 
-.tariff-period-actions {
-  display: flex;
-  gap: 0.375rem;
+.tariff-source-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.875rem 1rem;
+  margin: 0 0 0.75rem;
 }
 
-.tariff-period-line {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  flex-wrap: wrap;
+.tariff-source-fact-wide {
+  grid-column: 1 / -1;
 }
 
-/* The version being looked at: its window, standing and price once, with the
-   one action that changes it. The history below only picks which one. */
+.tariff-source-facts dt {
+  margin-bottom: 0.125rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
 
-.tariff-version-card {
+.tariff-source-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.875rem;
+  color: var(--ink);
+}
+
+.tariff-source-facts .tariff-source-address,
+.tariff-source-hint {
+  font-size: 0.8125rem;
+}
+
+.tariff-source-hint {
+  margin: 0.25rem 0 0;
+}
+
+.tariff-source-section {
   display: grid;
   gap: 0.375rem;
-  padding: 0.75rem 1rem;
-  border-radius: var(--radius-sm);
-  background: var(--surface);
 }
 
-.tariff-version-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem 0.75rem;
-  flex-wrap: wrap;
+.tariff-source-section h3 {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-muted);
 }
 
-.tariff-version-card-title {
+.tariff-source-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.tariff-source-statuses {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.25rem 0.75rem;
   flex-wrap: wrap;
+  font-size: 0.8125rem;
+}
+
+.tariff-source-status {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.375rem;
   min-width: 0;
 }
 
-.tariff-version-card-window {
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
+.tariff-source-status[data-status='ok'] {
+  color: var(--success-700);
 }
 
-.tariff-version-card-price,
 .tariff-version-card-notes {
   margin: 0;
-  color: var(--ink);
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   line-height: 1.45;
-  font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
 
@@ -61,59 +84,189 @@
   color: var(--text-muted);
 }
 
-.tariff-detail-label {
-  font-size: 0.6875rem;
-  font-weight: 650;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.tariff-period-section {
+.tariff-version-section,
+.tariff-chart-section {
   display: grid;
   gap: 0.75rem;
-  padding-top: 0.25rem;
-  border-top: 1px solid var(--border-default);
 }
 
-.tariff-period-section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  flex-wrap: wrap;
+.tariff-version-section > .button {
+  justify-self: end;
 }
 
-.tariff-period-section-header h4 {
+.tariff-chart-section h3 {
   margin: 0;
-}
-
-.tariff-period-list {
-  display: grid;
-  gap: 0.375rem;
-}
-
-.tariff-period-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.5rem 0.75rem;
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-}
-
-.tariff-period-main {
-  display: grid;
-  flex: 1;
-  min-width: 0;
-  gap: 0.3rem;
+  font-size: 0.9375rem;
 }
 
 .tariff-period-meta,
 .tariff-period-empty {
-  margin: 0;
+  margin: 0.125rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.tariff-pane .tariff-pane-table {
+  table-layout: fixed;
   font-size: 0.8125rem;
+}
+
+.tariff-pane-table :is(th, td) {
+  padding: 0.5rem 0.625rem;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+
+.tariff-pane-table thead th {
+  position: relative;
+  font-size: 0.75rem;
+}
+
+.tariff-pane-table .numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: normal;
+}
+
+.tariff-delete-button:hover:not(:disabled) {
+  background: var(--danger-100);
+  color: var(--danger-700);
+}
+
+.tariff-pane .tariff-version-table td {
+  padding: 0.5rem 0.625rem;
+  vertical-align: top;
+}
+
+.tariff-version-list {
+  --tariff-version-row-height: 6rem;
+  --tariff-version-heading-height: 2.25rem;
+
+  max-height: calc(var(--tariff-version-heading-height) + 5 * var(--tariff-version-row-height));
+  overflow-y: auto;
+}
+
+.tariff-version-list .tariff-version-row {
+  height: var(--tariff-version-row-height);
+}
+
+.tariff-version-list thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: var(--tariff-version-heading-height);
+  box-sizing: border-box;
+}
+
+.tariff-version-price-column {
+  width: 62%;
+}
+
+.tariff-version-row.is-shown > td {
+  background: var(--surface);
+}
+
+.tariff-version-row.is-shown > td:first-child {
+  box-shadow: inset 3px 0 0 var(--brand-mid);
+}
+
+.tariff-version-row.is-ended {
+  color: color-mix(in srgb, var(--text-body) 50%, var(--text-muted));
+}
+
+.tariff-version-actions {
+  display: flex;
+  gap: 0.125rem;
+}
+
+.tariff-version-row {
+  cursor: pointer;
+}
+
+.tariff-version-row:hover > td {
+  background: var(--surface);
+}
+
+.tariff-version-select {
+  display: block;
+  width: 100%;
+  min-height: 2.75rem;
+  margin-bottom: 0.25rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tariff-version-select:focus-visible {
+  outline-offset: -3px;
+}
+
+.tariff-version-context,
+.tariff-version-prices {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.tariff-version-prices {
+  gap: 0.75rem;
+}
+
+.tariff-version-rate {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+}
+
+.tariff-version-rate + .tariff-version-rate {
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border-default);
+}
+
+.tariff-version-applies {
+  grid-column: 1 / -1;
+}
+
+.tariff-version-applies,
+.tariff-version-unit {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.tariff-version-amount {
+  grid-column: 1;
+  grid-row: 2;
+  font-variant-numeric: tabular-nums;
+}
+
+.tariff-version-rate > .tariff-version-actions {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.tariff-version-amount strong {
+  white-space: nowrap;
+}
+
+.tariff-version-add-band {
+  max-width: 100%;
+  margin-top: 0.5rem;
+}
+
+.tariff-version-window {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.tariff-chart-section .tariff-price-history {
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 
 /* ── Tariff detail pane ──────────────────────────────────────────────────
@@ -122,6 +275,7 @@
    scrolls on its own when taller than the screen. */
 
 .tariff-pane {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -129,6 +283,16 @@
   border-radius: var(--radius-lg);
   background: var(--surface-card);
   box-shadow: var(--shadow-sheet);
+}
+
+@container (max-width: 26rem) {
+  .tariff-pane-table :is(th, td) {
+    padding-inline: 0.5rem;
+  }
+
+  .tariff-version-window {
+    font-weight: 500;
+  }
 }
 
 .tariff-split[data-layout='wide'] .tariff-pane {
@@ -146,31 +310,70 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  padding: 1rem 1.25rem;
+  flex-wrap: wrap;
+  padding: 1.25rem;
   border-bottom: 1px solid var(--border-default);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  background: var(--surface-card);
+  background: var(--brand-deep);
+  color: var(--white);
 }
 
 .tariff-pane-heading {
+  flex: 1 1 12rem;
   display: grid;
   gap: 0.375rem;
   min-width: 0;
 }
 
-.tariff-pane-heading h2 {
-  margin: 0;
-  overflow-wrap: anywhere;
+.tariff-pane-title {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
 }
 
-.tariff-pane-heading h2:focus {
-  outline: none;
+.tariff-pane-title > .button {
+  flex-shrink: 0;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tariff-pane-title > .button {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .tariff-pane-title:hover > .button,
+  .tariff-pane-title > .button:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.tariff-pane-heading h2 {
+  min-width: 0;
+  margin: 0;
+  font-size: 1.125rem;
+  overflow-wrap: anywhere;
+  color: var(--white);
+}
+
+.tariff-pane-heading h2:focus-visible {
+  outline-color: var(--brand-accent);
 }
 
 .tariff-pane-meta {
   margin: 0;
   font-size: 0.875rem;
-  color: var(--text-muted);
+  color: var(--brand-accent);
+}
+
+.tariff-pane-header .tariff-version-card-notes {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--brand-accent);
+  white-space: pre-line;
 }
 
 .tariff-pane-heading > .badge {
@@ -178,122 +381,77 @@
 }
 
 .tariff-pane-body {
-  padding: 1.25rem 1.25rem 1.75rem;
+  gap: 1.25rem;
+  padding: 1rem 1.25rem 1.25rem;
 }
 
-.tariff-pane-actions {
-  padding-bottom: 0.25rem;
-  border-bottom: 1px solid var(--border-default);
+.tariff-pane-header-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  max-width: 100%;
+  margin-left: auto;
+  gap: 0.125rem;
 }
 
-/* ── Tariff versions ─────────────────────────────────────────────────────── */
-
-.tariff-version-section {
-  display: grid;
-  gap: 0.75rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--border-default);
+.tariff-pane-header .button {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--white);
 }
 
-.tariff-version-section h3,
-.tariff-period-section-header h3 {
-  margin: 0;
-  font-size: 1rem;
+.tariff-pane-header .button:hover {
+  background: var(--brand-mid);
+  color: var(--white);
 }
 
-.tariff-version-group {
-  display: grid;
-  gap: 0.4rem;
-}
-
-.tariff-version-group h4 {
-  margin: 0;
-}
-
-.tariff-version-list {
-  display: grid;
-  gap: 0.4rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-/* A past version: grey, still readable and still editable. */
-
-.tariff-version-row.is-ended .tariff-version-window,
-.tariff-version-row.is-ended strong {
-  color: color-mix(in srgb, var(--text-body) 50%, var(--text-muted));
+.tariff-pane-header .button:focus-visible {
+  outline-color: var(--brand-accent);
 }
 
 /* Secondary pane content on demand. */
 
+.tariff-disclosure {
+  border-top: 1px solid var(--border-default);
+}
+
 .tariff-disclosure > summary {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.25rem 0;
+  min-height: 2.75rem;
+  padding: 0.625rem 0;
   cursor: pointer;
-  color: var(--text-muted);
+  color: var(--text-body);
+  font-size: 0.875rem;
+  font-weight: 600;
   list-style: none;
+}
+
+.tariff-disclosure > summary:hover {
+  color: var(--ink);
+  background: var(--surface);
 }
 
 .tariff-disclosure > summary::-webkit-details-marker {
   display: none;
 }
 
-.tariff-disclosure > summary::after {
-  content: '+';
+.tariff-disclosure-chevron {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 0.6875rem;
 }
 
-.tariff-disclosure[open] > summary::after {
-  content: '−';
+.tariff-disclosure[open] > summary .tariff-disclosure-chevron {
+  transform: rotate(180deg);
 }
 
 .tariff-disclosure[open] > summary {
   margin-bottom: 0.5rem;
-}
-
-.tariff-version-row {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  border: 1px solid var(--border-default);
-  border-radius: 0.7rem;
-  padding: 0.15rem 0.5rem 0.15rem 0.15rem;
-  background: var(--surface-card);
-}
-
-.tariff-version-row.is-shown {
-  border-color: var(--brand-accent);
-  background: var(--brand-pale);
-}
-
-/* The whole row is the selector, so the click target matches the affordance. */
-
-.tariff-version-select {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-  background: none;
-  border: 0;
-  padding: 0.5rem;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  border-radius: 0.5rem;
-}
-
-.tariff-version-select:hover {
-  background: var(--surface);
-}
-
-.tariff-version-window {
-  color: var(--text-body);
-  font-variant-numeric: tabular-nums;
 }
 
 .tariff-gap-warning {
@@ -362,4 +520,42 @@
   padding: 0.75rem 0;
   background: var(--surface-card);
   border-top: 1px solid var(--border-default);
+}
+
+.tariff-editor-title {
+  margin: 0;
+  font-size: 0.9375rem;
+}
+
+.tariff-version-status {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.tariff-pane-back {
+  display: none;
+}
+
+.tariff-split[data-layout='narrow'] .tariff-pane-back {
+  display: flex;
+  align-self: flex-start;
+  margin: 0.5rem;
+}
+
+.tariff-split[data-layout='narrow'] .tariff-pane-close {
+  display: none;
+}
+
+.tariff-change-preview {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0.375rem;
+  padding: 0.75rem;
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+}
+
+.tariff-change-preview p {
+  margin: 0;
 }

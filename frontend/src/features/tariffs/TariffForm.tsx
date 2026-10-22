@@ -3,6 +3,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCheck, faPlus, faXmark } from '@fortawesome/free-solid-svg-icons'
 import { useQuery } from '@tanstack/react-query'
 import { Controller, useForm, useWatch } from 'react-hook-form'
+import { Textarea } from '@mantine/core'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FormModalFooter } from '../../components/FormModalFooter'
@@ -14,6 +15,8 @@ import { dynamicSourceOptions, impliedEnergyType } from './dynamicSources'
 import { DynamicSourceForm } from './DynamicSourceFormModal'
 import { Notice } from '../../components/Notice'
 import { useFocusFirstField } from './useFocusFirstField'
+import { TariffBandEditor } from './TariffBandEditor'
+import { emptyBand, sameBands, type BandDraft } from './bandDrafts'
 import {
   defaultTariffFormValues,
   mapTariffFormValuesToInput,
@@ -47,6 +50,7 @@ type TariffFormProps = {
   onCancel: () => void
   /** Whether anything was changed, for the pane's unsaved-input guard. */
   onDirtyChange: (dirty: boolean) => void
+  onSourcePendingChange?: (pending: boolean) => void
 }
 
 /**
@@ -61,13 +65,22 @@ export function TariffForm({
   onSubmit,
   onCancel,
   onDirtyChange,
+  onSourcePendingChange,
 }: TariffFormProps) {
   const { t } = useTranslation()
   const formId = useId()
   const [showSourceSection, setShowSourceSection] = useState(false)
   const [sourceDirty, setSourceDirty] = useState(false)
+  const [initialBands, setInitialBands] = useState<BandDraft[]>([emptyBand()])
   const formRef = useRef<HTMLFormElement>(null)
+  const sourceButtonRef = useRef<HTMLButtonElement>(null)
   useFocusFirstField(formRef)
+
+  useEffect(() => {
+    if (!showSourceSection) return
+    const sourceButton = sourceButtonRef.current
+    return () => sourceButton?.focus()
+  }, [showSourceSection])
 
   const form = useForm<TariffFormValues>({
     resolver: zodResolver(tariffFormSchema),
@@ -93,8 +106,7 @@ export function TariffForm({
     control: form.control,
     name: 'energy_type',
   })
-  // An existing tariff is one version of a series; its identity fields are
-  // fixed. Creating a new tariff still sets them freely.
+  // An existing version keeps the identity fields shared by its tariff series.
   const isVersion = Boolean(initialTariff)
   // The backend refuses to link a dynamic source onto a version that already
   // has price bands (and, symmetrically, to add a band to an already-dynamic
@@ -103,7 +115,7 @@ export function TariffForm({
   // letting the pick fail at submit with a raw field-name toast.
   const hasExistingPeriods = isVersion && (initialTariff?.periods?.length ?? 0) > 0
 
-  // Fetched once per modal session, not gated on billing_mode: the picker
+  // Fetched once per editing session, not gated on billing_mode: the picker
   // only *renders* for an energy tariff, but the list has to be ready by
   // then rather than triggering a fetch (and a loading flash) on every
   // billing-mode change.
@@ -120,20 +132,21 @@ export function TariffForm({
   }, [sourcesData, dynamicSourceId])
 
   const isDirty = form.formState.isDirty || (showSourceSection && sourceDirty)
+    || (!isVersion && billingMode === 'energy' && !dynamicSourceId && !sameBands(initialBands, [emptyBand()]))
   useEffect(() => { onDirtyChange(isDirty) }, [isDirty, onDirtyChange])
 
-  // A field's problem is told by the field. The schema's own messages are
-  // English and generic; the form says it in the user's language.
   const errors = form.formState.errors
-  const fieldError = (field: keyof TariffFormValues) => {
-    if (!errors[field]) return null
-    const value = form.getValues(field)
-    return (
-      <small className="field-error" role="alert">
-        {t(typeof value === 'string' && value.trim() ? 'pages.tariffs.form.errorNumber' : 'pages.tariffs.form.errorRequired')}
-      </small>
-    )
-  }
+  const errorText = (field: keyof TariffFormValues) => errors[field]
+    ? t(errors[field]?.message === 'number' ? 'pages.tariffs.form.errorNumber' : 'pages.tariffs.form.errorRequired')
+    : undefined
+  const errorId = (field: keyof TariffFormValues) => `${formId}-${field}-error`
+  const fieldError = (field: keyof TariffFormValues) => errors[field]
+    ? <small id={errorId(field)} className="field-error" role="alert">{errorText(field)}</small>
+    : null
+  const errorProps = (field: keyof TariffFormValues) => ({
+    'aria-invalid': !!errors[field] || undefined,
+    'aria-describedby': errors[field] ? errorId(field) : undefined,
+  })
 
   // Picking a source is what decides the energy type for a brand-new tariff
   // (there is nothing else to derive it from); an existing version's energy
@@ -149,21 +162,44 @@ export function TariffForm({
   }, [dynamicSourceId, isVersion, sourcesData, form])
 
   function submit(values: TariffFormValues) {
-    onSubmit(mapTariffFormValuesToInput(values, selectedZevId))
+    const payload = mapTariffFormValuesToInput(values, selectedZevId)
+    // A concurrent rename must not be undone by the mount-time form seed.
+    if (initialTariff) payload.name = initialTariff.name
+    else if (values.billing_mode === 'energy' && !values.dynamic_source) {
+      payload.initial_periods = initialBands.map(band => ({ ...band, percentage: null }))
+    }
+    onSubmit(payload)
   }
+
+  const selectedSource = sourcesData?.find((source) => source.id === dynamicSourceId)
+  const sourceEnergyType = selectedSource && impliedEnergyType(selectedSource)
+  const energyTypeHintId = `${formId}-energy-type-hint`
+  const energyTypeField = !isVersion && (
+    <label>
+      <span>{t('pages.tariffs.form.energyType')}</span>
+      {billingMode === 'energy' && sourceEnergyType ? (
+        <span className="tariff-readonly-value">{t(`pages.tariffs.energyTypes.${sourceEnergyType}`)}</span>
+      ) : (
+        <select {...form.register('energy_type')} aria-describedby={energyTypeHintId}>
+          <option value="local">{t('pages.tariffs.energyTypes.local')}</option>
+          <option value="grid">{t('pages.tariffs.energyTypes.grid')}</option>
+          <option value="feed_in">{t('pages.tariffs.energyTypes.feed_in')}</option>
+        </select>
+      )}
+      <small id={energyTypeHintId} className="muted">
+        {t(`pages.tariffs.form.energyTypeHints.${billingMode === 'energy' && sourceEnergyType ? sourceEnergyType : energyType}`)}
+      </small>
+    </label>
+  )
 
   return (
     <div className="tariff-pane-form">
-      {error && <Notice tone="error">{error}</Notice>}
-      <form ref={formRef} id={formId} onSubmit={form.handleSubmit(submit)} className="form-grid" aria-busy={isPending || undefined}>
-       <fieldset className="tariff-pane-fieldset" disabled={isPending}>
-        {/* Editing an existing tariff means editing one *version* of it. The name
-            groups versions, and category/billing mode/energy type must match
-            across them, so the four identity fields are shown as values rather
-            than inputs. Rendering them instead of disabling them is deliberate:
-            react-hook-form treats a disabled registered field as undefined, which
-            would quietly blank the name on save. The values still reach the
-            payload from the form state seeded by reset(). */}
+      {isVersion && <p className="muted">{t('pages.tariffs.workspace.correctionHint')}</p>}
+      {error && !showSourceSection && <Notice tone="error">{error}</Notice>}
+      {Object.keys(errors).some(key => !['name', 'minimum_price_chf_per_kwh', 'initial_percentage', 'fixed_price_chf', 'valid_from', 'valid_to'].includes(key)) && <Notice tone="error">{t('pages.tariffs.form.errorRequired')}</Notice>}
+      <form ref={formRef} id={formId} onSubmit={form.handleSubmit(submit)} className="form-grid tariff-configuration-form" data-creation={!isVersion} hidden={showSourceSection} aria-busy={isPending || undefined}>
+        <fieldset className="tariff-pane-fieldset" disabled={isPending}>
+        {/* Preserve seeded identity values while displaying their current metadata. */}
         {isVersion ? (
           <div className="tariff-identity-summary" style={{ gridColumn: '1 / -1' }}>
             <div>
@@ -192,7 +228,7 @@ export function TariffForm({
           <>
             <label>
               <span>{t('pages.tariffs.form.name')}</span>
-              <input {...form.register('name')} required />
+              <input {...form.register('name')} {...errorProps('name')} required />
               {fieldError('name')}
             </label>
             <label>
@@ -217,16 +253,6 @@ export function TariffForm({
                 <option value="shared_yearly_fee">{t('pages.tariffs.billingModes.shared_yearly_fee')}</option>
               </select>
             </label>
-            {(billingMode === 'energy' || billingMode === 'percentage_of_energy') && (
-              <label>
-                <span>{t('pages.tariffs.form.energyType')}</span>
-                <select {...form.register('energy_type')}>
-                  <option value="local">{t('pages.tariffs.energyTypes.local')}</option>
-                  <option value="grid">{t('pages.tariffs.energyTypes.grid')}</option>
-                  <option value="feed_in">{t('pages.tariffs.energyTypes.feed_in')}</option>
-                </select>
-              </label>
-            )}
           </>
         )}
 
@@ -236,12 +262,14 @@ export function TariffForm({
           <div style={{ gridColumn: '1 / -1', display: 'grid', gap: '0.5rem' }}>
             <label>
               <span>{t('pages.tariffs.form.dynamicSource')}</span>
-              <select {...form.register('dynamic_source')} disabled={sourcesQuery.isLoading || hasExistingPeriods}>
+              {hasExistingPeriods ? (
+                <span className="tariff-readonly-value">{t('pages.tariffs.form.dynamicSourceNone')}</span>
+              ) : <select {...form.register('dynamic_source')} value={dynamicSourceId} disabled={sourcesQuery.isLoading}>
                 <option value="">{t('pages.tariffs.form.dynamicSourceNone')}</option>
                 {availableSources.map((source) => (
                   <option key={source.id} value={source.id}>{source.label}</option>
                 ))}
-              </select>
+              </select>}
               <small className="muted">
                 {hasExistingPeriods
                   ? t('pages.tariffs.form.dynamicSourceBlockedByPeriods')
@@ -250,7 +278,7 @@ export function TariffForm({
                     : t('pages.tariffs.form.dynamicSourceHint')}
               </small>
             </label>
-            <p className="muted" style={{ margin: 0 }}>{t('pages.tariffs.form.sharedSourceHint')}</p>
+            {energyTypeField}
             {energyType === 'feed_in' && dynamicSourceId && (
               <label>
                 <span>{t('pages.tariffs.form.minimumPrice')}</span>
@@ -259,12 +287,13 @@ export function TariffForm({
                   step="0.00001"
                   min="0"
                   placeholder={t('pages.tariffs.form.minimumPricePlaceholder')}
-                  {...form.register('minimum_price_chf_per_kwh')}
+                  {...form.register('minimum_price_chf_per_kwh')} {...errorProps('minimum_price_chf_per_kwh')}
                 />
                 <small className="muted">{t('pages.tariffs.form.minimumPriceHint')}</small>
                 {fieldError('minimum_price_chf_per_kwh')}
               </label>
             )}
+            {dynamicSourceId && <p className="muted tariff-form-hint">{t('pages.tariffs.form.sharedSourceHint')}</p>}
             {selectedSourceAggregatedTypes.length > 0 && (
               <div className="warning-banner">
                 {t('pages.dynamicSources.form.doubleCountingWarning', {
@@ -279,6 +308,7 @@ export function TariffForm({
                 <button
                   className="button button-secondary button-compact"
                   type="button"
+                  ref={sourceButtonRef}
                   onClick={() => setShowSourceSection(true)}
                 >
                   <FontAwesomeIcon icon={faPlus} fixedWidth />
@@ -289,13 +319,17 @@ export function TariffForm({
           </div>
         )}
 
+        {billingMode === 'percentage_of_energy' && energyTypeField}
+        {!isVersion && billingMode === 'energy' && !dynamicSourceId && (
+          <TariffBandEditor value={initialBands} onChange={setInitialBands} disabled={isPending} />
+        )}
         {billingMode === 'percentage_of_energy' ? (
-          // Editing a version already has bands to manage in the drawer, so
+          // Editing a version already has bands to manage in the pane, so
           // the field is create-only (§5.7) — it just seeds the first one.
           !isVersion && (
             <label>
               <span>{t('pages.tariffs.form.initialPercentage')}</span>
-              <input type="number" step="0.01" min="0" {...form.register('initial_percentage')} required />
+              <input type="number" step="0.01" min="0" {...form.register('initial_percentage')} {...errorProps('initial_percentage')} required />
               <small className="muted">{t('pages.tariffs.form.initialPercentageHint')}</small>
               {fieldError('initial_percentage')}
             </label>
@@ -303,13 +337,8 @@ export function TariffForm({
         ) : billingMode !== 'energy' ? (
           <label>
             <span>{t(FIXED_PRICE_LABELS[billingMode] ?? 'pages.tariffs.form.monthlyFee')}</span>
-            <input type="number" step="0.01" {...form.register('fixed_price_chf')} required />
+            <input type="number" step="0.01" {...form.register('fixed_price_chf')} {...errorProps('fixed_price_chf')} required />
             {fieldError('fixed_price_chf')}
-            {isSharedFee && (
-              <small className="muted">
-                {t(splitKey === 'weight' ? 'pages.tariffs.form.sharedFeeHintWeight' : 'pages.tariffs.form.sharedFeeHint')}
-              </small>
-            )}
           </label>
         ) : null}
 
@@ -320,41 +349,54 @@ export function TariffForm({
               <option value="equal">{t('pages.tariffs.form.splitKeyEqual')}</option>
               <option value="weight">{t('pages.tariffs.form.splitKeyWeight')}</option>
             </select>
+            <small className="muted">
+              {t(splitKey === 'weight' ? 'pages.tariffs.form.sharedFeeHintWeight' : 'pages.tariffs.form.sharedFeeHint')}
+            </small>
           </label>
         )}
 
-        <label>
-          <span>{t('pages.tariffs.form.validFrom')}</span>
-          <Controller
-            control={form.control}
-            name="valid_from"
-            render={({ field }) => (
-              <CivilDateInput
-                value={field.value || null}
-                onChange={(iso) => field.onChange(iso ?? '')}
-              />
-            )}
-          />
-        </label>
-        <label>
-          <span>{t('pages.tariffs.form.validTo')}</span>
-          <Controller
-            control={form.control}
-            name="valid_to"
-            render={({ field }) => (
-              <CivilDateInput
-                value={field.value || null}
-                onChange={(iso) => field.onChange(iso ?? '')}
-              />
-            )}
-          />
-        </label>
-        <label>
-          <span>{t('pages.tariffs.form.notes')}</span>
-          <input {...form.register('notes')} />
-        </label>
+        <div className="tariff-validity-fields">
+          <label>
+            <span>{t('pages.tariffs.form.validFrom')}</span>
+            <Controller
+              control={form.control}
+              name="valid_from"
+              render={({ field }) => (
+                <CivilDateInput
+                  error={errorText(field.name)}
+                  errorId={errorId(field.name)}
+                  value={field.value || null}
+                  onChange={(iso) => field.onChange(iso ?? '')}
+                />
+              )}
+            />
+          </label>
+          <label>
+            <span>{t('pages.tariffs.form.validTo')}</span>
+            <Controller
+              control={form.control}
+              name="valid_to"
+              render={({ field }) => (
+                <CivilDateInput
+                  error={errorText(field.name)}
+                  errorId={errorId(field.name)}
+                  value={field.value || null}
+                  onChange={(iso) => field.onChange(iso ?? '')}
+                />
+              )}
+            />
+          </label>
+        </div>
+        <Textarea
+          className="tariff-notes-field"
+          label={t('pages.tariffs.form.notes')}
+          minRows={isVersion ? 5 : 2}
+          maxRows={12}
+          autosize
+          {...form.register('notes')}
+        />
 
-       </fieldset>
+        </fieldset>
       </form>
       {showSourceSection && (
         <section className="tariff-pane-section" aria-labelledby={`${formId}-source`}>
@@ -362,6 +404,7 @@ export function TariffForm({
           <DynamicSourceForm
             onClose={() => setShowSourceSection(false)}
             onDirtyChange={setSourceDirty}
+            onPendingChange={onSourcePendingChange}
             onSaved={(source) => {
               form.setValue('dynamic_source', source.id, { shouldValidate: true, shouldDirty: true })
               const energyType = impliedEnergyType(source)
@@ -370,14 +413,14 @@ export function TariffForm({
           />
         </section>
       )}
-      <FormModalFooter
+      {!showSourceSection && <FormModalFooter
         formId={formId}
         onCancel={onCancel}
         isPending={isPending}
-        submitLabel={isPending ? t('common.saving') : initialTariff ? t('pages.tariffs.saveTariff') : t('pages.tariffs.createTariff')}
+        submitLabel={isPending ? t('common.saving') : initialTariff ? t('pages.tariffs.workspace.saveCorrection') : t('pages.tariffs.createTariff')}
         submitIcon={<FontAwesomeIcon icon={faCheck} fixedWidth />}
         cancelIcon={<FontAwesomeIcon icon={faXmark} fixedWidth />}
-      />
+      />}
     </div>
   )
 }

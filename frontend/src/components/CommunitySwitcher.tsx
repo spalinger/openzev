@@ -11,17 +11,18 @@ import { ConfirmDialog, useConfirmDialog } from './ConfirmDialog'
  * the title opens the list of the account's communities. With one community
  * (or none) there is nothing to choose, and the name stays plain text.
  */
-export function CommunitySwitcher({ name }: { name: ReactNode }) {
+export function CommunitySwitcher({ name, onSwitch }: { name: ReactNode; onSwitch?: (change: () => void) => void }) {
     const managedZev = useOptionalManagedZev()
     if (!managedZev || (managedZev.entries ?? []).length < 2) {
         return <>{name}</>
     }
-    return <CommunityMenu name={name} managedZev={managedZev} />
+    return <CommunityMenu name={name} managedZev={managedZev} onSwitch={onSwitch} />
 }
 
-function CommunityMenu({ name, managedZev }: {
+function CommunityMenu({ name, managedZev, onSwitch }: {
     name: ReactNode
     managedZev: NonNullable<ReturnType<typeof useOptionalManagedZev>>
+    onSwitch?: (change: () => void) => void
 }) {
     const { t } = useTranslation()
     const { dialog, confirm, handleConfirm, handleCancel } = useConfirmDialog()
@@ -32,6 +33,10 @@ function CommunityMenu({ name, managedZev }: {
     // switch drops it. Clean switches go through immediately.
     function requestSwitch(zevId: string) {
         if (zevId === selectedZevId) {
+            return
+        }
+        if (onSwitch) {
+            onSwitch(() => setSelectedZevId(zevId))
             return
         }
         if (!hasUnsavedZevSettingsDraft()) {

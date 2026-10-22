@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { waitForCondition } from './helpers/waitForCondition'
+import { useTariffEditor } from '../src/features/tariffs/useTariffEditor'
 import { useTariffCrud } from '../src/features/tariffs/useTariffCrud'
 import { useTariffVersions } from '../src/features/tariffs/useTariffVersions'
 import type { Tariff, TariffInput, TariffPeriodInput, TariffSeries, TariffVersion } from '../src/types/api'
@@ -26,12 +27,14 @@ let confirmation: { onConfirm: () => void }
 const toast = vi.fn()
 const tariffSaved = vi.fn()
 const versionSaved = vi.fn()
+const periodSaved = vi.fn()
 const tariff = { id: 'tariff-A', zev: 'A' } as Tariff
 const series = { zev: 'A' } as TariffSeries
 const source = { id: tariff.id } as TariffVersion
 function Harness() {
-    const shared = { selectedZevId: zevId, canWrite, queryClient: client, pushToast: toast, t: (key: string) => key }
-    const currentCrud = useTariffCrud({ ...shared, tariffs: [tariff], periods: [], bandableTariffs: [tariff], tariffNameById: new Map(), confirm: options => { confirmation = options }, onTariffSaved: tariffSaved })
+    const editing = useTariffEditor(`${zevId}|${canWrite}|${api.userId}`)
+    const shared = { editing, selectedZevId: zevId, canWrite, queryClient: client, pushToast: toast, t: (key: string) => key }
+    const currentCrud = useTariffCrud({ ...shared, tariffs: [tariff], periods: [], bandableTariffs: [tariff], tariffNameById: new Map(), confirm: options => { confirmation = options }, onTariffSaved: tariffSaved, onPeriodSaved: periodSaved })
     const currentVersions = useTariffVersions({ ...shared, onSaved: versionSaved })
     useLayoutEffect(() => { crud = currentCrud; versions = currentVersions }, [currentCrud, currentVersions])
     return null
@@ -92,7 +95,7 @@ it.each(['save', 'rename'])('ignores delayed %s UI completion while invalidating
     act(() => { crud.openCreateTariff(); versions.openRename({ ...series, zev: 'B' }, source) })
     await act(async () => resolve(tariff))
     await waitForCondition(() => invalidate.mock.calls.length > 0, 'cache invalidation')
-    expect(crud.tariffFormOpen).toBe(true)
+    expect(crud.tariffFormOpen).toBe(false)
     expect(versions.dialog).not.toBeNull()
     expect(toast).not.toHaveBeenCalled()
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.tariffs.series('A') })
@@ -195,4 +198,28 @@ it.each(['save', 'rename'])('a %s finishing after its form was closed neither re
     expect(versionSaved).not.toHaveBeenCalled()
     expect(crud.tariffFormOpen).toBe(false)
     expect(versions.dialog?.kind).toBe('duplicate')
+})
+
+it('has only one active tariff, band or version editor', () => {
+    act(() => crud.openCreateTariff())
+    expect(crud.tariffFormOpen).toBe(true)
+    act(() => crud.openCreatePeriod())
+    expect(crud.tariffFormOpen).toBe(false)
+    expect(crud.periodFormOpen).toBe(true)
+    act(() => versions.openRename(series, source))
+    expect(crud.periodFormOpen).toBe(false)
+    expect(versions.dialog?.kind).toBe('rename')
+    act(() => crud.startTariffEdit(tariff))
+    expect(versions.dialog).toBeNull()
+    expect(crud.editingTariffId).toBe(tariff.id)
+})
+
+it('passes the saved band’s owner to the pane so an inline edit can select its date range', async () => {
+    api.save.mockResolvedValue({ tariff: tariff.id })
+    act(() => {
+        crud.openCreatePeriod(tariff.id)
+        crud.submitPeriod({ tariff: tariff.id } as TariffPeriodInput)
+    })
+    await waitForCondition(() => periodSaved.mock.calls.length > 0, 'saved band owner selected')
+    expect(periodSaved).toHaveBeenCalledWith(tariff.id)
 })

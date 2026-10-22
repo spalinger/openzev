@@ -8,3 +8,128 @@
   background: var(--surface);
 }
 
+.tariff-identity-summary > div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.tariff-detail-label {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.tariff-readonly-value {
+  padding-block: 0.5rem;
+  font-weight: 400;
+}
+
+.tariff-notes-field {
+  grid-column: 1 / -1;
+}
+
+.tariff-pane-form .form-grid {
+  align-items: start;
+}
+
+.tariff-time-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 1rem;
+}
+
+
+/* Choices read top to bottom; only their following fields change. */
+.tariff-configuration-form[data-creation='true'] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tariff-configuration-form[hidden] {
+  display: none;
+}
+
+.tariff-validity-fields {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.tariff-form-hint {
+  margin: 0;
+  font-size: 0.8125rem;
+}
+
+@container (max-width: 26rem) {
+  .tariff-validity-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.tariff-band-editor {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.tariff-band-draft {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+}
+
+.tariff-band-draft legend {
+  padding-inline: 0.25rem;
+  font-weight: 600;
+}
+
+.tariff-band-draft label,
+.tariff-band-draft .tariff-time-row > div {
+  min-width: 0;
+}
+
+.tariff-band-price-input {
+  width: 100%;
+}
+
+.tariff-band-recurrence {
+  min-width: 0;
+}
+
+.tariff-band-recurrence summary {
+  cursor: pointer;
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+.tariff-band-recurrence .recurrence-field {
+  margin-top: 0.75rem;
+}
+
+.tariff-band-coverage {
+  padding-block: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.tariff-band-coverage p {
+  margin: 0.25rem 0;
+}
+
+.tariff-band-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  overflow-wrap: anywhere;
+}
+
+.tariff-band-warning > svg {
+  flex-shrink: 0;
+  margin-top: 0.4rem;
+  color: var(--danger-700);
+}

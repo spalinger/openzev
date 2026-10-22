@@ -27,9 +27,9 @@ const cleanups: (() => void)[] = []
 afterEach(() => cleanups.splice(0).forEach((cleanup) => cleanup()))
 
 // The source's address and coverage sit in a disclosure, mounted when opened.
-async function renderDetails(overrides: Partial<DynamicTariffSource> = {}) {
+async function renderDetails(overrides: Partial<DynamicTariffSource> = {}, canOperate = true) {
     const { container } = await renderWithProviders(
-        createElement(DynamicSourceSummary, { source: { ...source, ...overrides }, settings: {} as AppSettings, canOperate: true }), cleanups)
+        createElement(DynamicSourceSummary, { source: { ...source, ...overrides }, settings: {} as AppSettings, canOperate }), cleanups)
     await act(async () => { container.querySelector('summary')!.click() })
     return container.innerHTML
 }
@@ -49,20 +49,48 @@ describe('DynamicSourceSummary', () => {
         expect(html).not.toContain('pages.dynamicSources.history.coverage')
     })
 
-    it('omits the last-success label until a successful fetch exists', () => {
+    it('combines successful status and its timestamp without a repeated last-success line', () => {
+        const time = '2026-10-01T12:00:00Z'
         expect(render()).not.toContain('pages.dynamicSources.lastSuccess')
-        expect(render({ last_success_at: '2026-10-01T12:00:00Z' })).toContain('pages.dynamicSources.lastSuccess')
+        const html = render({ last_success_at: time })
+        expect(html).toContain('pages.dynamicSources.status.ok')
+        expect(html.split(time)).toHaveLength(2)
+        expect(html).not.toContain('pages.dynamicSources.lastSuccess')
     })
 
-    it('shows stored coverage and the gap hint when points exist', async () => {
+    it('retains the earlier successful fetch when the latest fetch fails', () => {
+        const html = render({ last_fetch_status: 'failed', last_success_at: '2026-10-01T12:00:00Z', last_fetch_error: 'Source unavailable' })
+        expect(html).toContain('pages.dynamicSources.status.failed')
+        expect(html).toContain('pages.dynamicSources.lastSuccess')
+        expect(html).toContain('Source unavailable')
+    })
+
+    it('explains that a disabled source has automatic fetching disabled', () => {
+        const html = render({ enabled: false })
+        expect(html).toContain('pages.dynamicSources.details.automaticDisabled')
+        expect(html).not.toContain('pages.dynamicSources.status.disabled')
+    })
+
+    it('labels source configuration and separates stored prices from coverage and usage', async () => {
         const html = await renderDetails({ point_count: 12, covers_from: '2026-09-01', covers_to: '2026-10-01' })
-        expect(html).toContain('pages.dynamicSources.history.coverage')
+        expect(html).toContain('<dl class="tariff-source-facts">')
+        expect(html).toContain('pages.dynamicSources.form.apiVersion')
+        expect(html).toContain('pages.dynamicSources.form.tariffType')
+        expect(html).toContain('pages.dynamicSources.form.tariffName')
+        expect(html).toContain('pages.dynamicSources.details.storedPrices')
+        expect(html).toContain('>12</dd>')
+        expect(html).toContain('pages.dynamicSources.details.coverage')
+        expect(html).toContain('2026-09-01')
+        expect(html).toContain('2026-10-01')
+        expect(html).toContain('pages.dynamicSources.columns.reuse')
         expect(html).toContain('pages.dynamicSources.coverageHint')
         expect(html).not.toContain('pages.dynamicSources.noCoverage')
     })
 
-    it('limits the maintenance link to users with operation permission', () => {
-        expect(render()).toContain('/admin/dynamic-sources?source=source-1')
-        expect(render({}, false)).not.toContain('pages.dynamicSources.manageSource')
+    it('keeps the maintenance link inside source details and limits it to operation permission', async () => {
+        expect(render()).not.toContain('pages.dynamicSources.manageSource')
+        expect(await renderDetails()).toContain('/admin/dynamic-sources?source=source-1')
+        expect(await renderDetails()).toContain('data-icon="arrow-right"')
+        expect(await renderDetails({}, false)).not.toContain('pages.dynamicSources.manageSource')
     })
 })

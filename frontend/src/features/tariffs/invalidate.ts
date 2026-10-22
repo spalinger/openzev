@@ -1,26 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { queryKeys } from '../../lib/api/queryKeys'
 
-/**
- * Refetch everything a tariff mutation can affect.
- *
- * Kept in one place on purpose. The tariff page reads the *series* query, while
- * other callers may cache additional shapes — so a mutation that invalidates
- * only the key it happens to know about leaves the page showing stale data
- * until a manual refresh. Every tariff mutation funnels through here so adding
- * a new one cannot reintroduce that.
- *
- * A single mutation can reshape more than the row it touched: editing a
- * version's `valid_to` changes its series' gaps, and creating a version also
- * closes its predecessor — so the whole series query is refetched rather than
- * patched. A VSE import can also create a *new* dynamic price source (global,
- * not per-ZEV — ADR 0018), so the source picker's list is refetched too; an
- * ordinary tariff edit never touches that list, but invalidating it anyway
- * costs one cheap refetch against a query nothing else is actively changing.
- *
- * Resolves once the refetch has landed, so a caller that selects what it just
- * saved can wait for the series to contain it.
- */
+/** Refresh series/shared sources; await before selecting a saved tariff. */
 export function invalidateTariffQueries(queryClient: QueryClient, selectedZevId?: string): Promise<void> {
     const zevId = selectedZevId || undefined
     return Promise.all([

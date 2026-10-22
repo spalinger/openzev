@@ -214,6 +214,8 @@ describe('buildRateLines', () => {
         const perPoint = energySeries({ billing_mode: 'per_metering_point_monthly_fee' })
         const monthlyVersion = energyVersion([], { fixed_price_chf: '50.00' })
         const sharedVersion = energyVersion([], { fixed_price_chf: '90.00' })
+        expect(buildRateLines(monthly, energyVersion([], { fixed_price_chf: null }), t, DAY_NAMES, MONTH_NAMES, formatDate)[0].price).toBe('')
+        expect(buildRateLines(monthly, energyVersion([], { fixed_price_chf: '0.00' }), t, DAY_NAMES, MONTH_NAMES, formatDate)[0].price).toBe('0.00')
         expect(buildRateLines(monthly, monthlyVersion, t, DAY_NAMES, MONTH_NAMES, formatDate)[0]).toMatchObject({
             applies: 'per participant', price: '50.00', unit: 'per month',
         })
@@ -277,6 +279,7 @@ describe('tariff list narrow markup', () => {
                     settings,
                     selected: null,
                     onOpenDetail,
+                    onCloseDetail: vi.fn(),
                 }),
             ))
         })
@@ -321,7 +324,8 @@ describe('tariff list narrow markup', () => {
         expect(band.getAttribute('title')).toContain('60% of CHF 0.295/kWh = CHF 0.177/kWh')
         expect(band.getAttribute('title')).toContain('only the intervals available')
         const cell = band.closest('td')!
-        expect(container.querySelector(`#${cell.getAttribute('headers')}`)?.textContent).toContain('pages.tariffs.rateCard.price')
+        const headers = cell.getAttribute('headers')!.split(' ').map(id => container.querySelector(`#${id}`)?.textContent)
+        expect(headers).toContain('pages.tariffs.rateCard.price')
     })
 
     it('does not mark a complete percentage base as incomplete', async () => {
