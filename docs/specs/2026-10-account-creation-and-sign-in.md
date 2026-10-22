@@ -189,10 +189,12 @@ admin, admin MFA reset, and promotion. Reactivating an account does not revive o
   cookie with the stored hash in constant time before any provider I/O or account work, and
   refuses a missing cookie, a wrong value, a value from another attempt, and a row with no
   stored binding (an in-flight login from before this shipped) with `invalid_state` — audited
-  as `state_binding_missing` / `state_not_bound` — consuming the state. The cookie is cleared on
-  every callback exit path. Without this, `state` was bearer material: an attacker could
-  authenticate at the provider as themselves and hand the callback URL to a victim, whose
-  browser then completed the flow into the attacker's account (login CSRF / account confusion).
+  as `state_binding_missing` (no cookie), `state_not_bound` (wrong cookie) or
+  `state_binding_unset` (row without a stored binding) — consuming the state. The cookie is
+  cleared on every callback exit path. Without this, `state` was bearer material: an attacker
+  could authenticate at the provider as themselves and hand the callback URL to a victim,
+  whose browser then completed the flow into the attacker's account (login CSRF / account
+  confusion).
 - **PKCE is deliberately not implemented.** These are confidential clients (a `client_secret`
   is always sent), and PKCE S256 guards code interception, a different attack from the state
   transfer above. It would need a browser-bound verifier cookie and a per-provider opt-in

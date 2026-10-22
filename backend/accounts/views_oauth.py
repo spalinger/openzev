@@ -322,15 +322,6 @@ def _authorization_url(provider: OAuthProvider, state_token: str) -> str:
     return f"{provider.authorization_url}?{urlencode(params)}"
 
 
-def _bind_authorization_response(provider: OAuthProvider, state_token: str, binding: str) -> Response:
-    """Return the authorize URL together with the browser's binding cookie."""
-    response = Response({"redirect_url": _authorization_url(provider, state_token)})
-    set_oauth_binding_cookie(
-        response, binding, max_age=int(OAuthState.TTL.total_seconds()),
-    )
-    return response
-
-
 @api_view(["POST"])
 @permission_classes([AllowAny])
 @throttle_classes([AuthOAuthInitiateThrottle])
@@ -344,7 +335,9 @@ def oauth_login_initiate(request, provider_slug: str):
     OAuthState.objects.create(
         state=state_token, provider=provider, binding=hash_secret(binding),
     )
-    return _bind_authorization_response(provider, state_token, binding)
+    response = Response({"redirect_url": _authorization_url(provider, state_token)})
+    set_oauth_binding_cookie(response, binding, max_age=int(OAuthState.TTL.total_seconds()))
+    return response
 
 
 @api_view(["POST"])
@@ -362,7 +355,9 @@ def oauth_link_initiate(request, provider_slug: str):
         from_participant_link=is_participant_link_session(request.auth),
         binding=hash_secret(binding),
     )
-    return _bind_authorization_response(provider, state_token, binding)
+    response = Response({"redirect_url": _authorization_url(provider, state_token)})
+    set_oauth_binding_cookie(response, binding, max_age=int(OAuthState.TTL.total_seconds()))
+    return response
 
 
 # ── callback (browser-facing, redirects back to frontend) ────────────────────
@@ -376,18 +371,21 @@ def _provider_proves_account_email(user_info, account_email):
     )
 
 
-def _binding_state(request, state_obj: OAuthState) -> str | None:
+def _binding_problem(request, state_obj: OAuthState) -> str | None:
     """Return why the presented browser binding does not match, or ``None``.
 
     ``state`` is bearer material — an attacker who authenticates at the IdP as
     themselves can mint one and hand the callback URL to somebody else. The
     cookie is what makes the state belong to the browser that started the
-    flow, so a row without a stored binding (an in-flight login from before
-    this shipped) and a browser without the cookie are both refused rather
-    than trusted.
+    flow, so a mismatch is refused rather than trusted. The reason is audited
+    so a refusal can be told apart from an expired or unknown state.
     """
+    if not state_obj.binding:
+        # A row created before the binding existed: the browser cannot hold a
+        # secret for it, so it can never be completed.
+        return "state_binding_unset"
     presented = request.COOKIES.get(OAUTH_BINDING_COOKIE, "")
-    if not presented or not state_obj.binding:
+    if not presented:
         return "state_binding_missing"
     if not verify_secret(presented, state_obj.binding):
         return "state_not_bound"
@@ -441,7 +439,7 @@ def _complete_oauth_callback(request, provider_slug: str):
     # Browser binding: the state must be presented by the client that started
     # the flow. Refused before any provider I/O or account work, and the state
     # is consumed either way — a mismatched callback is not a retryable try.
-    binding_problem = _binding_state(request, state_obj)
+    binding_problem = _binding_problem(request, state_obj)
     if binding_problem is not None:
         state_obj.delete()
         _record_login_failure(request, provider_slug, binding_problem)

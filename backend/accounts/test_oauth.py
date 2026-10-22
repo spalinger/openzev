@@ -384,9 +384,19 @@ class OAuthStateBindingTests(OAuthTestCase):
         self.assert_refused(response)
 
     def test_refusals_name_the_binding_problem_for_triage(self):
-        for present, expected in ((None, "state_binding_missing"), ("wrong", "state_not_bound")):
-            with self.subTest(present=present):
-                self.start_state("bound")
+        """Each refusal reason is distinguishable in the audit trail."""
+        for binding, present, expected in (
+            ("browser-binding", None, "state_binding_missing"),
+            ("browser-binding", "wrong", "state_not_bound"),
+            ("", "browser-binding", "state_binding_unset"),
+        ):
+            with self.subTest(expected=expected):
+                if binding:
+                    self.start_state("bound", binding=binding)
+                else:
+                    # A row minted before the binding existed: no browser can
+                    # hold a secret for it, so it can never be completed.
+                    OAuthState.objects.create(state="bound", provider=self.provider)
                 if present is None:
                     del self.client.cookies[OAUTH_BINDING_COOKIE]
                 else:
