@@ -1091,6 +1091,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#metering-corrections-on-issued-invoices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metering corrections on issued invoices
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1962,6 +1973,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#metering-corrections-on-issued-invoices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metering corrections on issued invoices
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2515,8 +2537,8 @@ the rest under <strong>More</strong>:</p>
 </tr>
 <tr>
 <td>Sent</td>
-<td><strong>Mark Paid</strong></td>
-<td>Open PDF, Generate/Regenerate PDF, Resend Email</td>
+<td><strong>Mark Paid</strong> / <strong>Mark rest as paid</strong></td>
+<td>Record payment, Open PDF, Generate/Regenerate PDF, Resend Email</td>
 </tr>
 <tr>
 <td>Paid</td>
@@ -2575,6 +2597,41 @@ they are stored separately and added to the new draft again.</p>
 <blockquote>
 <p><strong>Tip:</strong> You can generate invoices even when metering data is incomplete, but totals may be inaccurate. It is best to resolve missing data first.</p>
 </blockquote>
+<h3 id="metering-corrections-on-issued-invoices">Metering corrections on issued invoices<a class="headerlink" href="#metering-corrections-on-issued-invoices" title="Permanent link">&para;</a></h3>
+<p>A committed metering correction (or an import deletion) never rewrites an
+invoice — amounts, PDFs and delivery records stay as issued. Instead the
+affected invoices stay in the <strong>Issues</strong> filter and carry a <strong>Data review</strong>
+flag. The period rows and invoice detail page identify them; managers and viewers
+also see source evidence (delivery ID or CSV filename, changed intervals) on the
+detail page. The <strong>Overview</strong> readiness
+check gains a <strong>Data corrections</strong> step linking to the period's billing page.</p>
+<table>
+<thead>
+<tr>
+<th>Invoice status</th>
+<th>What to do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Draft</strong></td>
+<td><strong>More → Regenerate invoice</strong> bills the corrected values.</td>
+</tr>
+<tr>
+<td><strong>Approved / Sent</strong></td>
+<td>With no payments, cancel through the API and generate a new invoice. A sent invoice with payments needs <strong>Correct invoice → Reverse the invoice</strong> first.</td>
+</tr>
+<tr>
+<td><strong>Paid</strong></td>
+<td>Use <strong>Correct invoice → Reverse the invoice</strong>, then generate a new invoice. Payments and partial credits leave the review flag open.</td>
+</tr>
+</tbody>
+</table>
+<p>Full reversal is available for a positive invoice with uncredited payments
+or applied credit. If neither remains, the flag stays open for review.
+Zero invoices and payouts cannot be reversed.</p>
+<p>Participants see the review flag on their own sent and paid invoices,
+without internal import evidence or management actions.</p>
 <h2 id="reviewing-invoices">Reviewing Invoices<a class="headerlink" href="#reviewing-invoices" title="Permanent link">&para;</a></h2>
 <p>Click the invoice number in the <strong>Participant</strong> column to view the invoice detail page.</p>
 <h3 id="invoice-detail-page">Invoice Detail Page<a class="headerlink" href="#invoice-detail-page" title="Permanent link">&para;</a></h3>
@@ -2688,16 +2745,19 @@ history</strong>, where a failed latest attempt also has a <strong>Retry</strong
 <h2 id="recording-payments">Recording payments<a class="headerlink" href="#recording-payments" title="Permanent link">&para;</a></h2>
 <p>When a participant has paid the whole invoice, click <strong>Mark Paid</strong> on the row
 (shown for <code>Sent</code> invoices). It records one payment for the outstanding amount,
-dated today, and the status changes to <code>Paid</code>. It is a single-click action.</p>
-<p>For a partial payment, or to record the date the money actually arrived, open
-the invoice and use the <strong>Payments</strong> card:</p>
+dated today, and the status changes to <code>Paid</code>. It is a single-click action.
+Once part of the money has been recorded, the same row action reads <strong>Mark rest
+as paid</strong> and books only what is still open.</p>
+<p>To record an amount or a payment date, choose <strong>Record payment</strong> from the row's
+<strong>More</strong> menu or from the invoice's <strong>Payments</strong> card:</p>
 <ol>
-<li>Click <strong>Record payment</strong>.</li>
 <li>Enter the amount (it starts at the outstanding amount and can't exceed it),
    the date it was paid (not in the future) and, optionally, a note such as the
    bank reference.</li>
 <li>Click <strong>Record payment</strong>.</li>
 </ol>
+<p>In the period table, <strong>Record payment</strong> and <strong>Mark Paid</strong> (or <strong>Mark rest as paid</strong>)
+stay unavailable while either action is saving, even if you close the payment dialog.</p>
 <p><img alt="Record payment dialog" src="../screenshots/08h-record-payment-dialog.png" /></p>
 <p>A payment short of the total leaves the invoice <strong>Partly paid</strong>: its status
 pill says so, and the payment step in the period table shows it as under way.
@@ -2910,6 +2970,13 @@ available after billing. The selected community appears above the page title.</p
 <li><strong>Understand billing logic:</strong> <a href="../08-billing-allocation-explained/">Billing &amp; Allocation Explained</a></li>
 <li><strong>Manage tariffs:</strong> <a href="../07-tariff-configuration/">Tariff Configuration</a></li>
 </ul>
+<p>Legacy CSV timestamp repairs also flag invoices for review, including periods
+on either side of a Swiss date boundary. Their evidence identifies a CSV
+timestamp correction rather than an SDAT delivery or an import deletion.</p>
+<p>The Data review notice initially lists the newest 20 corrections. Open the
+invoice detail and choose <strong>Show all</strong> to inspect a longer open history;
+<strong>Show newest 20</strong> collapses it again. Period overview keeps the complete count
+while returning only the newest 20 evidence entries per invoice.</p>
 
 
 
