@@ -1,6 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+import { ConfirmDialog, useConfirmDialog } from '../../components/ConfirmDialog'
+import { useDiscardConfirmation } from './useDraftGuard'
+import { useEditingSession } from './useEditingSession'
+import { useFocusFirstField } from './useFocusFirstField'
 import { FormModal } from '../../components/FormModal'
 import {
   createDynamicTariffSource,
@@ -36,6 +40,7 @@ type FormProps = {
   source?: DynamicTariffSource | null
   /** Whether anything was typed, for the caller's unsaved-input guard. */
   onDirtyChange?: (dirty: boolean) => void
+  onPendingChange?: (pending: boolean) => void
 }
 
 type Props = {
@@ -54,10 +59,15 @@ function componentKey(component: DynamicSourceDiscovery['components'][number]): 
  * section beside the tariff form (a pane has no second dialog). Mount it
  * fresh each time it opens.
  */
-export function DynamicSourceForm({ onClose, onSaved, source, onDirtyChange }: FormProps) {
+export function DynamicSourceForm({ onClose, onSaved, source, onDirtyChange, onPendingChange }: FormProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const { pushToast } = useToast()
+  const formRef = useRef<HTMLFormElement>(null)
+  useFocusFirstField(formRef)
+  const session = useEditingSession(source?.id)
+  const { dialog, confirm, handleConfirm, handleCancel } = useConfirmDialog()
+  const askDiscard = useDiscardConfirmation(confirm)
   const [step, setStep] = useState<1 | 2>(1)
   const [label, setLabel] = useState('')
   const [url, setUrl] = useState('')
@@ -89,24 +99,30 @@ export function DynamicSourceForm({ onClose, onSaved, source, onDirtyChange }: F
   const dirty = label !== (source?.label ?? '')
     || url !== (source?.url ?? '')
     || enabled !== (source?.enabled ?? true)
+    || versionChoice !== (source?.api_version ?? 'auto')
+    || sourceKind !== (source?.api_version === 'bfe_rmp' ? 'bfe_rmp' : 'vse')
+    || bfeSeries !== (source?.url === BFE_RMP_URLS.monthly ? 'monthly' : 'quarterly')
+    || bfeTechnology !== ((source?.tariff_name as BfeRmpTechnology) || 'pv')
+    || selection !== ''
+    || tariffName !== (source?.tariff_name ?? '')
   useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
 
   const discoverMutation = useMutation({
-    mutationFn: () => discoverDynamicTariffSource(
-      url,
-      versionChoice === 'auto' ? undefined : versionChoice,
-    ),
-    onSuccess: (result) => {
+    mutationFn: (submitted: number) => {
+      if (!session.isCurrent(submitted)) throw new Error(t('common.error'))
+      return discoverDynamicTariffSource(url, versionChoice === 'auto' ? undefined : versionChoice)
+    },
+    onSuccess: (result, submitted) => {
+      if (!session.isCurrent(submitted)) return
       setDiscovery(result)
       const first = result.components[0]
       setSelection(componentKey(first))
       setTariffName(first.tariff_name)
       setStep(2)
     },
-    onError: (error) => pushToast(
-      formatApiError(error, t('pages.dynamicSources.discovery.error')),
-      'error',
-    ),
+    onError: (error, submitted) => {
+      if (session.isCurrent(submitted)) pushToast(formatApiError(error, t('pages.dynamicSources.discovery.error')), 'error')
+    },
   })
 
   const selected = useMemo(
@@ -119,7 +135,8 @@ export function DynamicSourceForm({ onClose, onSaved, source, onDirtyChange }: F
   )
 
   const saveMutation = useMutation({
-    mutationFn: (): Promise<DynamicTariffSource & { warnings?: string[] }> => {
+    mutationFn: (submitted: number): Promise<DynamicTariffSource & { warnings?: string[] }> => {
+      if (!session.isCurrent(submitted)) throw new Error(t('common.error'))
       if (source) return updateDynamicTariffSource(source.id, { label, enabled })
       if (sourceKind === 'bfe_rmp') {
         return createDynamicTariffSource({
@@ -138,8 +155,9 @@ export function DynamicSourceForm({ onClose, onSaved, source, onDirtyChange }: F
         tariff_name: selected!.tariff_name || tariffName,
       })
     },
-    onSuccess: async (saved) => {
+    onSuccess: async (saved, submitted) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.tariffs.dynamicSources() })
+      if (!session.isCurrent(submitted)) return
       pushToast(t(source ? 'pages.dynamicSources.updated' : 'pages.dynamicSources.created'), 'success')
       // Units the endpoint publishes but this source cannot bill — surfaced
       // right when the source is configured, not only in the audit trail.
@@ -149,24 +167,35 @@ export function DynamicSourceForm({ onClose, onSaved, source, onDirtyChange }: F
       onSaved?.(saved)
       onClose()
     },
-    onError: (error) => pushToast(
-      formatApiError(error, t('pages.dynamicSources.saveError')),
-      'error',
-    ),
+    onError: (error, submitted) => {
+      if (session.isCurrent(submitted)) pushToast(formatApiError(error, t('pages.dynamicSources.saveError')), 'error')
+    },
   })
 
   function submit(event: React.FormEvent) {
     event.preventDefault()
-    if (source) saveMutation.mutate()
-    else if (sourceKind === 'bfe_rmp') saveMutation.mutate()
-    else if (step === 1) discoverMutation.mutate()
-    else if (selected) saveMutation.mutate()
+    if (source) saveMutation.mutate(session.id.current)
+    else if (sourceKind === 'bfe_rmp') saveMutation.mutate(session.id.current)
+    else if (step === 1) discoverMutation.mutate(session.id.current)
+    else if (selected) saveMutation.mutate(session.id.current)
   }
 
   const pending = discoverMutation.isPending || saveMutation.isPending
+  useEffect(() => {
+    onPendingChange?.(pending)
+    return () => onPendingChange?.(false)
+  }, [pending, onPendingChange])
+
+  function cancel() {
+    const close = () => { session.start(); onClose() }
+    if (dirty || pending) askDiscard(pending, close)
+    else close()
+  }
 
   return (
-      <form className="form-grid" onSubmit={submit}>
+      <>
+      <form ref={formRef} onSubmit={submit} aria-busy={pending || undefined}>
+       <fieldset className="form-grid" disabled={pending}>
         {!source && sourceKind === 'vse' && (
           <div className="muted" style={{ gridColumn: '1 / -1' }}>
             {t('pages.dynamicSources.discovery.step', { current: step, total: 2 })}
@@ -309,7 +338,7 @@ export function DynamicSourceForm({ onClose, onSaved, source, onDirtyChange }: F
               {t('pages.dynamicSources.discovery.back')}
             </button>
           )}
-          <button className="button button-secondary" type="button" onClick={onClose} disabled={pending}>
+          <button className="button button-secondary" type="button" onClick={cancel} disabled={pending}>
             {t('common.cancel')}
           </button>
           <button
@@ -324,7 +353,10 @@ export function DynamicSourceForm({ onClose, onSaved, source, onDirtyChange }: F
                 : t('pages.dynamicSources.createAction')}
           </button>
         </div>
+       </fieldset>
       </form>
+      {dialog && <ConfirmDialog {...dialog} onConfirm={handleConfirm} onCancel={handleCancel} />}
+      </>
   )
 }
 

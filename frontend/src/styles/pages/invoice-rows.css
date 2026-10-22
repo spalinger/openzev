@@ -124,7 +124,7 @@
     border-bottom: 1px solid var(--border-default);
   }
 
-  .invoice-rows tbody tr:first-child {
+  .invoice-rows:not(.tariff-list) tbody tr:first-child {
     padding-top: 0.2rem;
   }
 
@@ -134,7 +134,7 @@
 
   /* The table's bottom margin takes the sheet's padding, so the last card
      brings its own: the first card's inset above, mirrored below. */
-  .table-card.invoice-rows > table:last-child tbody tr:last-child {
+  .table-card.invoice-rows:not(.tariff-list) > table:last-child tbody tr:last-child {
     padding-bottom: calc(var(--sheet-pad-block) + 0.2rem);
   }
 

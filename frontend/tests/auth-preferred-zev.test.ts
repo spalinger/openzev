@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthProvider, useAuth } from '../src/lib/auth'
 import type { User } from '../src/types/api'
+import { MantineProvider } from '@mantine/core'
 import { Layout } from '../src/components/Layout'
 import { ProtectedRoute } from '../src/components/ProtectedRoute'
 import { ManagedZevProvider } from '../src/lib/managedZev'
@@ -441,7 +442,7 @@ describe('AuthProvider clears the query cache at session boundaries', () => {
                 createElement(ManagedZevProvider, null,
                     createElement(Routes, null,
                         createElement(Route, { path: '/', element: createElement(ProtectedRoute, {
-                            allowUnlinked: true, children: createElement(Layout),
+                            allowUnlinked: true, children: createElement(MantineProvider, null, createElement(Layout)),
                         }) }),
                         createElement(Route, { path: '/login', element: createElement(LoginLocation) }),
                     ),

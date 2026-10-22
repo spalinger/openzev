@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 type FormModalFooterProps = {
   onCancel: () => void
   isPending: boolean
+  disabled?: boolean
   submitIcon?: ReactNode
   submitLabel?: ReactNode
   cancelIcon?: ReactNode
@@ -13,7 +14,7 @@ type FormModalFooterProps = {
   formId?: string
 }
 
-export function FormModalFooter({ onCancel, isPending, submitIcon, submitLabel, cancelIcon, compact, formId }: FormModalFooterProps) {
+export function FormModalFooter({ onCancel, isPending, disabled = false, submitIcon, submitLabel, cancelIcon, compact, formId }: FormModalFooterProps) {
   const { t } = useTranslation()
   return (
     <div className={`dialog-actions grid-span-full ${compact ? 'mt-05' : 'mt-1'}`}>
@@ -21,7 +22,7 @@ export function FormModalFooter({ onCancel, isPending, submitIcon, submitLabel, 
         {cancelIcon}
         {t('common.cancel')}
       </button>
-      <button className="button button-primary" type="submit" form={formId} disabled={isPending}>
+      <button className="button button-primary" type="submit" form={formId} disabled={isPending || disabled}>
         {submitIcon}
         {submitLabel ?? t('common.save')}
       </button>

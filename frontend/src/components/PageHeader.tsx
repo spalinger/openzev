@@ -8,6 +8,8 @@ export type PageHeaderProps = {
     /** The eyebrow names the selected community: it opens the community list
      * when the account has more than one. */
     communitySwitch?: boolean
+    /** Let a page guard its draft before a user changes community. */
+    onCommunitySwitch?: (change: () => void) => void
     /** Access label beside the community (a viewer's read-only access); excluded from the browser title. */
     scopeNote?: string
     /** Plain text: it also names the browser tab. */
@@ -17,7 +19,7 @@ export type PageHeaderProps = {
     actions?: ReactNode
 }
 
-export function PageHeader({ eyebrow, communitySwitch, scopeNote, title, description, actions }: PageHeaderProps) {
+export function PageHeader({ eyebrow, communitySwitch, onCommunitySwitch, scopeNote, title, description, actions }: PageHeaderProps) {
     useDocumentTitle(title, typeof eyebrow === 'string' ? eyebrow : undefined)
     // Focus lands on the h1 after navigation; it describes itself by the scope line.
     const eyebrowId = useId()
@@ -26,7 +28,7 @@ export function PageHeader({ eyebrow, communitySwitch, scopeNote, title, descrip
         <header className="page-header">
             {eyebrow ? (
                 <p className="eyebrow" id={eyebrowId}>
-                    {communitySwitch ? <CommunitySwitcher name={eyebrow} /> : eyebrow}
+                    {communitySwitch ? <CommunitySwitcher name={eyebrow} onSwitch={onCommunitySwitch} /> : eyebrow}
                     {scopeNote ? <span className="eyebrow-note"> · {scopeNote}</span> : null}
                 </p>
             ) : null}

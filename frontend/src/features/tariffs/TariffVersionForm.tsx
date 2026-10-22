@@ -54,16 +54,10 @@ function draftsFrom(source: TariffVersion): PeriodDraft[] {
   }))
 }
 
-/** The day the source version will be closed on, if this date is adopted. */
-function closesPreviousOn(source: TariffVersion, validFrom: string): string | null {
-  if (!validFrom || validFrom <= source.valid_from) return null
-  return dayjs(validFrom).subtract(1, 'day').format('YYYY-MM-DD')
-}
-
 function seedFor(dialog: NonNullable<VersionDialog>) {
   const { source, series, kind } = dialog
   return {
-    validFrom: kind === 'rename' ? '' : dayjs().format('YYYY-MM-DD'),
+    validFrom: kind === 'rename' ? '' : kind === 'new-version' && dialog.validFrom ? dialog.validFrom : dayjs().format('YYYY-MM-DD'),
     name: kind === 'duplicate' ? '' : series.name,
     fixedPrice: source.fixed_price_chf ? String(source.fixed_price_chf) : '',
     minimumPrice: source.minimum_price_chf_per_kwh ? String(source.minimum_price_chf_per_kwh) : '',
@@ -71,12 +65,7 @@ function seedFor(dialog: NonNullable<VersionDialog>) {
   }
 }
 
-/**
- * Schedule a price change, duplicate a tariff or rename it, in the detail
- * pane. Prices start from the source version, because a new version almost
- * always exists to change them and retyping HT/NT bands from scratch would be
- * busywork. Mount it fresh for each task.
- */
+/** Seed a new task from its source version; retain its bands and seasons. */
 export function TariffVersionForm({
   dialog,
   settings,
@@ -152,7 +141,14 @@ export function TariffVersionForm({
     ? `${periods.map((period) => (isPercentage ? period.percentage : period.price_chf_per_kwh) || '—').join(' / ')} ${
       isPercentage ? '%' : t('pages.tariffs.chfPerKwh')}`
     : `CHF ${fixedPrice || '—'}`
-  const closingDate = kind === 'new-version' ? closesPreviousOn(source, validFrom) : null
+  const ordered = [...series.versions].sort((a, b) => a.valid_from.localeCompare(b.valid_from))
+  const predecessor = ordered.filter((version) => version.valid_from < validFrom).at(-1)
+  const successor = ordered.find((version) => version.valid_from > validFrom)
+  const dayBefore = (date: string) => dayjs(date).subtract(1, 'day').format('YYYY-MM-DD')
+  const closingDate = predecessor && validFrom
+    ? predecessor.valid_to && predecessor.valid_to < validFrom ? predecessor.valid_to : dayBefore(validFrom)
+    : null
+  const endingDate = successor ? dayBefore(successor.valid_from) : null
   const submitDisabled = isPending
     || (kind === 'rename' && (!name.trim() || name.trim() === series.name))
     || (kind === 'duplicate' && (!name.trim() || !validFrom))
@@ -161,16 +157,17 @@ export function TariffVersionForm({
   const submitLabel = isPending
     ? t('common.saving')
     : kind === 'new-version'
-      ? t('pages.tariffs.versions.schedule')
+      ? t('pages.tariffs.workspace.scheduleChange')
       : kind === 'duplicate'
         ? t('pages.tariffs.versions.duplicate')
         : t('common.save')
 
   return (
     <div className="tariff-pane-form">
+      {kind === 'new-version' && <p className="muted">{t('pages.tariffs.workspace.scheduleHint')}</p>}
       {error && <Notice tone="error">{error}</Notice>}
       <form ref={formRef} id={formId} onSubmit={submit} className="form-grid" aria-busy={isPending || undefined}>
-       <fieldset className="tariff-pane-fieldset" disabled={isPending}>
+        <fieldset className="tariff-pane-fieldset" disabled={isPending}>
         {kind === 'rename' && (
           <p className="muted" style={{ gridColumn: '1 / -1', margin: 0 }}>
             {t('pages.tariffs.versions.renameHint', { count: series.version_count })}
@@ -198,16 +195,12 @@ export function TariffVersionForm({
           </label>
         )}
 
-        {kind === 'new-version' && (
-          <p className="muted" style={{ gridColumn: '1 / -1', margin: 0 }}>
-            {closingDate
-              ? t('pages.tariffs.versions.closesPrevious', {
-                date: formatShortDate(closingDate, settings),
-              })
-              : t('pages.tariffs.versions.pickLaterDate', {
-                date: formatShortDate(source.valid_from, settings),
-              })}
-          </p>
+        {kind === 'new-version' && validFrom && (
+          <div className="tariff-change-preview">
+            {closingDate && <p>{t('pages.tariffs.versions.closesPrevious', { date: formatShortDate(closingDate, settings) })}</p>}
+            <p>{t('pages.tariffs.workspace.newStarts', { date: formatShortDate(validFrom, settings) })}</p>
+            {endingDate && <p>{t('pages.tariffs.workspace.newEnds', { date: formatShortDate(endingDate, settings) })}</p>}
+          </div>
         )}
 
         {kind === 'new-version' && validFrom && !isDynamic && (
@@ -259,7 +252,7 @@ export function TariffVersionForm({
               <div className="tariff-version-price-list">
                 {periods.map((period, index) => (
                   <label key={`${period.period_type}-${index}`} className="tariff-version-price-row">
-                    <span className="badge badge-neutral">
+                    <span>
                       {t(`pages.tariffs.periodTypes.${period.period_type}` as Parameters<typeof t>[0], {
                         defaultValue: period.period_type,
                       })}
@@ -303,12 +296,13 @@ export function TariffVersionForm({
           </div>
         )}
 
-       </fieldset>
+        </fieldset>
       </form>
       <FormModalFooter
         formId={formId}
         onCancel={onCancel}
-        isPending={submitDisabled}
+        isPending={isPending}
+        disabled={submitDisabled}
         submitLabel={submitLabel}
         submitIcon={<FontAwesomeIcon icon={faCheck} fixedWidth />}
         cancelIcon={<FontAwesomeIcon icon={faXmark} fixedWidth />}

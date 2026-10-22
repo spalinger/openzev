@@ -3,6 +3,7 @@ import { act, createElement, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter, Navigate, Route, Routes, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MantineProvider } from '@mantine/core'
 import { Layout } from '../src/components/Layout'
 import { PageHeader } from '../src/components/PageHeader'
 import { usePageNavigation } from '../src/lib/usePageNavigation'
@@ -99,7 +100,7 @@ async function renderShell(path: string) {
             createElement(QueryClientProvider, { client: new QueryClient() },
                 createElement(NavigateProbe),
                 createElement(Routes, null,
-                    createElement(Route, { path: '/', element: createElement(Layout) },
+                    createElement(Route, { path: '/', element: createElement(MantineProvider, null, createElement(Layout)) },
                         createElement(Route, { index: true, element: createElement(Page, { title: 'Home' }) }),
                         createElement(Route, { path: 'participants', element: createElement(ParticipantsPage) }),
                         createElement(Route, { path: 'other', element: createElement(OtherPage) }),

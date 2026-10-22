@@ -678,10 +678,24 @@ Viewers read linked tariffs/history; existing-source maintenance is admin-only.
 `DynamicSourceSummary` in the tariff detail pane shows the linked source's
 label, fetch status, disabled state, last success and user-safe fetch error
 up front, and the endpoint, protocol, component/product, stored range/point
-count and global linked-tariff/ZEV totals in a “Source details” disclosure. A positive point count shows stored coverage and a gap
+count and global linked-tariff/ZEV totals in a “Source details” disclosure. Its
+two-column definition list labels each fact, places the endpoint and covered
+period across both columns, omits an absent product and uses plural-aware usage
+counts. The gap hint sits beside the covered period, and the management link
+follows the facts. A positive point count shows stored coverage and a gap
 hint; zero points show “No stored prices yet.” Last success is shown only when
 its timestamp is present. The history panel is scoped to the shown tariff's validity.
-Only admins see the maintenance link to `/admin/dynamic-sources?source=<id>`.
+Only admins see the maintenance link to `/admin/dynamic-sources?source=<id>`,
+inside Source details, with a trailing right arrow. Successful fetches combine a
+green check, “Fetch successful” and the timestamp in one plain-text status line, without a repeated
+last-success line. When the latest fetch fails, its error and the earlier
+successful-fetch timestamp remain visible separately. A quiet “Price source”
+label leads the standalone source name. Disabled sources say that automatic
+fetching is disabled, without implying the linked tariff is disabled.
+The disclosure uses down/up chevrons. Raw interval records use the shared
+100-row pagination. Numeric date/time cells avoid constructing month-name
+formatters; the shared formatter still uses the configured pattern and Swiss
+timezone, and creates localised month names only for long-date patterns.
 
 `AdminDynamicSourcesPanel` presents source operations and global KPIs,
 uses the shared responsive stat grid and labels reuse counts as platform-wide.
@@ -708,9 +722,12 @@ positive coverage and maintenance-link permissions.
   existing version — whose `energy_type` is already locked — instead filters
   the picker to sources that would still validate
   (`dynamicSources.dynamicSourceOptions`), so nothing offered could fail on
-  save.
-  A new tariff can create a source from this picker: `DynamicSourceForm` opens as an inline section of the pane's form (the form is the dialog's body without its shell, shared with `DynamicSourceFormModal` on the admin page);
-  after the probed source is created or reused it is selected automatically and
+  save. A version with existing bands shows its immutable source choice as
+  plain text rather than a disabled dropdown.
+  A new tariff can create a source from this picker. The source task
+  preserves the tariff draft; its dirty, pending, cancellation and focus contract
+  is specified in [Tariff split view §6](2026-10-tariff-split-view.md#6-editing-in-the-pane).
+  After the probed source is created or reused it is selected automatically and
   its implied energy type is applied. Selecting a source whose `tariff_type`
   is an aggregate (`integrated` and v2's `dso`/`dso_complete`/
   `integrated_complete`) shows a warning naming exactly which other types it
@@ -756,10 +773,16 @@ positive coverage and maintenance-link permissions.
 - **`types/api.ts`** — `DynamicTariffSource`, `DynamicTariffType`,
   `Tariff.dynamic_source` / `TariffInput.dynamic_source`,
   `VseTariffCandidate.dynamic_url`, `VseTariffImportResult.created[].dynamic`.
-- **`DynamicPriceHistoryModal`** — linked from the expanded dynamic tariff and
-  from the platform admin table. It exposes a seven-day default/31-day maximum
-  date window, summary statistics, a step chart, explicit coverage gaps, and a
-  paginated interval table.
+- **`DynamicPriceHistoryPanel`** — embedded directly in the tariff pane with
+  `compact`, and used by `DynamicPriceHistoryModal` for platform admin. The
+  tariff pane leads with date filters and a step chart of fetched interval
+  prices, scoped to the selected version and applying its minimum price. Its
+  initial request already uses `defaultHistoryDateRange`: last week for VSE,
+  stored coverage for BFE, clipped to tariff validity. The compact panel omits
+  repeated statistics/validity text and keeps interval records in a lazy
+  disclosure. An empty series shows one plain message, without a graph, gap
+  warning or empty records disclosure; partially populated ranges retain gap
+  warnings. The platform admin panel retains its statistics and interval table.
 - **`AdminDynamicSourcesPanel`** — routed as `/admin/dynamic-sources` in the
   Admin Overview hub. It displays global source/point/reuse/failure KPIs and a
   `DataTable` with current fetch state, last error/time and reuse counts. Its

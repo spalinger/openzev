@@ -1,23 +1,21 @@
 import { useState, type ReactNode } from 'react'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { faChevronDown } from '@fortawesome/free-solid-svg-icons'
 
 type TariffDisclosureProps = {
     summary: ReactNode
-    /** Opens when the group holds what the pane is showing. */
-    defaultOpen?: boolean
     children: ReactNode
 }
 
-/**
- * Secondary pane content on demand: native details/summary, closed unless
- * told otherwise. Its body mounts only while open, so a closed disclosure
- * costs no request or chart. The shared `Disclosure` (UI patterns phase 2)
- * replaces it.
- */
-export function TariffDisclosure({ summary, defaultOpen = false, children }: TariffDisclosureProps) {
-    const [open, setOpen] = useState(defaultOpen)
+/** Mount secondary content only while its native disclosure is open. */
+export function TariffDisclosure({ summary, children }: TariffDisclosureProps) {
+    const [open, setOpen] = useState(false)
     return (
-        <details className="tariff-disclosure" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
-            <summary>{summary}</summary>
+        <details className="tariff-disclosure" onToggle={(event) => setOpen(event.currentTarget.open)}>
+            <summary>
+                <span>{summary}</span>
+                <FontAwesomeIcon className="tariff-disclosure-chevron" icon={faChevronDown} fixedWidth />
+            </summary>
             {open && children}
         </details>
     )

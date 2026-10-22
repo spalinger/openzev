@@ -6,6 +6,8 @@ import { CivilDateInput } from '../../components/CivilDateInput'
 import { DataTable, type ColumnDef } from '../../components/DataTable'
 import { FormModal } from '../../components/FormModal'
 import { StatCard } from '../../components/StatCard'
+import { PageSkeleton } from '../../components/PageSkeleton'
+import { TariffDisclosure } from './TariffDisclosure'
 import { fetchDynamicPriceHistory } from '../../lib/api/tariffs'
 import { formatDateTime, formatShortDate, useAppSettings } from '../../lib/appSettings'
 import { AXIS_COLOR, CHART_GRIDLINE, CONS_COLORS } from '../../lib/chartTokens'
@@ -134,23 +136,17 @@ type PanelProps = {
   source: DynamicTariffSource
   /** The tariff this history was opened for, if any — see `TariffValidityContext`. */
   tariff?: TariffValidityContext | null
+  /** In the tariff pane, lead with the chart and keep raw records on demand. */
+  compact?: boolean
 }
 
-/**
- * The date-range picker, stats, chart and point table for one dynamic
- * source's fetched prices. Split out from `DynamicPriceHistoryModal` so the
- * tariff detail drawer can show it inline — there is room for it there, and
- * it is the one thing on that drawer a click used to be needed for (#728) —
- * while the dynamic-sources admin table, which opens it out of context from
- * a table row rather than an already-open detail view, still wants it as a
- * modal.
- */
-export function DynamicPriceHistoryPanel({ source, tariff }: PanelProps) {
+/** Fetched prices in the tariff pane or the source-admin dialog. */
+export function DynamicPriceHistoryPanel({ source, tariff, compact = false }: PanelProps) {
   const { t } = useTranslation()
   const { settings } = useAppSettings()
   const today = todayBusinessIso()
-  const [dateFrom, setDateFrom] = useState(daysBefore(today, 6))
-  const [dateTo, setDateTo] = useState(today)
+  const [dateFrom, setDateFrom] = useState(() => defaultHistoryDateRange(source, today, tariff).dateFrom)
+  const [dateTo, setDateTo] = useState(() => defaultHistoryDateRange(source, today, tariff).dateTo)
 
   useEffect(() => {
     const range = defaultHistoryDateRange(source, today, tariff)
@@ -200,6 +196,15 @@ export function DynamicPriceHistoryPanel({ source, tariff }: PanelProps) {
     : historyQuery.data?.stats
   const validityMin = tariff?.valid_from
   const validityMax = tariff ? validityUpperBound(tariff, today) : undefined
+  const records = (
+    <DataTable
+      data={points}
+      columns={columns}
+      getRowId={(point) => point.valid_from}
+      loading={historyQuery.isLoading}
+      emptyMessage={t('pages.dynamicSources.history.empty')}
+    />
+  )
 
   return (
     <div className="page-stack">
@@ -224,7 +229,7 @@ export function DynamicPriceHistoryPanel({ source, tariff }: PanelProps) {
         </label>
       </div>
 
-      {tariff && (
+      {tariff && !compact && (
         <p className="muted" style={{ margin: 0 }}>
           {t('pages.dynamicSources.history.validityScope', {
             from: formatShortDate(tariff.valid_from, settings),
@@ -236,9 +241,15 @@ export function DynamicPriceHistoryPanel({ source, tariff }: PanelProps) {
         </p>
       )}
 
+      {compact && hasFloor && (
+        <p className="muted tariff-period-meta">
+          {t('pages.dynamicSources.history.minimumApplied', { price: Number(tariff!.minimum_price_chf_per_kwh).toFixed(5) })}
+        </p>
+      )}
+
       {historyQuery.isError && <div className="error-banner">{t('pages.dynamicSources.history.loadError')}</div>}
 
-      {stats && (
+      {stats && !compact && (
         <div className="kpi-row">
           <StatCard label={t('pages.dynamicSources.history.points')} value={stats.point_count} flat />
           <StatCard
@@ -255,9 +266,12 @@ export function DynamicPriceHistoryPanel({ source, tariff }: PanelProps) {
         </div>
       )}
 
+      {compact && historyQuery.isLoading && <PageSkeleton variant="card" />}
+      {compact && historyQuery.isSuccess && points.length === 0 && <p className="muted">{t('pages.dynamicSources.history.empty')}</p>}
+
       {chartData.length > 0 && (
-        <section className="card">
-          <ResponsiveContainer width="100%" height={280}>
+        <section className={compact ? 'tariff-dynamic-chart' : 'card'} aria-label={t('pages.tariffs.priceHistory.title')}>
+          <ResponsiveContainer width="100%" height={compact ? 220 : 280}>
             <LineChart data={chartData} margin={{ top: 8, right: 18, left: 8, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRIDLINE} />
               <XAxis
@@ -280,7 +294,7 @@ export function DynamicPriceHistoryPanel({ source, tariff }: PanelProps) {
                 dataKey="price"
                 type="stepAfter"
                 stroke={CONS_COLORS[0]}
-                dot={false}
+                dot={chartData.length === 1 ? { r: 4 } : false}
                 activeDot={{ r: 4 }}
                 isAnimationActive={false}
               />
@@ -289,7 +303,7 @@ export function DynamicPriceHistoryPanel({ source, tariff }: PanelProps) {
         </section>
       )}
 
-      {historyQuery.data && historyQuery.data.gaps.length > 0 && (
+      {historyQuery.data && historyQuery.data.gaps.length > 0 && (!compact || points.length > 0) && (
         <section className="warning-banner">
           <strong>{t('pages.dynamicSources.history.gapTitle')}</strong>
           <ul>
@@ -300,13 +314,7 @@ export function DynamicPriceHistoryPanel({ source, tariff }: PanelProps) {
         </section>
       )}
 
-      <DataTable
-        data={points}
-        columns={columns}
-        getRowId={(point) => point.valid_from}
-        loading={historyQuery.isLoading}
-        emptyMessage={t('pages.dynamicSources.history.empty')}
-      />
+      {compact ? points.length > 0 && <TariffDisclosure summary={t('pages.dynamicSources.history.sectionTitle')}>{records}</TariffDisclosure> : records}
     </div>
   )
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildPriceHistory } from '../src/features/tariffs/priceHistory'
+import { buildPriceHistory, hasPriceChanges } from '../src/features/tariffs/priceHistory'
 import type { TariffPeriod, TariffSeries, TariffVersion } from '../src/types/api'
 
 const TODAY = '2026-07-30'
@@ -378,5 +378,24 @@ describe('buildPriceHistory — percentage of energy', () => {
     expect(history.points[0].values['band-0']).toBe(0.18)
     expect(history.points[0].values['band-1']).toBe(0.12)
     expect(history.points[0].values['band-2']).toBe(0.19)
+  })
+})
+
+
+describe('history chart visibility', () => {
+  it('omits missing and unchanged prices, but keeps real changes', () => {
+    const chart = (first: string | null, second: string | null) => buildPriceHistory(series([
+      version('2025-01-01', '2025-12-31', { periods: first == null ? [] : [period('flat', first)] }),
+      version('2026-01-01', null, { periods: second == null ? [] : [period('flat', second)] }),
+    ]), [], TODAY)
+    expect(hasPriceChanges(chart(null, null))).toBe(false)
+    expect(hasPriceChanges(chart('0.295', '0.295'))).toBe(false)
+    expect(hasPriceChanges(chart('0.295', '0.315'))).toBe(true)
+    expect(hasPriceChanges(chart('0', '0.315'))).toBe(true)
+    const changedBands = buildPriceHistory(series([
+      version('2025-01-01', '2025-12-31', { periods: [period('flat', '0.295')] }),
+      version('2026-01-01', null, { periods: [period('high', '0.315'), period('low', '0.225')] }),
+    ]), [], TODAY)
+    expect(hasPriceChanges(changedBands)).toBe(true)
   })
 })

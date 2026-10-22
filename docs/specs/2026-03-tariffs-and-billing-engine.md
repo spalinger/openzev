@@ -1171,22 +1171,19 @@ one.
 
 ---
 
-### Frontend write dialogs
+### Frontend tariff workspace
 
-Tariff create/edit, price-band, version/duplicate/rename and import dialogs reset
-when account, selected community or effective write capability changes. Pending
-delete confirmations are cancelled and recheck current scope before dispatch.
-CRUD and version completions invalidate the submitting community's series; an
-obsolete completion does not close replacement dialogs or show a toast. The
-validity filter and badges use the business date calculated on each render.
-Tariff and price-band submissions both require a selected community as well as
-effective write capability, including for admins.
+Tariffs, price bands and versions are managed in the detail pane. The canonical
+interaction contract is [Tariff split view, §§4–6](2026-10-tariff-split-view.md#4-overview),
+including overview prices, scheduling versus corrections, creation and draft guards.
+Static-energy creation saves the tariff before its first band; an unpriced
+version remains incomplete. This does not change billing/versioning semantics.
 
-The tariff series query waits for a matching selected community record. ScopeGuard
-keeps the header visible during scope loading/failure/empty states and retains
-usable cached scope after refresh failures. Missing selection never means all
-communities in the management series filter. Retained tariff/period/version submit
-callbacks and each mutation's API dispatch check the current scope token.
+Writes require the selected community and effective write capability. Scope,
+account or permission changes invalidate the editing session. Delayed completion
+refreshes the submitting community's data but cannot close a replacement task.
+The management query waits for the selected community record and never treats a
+missing selection as a request for every community.
 
 ## 7. Invoice line-item construction
 

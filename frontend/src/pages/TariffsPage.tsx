@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
 import { TariffOverview } from '../features/tariffs/TariffOverview'
 import { TariffDetailPane, TariffPaneFrame } from '../features/tariffs/TariffDetailPane'
@@ -12,8 +11,10 @@ import { TariffPeriodForm } from '../features/tariffs/TariffPeriodForm'
 import { TariffActions } from '../features/tariffs/TariffActions'
 import { TariffVersionForm } from '../features/tariffs/TariffVersionForm'
 import { useTariffVersions } from '../features/tariffs/useTariffVersions'
-import { useDraftGuard, allowNavigation } from '../features/tariffs/useDraftGuard'
-import { listedVersion, tariffOverview } from '../features/tariffs/validity'
+import { useTariffEditor } from '../features/tariffs/useTariffEditor'
+import { useTariffPaneNavigation } from '../features/tariffs/useTariffPaneNavigation'
+import { useDraftGuard } from '../features/tariffs/useDraftGuard'
+import { tariffOverview } from '../features/tariffs/validity'
 import { seriesKeyOf } from '../features/tariffs/useTariffDisplay'
 import { tariffOverviewFilename, tariffOverviewParams, type TariffValidityFilter } from '../features/tariffs/tariffOverview'
 import { fetchTariffSeries } from '../lib/api/tariffs'
@@ -24,7 +25,6 @@ import { todayBusinessIso } from '../lib/dates'
 import { downloadBlob } from '../lib/downloadBlob'
 import { useAppSettings } from '../lib/appSettings'
 import { useAuth } from '../lib/auth'
-import { useMinWidth } from '../lib/useMinWidth'
 import { useManagedZev } from '../lib/managedZev'
 import { useCommunityAccess, useScopeNote } from '../lib/communityAccess'
 import { PageSkeleton } from '../components/PageSkeleton'
@@ -35,54 +35,37 @@ import { PageHeader } from '../components/PageHeader'
 import { Notice } from '../components/Notice'
 import { ScopeGuard } from '../components/ScopeGuard'
 
-const TARIFF_PARAM = 'tariff'
-const VERSION_PARAM = 'version'
-
-/** Content width from which the list and the pane sit side by side; below it
- * the pane takes the whole area (SPEC-2026-10-tariff-split-view §5.1). */
-const SPLIT_MIN_REM = 62
-
-/** Marks the history entry that opening a tariff from the list added, so X
- * can take it back instead of leaving a Back step behind. */
-const PANE_STATE = { tariffPane: true }
-
-type EditorKind = 'create' | 'edit' | 'period' | 'new-version' | 'duplicate' | 'rename'
-
 export function TariffsPage() {
     const queryClient = useQueryClient()
     const { pushToast } = useToast()
     const { dialog, confirm, handleConfirm, handleCancel, isLoading: dialogLoading } = useConfirmDialog()
     const { user } = useAuth()
-    const cancelConfirmation = useEffectEvent(handleCancel)
     const { settings } = useAppSettings()
     const { selectedZevId, selectedZev } = useManagedZev()
     const { t } = useTranslation()
     const scopeNote = useScopeNote()
     const { isZevScope, canWriteSelectedCommunity } = useCommunityAccess()
-    const isManagedScope = isZevScope
     const readOnly = !canWriteSelectedCommunity
+    const scopeKey = `${selectedZevId ?? ''}|${readOnly}|${user?.id ?? ''}`
+    const editing = useTariffEditor(scopeKey)
+    const editor = editing.task?.kind ?? null
+    const firstPriceFor = useRef<string | null>(null)
     const [showImportModal, setShowImportModal] = useState(false)
-    const [searchParams, setSearchParams] = useSearchParams()
-    const location = useLocation()
-    const navigate = useNavigate()
     // Which group a tariff is in and what its row says both follow today's date.
     const today = todayBusinessIso()
 
-    // One query, not three: the series endpoint already groups versions, names
-    // the active one, detects gaps, and nests each version's price bands. The
-    // flat lists below are derived from it so nothing can drift out of step
-    // after a mutation.
+    // Versions and bands derive from one scoped series query.
     const seriesQuery = useQuery({
         queryKey: queryKeys.tariffs.series(selectedZevId || undefined),
-        queryFn: () => fetchTariffSeries(isManagedScope ? selectedZevId || undefined : undefined),
+        queryFn: () => fetchTariffSeries(isZevScope ? selectedZevId || undefined : undefined),
         enabled: !!selectedZevId && selectedZev?.id === selectedZevId,
     })
 
     const allSeries = useMemo(
         () => (seriesQuery.data ?? []).filter(
-            (series) => !isManagedScope || series.zev === selectedZevId,
+            (series) => !isZevScope || series.zev === selectedZevId,
         ),
-        [seriesQuery.data, isManagedScope, selectedZevId],
+        [seriesQuery.data, isZevScope, selectedZevId],
     )
 
     const tariffs = useMemo<Tariff[]>(
@@ -90,79 +73,24 @@ export function TariffsPage() {
         [allSeries],
     )
 
-    // The pane's open tariff (and, within it, which version) lives in the URL
-    // rather than component state: a reload, the back button, or a shared
-    // link all reopen the same view instead of dropping back to the bare
-    // list (#728). A renamed tariff is still found by its version, so a link
-    // or a rename in flight does not close the pane.
-    const tariffParam = searchParams.get(TARIFF_PARAM)
-    const shownVersionId = searchParams.get(VERSION_PARAM)
-    const openSeries = useMemo<TariffSeries | null>(() => {
-        if (!tariffParam) return null
-        return allSeries.find((series) => seriesKeyOf(series) === tariffParam)
-            ?? (shownVersionId ? allSeries.find((series) => series.versions.some((version) => version.id === shownVersionId)) : undefined)
-            ?? null
-    }, [allSeries, tariffParam, shownVersionId])
-    const openSeriesKey = openSeries ? seriesKeyOf(openSeries) : null
-
-    // The version the pane shows: the linked one, else the one in force. The
-    // list highlights that row, so it reads the same as the pane.
-    const selected = useMemo(() => {
-        if (!openSeries) return null
-        const version = openSeries.versions.find((candidate) => candidate.id === shownVersionId)
-            ?? listedVersion(openSeries.versions, today)
-        return { seriesKey: seriesKeyOf(openSeries), versionId: version.id }
-    }, [openSeries, shownVersionId, today])
-
-    const [splitRef, fitsTwoPanes] = useMinWidth<HTMLDivElement>(SPLIT_MIN_REM)
-    const paneTitleRef = useRef<HTMLHeadingElement>(null)
-    // Where the list was scrolled to when the pane took its place.
-    const listScroll = useRef<number | null>(null)
-    // Opening or saving moves focus to the pane's title; closing moves it back
-    // to the control or row that opened it.
-    const focusPaneTitle = useRef(false)
-    const returnFocusTo = useRef<string | null>(null)
-    const returnFocusAction = useRef<string | null>(null)
-    // Raised while the page navigates on its own account, which the unsaved-
-    // input guard must not ask about.
-    const bypassGuard = useRef(false)
-
-    function withParams(change: (params: URLSearchParams) => void) {
-        return (previous: URLSearchParams) => {
-            const next = new URLSearchParams(previous)
-            change(next)
-            return next
-        }
-    }
-
-    // Opening from the list adds one history step; switching tariff or
-    // version while the pane is open replaces it, so Back returns to the
-    // list rather than stepping through every tariff looked at.
-    function select(series: Pick<TariffSeries, 'zev' | 'name'>, versionId: string) {
-        const fromList = !searchParams.get(TARIFF_PARAM)
-        if (fromList && !fitsTwoPanes) listScroll.current = window.scrollY
-        focusPaneTitle.current = true
-        allowNavigation(bypassGuard, () => setSearchParams(withParams((params) => {
-            params.set(TARIFF_PARAM, seriesKeyOf(series))
-            params.set(VERSION_PARAM, versionId)
-        }), { replace: !fromList, state: fromList ? PANE_STATE : location.state }))
-    }
-
-    // X takes back the step opening added; a pane reached by a link has no
-    // step of ours behind it, so it returns to the list in place.
-    function deselect() {
-        if (selected) returnFocusTo.current = `${selected.seriesKey}:${selected.versionId}`
-        allowNavigation(bypassGuard, () => {
-            if (location.state?.tariffPane) {
-                navigate(-1)
-                return
+    const navigation = useTariffPaneNavigation({
+        allSeries, today, scopeKey, editor,
+        settled: seriesQuery.isSuccess && !seriesQuery.isFetching,
+        onSelectionChange: (series) => {
+            editing.close()
+            if (firstPriceFor.current && series?.versions.some(version => version.id === firstPriceFor.current)) {
+                const id = firstPriceFor.current
+                firstPriceFor.current = null
+                beginEditing('add-first-price', () => openCreatePeriod(id))
             }
-            setSearchParams(withParams((params) => {
-                params.delete(TARIFF_PARAM)
-                params.delete(VERSION_PARAM)
-            }), { replace: true })
-        })
-    }
+        },
+        onScopeChange: () => {
+            setShowImportModal(false)
+            handleCancel()
+            firstPriceFor.current = null
+        },
+    })
+    const { pageRef, splitRef, paneTitleRef, openSeries, shownVersionId, selected, paneOpen, listHidden, fitsTwoPanes, select, deselect } = navigation
 
     const periods = useMemo(
         () => allSeries.flatMap((series) => series.versions.flatMap((version) => version.periods)),
@@ -199,12 +127,11 @@ export function TariffsPage() {
         startTariffEdit,
         startPeriodEdit,
         openCreateTariff,
-        closeTariffForm,
         openCreatePeriod,
-        closePeriodForm,
         confirmDeleteTariff,
         confirmDeletePeriod,
     } = useTariffCrud({
+        editing,
         selectedZevId,
         canWrite: !readOnly,
         tariffs,
@@ -216,11 +143,15 @@ export function TariffsPage() {
         confirm,
         t,
         // A new tariff is a new selection; a changed version stays in view.
-        onTariffSaved: (saved) => select(saved, saved.id),
-        onPeriodSaved: () => { focusPaneTitle.current = true },
+        onTariffSaved: (saved, kind) => {
+            firstPriceFor.current = kind === 'created' && saved.billing_mode === 'energy' && !saved.dynamic_source ? saved.id : null
+            select(saved, saved.id)
+        },
+        onPeriodSaved: navigation.focusTitle,
     })
 
     const versions = useTariffVersions({
+        editing,
         selectedZevId,
         canWrite: !readOnly,
         queryClient,
@@ -230,26 +161,19 @@ export function TariffsPage() {
         onSaved: (saved) => select(saved, saved.id),
     })
 
-    // What the pane is for right now: viewing, or one of the forms.
-    const editor: EditorKind | null = versions.dialog?.kind
-        ?? (tariffFormOpen ? (editingTariffId ? 'edit' : 'create') : periodFormOpen ? 'period' : null)
     const [formDirty, setFormDirty] = useState(false)
-    const saving = editor !== null && (tariffPending || periodPending || versions.isPending)
+    const [sourcePending, setSourcePending] = useState(false)
+    const saving = editor !== null && (tariffPending || periodPending || versions.isPending || sourcePending)
     const guard = useDraftGuard({
         dirty: editor !== null && formDirty,
         saving,
         confirm,
-        bypass: bypassGuard,
+        bypass: navigation.bypassGuard,
     })
 
-    function resetEditing() {
-        closeTariffForm()
-        closePeriodForm()
-        versions.closeDialog()
-    }
-
+    const resetEditing = editing.close
     function beginEditing(actionKey: string, open: () => void) {
-        returnFocusAction.current = actionKey
+        navigation.editingFrom(actionKey)
         open()
     }
 
@@ -260,10 +184,14 @@ export function TariffsPage() {
     })
 
     // Switching tariff or version, or leaving the pane, asks first when a form has unsaved input.
-    const showVersion = (series: Pick<TariffSeries, 'zev' | 'name'>, versionId: string) => guard.run(() => {
-        resetEditing()
-        select(series, versionId)
-    })
+    const showVersion = (series: Pick<TariffSeries, 'zev' | 'name'>, versionId: string) => {
+        if (navigation.isSelecting(series, versionId)) return
+        if (selected?.seriesKey === seriesKeyOf(series) && selected.versionId === versionId) return
+        guard.run(() => {
+            resetEditing()
+            select(series, versionId)
+        })
+    }
     const closePane = () => guard.run(() => {
         resetEditing()
         if (openSeries) deselect()
@@ -271,86 +199,6 @@ export function TariffsPage() {
     // Cancel, and Escape while a form is open: back to viewing.
     const cancelEditing = () => guard.run(resetEditing)
     const escapePane = () => (editor ? cancelEditing() : closePane())
-
-    // A change of community, permission or account drops the selection and
-    // whatever is open on top of it, drafts included. The first resolved
-    // scope is not a change: a link to a tariff must survive the page finding
-    // out which community it is in.
-    const scopeKey = `${selectedZevId ?? ''}|${readOnly}|${user?.id ?? ''}`
-    const lastScopeKey = useRef(scopeKey)
-    useEffect(() => {
-        setShowImportModal(false)
-        cancelConfirmation()
-        const previous = lastScopeKey.current
-        lastScopeKey.current = scopeKey
-        if (previous === scopeKey || previous.startsWith('|')) return
-        allowNavigation(bypassGuard, () => setSearchParams(withParams((params) => {
-            params.delete(TARIFF_PARAM)
-            params.delete(VERSION_PARAM)
-        }), { replace: true }))
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- the scope is the trigger; the rest is stable
-    }, [scopeKey])
-
-    // A selection that moves on its own (Back, a link) leaves any open form behind.
-    useEffect(() => {
-        resetEditing()
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- the selected tariff is the trigger
-    }, [openSeriesKey])
-
-    // A rename or a link by version leaves the old name in the URL; say the current one.
-    useEffect(() => {
-        if (openSeriesKey && tariffParam !== openSeriesKey) {
-            setSearchParams(withParams((params) => params.set(TARIFF_PARAM, openSeriesKey)), { replace: true, state: location.state })
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the name and the link disagree
-    }, [openSeriesKey, tariffParam])
-
-    // A link to a tariff that is gone (deleted here or elsewhere, or another
-    // community's) opens the list, not an empty pane.
-    useEffect(() => {
-        if (!seriesQuery.isSuccess || seriesQuery.isFetching || !tariffParam || openSeries) return
-        allowNavigation(bypassGuard, () => setSearchParams(withParams((params) => {
-            params.delete(TARIFF_PARAM)
-            params.delete(VERSION_PARAM)
-        }), { replace: true }))
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- when the data has settled and the link points nowhere
-    }, [seriesQuery.isSuccess, seriesQuery.isFetching, tariffParam, openSeries])
-
-    const paneOpen = openSeries !== null || editor === 'create'
-    // Two panes that cannot both be useful become one: the pane, and the list
-    // out of sight and out of the tab order until it is closed.
-    const listHidden = paneOpen && !fitsTwoPanes
-
-    // Where focus goes as the pane changes: to its title when it opens or a
-    // save has landed; back to the control that opened a form when it is
-    // cancelled; back to the row, or the list's first heading, when it closes.
-    useEffect(() => {
-        if (paneOpen && focusPaneTitle.current) {
-            focusPaneTitle.current = false
-            returnFocusAction.current = null
-            paneTitleRef.current?.focus()
-            return
-        }
-        if (!paneOpen && returnFocusTo.current) {
-            const row = document.querySelector<HTMLElement>(`[data-row-key="${CSS.escape(returnFocusTo.current)}"] .tariff-select`)
-            returnFocusTo.current = null
-            ;(row ?? document.getElementById('tariff-overview-current'))?.focus()
-            return
-        }
-        if (editor === null && returnFocusAction.current) {
-            const control = document.querySelector<HTMLElement>(`[data-action-key="${CSS.escape(returnFocusAction.current)}"]`)
-            returnFocusAction.current = null
-            ;(control ?? paneTitleRef.current)?.focus()
-        }
-    }, [paneOpen, openSeries, editor])
-
-    // The list comes back where the user left it.
-    useLayoutEffect(() => {
-        if (!listHidden && listScroll.current !== null) {
-            window.scrollTo(0, listScroll.current)
-            listScroll.current = null
-        }
-    }, [listHidden])
 
     // The scope is chosen at the download, not by the list: the overview
     // groups series by validity, and "all" is what also adds every
@@ -365,6 +213,7 @@ export function TariffsPage() {
         <PageHeader
             eyebrow={selectedZev?.name}
             communitySwitch
+            onCommunitySwitch={guard.run}
             scopeNote={scopeNote}
             title={t('pages.tariffs.title')}
             description={t('pages.tariffs.description')}
@@ -415,6 +264,7 @@ export function TariffsPage() {
                         onSubmit={submitTariff}
                         onCancel={cancelEditing}
                         onDirtyChange={setFormDirty}
+                        onSourcePendingChange={setSourcePending}
                     />
                 ),
             }
@@ -442,14 +292,14 @@ export function TariffsPage() {
     const editorPane = renderEditor()
 
     return (
-        <div className="page-stack">
+        <div ref={pageRef} className="page-stack">
             {header}
             <ScopeGuard skeleton="table">
             {seriesQuery.isLoading ? <PageSkeleton variant="table" /> : seriesQuery.isError ? (
                 <Notice tone="error" onRetry={() => void seriesQuery.refetch()} isRetrying={seriesQuery.isFetching}>{t('common.error')}</Notice>
             ) : <>
             {selectedZev?.vat_mode === 'inclusive' && (
-                <div className="info-banner">{t('pages.tariffs.vatInclusiveNotice')}</div>
+                <p className="tariff-vat-notice muted">{t('pages.tariffs.vatInclusiveNotice')}</p>
             )}
 
             {selectedZevId && (
@@ -476,6 +326,7 @@ export function TariffsPage() {
                             settings={settings}
                             selected={selected}
                             onOpenDetail={showVersion}
+                            onCloseDetail={closePane}
                         />
                     )}
                 </div>
@@ -483,7 +334,10 @@ export function TariffsPage() {
                 {editor === 'create' && editorPane ? (
                     <TariffPaneFrame
                         title={t('pages.tariffs.createTitle')}
-                        onClose={escapePane}
+                        backLabel={t(openSeries ? 'pages.tariffs.workspace.backToTariff' : 'pages.tariffs.workspace.back')}
+                        onClose={closePane}
+                        onBack={escapePane}
+                        onEscape={escapePane}
                         titleRef={paneTitleRef}
                     >
                         <div className="tariff-pane-body page-stack">{editorPane.content}</div>
@@ -497,15 +351,17 @@ export function TariffsPage() {
                         onShowVersion={(versionId) => showVersion(openSeries, versionId)}
                         deleteTariffDisabled={deleteTariffPending || dialogLoading}
                         deletePeriodDisabled={deletePeriodPending || dialogLoading}
-                        onClose={escapePane}
+                        onClose={closePane}
+                        onBack={escapePane}
+                        onEscape={escapePane}
                         onEditTariff={(version, actionKey) => beginEditing(actionKey, () => startTariffEdit(version))}
                         onDeleteTariff={confirmDeleteTariff}
                         onOpenCreatePeriod={(versionId) => beginEditing('add-period', () => openCreatePeriod(versionId))}
                         onEditPeriod={(period, actionKey) => beginEditing(actionKey, () => startPeriodEdit(period))}
                         onDeletePeriod={confirmDeletePeriod}
-                        onNewVersion={(series, source) => beginEditing('new-version', () => versions.openNewVersion(series, source))}
-                        onDuplicate={(series, source) => beginEditing('duplicate', () => versions.openDuplicate(series, source))}
-                        onRenameSeries={(series, source) => beginEditing('rename', () => versions.openRename(series, source))}
+                        onNewVersion={(series, source, validFrom) => beginEditing('new-version', () => versions.openNewVersion(series, source, validFrom))}
+                        onDuplicate={(series, source) => beginEditing('series-actions', () => versions.openDuplicate(series, source))}
+                        onRenameSeries={(series, source) => beginEditing('series-actions', () => versions.openRename(series, source))}
                         readOnly={readOnly}
                         titleRef={paneTitleRef}
                         editor={editorPane ?? undefined}

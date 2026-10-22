@@ -391,7 +391,7 @@ Reuses `_pdf_response(..., disposition="attachment")`.
 
 - `useMutation` over `downloadTariffOverview`, `onSuccess` → `downloadBlob`.
 - The mutation takes the scope chosen at the download. It is not taken from
-  the list: it is grouped Current · Upcoming · History rather than filtered, and
+  the list: it combines current/upcoming prices, then entirely ended tariffs, and
   "all" is what also adds every superseded version to the PDF.
 - `as_of` is not sent; the backend defaults to today. A date picker is a later
   addition and would go next to the scope choice.

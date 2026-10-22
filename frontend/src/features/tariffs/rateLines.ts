@@ -81,7 +81,7 @@ export function buildRateLines(
         : series.billing_mode.startsWith('shared') ? 'shared' : 'perParticipant'
     return [{
         applies: t(`pages.tariffs.rateCard.${basis}`),
-        price: Number(version.fixed_price_chf || 0).toFixed(2),
+        price: version.fixed_price_chf ? Number(version.fixed_price_chf).toFixed(2) : '',
         unit: t(yearly ? 'pages.tariffs.rateCard.perYear' : 'pages.tariffs.rateCard.perMonth'),
     }]
 }

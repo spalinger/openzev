@@ -43,30 +43,27 @@ export function listedVersion<T extends Tariff>(versions: T[], today: string, up
 }
 
 /** A list row: the series, and the one version the row stands for. */
-export type TariffOverviewRow = { series: TariffSeries, version: TariffVersion }
+export type TariffOverviewRow = { series: TariffSeries, version: TariffVersion, upcomingVersion?: TariffVersion }
 
 export type TariffOverview = {
     current: TariffOverviewRow[]
-    upcoming: TariffOverviewRow[]
     history: TariffOverviewRow[]
 }
 
 /**
- * The overview's three groups. A series appears in each group it has a
- * version for, with the version that group is about: the one in force; the
- * nearest to start (`versions` are newest first, so the last scheduled one);
- * the most recently ended. The older ended ones are reached from the detail's
- * version history, not as rows of their own.
+ * One row per current/upcoming tariff, plus tariffs that have ended entirely.
+ * Earlier versions of a current or upcoming tariff live only in its detail.
+ * Versions arrive newest first, so the last scheduled one is the next to start.
  */
 export function tariffOverview(series: TariffSeries[], today: string): TariffOverview {
-    const overview: TariffOverview = { current: [], upcoming: [], history: [] }
+    const overview: TariffOverview = { current: [], history: [] }
     for (const entry of series) {
         const active = entry.versions.find((version) => validityState(version, today) === 'active')
         const next = entry.versions.findLast((version) => validityState(version, today) === 'scheduled')
         const ended = entry.versions.find((version) => validityState(version, today) === 'expired')
-        if (active) overview.current.push({ series: entry, version: active })
-        if (next) overview.upcoming.push({ series: entry, version: next })
-        if (ended) overview.history.push({ series: entry, version: ended })
+        const shown = active ?? next
+        if (shown) overview.current.push({ series: entry, version: shown, upcomingVersion: active ? next : undefined })
+        if (ended && !active && !next) overview.history.push({ series: entry, version: ended })
     }
     return overview
 }

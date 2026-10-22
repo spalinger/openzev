@@ -38,7 +38,7 @@ export type TariffPeriodFormValues = {
 
 export const tariffFormSchema = z
   .object({
-    name: z.string().trim().min(1),
+    name: z.string().trim().min(1, 'required'),
     category: z.enum(['energy', 'grid_fees', 'levies', 'metering']),
     billing_mode: z.enum([
       'energy',
@@ -54,7 +54,7 @@ export const tariffFormSchema = z
     fixed_price_chf: z.string(),
     initial_percentage: z.string(),
     split_key: z.enum(['equal', 'weight']),
-    valid_from: z.string().trim().min(1),
+    valid_from: z.string().trim().min(1, 'required'),
     valid_to: z.string(),
     notes: z.string(),
     dynamic_source: z.string(),
@@ -71,7 +71,7 @@ export const tariffFormSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['minimum_price_chf_per_kwh'],
-        message: 'Minimum price must be a number.',
+        message: 'number',
       })
     }
 
@@ -79,7 +79,7 @@ export const tariffFormSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['energy_type'],
-        message: 'Energy type is required.',
+        message: 'required',
       })
     }
 
@@ -91,14 +91,14 @@ export const tariffFormSchema = z
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['initial_percentage'],
-          message: 'Percentage is required.',
+          message: 'required',
         })
       }
       if (values.initial_percentage && Number.isNaN(Number(values.initial_percentage))) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['initial_percentage'],
-          message: 'Percentage must be a number.',
+          message: 'number',
         })
       }
     }
@@ -108,14 +108,14 @@ export const tariffFormSchema = z
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['fixed_price_chf'],
-          message: 'Fixed price is required.',
+          message: 'required',
         })
       }
       if (values.fixed_price_chf && Number.isNaN(Number(values.fixed_price_chf))) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['fixed_price_chf'],
-          message: 'Fixed price must be a number.',
+          message: 'number',
         })
       }
     }
@@ -152,14 +152,14 @@ export const tariffPeriodFormSchema = z
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['percentage'],
-          message: 'Percentage is required.',
+          message: 'required',
         })
       }
     } else if (!values.price_chf_per_kwh.trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['price_chf_per_kwh'],
-        message: 'Price is required.',
+        message: 'required',
       })
     }
   })

@@ -1,5 +1,4 @@
 import { useMutation, type QueryClient } from '@tanstack/react-query'
-import { useLayoutEffect, useRef, useState } from 'react'
 import { createTariffVersion, duplicateTariff, renameTariffSeries } from '../../lib/api/tariffs'
 import { useAuth } from '../../lib/auth'
 import { useWriteScope } from '../../lib/useWriteScope'
@@ -7,14 +6,12 @@ import { formatApiError } from '../../lib/api/errors'
 import { invalidateTariffQueries } from './invalidate'
 import type { Tariff, TariffSeries, TariffVersion, TariffVersionInput } from '../../types/api'
 
-/** Which task the versioning flow currently has open in the pane, and against what. */
-export type VersionDialog =
-  | { kind: 'new-version', series: TariffSeries, source: TariffVersion }
-  | { kind: 'duplicate', series: TariffSeries, source: TariffVersion }
-  | { kind: 'rename', series: TariffSeries, source: TariffVersion }
-  | null
+import type { TariffEditing, VersionTask } from './useTariffEditor'
+
+export type VersionDialog = VersionTask | null
 
 type Params = {
+  editing: TariffEditing
   selectedZevId?: string
   canWrite?: boolean
   queryClient: QueryClient
@@ -24,25 +21,11 @@ type Params = {
   onSaved?: (saved: Tariff, kind: 'new-version' | 'duplicate' | 'rename') => void
 }
 
-export function useTariffVersions({ selectedZevId, canWrite = true, queryClient, pushToast, t, onSaved }: Params) {
+export function useTariffVersions({ editing, selectedZevId, canWrite = true, queryClient, pushToast, t, onSaved }: Params) {
   const { user } = useAuth()
   const { scope, isCurrent, assertWritable } = useWriteScope({ selectedZevId, canWrite, accountId: user?.id }, t('common.error'))
-  const [dialog, setDialog] = useState<VersionDialog>(null)
-  // A failure that belongs to the open form: shown in it, not only as a toast.
-  const [saveError, setSaveError] = useState<string | null>(null)
-  // Which editing session a request belongs to: a save completing after its
-  // form was closed, or another opened, must not close or select anything.
-  const session = useRef(0)
-
-  function startSession() {
-    session.current += 1
-    setSaveError(null)
-  }
-
-  useLayoutEffect(() => {
-    startSession()
-    setDialog(null)
-  }, [scope])
+  const { task, id: session, setError: setSaveError, error: saveError } = editing
+  const dialog = task?.kind === 'new-version' || task?.kind === 'duplicate' || task?.kind === 'rename' ? task : null
 
   type Submitted = { scope: typeof scope; session: number }
 
@@ -52,8 +35,7 @@ export function useTariffVersions({ selectedZevId, canWrite = true, queryClient,
     if (!isCurrent(variables.scope)) return
     pushToast(message, 'success')
     if (variables.session !== session.current) return
-    startSession()
-    setDialog(null)
+    editing.close()
     onSaved?.(saved, kind)
   }
 
@@ -90,21 +72,13 @@ export function useTariffVersions({ selectedZevId, canWrite = true, queryClient,
     onError: (error, variables) => failed(t('pages.tariffs.messages.renameFailed'), error, variables),
   })
 
-  function open(next: NonNullable<VersionDialog>) {
-    startSession()
-    setDialog(next)
-  }
-
   return {
     dialog,
     saveError,
-    closeDialog: () => {
-      startSession()
-      setDialog(null)
-    },
-    openNewVersion: (series: TariffSeries, source: TariffVersion) => open({ kind: 'new-version', series, source }),
-    openDuplicate: (series: TariffSeries, source: TariffVersion) => open({ kind: 'duplicate', series, source }),
-    openRename: (series: TariffSeries, source: TariffVersion) => open({ kind: 'rename', series, source }),
+    closeDialog: editing.close,
+    openNewVersion: (series: TariffSeries, source: TariffVersion, validFrom?: string) => editing.open({ kind: 'new-version', series, source, validFrom }),
+    openDuplicate: (series: TariffSeries, source: TariffVersion) => editing.open({ kind: 'duplicate', series, source }),
+    openRename: (series: TariffSeries, source: TariffVersion) => editing.open({ kind: 'rename', series, source }),
     submitNewVersion: (id: string, payload: TariffVersionInput) => {
       if (canWrite && selectedZevId && isCurrent(scope)) {
         setSaveError(null)

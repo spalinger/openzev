@@ -2,7 +2,8 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCheck, faXmark } from '@fortawesome/free-solid-svg-icons'
 import { useEffect, useId, useRef } from 'react'
-import { useForm, useWatch } from 'react-hook-form'
+import { Controller, useForm, useWatch } from 'react-hook-form'
+import { TimePicker } from '@mantine/dates'
 import { useTranslation } from 'react-i18next'
 import { Notice } from '../../components/Notice'
 import { useFocusFirstField } from './useFocusFirstField'
@@ -80,14 +81,14 @@ export function TariffPeriodForm({
 
   const errors = form.formState.errors
   const fieldError = (field: 'price_chf_per_kwh' | 'percentage') => errors[field]
-    ? <small className="field-error" role="alert">{t('pages.tariffs.form.errorRequired')}</small>
+    ? <small id={`${formId}-${field}-error`} className="field-error" role="alert">{t('pages.tariffs.form.errorRequired')}</small>
     : null
 
   return (
     <div className="tariff-pane-form">
       {error && <Notice tone="error">{error}</Notice>}
       <form ref={formRef} id={formId} onSubmit={form.handleSubmit(submit)} className="form-grid" aria-busy={isPending || undefined}>
-       <fieldset className="tariff-pane-fieldset" disabled={isPending}>
+        <fieldset className="tariff-pane-fieldset" disabled={isPending}>
         <label>
           <span>{t('pages.tariffs.form.periodType')}</span>
           <select {...form.register('period_type')}>
@@ -108,24 +109,44 @@ export function TariffPeriodForm({
         {isPercentage ? (
           <label>
             <span>{t('pages.tariffs.form.percentage')}</span>
-            <input type="number" step="0.01" min="0" {...form.register('percentage')} required />
+            <input type="number" step="0.01" min="0" {...form.register('percentage')} aria-invalid={!!errors.percentage || undefined} aria-describedby={errors.percentage ? `${formId}-percentage-error` : undefined} required />
             {fieldError('percentage')}
           </label>
         ) : (
           <label>
             <span>{t('pages.tariffs.form.pricePerKwh')}</span>
-            <input type="number" step="0.00001" {...form.register('price_chf_per_kwh')} required />
+            <input type="number" step="0.00001" {...form.register('price_chf_per_kwh')} aria-invalid={!!errors.price_chf_per_kwh || undefined} aria-describedby={errors.price_chf_per_kwh ? `${formId}-price_chf_per_kwh-error` : undefined} required />
             {fieldError('price_chf_per_kwh')}
           </label>
         )}
-        <label>
-          <span>{t('pages.tariffs.form.timeFrom')}</span>
-          <input type="time" {...form.register('time_from')} />
-        </label>
-        <label>
-          <span>{t('pages.tariffs.form.timeTo')}</span>
-          <input type="time" {...form.register('time_to')} />
-        </label>
+        <div className="tariff-time-row">
+        {(['time_from', 'time_to'] as const).map((name) => {
+          const label = t(name === 'time_from' ? 'pages.tariffs.form.timeFrom' : 'pages.tariffs.form.timeTo')
+          return (
+            <Controller
+              key={name}
+              name={name}
+              control={form.control}
+              render={({ field }) => (
+                <TimePicker
+                  label={label}
+                  format="24h"
+                  value={field.value || ''}
+                  onChange={field.onChange}
+                  onBlur={field.onBlur}
+                  hoursRef={field.ref}
+                  name={field.name}
+                  hoursInputLabel={`${label}: ${t('pages.tariffs.form.hours')}`}
+                  minutesInputLabel={`${label}: ${t('pages.tariffs.form.minutes')}`}
+                  disabled={isPending}
+                  clearable
+                  clearButtonProps={{ 'aria-label': t('pages.tariffs.form.clearTime') }}
+                />
+              )}
+            />
+          )
+        })}
+        </div>
         <RecurrenceChips
           label={t('pages.tariffs.form.weekdays')}
           hint={t('pages.tariffs.form.weekdaysHint')}
@@ -149,13 +170,13 @@ export function TariffPeriodForm({
           columns={6}
         />
 
-       </fieldset>
+        </fieldset>
       </form>
       <FormModalFooter
         formId={formId}
         onCancel={onCancel}
         isPending={isPending}
-        submitLabel={isPending ? t('common.saving') : initialPeriod ? t('pages.tariffs.savePeriod') : t('pages.tariffs.createPeriod')}
+        submitLabel={isPending ? t('common.saving') : t('pages.tariffs.workspace.saveBand')}
         submitIcon={<FontAwesomeIcon icon={faCheck} fixedWidth />}
         cancelIcon={<FontAwesomeIcon icon={faXmark} fixedWidth />}
       />

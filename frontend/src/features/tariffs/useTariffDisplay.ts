@@ -153,7 +153,7 @@ export function useTariffDisplay(settings: AppSettings, today: string) {
         return undefined
     }
 
-    return { sourceById, validityBadge, priceSummary, rateLines, pricingTooltipFor }
+    return { sourcesQuery, sourceById, validityBadge, priceSummary, dynamicAverageLabel, rateLines, pricingTooltipFor }
 }
 
 /** Stable identity for a series, independent of any one version — used to key

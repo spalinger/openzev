@@ -47,27 +47,37 @@ describe('TariffDetailPane', () => {
         expect(container.querySelector('h2')?.getAttribute('tabindex')).toBe('-1')
     })
 
-    it('shows the current version first, then what is scheduled, then the folded past', async () => {
+    it('shows current, scheduled and earlier versions together in a table without disclosures', async () => {
         const container = await pane()
-        const labels = [...container.querySelectorAll('.tariff-version-group > h4, .tariff-version-group > .tariff-disclosure > summary')]
-            .map((node) => node.textContent)
-        expect(labels).toEqual(['pages.tariffs.versions.groupCurrent', 'pages.tariffs.versions.groupUpcoming', 'pages.tariffs.versions.groupPast'])
-        const folded = container.querySelector<HTMLDetailsElement>('.tariff-version-group .tariff-disclosure')!
-        expect(folded.open).toBe(false)
-        expect(container.querySelectorAll('.tariff-version-row')).toHaveLength(2)
+        const dates = [...container.querySelectorAll('.tariff-version-window')].map((node) => node.textContent)
+        expect(dates).toEqual(['01.01.2999 – pages.tariffs.openEnded', '01.01.2001 – pages.tariffs.openEnded', '01.01.2000 – 31.12.2000'])
+        expect(container.querySelectorAll('.tariff-version-table tbody tr')).toHaveLength(3)
+        expect(container.querySelector('.tariff-chart-section')).toBeNull()
+        expect(container.querySelector('details')).toBeNull()
     })
 
-    it('opens the past versions when one of them is shown, and says it is not the current one', async () => {
-        const container = await pane({ shownVersionId: 'past' })
-        expect(container.querySelector<HTMLDetailsElement>('.tariff-disclosure')!.open).toBe(true)
+    it('identifies a selected past version and selects another through its date', async () => {
+        const onShowVersion = vi.fn()
+        const container = await pane({ shownVersionId: 'past', onShowVersion })
         expect(container.querySelector('.tariff-version-row.is-shown.is-ended')).not.toBeNull()
-        expect(container.querySelector('.tariff-version-card .badge')?.textContent).toBe('pages.tariffs.versions.statusEnded')
+        expect(container.querySelector('.tariff-pane-window .badge')?.textContent).toBe('pages.tariffs.versions.statusEnded')
+        await act(async () => container.querySelector<HTMLButtonElement>('.tariff-version-select')!.click())
+        expect(onShowVersion).toHaveBeenCalledWith('next')
     })
 
-    it('carries no status pill or version count in its heading', async () => {
-        const container = await pane()
-        expect(container.querySelector('.tariff-pane-header .badge')).toBeNull()
-        expect(container.querySelector('.tariff-pane-meta')?.textContent).not.toMatch(/\d/)
+    it('keeps version context in the heading and labels the common tasks above pricing', async () => {
+        const container = await pane({ series: { ...series, energy_type: 'grid' } })
+        expect(container.querySelector('.tariff-pane-header .badge')?.textContent).toBe('pages.tariffs.workspace.current')
+        expect(container.querySelector('.tariff-version-row.is-shown .tariff-version-status')?.textContent).toBe('pages.tariffs.workspace.current')
+        expect(container.querySelector('.tariff-pane-window')?.textContent).toContain('01.01.2001')
+        expect(container.querySelector('.tariff-pane-header [data-action-key="edit-current"]')).toBeNull()
+        expect(container.querySelector('.tariff-pane-actions [data-action-key="edit-current"]')?.textContent).toContain('pages.tariffs.workspace.correct')
+        expect(container.querySelector('.tariff-pane-meta')?.textContent).not.toContain('pages.tariffs.energyTypes.grid')
+    })
+
+    it.each([['levies', 'grid'], ['grid_fees', 'local']] as const)('preserves distinct energy context for %s / %s', async (category, energy_type) => {
+        const container = await pane({ series: { ...series, category, energy_type } })
+        expect(container.querySelector('.tariff-pane-meta')?.textContent).toContain(`pages.tariffs.energyTypes.${energy_type}`)
     })
 
     it('closes on Escape unless something inside already took it', async () => {
@@ -84,6 +94,7 @@ describe('TariffDetailPane', () => {
 
     it('offers a viewer the same facts and warnings with no write controls', async () => {
         const container = await pane({ readOnly: true })
+        expect(container.querySelector('.tariff-pane-header [data-action-key^="edit-"]')).toBeNull()
         expect(container.querySelector('.tariff-pane-actions')).toBeNull()
         expect(container.querySelector('.tariff-version-row .button')).toBeNull()
         expect(container.querySelector('.tariff-version-select')).not.toBeNull()
@@ -92,8 +103,28 @@ describe('TariffDetailPane', () => {
     it('replaces the body with the form being edited and keeps the tariff named', async () => {
         const container = await pane({ editor: { label: 'editing label', content: createElement('form', { className: 'the-form' }) } })
         expect(container.querySelector('h2')?.textContent).toBe('Grid')
-        expect(container.querySelector('.tariff-pane-meta')?.textContent).toBe('editing label')
+        expect(container.querySelector('.tariff-editor-title')?.textContent).toBe('editing label')
+        expect(container.querySelector('.tariff-pane-window')?.textContent).toContain('01.01.2001')
         expect(container.querySelector('.the-form')).not.toBeNull()
         expect(container.querySelector('.tariff-version-section')).toBeNull()
     })
+})
+
+
+it('marks an unpriced tariff incomplete and keeps the first-price action available', async () => {
+    const onOpenCreatePeriod = vi.fn()
+    const unpriced = { ...series, billing_mode: 'energy', versions: [{ ...current, billing_mode: 'energy', periods: [] }] }
+    const container = await pane({ series: unpriced, onOpenCreatePeriod })
+    expect(container.textContent).toContain('pages.tariffs.workspace.incompleteBody')
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-action-key="add-first-price"]')!.click())
+    expect(onOpenCreatePeriod).toHaveBeenCalledWith('current')
+})
+
+it('repairs an interior gap using the preceding prices and the missing start date', async () => {
+    const onNewVersion = vi.fn()
+    const withGap = { ...series, gaps: [{ start: '2001-01-01', end: '2001-01-31' }], versions: [{ ...current, valid_from: '2001-02-01' }, past] }
+    const container = await pane({ series: withGap, onNewVersion })
+    const action = [...container.querySelectorAll<HTMLButtonElement>('.tariff-gap-warning button')][0]
+    await act(async () => action.click())
+    expect(onNewVersion).toHaveBeenCalledWith(withGap, past, '2001-01-01')
 })
