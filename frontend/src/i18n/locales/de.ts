@@ -501,7 +501,7 @@ export const de = {
         copyFailed: 'Kopieren hat nicht funktioniert. Markieren Sie den Text und kopieren Sie ihn von Hand.',
     },
     account: {
-        impersonationRestrictions: 'Während der Kontoübernahme können Kontosicherheit und Zugangsdaten nicht eingerichtet oder geändert werden.',
+        impersonationRestrictions: 'Während des Identitätswechsels können Kontosicherheit und Zugangsdaten nicht eingerichtet oder geändert werden.',
         title: 'Konto',
         titleDescription: 'Verwalten Sie Ihr Profil, Ihr Passwort, verknüpfte Konten sowie Token und Schlüssel.',
         profileSection: 'Profil',

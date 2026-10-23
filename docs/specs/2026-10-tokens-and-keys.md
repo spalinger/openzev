@@ -201,6 +201,9 @@ the old `?tab=api-keys` to `tokens`, so existing links keep working. `AccountPro
 - "New" buttons: **API key** (shown when `can_create.api_key`; name, expiry, read-only), **Analytics token** (shown when
   `can_create.analytics`), and **Connect energy data**, a link to the energy data page (`/me/metering-points`) with a hint that an
   energy token is created with a source.
+- During impersonation, both "New" buttons and energy-token **Rotate** remain visible but disabled
+  with the `account.impersonationRestrictions` tooltip, matching connect/rotate on the energy-data
+  page. Revocation stays enabled. Ordinary sessions still use the capability flags and row actions.
 - Analytics form: name; scope select built by `analyticsScopeOptions(memberships, allZevs?)`: "Whole community:
   <zev>" for each membership with `access` or a managing role, "Only my data: <zev>" for each live participant
   record, a disabled community offers none; an **administrator** also gets every enabled community
@@ -254,7 +257,7 @@ Frontend (`frontend/tests/`):
 
 | File | Count | Covers |
 |---|---|---|
-| `tokens-section.test.ts` | 15 | list rows with type, access, scope and prefix; filter chips; expiring badge; empty state; rotate and manage link only on energy tokens; revoke through confirmation and the kind's endpoint; rotate shows the new token once; create API key and analytics token (scope options, participant scope, ready-made command); an administrator can pick any community and an ordinary account triggers no community lookup; creation/rotation hidden when unavailable, revocation preserved; link to the energy data page |
+| `tokens-section.test.ts` | 16 | list rows with type, access, scope and prefix; filter chips; expiring badge; empty state; rotate and manage link only on energy tokens; revoke through confirmation and the kind's endpoint; rotate shows the new token once; create API key and analytics token (scope options, participant scope, ready-made command); an administrator can pick any community and an ordinary account triggers no community lookup; impersonation shows disabled creation/rotation with explanatory tooltips, including stale creation capabilities, and preserves revocation; link to the energy data page |
 | `credentials-helpers.test.ts` | 6 | counts and filters; `analyticsScopeOptions` for grants, roles, participant records, ended rows, disabled communities, the administrator's extra communities, no memberships |
 | `secret-reveal.test.ts` | 3 | shows, copies and dismisses; copy failure; caller wording and test id |
 | `admin-credentials-page.test.ts` | 4 | every kind with owner and counts; revoke only for non-revoked; revoke as admin through the kind after confirmation; type filter reaches the server |

@@ -968,7 +968,7 @@ metadata `is_admin` / `is_active`).
 **Restrictions:** impersonation cannot create credentials or change account security settings.
 Account writes are default-denied in authentication; external credential issuers use
 `NotWhileImpersonating`. Refusals are audited with the admin's id. The account page disables
-security controls and hides credential creation/rotation while profile names and token revocation
+security controls and shows disabled credential creation/rotation with explanatory tooltips while profile names and token revocation
 remain available. Full contract: [account creation §5.10](2026-10-account-creation-and-sign-in.md#510-impersonation).
 
 **Stop impersonation:** `POST /api/v1/auth/users/stop-impersonation/`

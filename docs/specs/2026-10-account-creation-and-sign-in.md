@@ -232,8 +232,12 @@ data-management actions remain available. Both guards return
 `audit_impersonation_refusal`, which records `auth.impersonation.refused` (`DENIED`, metadata
 `url_name`, `method`, and the centrally attributed `impersonated_by`).
 
-The account page disables its Security fieldset, hides email-change and credential-creation
-controls, and explains the restrictions. The credentials response advertises no creation or
+The default-deny rule covers only the `accounts` app; any new issuer outside it that creates
+credentials for the impersonated account must explicitly use `NotWhileImpersonating`.
+
+The account page disables its Security fieldset, hides email-change controls, and explains
+the restrictions. Credential-creation and energy-token rotation buttons remain visible but
+disabled with the restriction as their tooltip. The credentials response advertises no creation or
 rotation during impersonation; revocation remains available for all three token types.
 Supplementary-source connect and rotate buttons are also disabled.
 
@@ -271,3 +275,7 @@ The uniqueness rules are covered by `accounts/test_unique_email.py` (constraint,
 `test_session_hardening.py`, `test_registration_concurrency.py`,
 `test_admin_account_actions.py`, `zev/test_login_protection.py`, `zev/test_onboarding.py`
 and `zev/test_access_api.py`.
+
+Frontend `account-tabs.test.ts` checks the impersonation notice and disabled Security fieldset
+alongside an ordinary session; `email-change-capability.test.ts` checks that impersonation hides
+email-change controls and suppresses the managed-account hint.

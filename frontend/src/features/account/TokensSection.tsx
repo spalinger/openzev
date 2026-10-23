@@ -59,7 +59,7 @@ export function TokensSection({ onRevoke, onRotate }: Props) {
     const { t } = useTranslation()
     const { settings } = useAppSettings()
     const { pushToast } = useToast()
-    const { user } = useAuth()
+    const { user, isImpersonating } = useAuth()
     const queryClient = useQueryClient()
 
     const [filter, setFilter] = useState<CredentialFilter>('all')
@@ -178,11 +178,25 @@ export function TokensSection({ onRevoke, onRotate }: Props) {
 
             {creating === null && (
                 <div className="actions-row actions-row-wrap" style={{ marginBottom: '1.5rem' }}>
-                    {query.data?.can_create.api_key && <button type="button" className="button button-primary" onClick={() => setCreating('api_key')}>
-                        {t('account.tokens.newApiKey')}
-                    </button>}
-                    {canCreateAnalytics && (
-                        <button type="button" className="button button-secondary" onClick={() => setCreating('analytics')}>
+                    {(query.data?.can_create.api_key || isImpersonating) && (
+                        <button
+                            type="button"
+                            className="button button-primary"
+                            disabled={isImpersonating}
+                            title={isImpersonating ? t('account.impersonationRestrictions') : undefined}
+                            onClick={() => setCreating('api_key')}
+                        >
+                            {t('account.tokens.newApiKey')}
+                        </button>
+                    )}
+                    {(canCreateAnalytics || isImpersonating) && (
+                        <button
+                            type="button"
+                            className="button button-secondary"
+                            disabled={isImpersonating}
+                            title={isImpersonating ? t('account.impersonationRestrictions') : undefined}
+                            onClick={() => setCreating('analytics')}
+                        >
                             {t('account.tokens.newAnalytics')}
                         </button>
                     )}
@@ -262,11 +276,12 @@ export function TokensSection({ onRevoke, onRotate }: Props) {
                                         {t('account.tokens.manageSource')}
                                     </Link>
                                 )}
-                                {credential.actions.includes('rotate') && (
+                                {(credential.actions.includes('rotate') || (isImpersonating && credential.kind === 'energy_push')) && (
                                     <button
                                         type="button"
                                         className="button button-secondary button-compact"
-                                        disabled={rotate.isPending}
+                                        disabled={rotate.isPending || isImpersonating}
+                                        title={isImpersonating ? t('account.impersonationRestrictions') : undefined}
                                         onClick={() => onRotate({ name: credential.name, onConfirm: () => rotate.mutate(credential) })}
                                     >
                                         {t('account.tokens.rotate')}
