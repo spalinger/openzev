@@ -15,6 +15,7 @@ import { ProfileCard } from '../features/account/ProfileCard'
 import { SessionsCard } from '../features/account/SessionsCard'
 import { TwoFactorSection } from '../features/account/TwoFactorSection'
 import { PageHeader } from '../components/PageHeader'
+import { Notice } from '../components/Notice'
 
 /**
  * The signed-in user's own account, in three tabs: Profile (who you are),
@@ -25,7 +26,7 @@ import { PageHeader } from '../components/PageHeader'
 export function AccountProfilePage() {
     const { t } = useTranslation()
     const { searchParams, updateParams } = usePageNavigation()
-    const { user } = useAuth()
+    const { user, isImpersonating } = useAuth()
     const { pushToast } = useToast()
     const queryClient = useQueryClient()
     const oauthHandled = useRef(false)
@@ -66,6 +67,7 @@ export function AccountProfilePage() {
     return (
         <div className="page-stack">
             <PageHeader title={t('account.title')} description={t('account.titleDescription')} />
+            {isImpersonating && <Notice tone="warning">{t('account.impersonationRestrictions')}</Notice>}
 
             {user?.must_change_password && (
                 <div className="warning-banner" role="alert" style={{ display: 'grid', gap: '0.35rem', maxWidth: '1000px' }}>
@@ -96,7 +98,7 @@ export function AccountProfilePage() {
                 </Tabs.Panel>
 
                 <Tabs.Panel value="security">
-                    <div className="form-grid" style={{ gap: '2rem', maxWidth: '1000px', alignItems: 'start' }}>
+                    <fieldset className="form-grid" disabled={isImpersonating} aria-label={t('account.tabs.security')} style={{ gap: '2rem', maxWidth: '1000px', alignItems: 'start' }}>
                         <div style={{ display: 'grid', gap: '2rem' }}>
                             <PasswordCard />
                             <LinkedAccountsCard
@@ -142,7 +144,7 @@ export function AccountProfilePage() {
                                 })
                             }
                         />
-                    </div>
+                    </fieldset>
                 </Tabs.Panel>
 
                 <Tabs.Panel value="tokens">

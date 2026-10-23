@@ -512,3 +512,47 @@ class RevokePushTokenTests(SupplementaryApiTestCase):
         self.assertEqual(client_for(self.holder_user).post(self.url).status_code, 404)
         self.source.refresh_from_db()
         self.assertIsNotNone(self.source.push_token_prefix)
+
+
+class ImpersonationTests(SupplementaryApiTestCase):
+    """A push token outlives the impersonation, so it cannot be minted there."""
+
+    def _impersonating(self):
+        from accounts.jwt_utils import make_jwt_for_user
+
+        client = APIClient()
+        client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {make_jwt_for_user(self.holder_user, impersonated_by=self.admin.pk)['access']}"
+        )
+        return client
+
+    def test_a_push_token_cannot_be_minted_while_impersonating(self):
+        created_source = self.create_push_source().json()
+        client = self._impersonating()
+
+        rotated = client.post(f"{SOURCES_URL}{created_source['id']}/rotate-push-token/")
+        self.assertEqual(rotated.status_code, 403)
+
+        connected = client.post(SOURCES_URL, {
+            "metering_point": str(self.point.pk), "provider": "push", "label": "Second", "consent": True,
+        }, format="json")
+        self.assertEqual(connected.status_code, 403)
+        self.assertEqual(SupplementarySource.objects.count(), 1)
+        events = AuditEvent.objects.filter(action_type="auth.impersonation.refused")
+        self.assertEqual(events.count(), 2)
+        self.assertEqual(
+            {event.metadata_json["url_name"] for event in events},
+            {response.wsgi_request.resolver_match.url_name for response in (rotated, connected)},
+        )
+        for event in events:
+            self.assertEqual(event.status, "denied")
+            self.assertEqual(event.metadata_json["impersonated_by"], self.admin.pk)
+
+    def test_managing_data_is_still_allowed(self):
+        created_source = self.create_push_source().json()
+
+        response = self._impersonating().patch(
+            f"{SOURCES_URL}{created_source['id']}/", {"enabled": False}, format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)

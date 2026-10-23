@@ -5,10 +5,10 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { EmailChangeForm } from '../src/features/account/EmailChangeForm'
 import { requestEmailChange } from '../src/lib/api/auth'
 
-const state = vi.hoisted(() => ({ user: {
+const state = vi.hoisted(() => ({ isImpersonating: false, user: {
     email: 'participant@example.com', has_usable_password: true, can_change_email: false,
 } }))
-vi.mock('../src/lib/auth', () => ({ useAuth: () => ({ user: state.user }) }))
+vi.mock('../src/lib/auth', () => ({ useAuth: () => state }))
 vi.mock('../src/lib/toast', () => ({ useToast: () => ({ pushToast: vi.fn() }) }))
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 vi.mock('../src/lib/api/auth', () => ({ requestEmailChange: vi.fn() }))
@@ -16,6 +16,7 @@ vi.mock('../src/lib/api/auth', () => ({ requestEmailChange: vi.fn() }))
 let container: HTMLDivElement
 let root: Root
 beforeEach(() => {
+    state.isImpersonating = false
     vi.mocked(requestEmailChange).mockReset()
     container = document.createElement('div')
     document.body.appendChild(container)
@@ -40,6 +41,15 @@ async function fill(selector: string, value: string) {
 }
 
 describe('email-change capability', () => {
+    it('hides email changes and managed-account guidance during impersonation', async () => {
+        state.isImpersonating = true
+        await render(false)
+
+        expect(container.querySelector<HTMLInputElement>('input[type="email"]')!.disabled).toBe(true)
+        expect(container.querySelector('button')).toBeNull()
+        expect(container.textContent).not.toContain('account.emailChange.managed')
+    })
+
     it('shows read-only guidance for a usable participant password', async () => {
         await render(false)
         expect(container.textContent).toContain('account.emailChange.managed')

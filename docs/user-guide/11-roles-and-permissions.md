@@ -174,6 +174,12 @@ Admins can act as an active non-admin account. The banner identifies the account
 in use. Select **Stop** to return to your admin account. If that session has
 expired, sign in again. This does not sign the other account out on other devices.
 
+While impersonating, you cannot create credentials, rotate tokens, change account security
+settings, or connect a new energy data source. Token creation and rotation buttons and energy-data
+connection buttons stay visible but disabled, with an explanation on hover. You can still
+edit profile names, manage existing energy data, and revoke API keys, analytics tokens, or
+energy data push tokens.
+
 ## Accounts Without a Community
 
 An account that is neither a manager, a viewer nor a participant anywhere has

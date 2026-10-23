@@ -849,3 +849,21 @@ class AdminApiKeyManagementTests(TestCase):
         response = client.get("/api/v1/auth/me/api-keys/")
 
         self.assertEqual([r["name"] for r in response.data["results"]], ["owner nightly"])
+
+
+class ApiKeyImpersonationTests(TestCase):
+    """A key is a standing credential: an impersonation session must not mint one."""
+
+    def test_an_impersonation_session_cannot_create_a_key(self):
+        from .jwt_utils import make_jwt_for_user
+
+        admin = make_user("ak_imp_admin")
+        target = make_user("ak_imp_target")
+        client = APIClient()
+        token = make_jwt_for_user(target, impersonated_by=admin.pk)["access"]
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        response = client.post("/api/v1/auth/me/api-keys/", {"name": "planted"}, format="json")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(ApiKey.objects.filter(user=target).exists())

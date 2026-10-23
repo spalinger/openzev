@@ -418,6 +418,12 @@ Invalid request context is dropped before insert (`request_id` must match
 truncated to their column limits); database failures propagate so the
 surrounding transaction rolls back. The audit write is never silently dropped.
 
+**Impersonation attribution.** `record_audit_event` adds `metadata["impersonated_by"]` from
+`request.impersonator_id`, stamped by `CookieJWTAuthentication` after JWT validation. This avoids
+reading `request.auth` while authentication is still running. The impersonated account remains
+the actor; explicit caller attribution is preserved. Ordinary sessions and API keys add no marker.
+Both account and external credential refusals record `auth.impersonation.refused` (`DENIED`).
+
 Mixin-driven events (`AuditedUpdateMixin`, `AuditedCreateDestroyMixin` in
 `backend/audit/mixins.py`) run the model write and the audit insert inside
 one `transaction.atomic()` block, so a failing audit insert rolls back the

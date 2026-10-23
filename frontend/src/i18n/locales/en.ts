@@ -510,6 +510,7 @@ export const en = {
         copyFailed: 'Copying did not work. Select it and copy it by hand.',
     },
     account: {
+        impersonationRestrictions: 'Account security changes and credential creation are unavailable while impersonating.',
         title: 'Account',
         titleDescription: 'Manage your profile, password, linked accounts, and tokens and keys.',
         profileSection: 'Profile',

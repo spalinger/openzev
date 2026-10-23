@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 
 from accounts.api_keys import generate_key
 from accounts.authentication import ApiKeyAuthentication, CookieJWTAuthentication
+from accounts.permissions import NotWhileImpersonating
 from accounts.throttling import ApiKeyRateThrottle
 from audit.models import AuditActionCategory
 from audit.services import record_audit_event
@@ -118,7 +119,9 @@ class AnalyticsTokenViewSet(
     """
 
     authentication_classes = [CookieJWTAuthentication]
-    permission_classes = [IsAuthenticated]
+    # An impersonation session must not mint a token that outlives it.
+    permission_classes = [IsAuthenticated, NotWhileImpersonating]
+    impersonation_exempt_actions = frozenset({"destroy"})
     serializer_class = AnalyticsTokenSerializer
     pagination_class = None
 

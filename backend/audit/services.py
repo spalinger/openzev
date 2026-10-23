@@ -248,6 +248,9 @@ def record_audit_event(
                 **{key: value for key, value in (metadata or {}).items()
                    if key not in {"api_key_id", "api_key_name"}},
             }
+        impersonator_id = getattr(request, "impersonator_id", None)
+        if impersonator_id is not None and "impersonated_by" not in (metadata or {}):
+            metadata = {**(metadata or {}), "impersonated_by": impersonator_id}
 
     actor_snapshot = snapshot_actor(user)
 

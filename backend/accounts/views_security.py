@@ -21,7 +21,6 @@ from audit.services import build_diff, record_audit_event
 from zev import onboarding as zev_onboarding
 
 from . import email_change, emails, magic_links, notifications, password_reset
-from .jwt_utils import impersonator_of
 from .models import User
 from .permissions import IsAdmin
 from .session_revocation import keep_current_session, lock_current_session, revoke_sessions
@@ -29,9 +28,6 @@ from .throttling import AuthEmailChangeThrottle, AuthPasswordResetThrottle, Auth
 from .views import _release_mail_slot, _reserve_mail_slot
 
 logger = logging.getLogger(__name__)
-
-NOT_WHILE_IMPERSONATING = {"detail": "This is not available while impersonating another account."}
-
 
 def _audit(request, action_type, target, summary, *, actor=None, status_=AuditEventStatus.SUCCESS, **extra):
     record_audit_event(
@@ -66,8 +62,6 @@ class EmailChangeRequestView(APIView):
 
     def post(self, request, *args, **kwargs):
         user = request.user
-        if impersonator_of(request.auth):
-            return Response(NOT_WHILE_IMPERSONATING, status=status.HTTP_403_FORBIDDEN)
         if email_change.is_managed(user):
             return Response(
                 {"detail": "Your email address is managed by your administrator.", "code": "managed_email"},
@@ -303,8 +297,6 @@ class RevokeOwnSessionsView(APIView):
     @transaction.atomic
     def post(self, request, *args, **kwargs):
         user = lock_current_session(request)
-        if impersonator_of(request.auth):
-            return Response(NOT_WHILE_IMPERSONATING, status=status.HTTP_403_FORBIDDEN)
         revoke_sessions(user)
         response = Response({"detail": "All other sessions were signed out."})
         keep_current_session(request, response, user)

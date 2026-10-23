@@ -675,7 +675,8 @@ then invalid) or fails. Account deactivation refuses redemption.
 **Guard:** allowed only if `must_change_password == True` or no usable password exists.
 An established password requires the old password or the separate, timed
 `reset-password` permission. Other requests return 400
-("Use the change-password endpoint instead.").
+("Use the change-password endpoint instead."). An impersonation session is refused
+here as at every other credential issuer (§5.7).
 
 **Flow:**
 1. Validate password via Django password validators.
@@ -688,7 +689,7 @@ An established password requires the old password or the separate, timed
 
 **Payload:** `{ old_password, new_password }`
 
-Validates old password, sets new password, clears `must_change_password`, then **signs the account out of every other session** (`revoke_sessions`, §5.6b) and revokes the account's onboarding and outstanding magic links: whoever knew the old password, or held a stolen session, must not stay signed in. The response carries a fresh token pair under the new session version, so the caller stays signed in (an impersonation session stays an impersonation session). API keys are not revoked — they are separate credentials. `_finish_password_change` shares retirement, cookies and the post-commit notification with initial setup and recovery; `password.change` audits both link-retirement counts inside the password transaction;
+Validates old password, sets new password, clears `must_change_password`, then **signs the account out of every other session** (`revoke_sessions`, §5.6b) and revokes the account's onboarding and outstanding magic links: whoever knew the old password, or held a stolen session, must not stay signed in. The response carries a fresh token pair under the new session version, so the caller stays signed in. Impersonation cannot change passwords (§5.7). API keys are not revoked — they are separate credentials. `_finish_password_change` shares retirement, cookies and the post-commit notification with initial setup and recovery; `password.change` audits both link-retirement counts inside the password transaction;
 a failing audit insert rolls back credentials, sessions and links and schedules no notification.
 
 ### 5.6 Profile (me)
@@ -703,7 +704,7 @@ a failing audit insert rolls back credentials, sessions and links and schedules 
   to, in the shape of §6.4's `memberships` — and `may_create_zev: boolean`
   (#761).
 - GET carries `has_usable_password: boolean`, including participant-created passwords.
-- GET/PATCH carries `can_change_email: boolean`: a usable, independently established password and no manager-maintained participant identity (`email_change.is_managed`). The form is offered only when true.
+- GET/PATCH carries `can_change_email: boolean`: a usable, independently established password, no manager-maintained participant identity (`email_change.is_managed`), and no impersonation. The form is offered only when true.
 - GET/PATCH carries `password_recovery_expires_at: ISO datetime | null` from completed link sign-in. PasswordCard offers explicit replacement without the old password during that fixed 15-minute window; credential provenance alone does not authorize it. Passwordless accounts use initial setup. See [setup and recovery](2026-09-participant-onboarding-link.md#password-setup-and-explicit-recovery).
 - PATCH → partial update of **first name, last name and `preferred_zev` only**
   (`SelfUserSerializer`). A payload that tries to *change* `email`, `username`,
@@ -963,6 +964,12 @@ metadata `is_admin` / `is_active`).
 **Frontend flow (`AuthContext.startImpersonation`):**
 1. Call impersonate endpoint (cookies handled via `api` with `withCredentials`); backup cookies stored httpOnly.
 2. Re-fetch `/auth/me/` to update the UI context.
+
+**Restrictions:** impersonation cannot create credentials or change account security settings.
+Account writes are default-denied in authentication; external credential issuers use
+`NotWhileImpersonating`. Refusals are audited with the admin's id. The account page disables
+security controls and shows disabled credential creation/rotation with explanatory tooltips while profile names and token revocation
+remain available. Full contract: [account creation §5.10](2026-10-account-creation-and-sign-in.md#510-impersonation).
 
 **Stop impersonation:** `POST /api/v1/auth/users/stop-impersonation/`
 (`IsAuthenticated`) requires the caller's validated `impersonated_by` claim.
@@ -2267,13 +2274,13 @@ lists the test classes per module (test counts are the `test_*` methods).
 | `test_password_writes.py` | 1 | 4 | Stale profile saves, intentional usable/unusable writes, synchronous/asynchronous hash upgrades and concurrent password replacement |
 | `test_password_recovery.py` | 2 | 30 | Password preservation, real TOTP/provenance, legacy challenges, recovery, retirement, managed email, audit accuracy/rollback, stale profile writes, OAuth retirement and PostgreSQL consumption/reset/issuance races |
 | `test_admin_account_actions.py` | 2 | 12 | Account creation (generated password when omitted, returned once and never re-listed, two accounts get different passwords, a supplied password is still accepted, mismatched/weak supplied passwords rejected, generated password passes the validators anyway, response carries the new id, non-admin blocked); self-deactivation guard (blocked with a field error, deactivating someone else works and is audited, reactivating your own account is unaffected, deactivating someone else still revokes their sessions) |
-| `test_api_keys.py` | 10 | 81 | Generation, hashing, auth, read-only keys, scope deny-list, audit, throttling, CRUD, admin management |
+| `test_api_keys.py` | 11 | 83 | Generation, hashing, auth, read-only keys, scope deny-list, audit, throttling, CRUD, admin management; an impersonation session cannot create a key |
 | `test_oauth.py` | 16 | 91 | Public endpoint validation and bounded provider data; provider configuration, callback guards, verified-email provisioning/linking and MFA claims; linking-session revocation before/during provider I/O, deleted/unbound state refusal, identity-owner and PostgreSQL competing-link races; exchange single-use/revocation |
-| `test_passkeys.py` | 8 | 65 | Passkey registration and passwordless sign-in against a software authenticator, MFA policy and grace arithmetic, removal guard, admin reset, RP-ID/origin system checks |
-| `test_mfa.py` | 4 | 28 | TOTP enrolment/removal/recovery codes, two-step login, MFA at the magic-link/onboarding/OAuth/impersonation/email-verification doors, per-account throttle (`SPEC-2026-09-two-factor-authentication`) |
+| `test_passkeys.py` | 9 | 66 | Passkey registration and passwordless sign-in against a software authenticator, MFA policy and grace arithmetic, removal guard, admin reset, RP-ID/origin system checks; registration refused while impersonating |
+| `test_mfa.py` | 5 | 29 | TOTP enrolment/removal/recovery codes, two-step login, MFA at the magic-link/onboarding/OAuth/impersonation/email-verification doors, per-account throttle (`SPEC-2026-09-two-factor-authentication`); no factor can be enrolled while impersonating |
 | `test_registration_concurrency.py` | — (3 functions) | 7 cases | PostgreSQL cancellation/verification/resend row-lock ordering; SMTP outside transactions; transitions during delivery; late cleanup preserves newer links |
 | `test_cookie_oauth.py` | — (7 module-level test functions) | 7 | Refresh/logout cookie handling; token exchange sets cookies, consumes codes, and stamps `last_login` |
-| `test_impersonation.py` | 5 | 28 | Permissions, audit, cookie round-trip, stop-impersonation; parked identity binding before rotation, unavailable accounts during refresh, and invalid refresh ending only the browser session |
+| `test_impersonation.py` | 6 | 38 | Permissions, audit, cookie round-trip, stop-impersonation; parked identity binding before rotation, unavailable accounts during refresh, and invalid refresh ending only the browser session; credential issuers (API key, TOTP, recovery codes, passkey, OAuth link, password change) refused while impersonating over bearer *and* cookie sessions with nothing written and a `DENIED` `auth.impersonation.refused` event, reads and `PATCH /auth/me/` unaffected, key revocation, refresh, logout and stop allowed |
 | `test_throttling.py` | 4 | 15 | Per-IP 429 boundaries for all six public auth write endpoints; budgets are independent; production settings wiring and spoofed `X-Forwarded-For` regression coverage; headers neither evade the login bucket without a trusted proxy nor escape the right-most-entry bucket with one trusted hop |
 
 **`config/test_settings_guards.py`** (5 test classes, 24 tests):

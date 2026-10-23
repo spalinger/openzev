@@ -501,6 +501,7 @@ export const fr = {
         copyFailed: 'La copie n’a pas fonctionné. Sélectionnez-le et copiez-le à la main.',
     },
     account: {
+        impersonationRestrictions: 'La modification de la sécurité du compte et la création d’identifiants sont indisponibles pendant la simulation du compte.',
         title: 'Compte',
         titleDescription: 'Gérez votre profil, votre mot de passe, vos comptes liés ainsi que vos jetons et clés.',
         profileSection: 'Profil',

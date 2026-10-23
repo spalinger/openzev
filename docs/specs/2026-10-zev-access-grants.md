@@ -556,7 +556,12 @@ and do not sync onto protected authentication identities (parties spec §5.2).
 `IMPERSONATABLE_ROLES` is removed. `ImpersonateParticipantView` (name kept)
 refuses only admins and inactive accounts (400 `"Admin and inactive accounts
 cannot be impersonated."`, audited `DENIED` with metadata `is_admin`,
-`is_active`). The session sees everything the account holds. The frontend's
+`is_active`). The session sees everything the account holds, but it may not
+*issue*: `accounts.authentication.enforce_impersonation_limits` refuses every
+unsafe `accounts` write except refresh, MFA, logout, stop-impersonation, the
+profile and key revocation, and `accounts.permissions.NotWhileImpersonating`
+closes the credential issuers outside that app
+(`SPEC-2026-10-account-creation-and-sign-in` §5.10). The frontend's
 `canImpersonateAccount` mirrors this (`role !== 'admin' && is_active`).
 
 ### 7.5 Two-factor policy
