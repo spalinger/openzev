@@ -1,7 +1,8 @@
 /* ── Mantine Tabs (.app-tabs) ────────────────────────────────────────────── */
 
 /* Mantine v9 only emits hashed classes, so these hooks are applied via the
-   Tabs classNames prop: root app-tabs, list app-tabs-list, tab app-tabs-tab. */
+   Tabs classNames prop: root app-tabs, list app-tabs-list, tab app-tabs-tab,
+   panel app-tabs-panel. */
 .app-tabs {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -12,6 +13,13 @@
    active tab's underline the forest accent. */
 .app-tabs-list {
   gap: 1.5rem;
+}
+
+.app-tabs-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  align-content: start;
 }
 
 .app-tabs-list::before {

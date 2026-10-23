@@ -7,7 +7,7 @@ from accounts.models import UserRole, VatRate
 from invoices.engine import _tariff_bears_input_vat, generate_invoice
 from invoices.models import InvoiceItem
 from invoices.test_helpers import make_participant, make_user, make_zev
-from metering.models import MeterReading, ReadingDirection, ReadingResolution
+from metering.models import MeterReading, QuarantinedReading, ReadingDirection, ReadingResolution
 from tariffs.models import BillingMode, EnergyType, Tariff, TariffCategory, TariffPeriod
 from testing.helpers import clear_vat_rates
 from zev.models import MeteringPoint, MeteringPointAssignment, MeteringPointType, VatMode
@@ -146,6 +146,45 @@ class InvoiceMathEdgeCaseTests(TestCase):
         self.assertEqual(item.total_chf, Decimal("1.00"))
         self.assertEqual(invoice.subtotal_chf, Decimal("1.00"))
         self.assertEqual(invoice.total_chf, Decimal("1.00"))
+
+    def test_quarantined_sdat_observations_are_not_billed(self):
+        tariff = Tariff.objects.create(
+            zev=self.zev,
+            name="Quarantine Grid",
+            category=TariffCategory.ENERGY,
+            billing_mode=BillingMode.ENERGY,
+            energy_type=EnergyType.GRID,
+            valid_from=date(2026, 1, 1),
+        )
+        TariffPeriod.objects.create(
+            tariff=tariff,
+            period_type="flat",
+            price_chf_per_kwh=Decimal("0.20000"),
+        )
+
+        MeterReading.objects.create(
+            metering_point=self.consumption_mp,
+            timestamp=datetime(2026, 1, 20, 0, 0, tzinfo=timezone.utc),
+            energy_kwh=Decimal("5.0000"),
+            direction=ReadingDirection.IN,
+            resolution=ReadingResolution.FIFTEEN_MIN,
+        )
+        # Info-only / temporary SDAT-CH observations live in quarantine and
+        # must never leak into the invoice, even at 20x the billable volume.
+        QuarantinedReading.objects.create(
+            metering_point=self.consumption_mp,
+            timestamp=datetime(2026, 1, 21, 0, 0, tzinfo=timezone.utc),
+            energy_kwh=Decimal("100.0000"),
+            direction=ReadingDirection.IN,
+            business_reason="C38",
+            condition="21",
+        )
+
+        invoice = generate_invoice(self.participant, date(2026, 1, 1), date(2026, 1, 31))
+        item = invoice.items.get(description=tariff.name)
+
+        self.assertEqual(item.quantity_kwh, Decimal("5.0000"))
+        self.assertEqual(item.total_chf, Decimal("1.00"))
 
 
 class InvoiceVatRateSelectionTests(TestCase):

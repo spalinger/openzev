@@ -15,7 +15,9 @@ a hand-written ``if`` to a permission class.
 from datetime import date, timedelta
 from unittest.mock import patch
 
+from cryptography.fernet import Fernet
 from django.test import TestCase
+from django.test.utils import override_settings
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
@@ -23,9 +25,19 @@ from audit.models import AuditActionCategory, AuditEvent, AuditEventStatus
 from testing.helpers import authenticate as auth, make_user, create_managed_zev
 from zev.models import Participant
 
+from .authentication import NOT_WHILE_IMPERSONATING
 from .cookies import ACCESS_COOKIE, ADMIN_ACCESS_COOKIE, ADMIN_REFRESH_COOKIE, REFRESH_COOKIE
 from .jwt_utils import make_jwt_for_user
-from .models import User, UserRole
+from .models import (
+    ApiKey,
+    MfaRecoveryCode,
+    OAuthProvider,
+    OAuthState,
+    TotpDevice,
+    User,
+    UserRole,
+    WebAuthnCredential,
+)
 from .session_revocation import revoke_sessions, validate_refresh_token
 
 TOKEN = "/api/v1/auth/token/"
@@ -429,3 +441,176 @@ class StopImpersonationAuditTests(TestCase):
         self.client.post(STOP)
 
         self.assertEqual(AuditEvent.objects.get().metadata_json["impersonated_by"], self.admin.pk)
+
+
+class ImpersonationCredentialIssuerTests(TestCase):
+    """Credential issuers refuse impersonation before writing anything."""
+
+    # url name, path, body and the table the endpoint would write to
+    ISSUERS = (
+        ("api-key-list-create", "/api/v1/auth/me/api-keys/", {"name": "planted"}, ApiKey),
+        ("mfa-totp-device", "/api/v1/auth/me/mfa/totp/", None, TotpDevice),
+        ("mfa-totp-confirm", "/api/v1/auth/me/mfa/totp/confirm/", {"code": "123456"}, TotpDevice),
+        ("mfa-recovery-codes", "/api/v1/auth/me/mfa/recovery-codes/", None, MfaRecoveryCode),
+        ("passkey-register-begin", "/api/v1/auth/me/passkeys/register/begin/", None, WebAuthnCredential),
+        ("passkey-register-complete", "/api/v1/auth/me/passkeys/register/complete/", {}, WebAuthnCredential),
+        ("oauth-link-initiate", "/api/v1/auth/oauth/link/limitsidp/", None, OAuthState),
+    )
+
+    def setUp(self):
+        self.admin = make_user("limits_admin", UserRole.ADMIN)
+        self.target = make_user("limits_target", UserRole.USER)
+        self.provider = OAuthProvider.objects.create(
+            name="limitsidp",
+            client_id="client-id",
+            client_secret="client-secret",
+            authorization_url="https://idp.example/authorize",
+            token_url="https://idp.example/token",
+            userinfo_url="https://idp.example/userinfo",
+            redirect_url="https://app.example/callback",
+        )
+
+    def impersonating(self):
+        client = APIClient()
+        token = make_jwt_for_user(self.target, impersonated_by=self.admin.pk)["access"]
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+        return client
+
+    def test_no_credential_can_be_minted_while_impersonating(self):
+        client = self.impersonating()
+        for url_name, path, body, table in self.ISSUERS:
+            with self.subTest(url_name=url_name):
+                before = table.objects.count()
+
+                response = client.post(
+                    path, body, **({"format": "json"} if body is not None else {}),
+                )
+
+                self.assertEqual(response.status_code, 403, response.content)
+                self.assertEqual(response.json(), NOT_WHILE_IMPERSONATING)
+                self.assertEqual(
+                    table.objects.count(), before,
+                    "the refusal has to happen before the write",
+                )
+
+    def test_a_refusal_is_audited_with_the_url_name_and_the_impersonator(self):
+        client = self.impersonating()
+        for url_name, path, body, _table in self.ISSUERS:
+            with self.subTest(url_name=url_name):
+                client.post(path, body, **({"format": "json"} if body is not None else {}))
+
+                event = AuditEvent.objects.get(
+                    action_type="auth.impersonation.refused",
+                    metadata_json__url_name=url_name,
+                )
+                self.assertEqual(event.status, AuditEventStatus.DENIED)
+                self.assertEqual(event.metadata_json["impersonated_by"], self.admin.pk)
+                self.assertEqual(event.target_id, str(self.target.pk))
+                self.assertEqual(event.action_category, AuditActionCategory.AUTH)
+
+    def test_reads_are_unaffected(self):
+        client = self.impersonating()
+
+        for path in (
+            "/api/v1/auth/me/",
+            "/api/v1/auth/me/api-keys/",
+            "/api/v1/auth/me/mfa/",
+            "/api/v1/auth/me/passkeys/",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(client.get(path).status_code, 200)
+
+    def test_the_profile_stays_editable(self):
+        response = self.impersonating().patch("/api/v1/auth/me/", {"first_name": "Puppet"}, format="json")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.target.refresh_from_db()
+        self.assertEqual(self.target.first_name, "Puppet")
+        self.assertFalse(response.json()["can_change_email"])
+
+    def test_revoking_a_key_is_still_allowed(self):
+        key = ApiKey.objects.create(user=self.target, name="leaked", prefix="leaked123", hashed_key="x" * 64)
+
+        response = self.impersonating().delete(f"/api/v1/auth/me/api-keys/{key.pk}/")
+
+        self.assertEqual(response.status_code, 204, response.content)
+        key.refresh_from_db()
+        self.assertIsNotNone(key.revoked_at, "DELETE revokes rather than deleting")
+        event = AuditEvent.objects.get(action_type="api_key.revoke")
+        self.assertEqual(event.metadata_json["impersonated_by"], self.admin.pk)
+        self.assertEqual(event.actor_user_id, self.target.pk)
+
+    def test_the_session_can_still_refresh_and_end_itself(self):
+        client = APIClient()
+        self.assertEqual(
+            client.post(TOKEN, {"username": self.admin.username, "password": "pass1234"}).status_code, 200,
+        )
+        self.assertEqual(client.post(impersonate_url(self.target.pk)).status_code, 200)
+
+        self.assertEqual(client.post("/api/v1/auth/token/refresh/").status_code, 200)
+        self.assertEqual(client.post(STOP).status_code, 200)
+
+        self.assertEqual(client.post(impersonate_url(self.target.pk)).status_code, 200)
+        self.assertEqual(client.post("/api/v1/auth/logout/").status_code, 200)
+
+    def test_the_cookie_session_is_limited_the_same_way(self):
+        client = APIClient()
+        self.assertEqual(
+            client.post(TOKEN, {"username": self.admin.username, "password": "pass1234"}).status_code, 200,
+        )
+        self.assertEqual(client.post(impersonate_url(self.target.pk)).status_code, 200)
+
+        response = client.post("/api/v1/auth/me/api-keys/", {"name": "planted"}, format="json")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(ApiKey.objects.filter(user=self.target).exists())
+
+    def test_the_password_cannot_be_changed_while_impersonating(self):
+        original = self.target.password
+
+        response = self.impersonating().post(
+            "/api/v1/auth/me/change-password/",
+            {"old_password": "pass1234", "new_password": "Planted-password42!"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json(), NOT_WHILE_IMPERSONATING)
+        self.target.refresh_from_db()
+        self.assertEqual(self.target.password, original)
+
+    def test_the_guarded_views_keep_their_refusal_body(self):
+        client = self.impersonating()
+
+        for path, body in (
+            ("/api/v1/auth/me/email-change/", {"new_email": "new@example.com", "current_password": "pass1234"}),
+            ("/api/v1/auth/me/sessions/revoke/", None),
+        ):
+            with self.subTest(path=path):
+                response = client.post(path, body, format="json")
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(response.json(), NOT_WHILE_IMPERSONATING)
+
+    # Enrolling a factor needs a configured MFA key; the point here is only
+    # that the impersonation hook does not refuse the account's own session.
+    @override_settings(MFA_ENCRYPTION_KEYS=[Fernet.generate_key().decode()])
+    def test_the_accounts_own_session_is_unaffected(self):
+        client = APIClient()
+        auth(client, self.target)
+
+        created = client.post("/api/v1/auth/me/api-keys/", {"name": "mine"}, format="json")
+        self.assertEqual(created.status_code, 201, created.content)
+        self.assertEqual(client.post(f"/api/v1/auth/oauth/link/{self.provider.name}/").status_code, 200)
+        enrolment = client.post("/api/v1/auth/me/mfa/totp/")
+        self.assertEqual(enrolment.status_code, 200, enrolment.content)
+        self.assertIn("provisioning_uri", enrolment.json())
+        # The remaining ceremony endpoints answer their own validation errors
+        # rather than a policy refusal; none of them is refused for this session.
+        for path in (
+            "/api/v1/auth/me/mfa/totp/confirm/",
+            "/api/v1/auth/me/mfa/recovery-codes/",
+            "/api/v1/auth/me/passkeys/register/begin/",
+            "/api/v1/auth/me/passkeys/register/complete/",
+        ):
+            with self.subTest(path=path):
+                self.assertNotEqual(client.post(path).status_code, 403)

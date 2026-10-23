@@ -32,6 +32,7 @@ from django.db import DataError, IntegrityError, transaction
 from django.utils import timezone
 
 from invoices.models import (
+    InvoiceReadingImpact,
     Charge, Credit, CreditApplication, Invoice, InvoiceDynamicSourceEvidence, InvoiceItem, InvoicePdfStatus, InvoiceStatus, Payment,
 )
 from tariffs.dynamic.evidence import lock_sources, record_invoice_evidence
@@ -47,6 +48,7 @@ from metering.models import (
     ImportLog,
     ImportSource,
     MeterReading,
+    QuarantinedReading,
     ReadingDirection,
     ReadingResolution,
     SupplementaryProvider,
@@ -87,7 +89,9 @@ from .schema import (
     PARTY_FIELDS,
     PARTY_ROLE_FIELDS,
     PARTY_ROLES_FILE,
+    QUARANTINE_DIR,
     READINGS_DIR,
+    READING_CSV_COLUMNS,
     SECTION_CHARGES,
     SECTION_FILES,
     SECTION_INVOICE_PDFS,
@@ -289,6 +293,9 @@ def read_manifest(archive):
             raise ArchiveError(
                 f"{MANIFEST_NAME} does not record a count for section '{section}'."
             )
+
+    if manifest["format_version"] >= 9 and SECTION_READINGS in manifest["sections"] and "quarantined_readings" not in counts:
+        raise ArchiveError(f"{MANIFEST_NAME} does not record a count for 'quarantined_readings'.")
 
     source_zev = manifest.get("source_zev")
     if source_zev is not None and not isinstance(source_zev, dict):
@@ -729,7 +736,7 @@ def _import_charges(archive, zev, participants_by_archive_id, collector):
     return count
 
 
-def _import_invoices(archive, zev, participants_by_archive_id, collector):
+def _import_invoices(archive, zev, participants_by_archive_id, collector, *, format_version):
     """Create invoices and their line items, and return the highest number seen.
 
     The caller uses that to push ``Zev.invoice_counter`` past the imported
@@ -763,6 +770,25 @@ def _import_invoices(archive, zev, participants_by_archive_id, collector):
                 invoice.save()
                 _import_payments(invoice, raw, position)
                 _import_credits(invoice, raw, position)
+                if format_version >= 10 and "reading_impacts" not in raw:
+                    raise DjangoValidationError({"reading_impacts": "Missing correction state for format 10."})
+                impact_rows = raw.get("reading_impacts", [])
+                if not isinstance(impact_rows, list):
+                    raise DjangoValidationError({"reading_impacts": "Expected a list."})
+                for entry in impact_rows:
+                    if not isinstance(entry, dict) or not isinstance(entry.get("evidence"), dict):
+                        raise DjangoValidationError({"reading_impacts": "Invalid correction evidence."})
+                    json.dumps(entry["evidence"], allow_nan=False)
+                    created_at = _parse_datetime_utc(entry.get("created_at"))
+                    resolved_at = _parse_datetime_utc(entry["resolved_at"]) if entry.get("resolved_at") else None
+                    resolution = entry.get("resolution", "")
+                    if bool(resolution) != (resolved_at is not None):
+                        raise DjangoValidationError({"reading_impacts": "Resolution and resolved_at must agree."})
+                    impact = InvoiceReadingImpact(invoice=invoice, evidence=entry["evidence"],
+                        resolved_at=resolved_at, resolution=resolution)
+                    impact.full_clean(exclude=["invoice", "import_log"])
+                    impact.save()
+                    InvoiceReadingImpact.objects.filter(pk=impact.pk).update(created_at=created_at)
                 items = []
                 for raw_item in raw.get("items") or []:
                     item_fields = _pick(raw_item, INVOICE_ITEM_FIELDS, position, SECTION_INVOICES)
@@ -787,7 +813,7 @@ def _import_invoices(archive, zev, participants_by_archive_id, collector):
                     tariffs = list(Tariff.objects.filter(zev=zev).exclude(dynamic_source=None))
                     lock_sources({tariff.dynamic_source_id for tariff in tariffs})
                     record_invoice_evidence(invoice, tariffs)
-        except (DjangoValidationError, ValueError, TypeError, IntegrityError) as exc:
+        except (DjangoValidationError, ValueError, TypeError, OverflowError, IntegrityError) as exc:
             collector.add(SECTION_INVOICES, position, label, exc)
             continue
 
@@ -932,22 +958,28 @@ _VALID_RESOLUTIONS = {value for value, _ in ReadingResolution.choices}
 _VALID_SOURCES = {value for value, _ in ImportSource.choices}
 
 
-def _import_readings(archive, points_by_meter_id, collector, *, batch_id):
-    """Load every ``readings/*.csv`` member into the imported metering points.
+def _import_readings(archive, points_by_meter_id, collector, *, batch_id, format_version):
+    """Load billable CSV members in validated batches on newly imported points."""
+    return _import_row_members(
+        archive, READINGS_DIR, MeterReading,
+        points_by_meter_id, collector, batch_id=batch_id, format_version=format_version,
+    )
 
-    Rows are validated then written with ``bulk_create``. The metering app's
-    importer is row-at-a-time ``get_or_create`` — right for a user-supplied
-    file that may collide with existing data, wrong here: the metering points
-    were created moments ago and hold nothing, so there is nothing to collide
-    with, and two million round trips is not a thing to do on purpose. Its
-    field parsers are reused, so the two agree on what a timestamp and a
-    decimal are.
-    """
+
+def _import_quarantine(archive, points_by_meter_id, collector, *, batch_id, format_version):
+    """Load every ``quarantine/*.csv`` member (format 9) as held observations."""
+    return _import_row_members(
+        archive, QUARANTINE_DIR, QuarantinedReading,
+        points_by_meter_id, collector, batch_id=batch_id, format_version=format_version,
+    )
+
+
+def _import_row_members(archive, directory, model, points_by_meter_id, collector, *, batch_id, format_version):
     total = 0
     members = [
         name
         for name in archive.namelist()
-        if name.startswith(f"{READINGS_DIR}/") and name.lower().endswith(".csv")
+        if name.startswith(f"{directory}/") and name.lower().endswith(".csv")
     ]
 
     # (meter, timestamp, direction) already written for this import. The unique
@@ -962,7 +994,8 @@ def _import_readings(archive, points_by_meter_id, collector, *, batch_id):
             with archive.open(name) as member:
                 text = io.TextIOWrapper(member, encoding="utf-8", newline="")
                 reader = csv.DictReader(text)
-                missing = {"meter_id", "timestamp", "energy_kwh"} - set(reader.fieldnames or [])
+                required = set(READING_CSV_COLUMNS) if format_version >= 9 else {"meter_id", "timestamp", "energy_kwh"}
+                missing = required - set(reader.fieldnames or [])
                 if missing:
                     collector.add(
                         SECTION_READINGS,
@@ -975,7 +1008,7 @@ def _import_readings(archive, points_by_meter_id, collector, *, batch_id):
 
                 pending = []
                 for row_number, row in enumerate(reader, start=2):
-                    reading = _build_reading(row, points_by_meter_id, batch_id)
+                    reading = _build_reading(row, points_by_meter_id, batch_id, model)
                     if isinstance(reading, dict):
                         collector.add(SECTION_READINGS, row_number, name, reading)
                         continue
@@ -993,11 +1026,11 @@ def _import_readings(archive, points_by_meter_id, collector, *, batch_id):
 
                     pending.append(reading)
                     if len(pending) >= READING_BATCH_SIZE:
-                        total += _bulk_create_readings(pending, name, collector)
+                        total += _bulk_create_readings(pending, name, collector, model)
                         pending = []
 
                 if pending:
-                    total += _bulk_create_readings(pending, name, collector)
+                    total += _bulk_create_readings(pending, name, collector, model)
                 text.detach()
         except (zipfile.BadZipFile, UnicodeDecodeError, csv.Error) as exc:
             # A member whose payload failed its CRC check, or whose text
@@ -1158,20 +1191,14 @@ def _import_supplementary_readings(archive, sources_by_meter_id, collector):
     return total
 
 
-def _bulk_create_readings(rows, member_name, collector):
-    """Insert one batch, converting database-level failures into collected errors.
+def _bulk_create_readings(rows, member_name, collector, model):
+    """Insert inside a savepoint, reporting DB errors without breaking the transaction.
 
-    The rows were validated individually, so a failure here is something the
-    per-row checks did not cover — a future constraint, a value that overflowed
-    the column width. It must not take the whole import down: the batch is
-    reported by file, and whatever comes next still gets its chance. The insert
-    runs in a savepoint so a rejected batch leaves the surrounding transaction
-    usable on PostgreSQL. Returns the number of rows actually inserted, so the
-    manifest count check does not count a rejected batch as imported data.
+    Return the inserted row count for manifest verification.
     """
     try:
         with transaction.atomic():
-            MeterReading.objects.bulk_create(rows)
+            model.objects.bulk_create(rows)
     except (IntegrityError, DataError) as exc:
         # The exception text can carry database internals (constraint names,
         # column dumps); the admin-facing response gets a generic sentence and
@@ -1190,25 +1217,29 @@ def _bulk_create_readings(rows, member_name, collector):
     return len(rows)
 
 
-def _build_reading(row, points_by_meter_id, batch_id):
-    """A ``MeterReading`` for ``row``, or a dict of errors describing why not."""
+def _parse_shared_row(row, points_by_meter_id):
+    """Validate the identity, time, value and provenance columns of one CSV row.
+
+    Returns ``(parsed, None)`` or ``(None, errors)``. Provenance columns
+    absent from older archives default to no Creation and blank fields.
+    """
     meter_id = (row.get("meter_id") or "").strip()
     point = points_by_meter_id.get(meter_id)
     if point is None:
-        return {"meter_id": [f"No imported metering point named '{meter_id}'."]}
+        return None, {"meter_id": [f"No imported metering point named '{meter_id}'."]}
 
     try:
         timestamp = _parse_datetime_utc(row.get("timestamp"))
     except (ValueError, TypeError, OverflowError) as exc:
-        return {"timestamp": [f"Unreadable timestamp: {exc}"]}
+        return None, {"timestamp": [f"Unreadable timestamp: {exc}"]}
 
     try:
         energy = _parse_decimal(row.get("energy_kwh"))
     except (InvalidOperation, ValueError, TypeError) as exc:
-        return {"energy_kwh": [f"Unreadable energy value: {exc}"]}
+        return None, {"energy_kwh": [f"Unreadable energy value: {exc}"]}
 
     if abs(energy) > MAX_ENERGY_KWH:
-        return {
+        return None, {
             "energy_kwh": [
                 f"Energy value {energy} exceeds the maximum representable value ({MAX_ENERGY_KWH} kWh)."
             ]
@@ -1216,24 +1247,54 @@ def _build_reading(row, points_by_meter_id, batch_id):
 
     direction = (row.get("direction") or ReadingDirection.IN).strip().lower()
     if direction not in _VALID_DIRECTIONS:
-        return {"direction": [f"Invalid direction '{direction}'. Expected one of: {', '.join(sorted(_VALID_DIRECTIONS))}."]}
+        return None, {"direction": [f"Invalid direction '{direction}'. Expected one of: {', '.join(sorted(_VALID_DIRECTIONS))}."]}
 
     resolution = (row.get("resolution") or ReadingResolution.FIFTEEN_MIN).strip()
     if resolution not in _VALID_RESOLUTIONS:
-        return {"resolution": [f"Invalid resolution '{resolution}'. Expected one of: {', '.join(sorted(_VALID_RESOLUTIONS))}."]}
+        return None, {"resolution": [f"Invalid resolution '{resolution}'. Expected one of: {', '.join(sorted(_VALID_RESOLUTIONS))}."]}
 
     source = (row.get("import_source") or ImportSource.CSV).strip()
     if source not in _VALID_SOURCES:
-        return {"import_source": [f"Invalid import source '{source}'."]}
+        return None, {"import_source": [f"Invalid import source '{source}'."]}
 
-    return MeterReading(
-        metering_point=point,
-        timestamp=timestamp,
-        energy_kwh=energy,
-        direction=direction,
-        resolution=resolution,
-        import_source=source,
+    source_creation_raw = (row.get("source_creation") or "").strip()
+    try:
+        source_creation = _parse_datetime_utc(source_creation_raw) if source_creation_raw else None
+    except (ValueError, TypeError, OverflowError) as exc:
+        return None, {"source_creation": [f"Unreadable timestamp: {exc}"]}
+
+    provenance = {name: (row.get(name) or "").strip() for name in READING_CSV_COLUMNS[7:]}
+    for name, value in provenance.items():
+        limit = MeterReading._meta.get_field(name).max_length
+        if len(value) > limit:
+            return None, {name: [f"Value exceeds the maximum length ({limit} characters)."]}
+    provenance["source_creation"] = source_creation
+
+    return {
+        "point": point,
+        "timestamp": timestamp,
+        "energy": energy,
+        "direction": direction,
+        "resolution": resolution,
+        "source": source,
+        "provenance": provenance,
+    }, None
+
+
+def _build_reading(row, points_by_meter_id, batch_id, model):
+    """A billable or held row, or field errors describing why it is invalid."""
+    parsed, errors = _parse_shared_row(row, points_by_meter_id)
+    if errors is not None:
+        return errors
+    return model(
+        metering_point=parsed["point"],
+        timestamp=parsed["timestamp"],
+        energy_kwh=parsed["energy"],
+        direction=parsed["direction"],
+        resolution=parsed["resolution"],
+        import_source=parsed["source"],
         import_batch=batch_id,
+        **parsed["provenance"],
     )
 
 
@@ -1361,8 +1422,14 @@ def _run_import(archive, manifest, sections, *, owner, name_override, collector,
         )
 
     if SECTION_READINGS in sections:
-        imported = _import_readings(archive, points_by_meter_id, collector, batch_id=batch_id)
+        imported = _import_readings(
+            archive, points_by_meter_id, collector, batch_id=batch_id, format_version=manifest["format_version"]
+        )
         summary["counts"][SECTION_READINGS] = imported
+        if (manifest.get("format_version") or 0) >= 9:
+            summary["counts"]["quarantined_readings"] = _import_quarantine(
+                archive, points_by_meter_id, collector, batch_id=batch_id, format_version=manifest["format_version"]
+            )
         ImportLog.objects.create(
             batch_id=batch_id,
             zev=zev,
@@ -1389,7 +1456,7 @@ def _run_import(archive, manifest, sections, *, owner, name_override, collector,
             )
 
     if SECTION_INVOICES in sections:
-        count, highest = _import_invoices(archive, zev, participants_by_archive_id, collector)
+        count, highest = _import_invoices(archive, zev, participants_by_archive_id, collector, format_version=manifest["format_version"])
         summary["counts"][SECTION_INVOICES] = count
         # Past the imported history, so the next billing run cannot mint a
         # number this ZEV already carries.

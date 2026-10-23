@@ -169,6 +169,20 @@ Ordering: `["-created_at"]`.
 `PRIVACY_EMAIL_LOG_RETENTION_DAYS` (default 730); the row stays so the newest-log-per-invoice status
 keeps working ([`2026-10-privacy-retention-sweep.md`](2026-10-privacy-retention-sweep.md)).
 
+### 3.3a InvoiceReadingImpact
+
+| Field | Type | Description |
+|---|---|---|
+| `invoice` | FK → `Invoice` (`CASCADE`) | Flagged invoice; deletion resolves by cascade |
+| `import_log` | FK → `metering.ImportLog` (`SET_NULL`, nullable) | Source import; null for deletion-sourced flags or after log deletion — `evidence` keeps the identity |
+| `evidence` | `JSONField` | `{source: sdat-import \| csv-import \| import-deletion \| csv-reanchor, delivery_id, creation, status, reason (SDAT import only), filename (CSV import only), change_count, kinds, day_from, day_to, changes_truncated \| deleted_batches, deleted_readings \| changed_readings}` |
+| `created_at` | `DateTimeField` (auto) | When the correction landed |
+| `resolved_at` | `DateTimeField` (nullable) | Set on cancel-workflow resolution; regeneration resolves by row deletion with an audit event |
+| `resolution` | `InvoiceReadingImpactResolution` | `regenerated`, `cancelled`, or blank while open |
+
+Ordering: `["-created_at", "id"]`. Unique: `(invoice, import_log)`.
+Migration `invoices/0029_invoicereadingimpact`. Resolution semantics and attribution: §4.6.
+
 ### 3.4 PdfTemplate
 
 | Field | Type | Description |
@@ -289,9 +303,15 @@ invoice is in `approved` state, the task **automatically transitions** it to
 
 Single and bulk regeneration are atomic and serialized per participant before
 checking inclusive period overlaps (`period_start <= requested_end` and
-`period_end >= requested_start`). Adjacent periods are kept. See the
+`period_end >= requested_start`). Adjacent periods are kept. Replacement must cover the full period of every draft being removed; shorter or shifted partial overlaps are refused before pricing. See the
 [billing-engine guard rails](2026-03-tariffs-and-billing-engine.md#40-guard-rails)
 for the lock order coordinating generation with approval and community restore.
+
+The locked-overlap guard runs before any pricing work; the replaceable
+drafts are deleted only after the new invoice, its items and its dynamic
+evidence commit in one transaction (`settle_regeneration`). A failed run
+therefore keeps the working draft instead of destroying it. Open reading
+corrections on the replaced drafts settle in the same transaction under the billing lock (see §4.6).
 
 ### 4.5 Deletion rules
 
@@ -300,6 +320,110 @@ for the lock order coordinating generation with approval and community restore.
 | `admin` | Any invoice without payments, regardless of status |
 | `zev_owner` | Only `draft` or `cancelled` invoices in their ZEVs that were never approved (`can_delete_invoice`) and have no payments |
 | `participant` | No deletions (HTTP `403`) |
+
+### 4.6 Reading-correction impact
+
+A committed billing-input change never rewrites an invoice — no snapshot,
+item, total, status, PDF or delivery record is touched on import. It records
+one open `InvoiceReadingImpact` row per affected invoice instead (model §3.3a,
+logic `invoices/reading_impact.py`). The flags ride the importer's commit
+transaction, so flags and reading changes succeed or roll back together; an
+additive-import deletion flags the same way inside its own delete
+transaction, querying the billable readings scoped to each affected ZEV
+before deleting them.
+
+CSV imports use the same helper inside the import transaction, supplying
+complete quantity-change scope alongside capped `reading_changes` evidence
+(`availability` for creates and `value` for changed overwrites; identical values are no-ops — metering import spec §4.1). CSV flags carry
+`evidence.source: csv-import` with the `filename` instead of SDAT delivery
+identity; attribution, matching and resolution are identical to SDAT flags.
+
+Attribution: only `availability`/`value` change kinds flag (metadata-only
+provenance updates change no quantity); replays, stale skips, held-only
+files and rolled-back imports carry no changes and flag nothing. Changed
+slots map to Swiss civil days (`allocation.validity.civil_date` over the
+canonical interval starts). The holder on the reading's own day is always
+flagged — including a past holder, never just the meter's current one —
+and every physical consumption or production change additionally flags every
+participant active that day: personal consumption also changes shared-pool
+allocation denominators (ADR 0013). Invoices are matched by
+period overlap within the event's ZEV; `cancelled` invoices are never
+flagged. Imports create one row per `(invoice, import_log)`; repeated
+processing is a no-op. Deletions create one row per affected invoice and
+deletion operation, even when separate operations remove readings from the
+same import batch or readings without a batch. Retrying a completed deletion
+finds no billable slots and adds no impact.
+
+Evidence caps never cap attribution: importers keep an uncapped, compact
+per-meter/day/direction counter of availability/value changes alongside the
+bounded `reading_changes` array. Flags use that counter, including changes
+after a metadata-only prefix; evidence totals/kinds and affected day bounds
+cover the entire source import, not the subset priced by one invoice. Counts describe changes rather than unique slots when a file writes a slot repeatedly. Deletions query distinct scoped meter/day/direction
+slots before removing the rows, independently of the audit sample limit.
+
+PostgreSQL serializes the writes that move billing inputs with a per-ZEV
+advisory lock (`pg_advisory_xact_lock`, class 1641412 keyed by ZEV —
+ADR 0041): SDAT/CSV imports, import-log and metering-point deletions, and
+single-invoice generation all take it inside their transaction. Bulk
+generation retains independent participant transactions; cached participant
+weights are reused while each invoice reloads readings under the lock. This prevents
+a correction from being acknowledged against stale pricing inputs or a deleted
+draft; a waiting correction flags the replacement after generation commits.
+Invoice matching locks invoice rows so concurrent cancellation or paid-invoice reversal resolves existing
+flags or excludes the cancelled invoice before inserting any new ones. Reversal locks only the invoice row (`of=("self",)`), not joined ZEV/party rows; credit numbering uses a compatible no-key update lock.
+
+Generic reading API/admin writes are read-only. Point destruction and
+historical type/community changes are refused while either reading stream
+exists (metering-point spec §3.1.1). The production legacy CSV timestamp repair
+command also takes the billing lock and flags old and new Swiss dates via
+`flag_reanchored_slot_impacts`; evidence uses `source: csv-reanchor`,
+`changed_readings`, `day_from` and `day_to`, with no import link. Its failure
+rolls back flags and timestamp changes together. The `--allow-invoiced` gate uses the same active-participant/historical-holder attribution on both old and new days, including non-holder shared-pool invoices. Demo/sample generators are
+restricted to development (`DEBUG=True`).
+
+Regeneration locks overlapping invoices once, checks nonreplaceable states,
+then retains old drafts until pricing succeeds. `settle_regeneration` deletes
+incorporated impacts with those drafts and audits their count/source logs plus a bounded previous-invoice/evidence summary (20 entries, with a truncation flag);
+there is no timestamp-based carry/collapse path. Credit applications are
+released by deleting old drafts before applying open credits to the replacement.
+List review flags derive from the annotated open-impact count; detail/overview
+reuse explicitly prefetched `open_reading_impacts`, without prefetching all impacts for lists.
+
+Transfer archive version 10 includes invoice impact evidence, original creation
+time and resolution state; source import/user links do not travel. Older
+archives remain readable without correction state. Backups retain the model
+through the existing registry.
+
+| Invoice status | Resolution |
+|---|---|
+| `draft` | Explicit regeneration only (`POST /invoices/generate/`). Success deletes the incorporated open rows with their draft and records an audit event (`invoice.reading_impact_resolved`, resolution `regenerated`); the billing lock prevents tracked corrections committing mid-run; a failed run resolves nothing. |
+| `approved`, `sent` | Without payments, cancel via `POST /invoices/{id}/cancel/`, which resolves the flags as `cancelled`, then regenerate. A sent invoice with payments uses an explicit full credit-note reversal instead. No automatic credit or reissue. |
+| `paid` | Payment and partial credit adjustments leave the flag open. An explicit full credit-note reversal cancels the invoice and resolves its flags as `cancelled`; the period can then be regenerated. |
+| `cancelled` | Terminal and never flagged; regeneration after cancel starts clean. |
+
+Cancel and full-reversal responses clear cached open `reading_impacts` before
+serializing, so they immediately return `needs_data_review: false`,
+`open_data_impact_count: 0` and `data_impacts: []` after resolution.
+
+Role visibility follows existing invoice scoping with no new permission
+logic: managers/viewers see flags wherever they see invoices (list, detail,
+period overview, readiness — all `HasZevAccess`, ZEV-scoped); participants
+see flags only on their own sent/paid invoices via the sent-visibility rule
+(§6). The public access-link payload is unchanged.
+
+Backup archives carry impact rows in the `invoices` section, so a
+backup/restore round trip keeps the flags: the row's `import_log` link is
+preserved by primary key (the `import_logs` section restores first), while a
+log deleted before the backup leaves `import_log` null with the `evidence`
+keeping the delivery identity. Whole-ZEV transfer archives (format 10) carry
+the correction state too: each invoice nests `reading_impacts[]` entries with
+`evidence`, `created_at`, `resolved_at` and `resolution`; the source import
+and user links do not travel, so a restored row keeps `import_log` null with
+the `evidence` delivery identity. The importer requires the key for format 10,
+validates each entry (JSON evidence, resolution agreeing with `resolved_at`)
+and re-points `created_at` after the insert. Archives at version 9 or older
+import without correction state, as before (see the transfer-archive spec's
+extension rule).
 
 ---
 
@@ -534,7 +658,7 @@ required → 400, unknown ZEV → 404, non-owner → 403 via `HasZevAccess`).
 `Readiness` payload: `{period: {start, end, interval} | null, steps: [{key,
 status, count, [total], [failed], [detail], [link], [detail_data]}],
 next_action, [setup], [awaiting_first_period], [caught_up]}`; step keys ∈
-metering | assignments | tariffs | generated | charges | generation_conflicts |
+metering | assignments | tariffs | data_corrections | generated | charges | generation_conflicts |
 approved | sent | paid;
 statuses ∈ ok | warn | todo | done (never `blocked` — data quality is
 soft-gated). `count`/`total` are real: `generated` compares invoices present
@@ -558,6 +682,25 @@ detail shapes; both list annotations use `-created_at, -id` ordering. The ID
 feeds `/invoices/invoices/{id}/retry-email/{logId}/`. The setup block uses
 valid non-empty `bank_iban` for `settings_complete`; malformed legacy values
 remain incomplete (no new billing restriction).
+
+The serializers expose `needs_data_review` (any open reading impact) and
+`open_data_impact_count` on list and detail shapes — annotated subqueries on
+the list (no per-row N+1), prefetched open impacts on detail/overview/echo —
+plus `data_impacts` (open impacts with source `evidence`, detail only, for
+callers with `zev.access.can_view` on the invoice's ZEV). Participants retain
+the flag/count but receive `data_impacts: []`; missing request context also
+returns an empty list without querying impacts.
+Readiness gains a `data_corrections` warn step (`next_action:
+review_data_corrections`) counting the exact-period invoices with open
+impacts, with `detail_data: {correction_count, corrections: [{invoice_id,
+invoice_number, participant_name, status, delivery_id, flagged_at,
+correction_count}], more_corrections}` linking to the period's billing page.
+Attention stays unchanged: correction flags are period-scoped, so the
+readiness step — not a cross-period item — carries them. Frontend types:
+`InvoiceReadingImpact`, `Invoice.needs_data_review/open_data_impact_count/
+data_impacts`, `ReadinessStepKey: data_corrections`, `ReadinessNextAction:
+review_data_corrections`, `ReadinessStepDetailData.correction_count/
+corrections/more_corrections` (`frontend/src/types/api.ts`).
 
 ### 5.7 PDF template management
 
@@ -1066,6 +1209,27 @@ Two shapes, split by cost. `InvoiceListSerializer` returns all invoice fields pl
   both annotations order by `-created_at, -id`, keeping
   status and retry ID paired even when timestamps tie. The Billing emails tab
   passes it to the log-scoped retry endpoint.
+- `needs_data_review`: true while any open reading impact taints the invoice
+  (§4.6) — on list pages served by a count subquery annotation
+  inside the one SELECT (no per-row N+1); on detail-shaped objects from
+  prefetched open `reading_impacts`, with a per-object lookup only when
+  neither annotation nor prefetch is present.
+- `open_data_impact_count`: number of open reading impacts, sourced like the
+  flag above.
+- `data_impacts` (`InvoiceSerializer` only): the open impacts with source
+  `evidence` for callers with `zev.access.can_view` on the invoice's ZEV,
+  via `InvoiceReadingImpactSerializer` (`id`, `import_log`,
+  `evidence`, `created_at`, `resolution`, `resolved_at`). Period overview
+  prefetches only the newest 20 per invoice, ordered by `-created_at`, `id`,
+  while a count subquery preserves the full `open_data_impact_count` and flag.
+  Participants receive `[]`, including on sent/paid detail reads, while
+  retaining `needs_data_review` and `open_data_impact_count`. Missing request
+  context also returns `[]` without querying impacts. Authorized explicit
+  invoice detail retains the full open history. The detail notice
+  initially displays 20 and offers Show all / Show newest 20; row notices
+  never render an evidence list. List rows carry only the flag and count.
+  Reading imports/deletions invalidate the invoice query prefix so cached
+  flags, period overview and readiness are refreshed.
 
 - `paid_chf`: sum of the invoice's payments as a 2-decimal string — on list
   pages from a `paid_sum` `Subquery` annotation, on detail shapes from the
@@ -1084,7 +1248,7 @@ Two shapes, split by cost. `InvoiceListSerializer` returns all invoice fields pl
 - `replaces`: `[{id, invoice_number}]`, the participant's cancelled invoices for the exact same ZEV and period created before this one, newest first (what a correction or a cancel-and-regenerate left behind). Detail shape only.
 - `replaced_by`: `{id, invoice_number}` or `null`. For a cancelled invoice, the newest invoice for the same participant and period created after it (any status); always `null` for an invoice that is not cancelled. Both read the same-period siblings once per invoice (`InvoiceSerializer._same_period`, one query); `compute_period_overview` hands them in as `_same_period_invoices` from the rows it already loaded, so the overview adds no query per row or per replaced invoice.
 
-`InvoiceViewSet.get_serializer_class()` returns the list variant for `action == "list"` and the full one everywhere else (retrieve, the workflow actions that echo an invoice back, and `compute_period_overview`, which builds `InvoiceSerializer` directly). `get_queryset()` matches: the `prefetch_related("items", "email_logs", "payments", "credits__applications__invoice", "credit_applications__credit__source_invoice")` is applied for every action *except* `list` (the period overview prefetches the same set), so the database cost drops with the payload rather than being paid for fields that are no longer rendered.
+`InvoiceViewSet.get_serializer_class()` returns the list variant for `action == "list"` and the full one everywhere else (retrieve, the workflow actions that echo an invoice back, and `compute_period_overview`, which builds `InvoiceSerializer` directly). `get_queryset()` matches: the `prefetch_related("items", "email_logs", "payments", "credits__applications__invoice", "credit_applications__credit__source_invoice", open reading_impacts)` is applied for every action *except* `list` (the period overview prefetches the same set), so the database cost drops with the payload rather than being paid for fields that are no longer rendered.
 
 The split exists because the list is the one unbounded read: `AdminInvoicesContent` passes no ZEV filter and walks every invoice in the instance one page at a time, so each nested line item and email-log row is paid for once per invoice across the whole dataset. Measured on 50 invoices × 8 items, one page went from 151.4 KiB to 33.2 KiB (4.6×, 78% smaller) and from 4 queries to 2; at the client walker's 200-page cap that is 29.6 MiB → 6.5 MiB. No list consumer reads the nested arrays — `AdminInvoicesContent` renders `invoice_number`/`zev_name`/`participant_name`/period/`total_chf`/`status`, and `BillingEmailsPage` reads the annotated latest-email fields before loading history on demand. In `frontend/src/types/api.ts` both fields are optional (`items?`, `email_logs?`). See #488.
 
@@ -1276,6 +1440,8 @@ visibility, restored access, and strict selection with a second membership.
 | `test_invoice_replacement.py` | `InvoiceReplacementTests` | `replaces` newest first and `replaced_by` pointing to the newest invoice, no `replaced_by` before a replacement exists, other periods and participants unrelated, the period-overview row invoice carrying `replaces`, and no extra query per replaced invoice in the overview (6 tests) |
 | `test_period_overview_unit.py` | `ComputePeriodOverviewTests` (10 tests) | §5.5 unit level: complete/incomplete participants, single missing day, exclusion without assignment, partial-assignment required-day windows and gaps, invoice period matching, row ordering, multiple-metering-point counts |
 | `test_readiness.py` | 22 test classes (106 tests) | §5.6a: cockpit period resolution, bulk parity and stable query count, exact historical periods, running-versus-ended lifecycle metadata, first-run/awaiting/caught-up states, structured step details, attention and RBAC |
+| `test_reading_impact.py` | `AttributionTests` (9), `CorrectionImportTests` (7), `DraftRegenerationTests` (5), `FinalInvoiceResolutionTests` (3), `VisibilityTests` (6), `ReadinessImpactTests` (1), `BackupRoundTripTests` (1), `DeletionImpactTests` (4), `GenerationCorrectionRaceTests` (8) | §4.6/§5.6a: physical-consumption and production shared-pool attribution, historical (not current) holder flagged, Swiss civil-day period routing, unrelated periods/ZEVs and cancelled invoices unflagged, metadata-only/empty changes flag nothing, per-import idempotency, end-to-end SDAT-CH correction flagging with snapshots/items/PDF/delivery records untouched, rollback of billable/held/invoice/impact history after promotion deletion and impact creation, held/duplicate/stale/rejected files flag nothing, repeated header-only cancellations preserve invoice rows/items, review flags and period readiness (`test_rejected_cancellation_preserves_invoice_and_readiness`), regeneration resolving incorporated revisions under the billing lock (failed run keeps the flag), paid keeping the flag with cancel refused, cancel/full-reversal API responses immediately clearing resolved flags, separate deletions from shared or absent batches retaining their evidence, completed deletion retries adding no impact, cancel resolving as `cancelled`, participant flag/count without evidence, manager/viewer/admin evidence access, missing-request redaction and other-ZEV isolation, readiness `data_corrections` warn step, backup/restore round trip, complete import/deletion attribution past evidence caps, and PostgreSQL generation/correction/cancellation locking |
+| `metering/test_import_csv.py` | `CsvOverwriteImpactTests` (11) | §4.6: CSV overwrites flag billed invoices with `csv-import` filename evidence; past holders and Swiss civil days match correctly; skip-mode duplicates and identical replays flag nothing; attribution survives capped evidence; late collisions and daily-row rollback leave only committed evidence; CSV clears SDAT provenance; failure after flag creation rolls back readings, batch provenance and flags |
 | `test_engine_edge_cases.py` | `InvoiceMathEdgeCaseTests` | Edge cases: monthly fee month-boundary counting, tariff validity windows, zero/negative fees, rounding |
 | `test_engine_edge_cases.py` | `InvoiceVatRateSelectionTests` | VAT rate active at period_end, zero VAT when no vat_number |
 | `test_email_formatting.py` | `InvoiceEmailFormattingTests` | §7.1–7.2: date format in email body, custom ZEV templates, auto-transition to sent |
@@ -1319,6 +1485,11 @@ visibility, restored access, and strict selection with a second membership.
   invoices retain their link but have no billed amount. When the row's invoice
   `replaces` earlier ones, a "Replaces INV-x (Cancelled)" line links the newest
   of them, with "+n more" for the rest.
+- A sent row's primary action is **Mark Paid**; once it has payments
+  (`paid_chf ≠ 0`) it reads **Mark rest as paid** and books only the outstanding
+  amount. Its overflow menu carries **Record payment** for a sent invoice that
+  still collects money (`amount_due_chf > 0` and `outstanding_chf > 0`), opening
+  the same dialog as the detail page.
 - `InvoiceDetailPage` header meta adds "Replaced by INV-x" on a cancelled
   invoice with a `replaced_by`, and "Replaces INV-x, INV-y" when `replaces` is
   not empty; both links keep the page's return state.
@@ -1388,6 +1559,25 @@ visibility, restored access, and strict selection with a second membership.
   the presentation restriction is not an API alignment guarantee.
 - Viewers and managers of disabled communities retain filtering, conflict and
   related-invoice navigation, stored PDFs and batch download, with no writes.
+- Reading-correction review (§4.6) renders wherever the flags ride:
+  `InvoiceDataReviewNotice` (row/compact and detail/evidence variants) on the
+  period rows (`InvoicePeriodRowsTable`, imperative wording only when the
+  viewer can act), the invoice detail page (open impacts with source
+  evidence, including CSV filenames), a badge on the admin list and My invoices, and the
+  `data_corrections` readiness warn step (`review_data_corrections`
+  next-action mapping, `correctionsWarn` detail text) on Overview period
+  cards. Drafts resolve through the existing regenerate action, issued
+  invoices without payments through cancel (API-only) plus regeneration, and
+  paid invoices or sent invoices with payments through full credit-note reversal
+  plus regeneration. Paid notices state the reversal eligibility (positive
+  invoice total and uncredited payments or applied credit); payments and partial credits leave
+  review flags open;
+  no lifecycle permission changes. Correction flags remain in the Issues filter,
+  including on paid invoices. Overview text counts affected invoices rather than
+  correction records. Evidence ranges use the configured short-date format;
+  flag timestamps use Swiss civil dates. Detail wording uses write availability
+  in the invoice’s own community, including its disabled state. Covered by
+  `frontend/tests/invoice-data-review.test.ts`.
 - Containers up to 46rem render card rows, keeping table headers accessible;
   up to 28rem, progress and actions stack. The amount column header names CHF;
   cards show the currency next to the amount.

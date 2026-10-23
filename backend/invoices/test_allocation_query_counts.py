@@ -10,7 +10,8 @@ future change silently adding queries (N+1) to the billing path while leaving
 room to *remove* a query (an improvement) without churning this file.
 
 Bounds cover SQLite and PostgreSQL on the shared multi-meter reconciliation
-fixture; generation also takes a ZEV key-share lock on PostgreSQL.
+fixture; generation also takes ZEV key-share and billing-input advisory locks
+on PostgreSQL.
 """
 from datetime import date
 from decimal import Decimal
@@ -121,10 +122,10 @@ class AllocationQueryCountTests(_ReconciliationBase):
             AssignmentWindows.for_participant(self.alice, PERIOD_START, PERIOD_END)
 
     def test_engine_generate_invoice_query_count(self):
-        # Covers pricing, issuer snapshots, invoice writes and row locks.
-        # The bound includes PostgreSQL's additional ZEV key-share query.
+        # Covers pricing, issuer snapshots, invoice writes and overlap locks.
+        # Includes one-off charges and PostgreSQL's key-share/advisory locks.
         self._call_at_most(
-            24, generate_invoice, self.alice, PERIOD_START, PERIOD_END
+            27, generate_invoice, self.alice, PERIOD_START, PERIOD_END
         )
 
     def test_weight_keyed_shared_fees_do_not_scale_queries_with_tariff_count(self):

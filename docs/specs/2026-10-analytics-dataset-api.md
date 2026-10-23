@@ -70,7 +70,8 @@ Authentication of the series endpoint, in order: `AnalyticsTokenAuthentication` 
 account or a valid token.
 
 The token endpoints accept `CookieJWTAuthentication` only: a token or API key cannot mint further
-credentials.
+credentials. `NotWhileImpersonating` additionally refuses and audits impersonated creation;
+revocation remains available.
 
 ## 4. Data model
 
@@ -243,7 +244,7 @@ Existing behaviour not changed here: the participant dashboard already returns Z
 ## 8. Analytics tokens
 
 Endpoints (`analytics.views.AnalyticsTokenViewSet`, router prefix `tokens`, basename
-`analytics-token`, `CookieJWTAuthentication`, `IsAuthenticated`, no pagination; `404` while the
+`analytics-token`, `CookieJWTAuthentication`, `IsAuthenticated`, `NotWhileImpersonating` (except `destroy`), no pagination; `404` while the
 flag is off):
 
 | Method | Path | Behaviour |
@@ -320,7 +321,7 @@ known 10 kWh consumed / 6 kWh produced per interval; `enable_tokens`).
 | `test_series.py` | 34 | ZEV totals split local/grid/feed-in; community meter shared by weight; parity with `dashboard-summary` `participant_stats`; meter + holder grouping; filters; unassigned energy kept with `participant = null`; hourly and 15-minute Swiss buckets; `bucket_start` for DST days, month, week, year, autumn hour (10 parametrised cases); CSV header/rows; span, reading, row limits; 422 on inconsistent readings; invalid parameters (6 cases); required `from`/`to`; unknown ZEV; empty range |
 | `test_policy.py` | 20 | threshold resolution (default, env, admin value over env, the floor for env and for a row written around the validators); the series follows the setting (default suppresses, lower shows, inclusive at *k*, managers never held back); admin read of value/default/floor, the default shown is the effective one, set and clear, refused values (6 cases), partial updates leave it alone, a participant cannot change it and does not see it, audit diff |
 | `test_scoping.py` | 17 | anonymous 401; manager own ZEV / other ZEV 403; admin any; viewer; stranger 403; participant own rows only; own meter named, shared meter not; foreign `participant` filter 403; shared meter not addressable; other-ZEV participant 403; ZEV totals suppressed below *k*, shown at *k*, never for managers; ended participant; disabled ZEV; manager-and-participant sees all |
-| `test_tokens.py` | 28 | create + secret once + hash only; audit without secret; participant/manager/viewer creation rules; foreign ZEV; participant of another ZEV; expiry in the past; tokens/keys cannot mint tokens; flag off hides endpoints; ZEV token reads without naming the ZEV; other ZEV 403; participant token narrowing (own, manager-made); reaches nothing else; garbage/foreign tokens 401; session still works; `last_used_at`; revoke (+audit); expired; flag off stops tokens; creator losing access; participant leaving; inactive creator; disabled ZEV; per-token throttle; list/revoke visibility (manager, participant, admin) |
+| `test_tokens.py` | 31 | create + secret once + hash only; impersonation creation is refused and audited, revocation stays available with attribution; audit without secret; participant/manager/viewer creation rules; foreign ZEV; participant of another ZEV; expiry in the past; tokens/keys cannot mint tokens; flag off hides endpoints; ZEV token reads without naming the ZEV; other ZEV 403; participant token narrowing (own, manager-made); reaches nothing else; garbage/foreign tokens 401; session still works; `last_used_at`; revoke (+audit); expired; flag off stops tokens; creator losing access; participant leaving; inactive creator; disabled ZEV; per-token throttle; list/revoke visibility (manager, participant, admin) |
 
 Validation: `ruff check .`, `manage.py check`, `makemigrations --check`, full `pytest`.
 

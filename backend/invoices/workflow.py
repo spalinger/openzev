@@ -352,6 +352,12 @@ def delete_payment(payment: Payment) -> dict:
 def cancel_invoice(invoice: Invoice) -> dict:
     """Cancel a not-yet-paid invoice without payments. Returns the ``before``
     diff dict."""
+    from .reading_impact import resolve_on_cancel
+
+    def release_and_resolve(locked):
+        release_credit_applications(locked.pk)
+        resolve_on_cancel(invoice=locked)
+
     return _lock_and_transition(
         invoice,
         allowed_from={InvoiceStatus.DRAFT, InvoiceStatus.APPROVED, InvoiceStatus.SENT},
@@ -364,7 +370,7 @@ def cancel_invoice(invoice: Invoice) -> dict:
             "Invoices with recorded payments cannot be cancelled. Correct the invoice instead."
             if Payment.objects.filter(invoice_id=locked.pk).exists() else None
         ),
-        on_transition=lambda locked: release_credit_applications(locked.pk),
+        on_transition=release_and_resolve,
     )
 
 
@@ -435,7 +441,7 @@ def correct_invoice(
     """
     reason = (reason or "").strip()
     with transaction.atomic():
-        locked = Invoice.objects.select_for_update().select_related("zev", "participant__party").get(pk=invoice.pk)
+        locked = Invoice.objects.select_for_update(of=("self",)).select_related("zev", "participant__party").get(pk=invoice.pk)
         received = paid_chf(locked.pk)
         if locked.status not in (InvoiceStatus.SENT, InvoiceStatus.PAID):
             _mirror_status(invoice, locked)
@@ -485,6 +491,8 @@ def correct_invoice(
             locked.updated_at = timezone.now()
             locked.save(update_fields=["status", "updated_at"])
             released = release_credit_applications(locked.pk)
+            from .reading_impact import resolve_on_cancel
+            resolve_on_cancel(invoice=locked)
         if credit is not None:
             # The render reads the committed credit, so it is queued once it is there.
             from .tasks import generate_credit_pdf_task

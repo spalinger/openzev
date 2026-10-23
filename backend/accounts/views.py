@@ -51,7 +51,7 @@ from .serializers import (
     WebAuthnCredentialSerializer,
 )
 from .authentication import enforce_csrf
-from .jwt_utils import is_participant_link_session, make_jwt_for_user, password_recovery_deadline, record_login
+from .jwt_utils import impersonator_of, is_participant_link_session, make_jwt_for_user, password_recovery_deadline, record_login
 from .session_revocation import (
     is_session_current,
     keep_current_session,
@@ -553,7 +553,7 @@ def _serialize_me(user, token=None):
     # there — what the frontend's community switcher lists (#761).
     data["memberships"] = zev_access.memberships_for(user)
     data["can_change_email"] = (
-        user.has_usable_password() and not user.password_from_participant_link
+        impersonator_of(token) is None and user.has_usable_password() and not user.password_from_participant_link
         and not email_change.is_managed(
             user, has_participations=any(row["participants"] for row in data["memberships"]),
         )

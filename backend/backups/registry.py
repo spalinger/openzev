@@ -118,7 +118,17 @@ ZEV_SECTIONS: tuple[tuple[str, tuple[ZevPart, ...]], ...] = (
     ),
     (
         "readings",
-        (ZevPart("metering.MeterReading", "metering_point__zev", ("metering_point_id", "timestamp", "direction")),),
+        (
+            ZevPart("metering.MeterReading", "metering_point__zev", ("metering_point_id", "timestamp", "direction")),
+            # Held-back SDAT-CH observations (never billed). They travel with
+            # the ZEV so a restored instance keeps its quarantine and its
+            # replace provenance instead of silently dropping held data.
+            ZevPart(
+                "metering.QuarantinedReading",
+                "metering_point__zev",
+                ("metering_point_id", "timestamp", "direction"),
+            ),
+        ),
     ),
     (
         # Sources before readings: every reading points at one. The credential
@@ -143,6 +153,7 @@ ZEV_SECTIONS: tuple[tuple[str, tuple[ZevPart, ...]], ...] = (
             ZevPart("invoices.InvoiceDynamicSourceEvidence", "invoice__zev"),
             ZevPart("invoices.InvoiceAccessToken", "invoice__zev"),
             ZevPart("invoices.EmailLog", "invoice__zev"),
+            ZevPart("invoices.InvoiceReadingImpact", "invoice__zev"),
         ),
     ),
     ("contract_issues", (ZevPart("invoices.ContractIssue", "zev"),)),

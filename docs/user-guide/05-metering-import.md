@@ -103,12 +103,12 @@ alike. Delimiter may be any single character (for example `,`, `;`, `|`, or tab)
    - Click **Load Preview**. Configuration changes, including toggling overwrite, invalidate the preview — reload before importing. Selecting or removing a file also requires a new preview. With several files, each gets its own preview section; one file with errors blocks the whole import, and a meter missing from any file is listed once.
    - Check **Metering point exists** per row; missing IDs are listed with copy/download actions and block **Start Import** until the meters exist.
    - Check **Direction**: where each row's readings will land — *Consumption (in)*, *Feed-in (out)*, or both when a bidirectional meter's row splits by sign. If a whole file shows the wrong direction, the **Direction column** mapping is wrong.
-   - Check **Existing data**: the database already holds that reading (standard rows), or the day already holds readings for that meter/direction (daily rows). Enabling overwrite shows an estimate of how many existing readings will be replaced; fully duplicate rows never block the import — they are skipped (reported in the protocol) in skip mode and replaced in overwrite mode.
+   - Check **Existing data**: the database already holds that reading (standard rows), or the day already holds readings for that meter/direction (daily rows). Enabling overwrite shows an estimate of how many existing readings will be replaced; fully duplicate rows never block the import — they are skipped in skip mode; overwrite mode replaces only changed values. Identical values keep their original source and batch.
    - Review **Errors**: parse failures and empty daily rows. Values above 99999999.9999 kWh are rejected: they cannot be stored. Partially duplicate daily rows show no error — the existing slots are skipped and missing ones are imported (gap-fill).
 
 5. **Review Import Options**
    - **Overwrite existing readings** for the same metering point + timestamp +
-     direction (unchecked by default). When checked, re-importing overwrites any
+     direction (unchecked by default). When checked, re-importing replaces changed
      existing readings that match; when unchecked, existing readings are kept
      and duplicates are skipped per slot. Overwrites are reported as a protocol
      **Note** (`Overwrote N existing readings.`), not as errors.
@@ -130,6 +130,19 @@ Open **Import Protocol** from the history table to see totals
 table (row, meter, reason). Overwrites show a success toast; only true
 failures show an error toast. Both errors and overwrite notes auto-open the protocol.
 
+For SDAT-CH files the protocol shows the structured outcome instead of row
+totals: **Accepted** (billable data written), **Held** (only non-billable
+quarantine values written — still a success), **No changes** (valid replay),
+**Corrections applied** (only overwrites, no new rows), or **Rejected**
+(nothing written). An observation accounting lists new, overwritten, held,
+promoted, duplicate, stale, excluded and rejected observations — promoted
+values are a subset of the created/overwritten rows, not extra energy. Each
+finding carries its stable cause plus the source meter, block/document,
+delivery and position needed to resolve it, and the delivery identity
+(delivery ID, creation, sender/receiver) is shown for traceability.
+
+![SDAT-CH import protocol with the structured correction outcome](screenshots/09b-import-protocol.png)
+
 Duplicate handling: the same metering point + timestamp + direction is stored
 once. Fully existing daily rows show a non-blocking preview notice, so a file
 with existing days and newly appended days can be imported together.
@@ -138,7 +151,12 @@ ones; fully duplicate rows are skipped with a `Duplicate reading` error.
 
 ## SDAT-CH Format
 
-OpenZEV supports the Swiss **SDAT-CH** metering data standard (used by utility providers).
+OpenZEV imports **E66 `ValidatedMeteredData` files for ZEV/vZEV billing**:
+validated active-energy customer/producer deliveries uploaded manually as
+XML (`.xml`) or gzipped XML (`.xml.gz`, `.gz`). That is the supported
+release profile — not all-role SDAT-CH exchange. Automated receipt,
+acknowledgements/error responses, LEG settlement and other market roles
+(supplier, balance-group, grid operator, switching) are deferred.
 
 1. Go to **Metering → Import history** and click **New Import**
 2. Choose the **SDAT-CH (ebIX XML)** format
@@ -150,7 +168,67 @@ OpenZEV supports the Swiss **SDAT-CH** metering data standard (used by utility p
    they are imported one after another; if some fail, the others stay
    imported and only the failed files remain selected so you can retry.
 
-> **Note:** SDAT-CH metadata (meter type, interval) is extracted; timestamp resolution is auto-detected.
+### Supported profile
+
+| Aspect | Supported | Excluded / deferred |
+| --- | --- | --- |
+| Message | E66 `ValidatedMeteredData`, schema `ValidatedMeteredData_16` | E31 aggregates, acknowledgements, error reports, other roots |
+| Business reason | `E88` billing, `C38` information | `C40` community management, queries, switching, master data |
+| Product / unit | Active energy (`8716867000030`) in kWh | Reactive energy, LEG products, other units |
+| Direction | Customer/producer consumption (`IN`) and production (`OUT`) | Grid-interconnection (exchange) points |
+| Resolution | 15-minute intervals | Hourly and other resolutions |
+| Quality | Measured and estimated (`56`) values bill; temporary (`21`) values are held | — |
+| Transport | Manual file upload (XML, gzip) | Automated exchange, ACK/error messages |
+
+Unsupported message types, reasons, products and units reject the file;
+reactive-energy, LEG and exchange blocks are reported skips. Automated exchange,
+acknowledgements and other market roles remain outside this manual receiver.
+
+Real DSO production file variants and the full 50 MB exchange volume have not
+been exercised in production yet.
+
+### Complete intervals and atomic rejection
+
+Each billing block must carry **every position of its declared interval**
+and fit within the delivery's ReportPeriod. Its IN/OUT direction must match
+the configured meter type; bidirectional points accept both. An invalid file (unknown or ambiguous meter,
+incompatible unit, out-of-range or missing position, conflicting values,
+unknown product) rejects the **whole file**: no observations are written,
+existing data is unchanged, and the protocol names the cause with the
+affected meter, block and position. Reactive-energy, LEG and exchange blocks
+are intentional skips, reported as notes rather than failures. Separate files
+in a multi-file upload keep independent outcomes.
+
+### Corrections
+
+A replacement delivery (`Status 5`) with a newer `Creation` overwrites the
+billable values it names; an identical repeat is idempotent and changes
+nothing, while a different value at equal `Creation` rejects the file and
+reports both document identities. Overlaps with CSV/manual readings reject
+the file and preserve the existing data. Corrections that touch already
+invoiced periods flag those invoices for review instead of changing them —
+see [Invoice Management](09-invoice-management.md#metering-corrections-on-issued-invoices).
+
+Cancellation deliveries (`Status 1`) are rejected with a cancellation error in
+the import protocol, without changing readings or invoices or blocking billing.
+For corrected readings, request a replacement delivery (`Status 5`) from your
+grid operator.
+
+SDAT-CH uploads open the result protocol even for held-only files and
+unchanged replays. Its counters distinguish billable writes, held values and
+intentional skips. A multi-file upload opens one protocol; the other files
+remain available in history.
+
+### Held (non-billable) values
+
+Estimated/information-only and temporary values that are not billable are
+**held in quarantine**, visible in the protocol but excluded from billing,
+charts and invoices. A file that only holds values is still a successful
+import (`held`, not a failure). When a later validated delivery covers a
+held slot, the held value is promoted into billing and counted as such.
+
+XML and gzip uploads are limited to 50 MB, with a 100 MB limit after
+decompression.
 
 ## Timestamp Handling
 
@@ -239,7 +317,7 @@ CH12346-load,2026-01-15 01:00:00,0.630
 
 ### Scenario 2: Utility SDAT-CH Export
 
-Utility provides file: `20260315_metering.sdat`
+Utility provides file: `20260315_metering.xml` (or `.xml.gz`)
 
 1. Click **New Import** and choose **SDAT-CH (ebIX XML)** (select the target ZEV first)
 2. OpenZEV auto-parses metadata
@@ -259,7 +337,7 @@ The CSV references a meter ID that doesn't exist in the selected ZEV. Solutions:
 
 The reading already exists. Without overwrite, fully duplicate rows are
 skipped; partially duplicate daily rows gap-fill the missing slots. With
-**Overwrite existing readings** checked, matching readings are updated and the
+**Overwrite existing readings** checked, matching readings with different values are updated and the
 protocol notes `Overwrote N existing readings.`
 
 **Two files for the same meter, one consumption and one feed-in?** Grid
@@ -314,16 +392,21 @@ If you find errors in imported data:
 ## Deleting imports
 
 Single and bulk deletion remove eligible import logs plus all readings still
-linked to their batches, then refresh metering data. **Imports that overwrote
-readings cannot be deleted**, because their previous values cannot be restored.
+linked to their batches, including held SDAT-CH values, then refresh metering
+data. **Imports that replaced billable or held values cannot be deleted**,
+because their previous values cannot be restored.
 The delete action is disabled for these imports; their protocol explains why.
 If a bulk selection includes a protected import, the entire deletion is rejected
 and nothing is removed. The bulk dialog lists the blocking protected imports
 (filename and creation time) and disables confirmation while any is included.
 To correct an overwrite import, upload corrected values
-with overwrite enabled. Period bulk-delete matches imports created from
+with overwrite enabled; for SDAT-CH, request a newer correction delivery from
+your provider. Managers cannot delete imports from a disabled community.
+Period bulk-delete matches imports created from
 00:00 Swiss time on the first day up to midnight after the last day — the
-visible-count preview counts exactly the same imports.
+visible-count preview counts exactly the same imports. Deleting billable
+readings flags the affected invoices for review instead of changing them —
+see [Invoice Management](09-invoice-management.md#metering-corrections-on-issued-invoices).
 
 ## Data Quality Checks
 
@@ -403,3 +486,47 @@ Duplicate readings (same metering point, timestamp, and direction) are skipped a
 - **Check data quality:** [Metering Analysis](06-metering-analysis.md)
 - **Set up tariffs:** [Tariff Configuration](07-tariff-configuration.md)
 - **Generate invoices:** [Invoice Management](09-invoice-management.md)
+
+### Protected correction paths
+
+Individual readings and importer provenance are read-only through the API and
+Django admin. Correct quantities through an explicit CSV overwrite or a newer
+SDAT replacement delivery. A newer original delivery cannot replace existing
+values; the protocol reports those skipped originals separately from replays.
+The protocol shows localized findings and relevant identifiers; expand
+**Technical details** for the raw diagnostic.
+
+Cancellation deliveries remain unsupported. For an exceptional removal, an
+admin can delete a point's readings for a date range using **Delete data**;
+this is a deletion, not an undo of a replacement, and affected invoices still
+require review. Request corrected source data before reimporting.
+
+
+The supported E66 profile requires an explicit 15-minute resolution and complete
+interval positions. Other schema-valid E66 volumes without a resolution, hourly
+series and tariff-band observations are not supported. Held observations remain
+non-billable staging evidence: inspect the uploaded source or community archive;
+a validated delivery can promote them. There is no manual release action.
+
+Direct reading API create/update/delete operations return `405`; corrections use
+imports or the protected deletion workflow. PostgreSQL is required for production
+metering correction and identity concurrency guarantees.
+
+
+CSV overwrite skips identical values and preserves their source evidence and
+import ownership. Changing an SDAT value deliberately makes it a CSV correction:
+it clears the SDAT provenance and later SDAT deliveries cannot replace that slot.
+The confirmation explains this before import. CSV meter lookup uses primary IDs;
+secondary SDAT aliases are not CSV identifiers.
+
+The completion message distinguishes new readings, corrections, held values and
+unchanged files. Batch messages count these separately. Reading changes and
+deletions refresh invoice-review and billing-readiness state. **Delete data**
+removes billable and held observations in the chosen range and reports both counts.
+
+Production deployments require PostgreSQL. SQLite is supported for development
+and tests; MariaDB does not support these billing/identity lock workflows.
+Historical assignment edits remain a separate management operation: the reading
+correction flags described here track imports, protected deletion and timestamp
+repair, not every change to assignment windows. Review affected billing periods
+when changing historical assignments.

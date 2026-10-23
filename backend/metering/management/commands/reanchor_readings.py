@@ -13,14 +13,14 @@ from datetime import timezone
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
-from django.db.models import Count, Max, Min
+from django.db.models import Count, Max, Min, Q
 
 from allocation.validity import business_tz, civil_date
 from audit.models import AuditActionCategory, AuditEventSource
 from audit.services import record_audit_event
 from invoices.models import Invoice, InvoiceStatus
 from metering.models import ImportLog, ImportSource, MeterReading
-from zev.models import MeteringPointAssignment
+from zev.models import MeteringPoint, Zev
 
 MAX_LISTED = 20
 LOCKED_INVOICE_STATUSES = (InvoiceStatus.APPROVED, InvoiceStatus.SENT, InvoiceStatus.PAID)
@@ -62,6 +62,7 @@ class SelectionPlan:
             .order_by("timestamp")
             .values_list("pk", "import_batch", "metering_point_id", "timestamp", "direction", "energy_kwh")
         )
+        self.affected_slots = set()
         self.moves = []  # (pk, old, new), in ascending old order
         self.dropped = []  # (pk, old) zero-energy readings in the spring gap
         self.nonexistent = []  # (pk, old) non-zero readings in the spring gap
@@ -70,6 +71,9 @@ class SelectionPlan:
         targets = set()
         for pk, batch_id, mp_id, ts, direction, energy in readings:
             new = reanchored(ts)
+            self.affected_slots.add((mp_id, civil_date(ts), direction))
+            if new is not None:
+                self.affected_slots.add((mp_id, civil_date(new), direction))
             if new is None:
                 (self.dropped if energy == 0 else self.nonexistent).append((pk, ts))
                 self.per_batch[batch_id]["dropped"] += energy == 0
@@ -96,22 +100,21 @@ class SelectionPlan:
         self.collisions.extend(key for key in occupied if key in targets)
 
     def _locked_invoices(self, metering_point_ids):
-        """Approved, sent or paid invoices whose period holds a moved reading."""
-        if not self.moves:
-            return []
-        first = civil_date(min(new for _, _, new in self.moves))
-        last = civil_date(max(old for _, old, _ in self.moves))
-        participant_ids = MeteringPointAssignment.objects.filter(
-            metering_point_id__in=metering_point_ids,
-        ).values_list("participant_id", flat=True)
-        return list(
-            Invoice.objects.filter(
-                participant_id__in=participant_ids,
-                status__in=LOCKED_INVOICE_STATUSES,
-                period_start__lte=last,
-                period_end__gte=first,
-            ).order_by("period_start", "invoice_number")
-        )
+        """Use the same participants and civil days as correction attribution."""
+        from invoices.reading_impact import affected_participant_days
+
+        zev_ids = MeteringPoint.objects.filter(pk__in=metering_point_ids).values_list("zev_id", flat=True)
+        invoices = []
+        for zev in Zev.objects.filter(pk__in=zev_ids):
+            targets = affected_participant_days(zev=zev, slots=list(self.affected_slots))
+            scope = Q()
+            for day, participants in targets.items():
+                scope |= Q(participant_id__in=participants, period_start__lte=day, period_end__gte=day)
+            if targets:
+                invoices.extend(Invoice.objects.filter(
+                    scope, zev=zev, status__in=LOCKED_INVOICE_STATUSES,
+                ).order_by("period_start", "invoice_number"))
+        return invoices
 
     @property
     def refusal(self):
@@ -193,7 +196,28 @@ class Command(BaseCommand):
             raise CommandError("Refused, nothing was written:\n  " + "\n  ".join(refused))
         return logs
 
+    @transaction.atomic
     def _run(self, logs, *, apply, allow_invoiced):
+        if apply:
+            from metering.locks import lock_billing_inputs, protect_billing_scope
+            from zev.models import Zev
+
+            zev_ids = MeterReading.objects.filter(import_batch__in=[log.batch_id for log in logs]).values_list(
+                "metering_point__zev_id", flat=True,
+            ).distinct()
+            zev_ids = set(zev_ids) | {log.zev_id for log in logs if log.zev_id}
+            zevs = list(Zev.objects.filter(pk__in=zev_ids).order_by("pk"))
+            for zev in zevs:
+                protect_billing_scope(zev)
+            list(ImportLog.objects.filter(pk__in=[log.pk for log in logs]).order_by("pk").select_for_update())
+            logs = self._resolve_batches([log.batch_id for log in logs])
+            current_zevs = set(MeterReading.objects.filter(import_batch__in=[log.batch_id for log in logs]).values_list(
+                "metering_point__zev_id", flat=True,
+            ))
+            if current_zevs - {zev.pk for zev in zevs}:
+                raise CommandError("Import scope changed while waiting; retry the repair.")
+            for zev in zevs:
+                lock_billing_inputs(zev)
         plan = SelectionPlan(logs)
         for log in logs:
             counts = plan.per_batch[log.batch_id]
@@ -223,32 +247,39 @@ class Command(BaseCommand):
         if not apply:
             return
 
-        with transaction.atomic():
-            MeterReading.objects.filter(pk__in=[pk for pk, _ in plan.dropped]).delete()
-            # Every reading moves to an earlier instant, so in ascending order
-            # each target was vacated by an earlier reading before it is taken.
-            for pk, _old, new in plan.moves:
-                MeterReading.objects.filter(pk=pk).update(timestamp=new)
-            for log in logs:
-                counts = plan.per_batch[log.batch_id]
-                log.timestamp_timezone = str(business_tz())
-                log.save(update_fields=["timestamp_timezone"])
-                record_audit_event(
-                    action_category=AuditActionCategory.IMPORT,
-                    action_type="import.readings_reanchored",
-                    target_type="metering.ImportLog",
-                    target=log,
-                    target_id=str(log.id),
-                    target_display=str(log.batch_id),
-                    zev=log.zev,
-                    summary=f"Re-anchored {counts['moved']} reading(s) of import {log.filename} to Swiss time.",
-                    source=AuditEventSource.MANAGEMENT_COMMAND,
-                    metadata={
-                        "batch_id": str(log.batch_id),
-                        "zev_id": str(log.zev_id) if log.zev_id else None,
-                        "moved": counts["moved"],
-                        "dropped_nonexistent": counts["dropped"],
-                        "allow_invoiced": allow_invoiced,
-                    },
-                )
+        from invoices.reading_impact import flag_reanchored_slot_impacts
+
+        selected = MeterReading.objects.filter(import_batch__in=[log.batch_id for log in logs])
+        for zev in zevs:
+            flag_reanchored_slot_impacts(
+                zev=zev, readings=selected,
+                new_timestamps={pk: new for pk, _old, new in plan.moves},
+            )
+        MeterReading.objects.filter(pk__in=[pk for pk, _ in plan.dropped]).delete()
+        # Every reading moves to an earlier instant, so in ascending order
+        # each target was vacated by an earlier reading before it is taken.
+        for pk, _old, new in plan.moves:
+            MeterReading.objects.filter(pk=pk).update(timestamp=new)
+        for log in logs:
+            counts = plan.per_batch[log.batch_id]
+            log.timestamp_timezone = str(business_tz())
+            log.save(update_fields=["timestamp_timezone"])
+            record_audit_event(
+                action_category=AuditActionCategory.IMPORT,
+                action_type="import.readings_reanchored",
+                target_type="metering.ImportLog",
+                target=log,
+                target_id=str(log.id),
+                target_display=str(log.batch_id),
+                zev=log.zev,
+                summary=f"Re-anchored {counts['moved']} reading(s) of import {log.filename} to Swiss time.",
+                source=AuditEventSource.MANAGEMENT_COMMAND,
+                metadata={
+                    "batch_id": str(log.batch_id),
+                    "zev_id": str(log.zev_id) if log.zev_id else None,
+                    "moved": counts["moved"],
+                    "dropped_nonexistent": counts["dropped"],
+                    "allow_invoiced": allow_invoiced,
+                },
+            )
         self.stdout.write(self.style.SUCCESS(f"Re-anchored {len(plan.moves)} reading(s) in {len(logs)} batch(es)."))

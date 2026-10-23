@@ -92,7 +92,7 @@ describe('InvoicePaymentsCard', () => {
         })
         expect(container.textContent).toContain('pages.invoiceDetail.payments.summary')
         expect(container.textContent).toContain('E-Banking')
-        expect(byText(container, 'pages.invoiceDetail.payments.markRestPaid')).toBeTruthy()
+        expect(byText(container, 'pages.invoices.markRestPaid')).toBeTruthy()
         act(() => root.unmount())
         container.remove()
     })

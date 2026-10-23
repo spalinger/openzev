@@ -84,12 +84,17 @@ class CreditWorkflowTests(TestCase):
         first = _paid(self.zev, self.participant)
         second = _paid(self.zev, self.participant)
         counter_before = Invoice.objects.count()
+        # Those test invoices already allocated invoice numbers from the ZEV
+        # sequence, so compare against the counter they left behind rather than
+        # against the initial value: the point is that credit notes never move
+        # it further.
+        invoice_counter_before = self.zev.invoice_counter
         a = correct_invoice(first, kind=CreditKind.REVERSAL, reason="x")["credit"]
         b = correct_invoice(second, kind=CreditKind.REVERSAL, reason="x")["credit"]
         self.assertEqual((a.credit_number, b.credit_number), ("CN-00001", "CN-00002"))
         self.zev.refresh_from_db()
         self.assertEqual(self.zev.credit_note_counter, 3)
-        self.assertEqual(self.zev.invoice_counter, 1)
+        self.assertEqual(self.zev.invoice_counter, invoice_counter_before)
         self.assertEqual(Invoice.objects.count(), counter_before)
 
     def test_credit_note_prefix_is_configurable(self):

@@ -9,6 +9,15 @@ class MeterReadingAdmin(admin.ModelAdmin):
     search_fields = ("metering_point__meter_id",)
     date_hierarchy = "timestamp"
 
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
 
 @admin.register(ImportLog)
 class ImportLogAdmin(admin.ModelAdmin):
@@ -33,6 +42,9 @@ class ImportLogAdmin(admin.ModelAdmin):
     )
 
     def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
         return False
 
     def has_delete_permission(self, request, obj=None):

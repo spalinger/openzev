@@ -71,13 +71,14 @@ def _blocked_call(pool, call, expected_query):
 
 
 @pytest.mark.parametrize(
-    ("second_start", "second_end"),
+    ("second_start", "second_end", "refused"),
     [
-        pytest.param(START, END, id="identical"),
-        pytest.param(date(2026, 1, 15), date(2026, 2, 15), id="partial-overlap"),
+        pytest.param(START, END, False, id="identical"),
+        pytest.param(date(2025, 12, 15), date(2026, 2, 15), False, id="covering"),
+        pytest.param(date(2026, 1, 15), date(2026, 2, 15), True, id="partial-overlap-refused"),
     ],
 )
-def test_overlapping_draft_is_replaced_after_the_participant_lock(second_start, second_end):
+def test_overlapping_draft_is_checked_after_the_participant_lock(second_start, second_end, refused):
     participant = factories.ParticipantFactory()
     with ThreadPoolExecutor(max_workers=1) as pool:
         with transaction.atomic():
@@ -86,6 +87,11 @@ def test_overlapping_draft_is_replaced_after_the_participant_lock(second_start, 
                 pool, lambda: _generate(participant.pk, second_start, second_end),
                 'FROM "zev_participant"',
             )
+        if refused:
+            with pytest.raises(ValueError, match="whole period"):
+                pending.result(timeout=10)
+            assert set(Invoice.objects.filter(participant=participant).values_list("pk", flat=True)) == {first.pk}
+            return
         second = pending.result(timeout=10)
 
     actual_ids = set(Invoice.objects.filter(participant=participant).values_list("pk", flat=True))
@@ -167,17 +173,18 @@ def test_rollback_releases_the_lock_and_reuses_the_invoice_number():
     assert participant.zev.invoice_counter == initial_counter + 1
 
 
-def test_different_participants_sharing_a_party_can_generate_concurrently():
+def test_participant_lock_does_not_lock_a_shared_party():
     first = factories.ParticipantFactory()
     second = factories.ParticipantFactory(zev=first.zev, party=first.party)
-    overlaps_checked, release = Event(), Event()
-    discard = engine._discard_replaceable_invoices
+    participant_locked, release = Event(), Event()
+    lock_inputs = engine.lock_billing_inputs
 
-    def pause_first(participant, *args):
-        discard(participant, *args)
-        if participant.pk == first.pk:
-            overlaps_checked.set()
+    def pause_first(zev):
+        # Pause before the community lock; pricing itself is serialized.
+        if not participant_locked.is_set():
+            participant_locked.set()
             assert release.wait(10), "First generation was not released"
+        lock_inputs(zev)
 
     def generate_first():
         try:
@@ -185,11 +192,11 @@ def test_different_participants_sharing_a_party_can_generate_concurrently():
         finally:
             connections.close_all()
 
-    with patch.object(engine, "_discard_replaceable_invoices", side_effect=pause_first):
+    with patch.object(engine, "lock_billing_inputs", side_effect=pause_first):
         with ThreadPoolExecutor(max_workers=1) as pool:
             pending = pool.submit(generate_first)
             try:
-                assert overlaps_checked.wait(10), "First generation did not check overlaps"
+                assert participant_locked.wait(10), "First generation did not lock its participant"
                 with transaction.atomic():
                     with connection.cursor() as cursor:
                         cursor.execute("SET LOCAL lock_timeout = '5s'")

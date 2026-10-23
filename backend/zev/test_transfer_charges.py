@@ -74,6 +74,26 @@ class ChargeArchiveTests(TestCase):
         self.assertEqual(manifest["counts"][SECTION_CHARGES], 2)
         self.assertEqual({row["description"] for row in rows}, {"Porto", "Reparatur"})
 
+    def test_format_8_charges_and_readings_import_without_sdat_state(self):
+        raw = export_and_clear(self.zev, ALL)
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+            manifest["format_version"] = 8
+            manifest["counts"].pop("quarantined_readings")
+            replacement = {"manifest.json": manifest}
+            for name in archive.namelist():
+                if name.startswith("readings/"):
+                    lines = archive.read(name).decode().splitlines()
+                    replacement[name] = ("\n".join(",".join(line.split(",")[:5]) for line in lines) + "\n").encode()
+            held_members = [name for name in archive.namelist() if name.startswith("quarantine/")]
+
+        result = self.import_(rewrite_archive(raw, replace=replacement, drop=held_members))
+
+        self.assertEqual(result["counts"][SECTION_CHARGES], 2)
+        self.assertEqual(result["counts"]["readings"], manifest["counts"]["readings"])
+        zev = Zev.objects.get(pk=result["zev_id"])
+        self.assertEqual(zev.charges.get(description="Reparatur").participants.get().party.first_name, "Alice")
+
     def test_an_older_archive_without_the_section_still_imports(self):
         raw = export_and_clear(self.zev, ["zev", "participants"])
 

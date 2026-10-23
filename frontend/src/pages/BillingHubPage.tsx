@@ -38,7 +38,7 @@ export function BillingHubPage({ tab }: { tab: BillingTab }) {
             />
 
             <Tabs
-                classNames={{ root: 'app-tabs', list: 'app-tabs-list', tab: 'app-tabs-tab' }}
+                classNames={{ root: 'app-tabs', list: 'app-tabs-list', tab: 'app-tabs-tab', panel: 'app-tabs-panel' }}
                 value={tab}
                 keepMounted={false}
                 onChange={handleTabChange}

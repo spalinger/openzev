@@ -12,7 +12,7 @@ import { useMeteringPointActions } from '../src/features/meteringPoints/useMeter
 const state = vi.hoisted(() => ({
     zevId: '42', relation: 'manager', userId: 1, disabled: false, role: 'user', scopeFailed: false,
     quality: vi.fn(), assignments: vi.fn(), navigate: null as ReturnType<typeof useNavigate> | null,
-    toast: vi.fn(), write: vi.fn(), actions: null as ReturnType<typeof useMeteringPointActions> | null,
+    toast: vi.fn(), translate: vi.fn((key: string) => key), write: vi.fn(), actions: null as ReturnType<typeof useMeteringPointActions> | null,
 }))
 vi.mock('../src/lib/auth', () => ({ useAuth: () => ({ user: { id: state.userId, role: state.role } }) }))
 vi.mock('../src/lib/managedZev', () => {
@@ -26,7 +26,7 @@ vi.mock('../src/lib/appSettings', () => ({
     useAppSettings: () => ({ settings: {} }), formatShortDate: (value: string) => value,
     formatDateTime: (value: string) => value, toDayJsDateFormat: () => 'DD.MM.YYYY',
 }))
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'en' } }) }))
+vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: state.translate, i18n: { language: 'en' } }) }))
 vi.mock('../src/lib/api/zev', async importOriginal => ({
     ...await importOriginal(),
     createMeteringPoint: state.write, updateMeteringPoint: state.write, deleteMeteringPoint: state.write,
@@ -75,7 +75,7 @@ async function render() {
 async function openDraft(mode: 'create' | 'edit' | 'assignment' | 'delete') {
     act(() => {
         const button = mode === 'create'
-            ? container.querySelector<HTMLButtonElement>('.metering-toolbar .toolbar-actions button')!
+            ? container.querySelector<HTMLButtonElement>('.metering-toolbar .toolbar-actions .button-primary')!
             : mode === 'assignment'
                 ? container.querySelector<HTMLButtonElement>('.metering-point-holder .button-primary')!
                 : container.querySelector<HTMLButtonElement>('.metering-point-actions [aria-haspopup="menu"]')!
@@ -166,6 +166,31 @@ const writes = [
     }) },
 ]
 
+describe('meter form response ownership', () => {
+    it.each(['success', 'error'])('keeps a replacement draft after an older save %s', async outcome => {
+        await openDraft('edit')
+        let resolve!: (value: unknown) => void
+        let reject!: (error: unknown) => void
+        state.write.mockReturnValue(new Promise((yes, no) => { resolve = yes; reject = no }))
+        let operation!: Promise<unknown>
+        act(() => { operation = state.actions!.saveMpMutation.mutateAsync({
+            scope: state.actions!.scope, id: 'mp42', payload: state.actions!.mpForm,
+        }) })
+        const settled = operation.catch(() => undefined)
+        await waitForCondition(() => state.write.mock.calls.length === 1, 'original meter save')
+        act(() => state.actions!.closeMpModal())
+        await openDraft('create')
+        await act(async () => {
+            if (outcome === 'success') resolve({})
+            else reject({ response: { status: 400, data: { secondary_meter_id: ['Old alias collision'] } } })
+            await settled
+        })
+        expect(state.actions!.showMpModal).toBe(true)
+        expect(state.actions!.mpFieldErrors).toEqual({})
+        expect(state.toast).not.toHaveBeenCalled()
+    })
+})
+
 describe('metering write ownership', () => {
     it.each(['create', 'edit', 'assignment', 'delete'] as const)('closes the %s dialog when the community is disabled', async mode => {
         await openDraft(mode)
@@ -255,7 +280,7 @@ describe('metering write ownership', () => {
                         : name === 'meter delete'
                             ? [['metering'], queryKeys.zev.buildings('42')]
                             : name === 'reading delete'
-                                ? [['metering']]
+                                ? [['metering'], ['invoices']]
                                 : [queryKeys.metering.points('42'), queryKeys.zev.buildings('42')]
                     expect(invalidate.mock.calls.map(([filters]) => filters?.queryKey)).toEqual(keys)
                 } else {
@@ -450,4 +475,17 @@ describe('metering status availability', () => {
         expect(state.actions!).toMatchObject({ view: 'all', searchTerm: '', typeFilter: 'all', buildingFilter: 'all', sort: 'meter_id' })
         expect(state.actions!.meteringPoints.map(point => point.id)).toEqual(['mp42'])
     })
+})
+
+it('refreshes invoice/readiness caches and reports both deleted streams', async () => {
+    state.role = 'admin'
+    await render()
+    const keys = [queryKeys.invoices.detail('inv-1'), queryKeys.invoices.list('42'), queryKeys.invoices.mine(),
+        queryKeys.invoices.periodOverview('42', '2026-01-01', '2026-01-31'), queryKeys.invoices.readiness('42'), queryKeys.invoices.attention('42')]
+    for (const key of keys) client.setQueryData(key, { needs_data_review: false })
+    state.write.mockResolvedValue({ deleted_count: 0, deleted_readings: 0, deleted_quarantined_readings: 4 })
+    await act(async () => { await writes.find(write => write.name === 'reading delete')!.run(state.actions!) })
+    for (const key of keys) expect(client.getQueryState(key)?.isInvalidated).toBe(true)
+    expect(state.toast).toHaveBeenCalledWith('pages.meteringPoints.deleteData.success', 'success')
+    expect(state.translate).toHaveBeenCalledWith('pages.meteringPoints.deleteData.success', { count: 0, held: 4 })
 })

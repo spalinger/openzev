@@ -331,6 +331,23 @@ class ConflictTests(ZevRestoreTestCase):
         self.assertFalse(conflict["overridable"])
         self.assertEqual(MeteringPoint.objects.get(pk=point.pk).zev_id, self.beta_id)
 
+    def test_a_restored_primary_cannot_collide_with_another_zevs_secondary(self):
+        point = MeteringPoint.objects.get(zev_id=self.alpha_id, meter_id="ALPHA-CONS-1")
+        point.meter_id = "ALPHA-RENAMED"
+        point.save(update_fields=["meter_id"])
+        foreign = MeteringPoint.objects.filter(zev_id=self.beta_id).first()
+        foreign.secondary_meter_id = "ALPHA-CONS-1"
+        foreign.save(update_fields=["secondary_meter_id"])
+        before = zev_rows(self.alpha_id)
+        for dry_run in (True, False):
+            if dry_run:
+                result = restore_from(self.raw, self.alpha_id, dry_run=True, force=True)
+                self.assertIn("meter_id_owned_by_other_zev", self.kinds(result.plan))
+            else:
+                with self.assertRaises(restore_zev.RestoreRefused):
+                    restore_from(self.raw, self.alpha_id, force=True)
+            self.assertEqual(zev_rows(self.alpha_id), before)
+
     def test_a_referenced_price_source_that_no_longer_exists_cannot_be_forced(self):
         def edit(members, manifest):
             name = f"zevs/{self.alpha_id}/tariffs.jsonl"
@@ -555,3 +572,108 @@ class AccessGrantRestoreTests(ZevRestoreTestCase):
         Zev.objects.filter(pk=self.alpha_id).delete()
         restore_from(self.raw, self.alpha_id)
         self.assertFalse(ZevAccessGrant.objects.filter(zev_id=self.alpha_id).exists())
+
+
+BK_CONS_ID = "CH9999901234500000000000000000055"
+BK_ALIAS_ID = "CH9999901234500000000000000000066"
+BK_C38 = '<rsm:VSENationalCode>C38</rsm:VSENationalCode>'
+
+
+class SdatProvenanceRestoreTests(TestCase):
+    """Backup/restore preserves SDAT-CH provenance, quality, aliases and held rows."""
+
+    def _delivery(self, zev, user, values, *, creation, status="9", reason="E88", delivery_id, doc):
+        from metering.importers.sdatch_importer import import_sdatch
+        from testing.sdat import build_block, build_e66
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        obs = "".join(
+            f"<rsm:Observation><rsm:Position><rsm:Sequence>{seq}</rsm:Sequence></rsm:Position>"
+            f"<rsm:Volume>{value}</rsm:Volume></rsm:Observation>"
+            for seq, value in zip(range(1, 5), values)
+        )
+        reason_xml = BK_C38 if reason == "C38" else '<rsm:ebIXCode>E88</rsm:ebIXCode>'
+        content = build_e66(
+            [build_block(BK_CONS_ID, obs, doc=doc)],
+            status=status, creation=creation, delivery_id=delivery_id, reason_xml=reason_xml,
+        )
+        return import_sdatch(SimpleUploadedFile("delivery.xml", content), zev, user)
+
+    def test_provenance_quality_aliases_and_held_rows_come_back_exactly(self):
+        from decimal import Decimal
+
+        from metering.models import ImportLog, QuarantinedReading
+        from testing.helpers import create_managed_zev
+        from zev.models import MeteringPoint, MeteringPointType
+
+        owner = make_user("bk_sdat_owner", UserRole.USER)
+        zev = create_managed_zev(name="BK SDAT ZEV", owner=owner, zev_type="vzev", invoice_prefix="BK")
+        MeteringPoint.objects.create(
+            zev=zev, meter_id=BK_CONS_ID, secondary_meter_id=BK_ALIAS_ID,
+            meter_type=MeteringPointType.CONSUMPTION,
+        )
+        billed = self._delivery(zev, owner, ["101", "102", "103", "104"],
+                                creation="2025-06-04T10:00:00Z", delivery_id="BK-D0", doc="BK-D0-BLK")
+        held = self._delivery(zev, owner, ["50", "51", "52", "53"],
+                              creation="2025-06-05T10:00:00Z", reason="C38",
+                              delivery_id="BK-H0", doc="BK-H0-BLK")
+        self.assertEqual(billed.result_status, "accepted")
+        self.assertEqual(held.result_status, "held")
+        self.assertEqual(len(billed.reading_changes), 4)
+        before = zev_rows(zev.pk)
+        raw, _ = build("zev", zev)
+
+        MeterReading.objects.filter(metering_point__zev=zev).delete()
+        QuarantinedReading.objects.filter(metering_point__zev=zev).delete()
+        ImportLog.objects.filter(zev=zev).delete()
+        restore_from(raw, zev.pk)
+
+        self.assertEqual(zev_rows(zev.pk), before)
+        point = MeteringPoint.objects.get(zev=zev)
+        self.assertEqual(point.secondary_meter_id, BK_ALIAS_ID)
+        reading = MeterReading.objects.filter(metering_point=point).order_by("timestamp").first()
+        self.assertEqual(reading.business_reason, "E88")
+        self.assertEqual(reading.source_delivery_id, "BK-D0")
+        quarantined = QuarantinedReading.objects.filter(metering_point=point).order_by("timestamp").first()
+        self.assertEqual(quarantined.business_reason, "C38")
+        self.assertEqual(quarantined.condition, "")
+        self.assertEqual(quarantined.energy_kwh, Decimal("50"))
+        log = ImportLog.objects.get(zev=zev, source_delivery__delivery_id="BK-D0")
+        self.assertEqual(log.result_status, "accepted")
+        self.assertEqual(len(log.reading_changes), 4)
+        self.assertIn("quarantine_overwritten", log.result_counts)
+
+    def test_replace_guards_select_identically_after_restore(self):
+        from decimal import Decimal
+
+        from metering.models import ImportLog, MeterReading, QuarantinedReading
+        from testing.helpers import create_managed_zev
+        from zev.models import MeteringPoint, MeteringPointType
+
+        owner = make_user("bk_sdat_owner2", UserRole.USER)
+        zev = create_managed_zev(name="BK SDAT ZEV 2", owner=owner, zev_type="vzev", invoice_prefix="BJ")
+        MeteringPoint.objects.create(
+            zev=zev, meter_id=BK_CONS_ID, meter_type=MeteringPointType.CONSUMPTION,
+        )
+        self._delivery(zev, owner, ["101", "102", "103", "104"],
+                       creation="2025-06-04T10:00:00Z", delivery_id="BK2-D0", doc="BK2-D0-BLK")
+        self._delivery(zev, owner, ["50", "51", "52", "53"],
+                       creation="2025-06-05T10:00:00Z", reason="C38",
+                       delivery_id="BK2-H0", doc="BK2-H0-BLK")
+        raw, _ = build("zev", zev)
+        MeterReading.objects.filter(metering_point__zev=zev).delete()
+        QuarantinedReading.objects.filter(metering_point__zev=zev).delete()
+        ImportLog.objects.filter(zev=zev).delete()
+        restore_from(raw, zev.pk)
+
+        replay = self._delivery(zev, owner, ["101", "102", "103", "104"],
+                                creation="2025-06-04T10:00:00Z", delivery_id="BK2-D0R", doc="BK2-D0-BLK")
+        self.assertEqual(replay.result_status, "unchanged")
+        self.assertEqual(replay.result_counts["duplicate"], 4)
+        newer = self._delivery(zev, owner, ["201", "202", "203", "204"],
+                               creation="2025-06-06T10:00:00Z", status="5",
+                               delivery_id="BK2-D1", doc="BK2-D1-BLK")
+        self.assertEqual(newer.result_status, "accepted")
+        self.assertEqual(newer.result_counts["overwritten"], 4)
+        kept = list(MeterReading.objects.filter(metering_point__zev=zev).order_by("timestamp").values_list("energy_kwh", flat=True))
+        self.assertEqual(kept, [Decimal("201"), Decimal("202"), Decimal("203"), Decimal("204")])

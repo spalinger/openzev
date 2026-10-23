@@ -164,7 +164,7 @@ class CreateIntoDisabledZevTests(_OwnerAndParticipant):
             "metering_point": str(self.meter.id),
             "timestamp": "2026-01-16T00:00:00Z", "energy_kwh": "1.0", "direction": "in",
         }, format="json")
-        self.assertRefused(response, "metering_point")
+        self.assertEqual(response.status_code, 405, response.content)
 
 
 class WriteExistingRowInDisabledZevTests(_OwnerAndParticipant):
@@ -254,7 +254,7 @@ class WriteExistingTariffAndReadingRowTests(_OwnerAndParticipant):
 
     def test_owner_cannot_delete_reading(self):
         response = self.owner_client.delete(f"{READINGS}{self.reading.id}/")
-        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(response.status_code, 405, response.content)
         self.assertTrue(MeterReading.objects.filter(pk=self.reading.pk).exists())
 
     def test_admin_can_still_patch_tariff(self):
@@ -263,9 +263,10 @@ class WriteExistingTariffAndReadingRowTests(_OwnerAndParticipant):
         )
         self.assertEqual(response.status_code, 200, response.content)
 
-    def test_admin_can_still_delete_reading(self):
+    def test_admin_cannot_delete_reading_directly(self):
         response = self.admin_client.delete(f"{READINGS}{self.reading.id}/")
-        self.assertEqual(response.status_code, 204, response.content)
+        self.assertEqual(response.status_code, 405, response.content)
+        self.assertTrue(MeterReading.objects.filter(pk=self.reading.pk).exists())
 
     def test_owner_cannot_patch_even_a_field_unrelated_to_the_relation(self):
         """assert_within_scope alone would miss this: the payload never

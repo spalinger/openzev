@@ -3,8 +3,10 @@
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from unittest import mock
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, connection
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
@@ -13,6 +15,9 @@ from rest_framework.test import APIClient
 
 from accounts.models import UserRole
 from audit.models import AuditEvent
+from invoices.models import Invoice, InvoiceReadingImpact, InvoiceStatus
+from metering.importers import csv_importer
+from metering.importers.csv_importer import ImportFileError, import_csv
 from metering.models import ImportLog, MeterReading, ReadingDirection
 from metering.testing import preview_csv, upload_csv
 from testing.helpers import authenticate as auth, make_user, create_managed_zev
@@ -1318,3 +1323,331 @@ class CsvImportTests(TestCase):
 
         self.assertEqual(daily_preview.data["preview_rows"][0]["directions"], ["out"])
         self.assertEqual(standard_preview.data["preview_rows"][0]["directions"], ["in"])
+
+
+class CsvOverwriteImpactTests(TestCase):
+    """CSV overwrites flag billed periods like SDAT corrections (spec §4.1)."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.owner = make_user("csv_impact_owner", UserRole.USER)
+        self.zev = create_managed_zev(name="CSV Impact ZEV", owner=self.owner, zev_type="vzev", invoice_prefix="CI")
+        auth(self.client, self.owner)
+        self.zev_id = str(self.zev.id)
+        self.alice = Participant.objects.create(
+            zev=self.zev, first_name="Alice", last_name="Holder",
+            email="alice@example.com", valid_from=date(2026, 1, 1),
+        )
+        self.metering_point = MeteringPoint.objects.create(
+            zev=self.zev, meter_id="CH-IMPACT-1", meter_type=MeteringPointType.CONSUMPTION,
+        )
+        MeteringPointAssignment.objects.create(
+            metering_point=self.metering_point, participant=self.alice,
+            valid_from=date(2026, 1, 1),
+        )
+
+    def _base_row(self, energy="1.0000"):
+        return (
+            b"meter_id,timestamp,energy_kwh,direction\n"
+            b"CH-IMPACT-1,2026-01-04T00:00:00Z," + energy.encode() + b",in\n"
+        )
+
+    def _invoice(self, participant, start, end):
+        return Invoice.objects.create(
+            invoice_number=f"CI-{uuid4().hex[:8]}", zev=self.zev, participant=participant,
+            period_start=start, period_end=end, status=InvoiceStatus.DRAFT,
+            total_chf=Decimal("42.00"),
+        )
+
+    def test_billed_slot_overwrite_flags_invoice_with_csv_evidence(self):
+        first = upload_csv(self.client, "impact-base.csv", self._base_row(), zev_id=self.zev_id)
+        self.assertEqual(first.status_code, 201)
+        invoice = self._invoice(self.alice, date(2026, 1, 1), date(2026, 1, 31))
+        self.assertEqual(InvoiceReadingImpact.objects.count(), 0)
+
+        overwrite = upload_csv(
+            self.client, "impact-overwrite.csv", self._base_row("4.5000"),
+            overwrite_existing="true", zev_id=self.zev_id,
+        )
+
+        self.assertEqual(overwrite.status_code, 201)
+        self.assertEqual(overwrite.data["rows_imported"], 1)
+        self.assertEqual(overwrite.data["rows_overwritten"], 1)
+        self.assertTrue(any("Overwrote 1 existing readings." in entry.get("warning", "") for entry in overwrite.data["warnings"]))
+        changes = overwrite.data["reading_changes"]
+        self.assertEqual(len(changes), 1)
+        self.assertEqual(changes[0]["kind"], "value")
+        self.assertEqual(changes[0]["old_energy"], "1.0000")
+        self.assertEqual(changes[0]["new_energy"], "4.5000")
+        impact = InvoiceReadingImpact.objects.get(invoice=invoice)
+        self.assertEqual(impact.import_log.filename, "impact-overwrite.csv")
+        self.assertEqual(impact.evidence["source"], "csv-import")
+        self.assertEqual(impact.evidence["filename"], "impact-overwrite.csv")
+        self.assertEqual(impact.evidence["change_count"], 1)
+        self.assertEqual(impact.evidence["kinds"], ["value"])
+        self.assertIsNone(impact.resolved_at)
+
+    def test_overwrite_flags_past_holder_not_current_one(self):
+        bob = Participant.objects.create(
+            zev=self.zev, first_name="Bob", last_name="Later",
+            email="bob@example.com", valid_from=date(2026, 2, 1),
+        )
+        assignment = MeteringPointAssignment.objects.get(
+            metering_point=self.metering_point, participant=self.alice
+        )
+        assignment.valid_to = date(2026, 1, 31)
+        assignment.save()
+        MeteringPointAssignment.objects.create(
+            metering_point=self.metering_point, participant=bob,
+            valid_from=date(2026, 2, 1),
+        )
+        upload_csv(self.client, "reassign-base.csv", self._base_row(), zev_id=self.zev_id)
+        alice_invoice = self._invoice(self.alice, date(2026, 1, 1), date(2026, 1, 31))
+        bob_invoice = self._invoice(bob, date(2026, 2, 1), date(2026, 2, 28))
+
+        upload_csv(
+            self.client, "reassign-overwrite.csv", self._base_row("4.5000"),
+            overwrite_existing="true", zev_id=self.zev_id,
+        )
+
+        self.assertTrue(
+            InvoiceReadingImpact.objects.filter(invoice=alice_invoice, resolved_at__isnull=True).exists()
+        )
+        self.assertFalse(InvoiceReadingImpact.objects.filter(invoice=bob_invoice).exists())
+
+    def test_skip_mode_duplicates_flag_nothing(self):
+        upload_csv(self.client, "skip-base.csv", self._base_row(), zev_id=self.zev_id)
+        self._invoice(self.alice, date(2026, 1, 1), date(2026, 1, 31))
+
+        second = upload_csv(self.client, "skip-dupe.csv", self._base_row(), zev_id=self.zev_id)
+
+        self.assertEqual(second.status_code, 201)
+        self.assertEqual(second.data["rows_imported"], 0)
+        self.assertGreaterEqual(second.data["rows_skipped"], 1)
+        self.assertEqual(second.data["reading_changes"], [])
+        self.assertEqual(InvoiceReadingImpact.objects.count(), 0)
+
+    def test_identical_overwrite_reimport_flags_nothing(self):
+        upload_csv(self.client, "same-base.csv", self._base_row(), zev_id=self.zev_id)
+        self._invoice(self.alice, date(2026, 1, 1), date(2026, 1, 31))
+
+        same = upload_csv(
+            self.client, "same-overwrite.csv", self._base_row(),
+            overwrite_existing="true", zev_id=self.zev_id,
+        )
+
+        self.assertEqual(same.status_code, 201)
+        self.assertEqual(same.data["rows_overwritten"], 0)
+        self.assertEqual(same.data["reading_changes"], [])
+        self.assertEqual(InvoiceReadingImpact.objects.count(), 0)
+
+    def test_rolled_back_csv_import_flags_nothing(self):
+        invoice = self._invoice(self.alice, date(2026, 1, 1), date(2026, 1, 31))
+        payload = (
+            b"meter_id,timestamp,energy_kwh,direction\n"
+            b"CH-IMPACT-1,2026-01-10T00:00:00Z,1.0000,in\n"
+            b"CH-IMPACT-1,2026-01-10T00:15:00Z,2.0000,in\n"
+        )
+        real_get_or_create = MeterReading.objects.get_or_create
+        calls = {"count": 0}
+
+        def flaky(*args, **kwargs):
+            calls["count"] += 1
+            if calls["count"] > 1:
+                raise RuntimeError("boom")
+            return real_get_or_create(*args, **kwargs)
+
+        upload = SimpleUploadedFile("rollback.csv", payload, content_type="text/csv")
+        with mock.patch.object(MeterReading.objects, "get_or_create", side_effect=flaky):
+            with self.assertRaises(ImportFileError):
+                import_csv(upload, self.owner, zev=self.zev)
+
+        self.assertEqual(MeterReading.objects.filter(metering_point=self.metering_point).count(), 0)
+        self.assertEqual(InvoiceReadingImpact.objects.count(), 0)
+        failed = ImportLog.objects.get(filename="rollback.csv")
+        self.assertEqual(failed.rows_imported, 0)
+        self.assertEqual(failed.reading_changes, [])
+        self.assertFalse(InvoiceReadingImpact.objects.filter(invoice=invoice).exists())
+
+    def test_late_collision_records_each_committed_slot_once(self):
+        # The retried fast path records reading_changes only for slots that
+        # actually committed: an aborted first attempt must not leave duplicate
+        # (or phantom) invoice-impact evidence.
+        invoice = self._invoice(self.alice, date(2026, 1, 1), date(2026, 1, 31))
+        csv_bytes = b"meter_id,date,v1,v2\nCH-IMPACT-1,2026-01-04,1.0000,2.0000\n"
+        real_create = MeterReading.objects.create
+        colliding_ts = datetime(2026, 1, 4, tzinfo=ZURICH) + timedelta(minutes=15)
+
+        def flaky_create(*args, **kwargs):
+            if kwargs.get("timestamp") == colliding_ts:
+                raise IntegrityError("simulated race")
+            return real_create(*args, **kwargs)
+
+        with mock.patch.object(MeterReading.objects, "create", side_effect=flaky_create):
+            resp = upload_csv(
+                self.client,
+                "late-collision.csv",
+                csv_bytes,
+                format_profile="daily_15min",
+                col_timestamp="date",
+                col_energy_start="2",
+                values_count="2",
+                interval_minutes="15",
+                zev_id=self.zev_id,
+            )
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["rows_imported"], 1)
+        changes = resp.data["reading_changes"]
+        self.assertEqual(len(changes), 1)
+        self.assertEqual(changes[0]["kind"], "availability")
+        impact = InvoiceReadingImpact.objects.get(invoice=invoice)
+        self.assertEqual(impact.evidence["change_count"], 1)
+
+    def test_unchanged_prefix_does_not_consume_evidence_cap(self):
+        upload_csv(self.client, "base.csv", self._base_row(), zev_id=self.zev_id)
+        january = self._invoice(self.alice, date(2026, 1, 1), date(2026, 1, 31))
+        invoice = self._invoice(self.alice, date(2026, 2, 1), date(2026, 2, 28))
+        payload = self._base_row() + b"CH-IMPACT-1,2026-02-01T00:00:00Z,2.0000,in\n"
+        with mock.patch("metering.importers.csv_importer.READING_CHANGE_CAP", 1):
+            response = upload_csv(self.client, "tail.csv", payload, overwrite_existing="true", zev_id=self.zev_id)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual([row["kind"] for row in response.data["reading_changes"]], ["availability"])
+        impact = InvoiceReadingImpact.objects.get(invoice=invoice)
+        self.assertEqual(impact.evidence["change_count"], 1)
+        self.assertEqual(impact.evidence["kinds"], ["availability"])
+        self.assertEqual(impact.evidence["source"], "csv-import")
+        self.assertFalse(response.data["result_counts"].get("reading_changes_truncated", False))
+        self.assertFalse(impact.evidence["changes_truncated"])
+        self.assertFalse(InvoiceReadingImpact.objects.filter(invoice=january).exists())
+
+    def test_evidence_cap_does_not_hide_later_invoice_scope(self):
+        invoices = [self._invoice(self.alice, date(2026, month, 1), date(2026, month, 28)) for month in (1, 2)]
+        payload = self._base_row() + b"CH-IMPACT-1,2026-02-01T00:00:00Z,2.0000,in\n"
+        with mock.patch("metering.importers.csv_importer.READING_CHANGE_CAP", 1):
+            response = upload_csv(self.client, "capped.csv", payload, zev_id=self.zev_id)
+        self.assertEqual(len(response.data["reading_changes"]), 1)
+        self.assertTrue(response.data["result_counts"]["reading_changes_truncated"])
+        self.assertEqual(set(InvoiceReadingImpact.objects.values_list("invoice_id", flat=True)), {invoice.pk for invoice in invoices})
+
+    def test_daily_overwrite_flags_quantity_changes_on_the_swiss_day(self):
+        options = dict(format_profile="daily_15min", col_timestamp="date", col_energy_start="2",
+                       values_count="3", zev_id=self.zev_id)
+        original = b"meter_id,date,v1,v2,v3\nCH-IMPACT-1,2026-02-01,1.0000,2.0000,\n"
+        upload_csv(self.client, "daily-base.csv", original, **options)
+        january = self._invoice(self.alice, date(2026, 1, 1), date(2026, 1, 31))
+        february = self._invoice(self.alice, date(2026, 2, 1), date(2026, 2, 28))
+        corrected = original.replace(b"2.0000,\n", b"4.0000,3.0000\n")
+
+        response = upload_csv(self.client, "daily-correction.csv", corrected, overwrite_existing="true", **options)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["rows_imported"], 2)
+        self.assertEqual(response.data["rows_overwritten"], 1)
+        self.assertEqual([change["kind"] for change in response.data["reading_changes"]],
+                         ["value", "availability"])
+        self.assertEqual(MeterReading.objects.order_by("timestamp").first().timestamp,
+                         datetime(2026, 1, 31, 23, tzinfo=timezone.utc))
+        impact = InvoiceReadingImpact.objects.get(invoice=february)
+        self.assertEqual(impact.evidence["change_count"], 2)
+        self.assertEqual(impact.evidence["day_from"], "2026-02-01")
+        self.assertEqual(impact.evidence["kinds"], ["availability", "value"])
+        self.assertFalse(InvoiceReadingImpact.objects.filter(invoice=january).exists())
+
+        replay = upload_csv(self.client, "daily-replay.csv", corrected, overwrite_existing="true", **options)
+        self.assertEqual(replay.status_code, 201)
+        self.assertEqual(replay.data["reading_changes"], [])
+        self.assertEqual(InvoiceReadingImpact.objects.count(), 1)
+
+    def test_failure_after_flag_creation_rolls_back_overwrite_and_flags(self):
+        upload_csv(self.client, "base.csv", self._base_row(), zev_id=self.zev_id)
+        invoice = self._invoice(self.alice, date(2026, 1, 1), date(2026, 1, 31))
+        original_batch = MeterReading.objects.get().import_batch
+        real_save = ImportLog.save
+        flags_before_failure = []
+
+        def fail_final_save(log, *args, **kwargs):
+            if log.reading_changes:
+                flags_before_failure.append(InvoiceReadingImpact.objects.filter(invoice=invoice, import_log=log).exists())
+                raise RuntimeError("failed to save import evidence")
+            return real_save(log, *args, **kwargs)
+
+        with mock.patch.object(ImportLog, "save", fail_final_save):
+            response = upload_csv(self.client, "failed.csv", self._base_row("2.0000"),
+                                  overwrite_existing="true", zev_id=self.zev_id)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(flags_before_failure, [True])
+        reading = MeterReading.objects.get()
+        self.assertEqual(reading.energy_kwh, Decimal("1.0000"))
+        self.assertEqual(reading.import_batch, original_batch)
+        self.assertFalse(InvoiceReadingImpact.objects.exists())
+        failed = ImportLog.objects.get(filename="failed.csv")
+        self.assertEqual(failed.rows_overwritten, 0)
+        self.assertEqual(failed.reading_changes, [])
+
+    def test_csv_overwrite_clears_previous_sdat_provenance(self):
+        upload_csv(self.client, "base.csv", self._base_row(), zev_id=self.zev_id)
+        MeterReading.objects.update(import_source="sdatch", source_creation=datetime(2026, 1, 5, tzinfo=timezone.utc),
+            source_document_id="BLOCK", source_delivery_id="DELIVERY", business_reason="E88", condition="56",
+            source_product="8716867000030", source_unit="KWH", source_meter_id="OLD-ALIAS")
+        response = upload_csv(self.client, "new.csv", self._base_row("2.0000"), overwrite_existing="true", zev_id=self.zev_id)
+        self.assertEqual(response.status_code, 201)
+        reading = MeterReading.objects.get()
+        self.assertEqual(reading.import_source, "csv")
+        self.assertIsNone(reading.source_creation)
+        for name in ("source_document_id", "source_delivery_id", "business_reason", "condition", "source_product", "source_unit", "source_meter_id"):
+            self.assertEqual(getattr(reading, name), "", name)
+
+    def test_daily_overwrite_row_rollback_drops_its_evidence(self):
+        invoice = self._invoice(self.alice, date(2026, 1, 1), date(2026, 1, 31))
+        real = csv_importer._upsert_reading
+        calls = 0
+
+        def fail_second(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise ValueError("invalid slot")
+            return real(*args, **kwargs)
+
+        with mock.patch.object(csv_importer, "_upsert_reading", side_effect=fail_second):
+            response = upload_csv(self.client, "daily.csv", b"meter_id,date,v1,v2\nCH-IMPACT-1,2026-01-04,1.0000,2.0000\n",
+                format_profile="daily_15min", col_timestamp="date", col_energy_start="2", values_count="2",
+                overwrite_existing="true", zev_id=self.zev_id)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["reading_changes"], [])
+        self.assertFalse(MeterReading.objects.exists())
+        self.assertFalse(InvoiceReadingImpact.objects.filter(invoice=invoice).exists())
+
+
+class CsvSdatProvenanceTests(TestCase):
+    def test_identical_standard_and_daily_overwrites_preserve_entire_sdat_row(self):
+        from testing.sdat import CONS_ID, build_e66, quarter_block
+        from metering.importers.sdatch_importer import import_sdatch
+        owner = make_user("same_csv_sdat", UserRole.USER)
+        zev = create_managed_zev(name="Same CSV", owner=owner)
+        point = MeteringPoint.objects.create(zev=zev, meter_id=CONS_ID, meter_type="consumption")
+        client = APIClient()
+        auth(client, owner)
+        original = import_sdatch(SimpleUploadedFile("original.xml", build_e66([
+            quarter_block(CONS_ID, "2025-06-02T22:00:00Z", 1),
+        ])), zev, owner)
+        self.assertEqual(original.result_status, "accepted")
+        before = MeterReading.objects.values().get(metering_point=point)
+        cases = (
+            (f"meter_id,timestamp,energy_kwh,direction\n{CONS_ID},2025-06-02T22:00:00Z,101,in\n", {}),
+            (f"meter_id,date,v1\n{CONS_ID},2025-06-03,101\n", {
+                "format_profile": "daily_15min", "col_timestamp": "date", "col_energy_start": "2", "values_count": "1"}),
+        )
+        for text, options in cases:
+            with self.subTest(options=options):
+                response = upload_csv(client, "identical.csv", text.encode(), zev_id=str(zev.pk), overwrite_existing="true", **options)
+                self.assertEqual(response.status_code, 201, response.data)
+                self.assertEqual(response.data["rows_imported"], 0)
+                self.assertEqual(response.data["rows_overwritten"], 0)
+                self.assertEqual(response.data["reading_changes"], [])
+                self.assertTrue(response.data["deletable"])
+                self.assertEqual(MeterReading.objects.values().get(metering_point=point), before)
+        replacement = build_e66([quarter_block(CONS_ID, "2025-06-02T22:00:00Z", 1)], status="5", creation="2025-06-06T10:00:00Z")
+        self.assertEqual(import_sdatch(SimpleUploadedFile("replacement.xml", replacement), zev, owner).result_status, "accepted")

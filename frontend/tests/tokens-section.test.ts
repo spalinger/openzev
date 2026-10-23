@@ -15,9 +15,10 @@ vi.mock('../src/lib/appSettings', async (importOriginal) => {
     return { ...actual, useAppSettings: () => ({ settings: actual.DEFAULT_APP_SETTINGS, isLoading: false }) }
 })
 vi.mock('../src/lib/clipboard', () => ({ copyToClipboard: vi.fn().mockResolvedValue(true) }))
-const auth = vi.hoisted(() => ({ role: 'user' }))
+const auth = vi.hoisted(() => ({ role: 'user', isImpersonating: false }))
 vi.mock('../src/lib/auth', () => ({
     useAuth: () => ({
+        isImpersonating: auth.isImpersonating,
         user: {
             role: auth.role,
             memberships: [
@@ -81,6 +82,7 @@ const click = (element: HTMLElement) => act(async () => { element.click() })
 beforeEach(() => {
     vi.clearAllMocks()
     auth.role = 'user'
+    auth.isImpersonating = false
     zevApi.fetchZevs.mockResolvedValue([
         { id: 'z1', name: 'Sonnenhof', disabled_at: null },
         { id: 'z2', name: 'Hölzliackerweg', disabled_at: null },
@@ -171,6 +173,28 @@ describe('TokensSection actions', () => {
 })
 
 describe('TokensSection creating', () => {
+    it.each([false, true])('explains disabled creation/rotation during impersonation with capabilities %s', async (canCreate) => {
+        auth.isImpersonating = true
+        credentialsApi.fetchMyCredentials.mockResolvedValue({
+            credentials: [row({}), analytics, { ...energy, actions: ['revoke'] }],
+            can_create: { api_key: canCreate, analytics: canCreate },
+        })
+        const { container } = await mount()
+
+        for (const label of ['account.tokens.newApiKey', 'account.tokens.newAnalytics', 'account.tokens.rotate']) {
+            const button = buttonWith(container, label)
+            expect(button).toBeDefined()
+            expect(button.disabled).toBe(true)
+            expect(button.title).toBe('account.impersonationRestrictions')
+            await click(button)
+        }
+        expect(container.querySelector('form')).toBeNull()
+        expect(onRotate).not.toHaveBeenCalled()
+        const revocations = buttons(container).filter((button) => button.getAttribute('aria-label')?.includes('account.tokens.revokeNamed'))
+        expect(revocations).toHaveLength(3)
+        expect(revocations.every((button) => !button.disabled)).toBe(true)
+    })
+
     it('creates an API key and shows its secret once', async () => {
         authApi.createApiKey.mockResolvedValue({ id: 'k2', name: 'New', key: 'ozv_zzzz_secret', prefix: 'zzzz' })
         const { container } = await mount()

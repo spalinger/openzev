@@ -7,12 +7,12 @@ import { MantineProvider } from '@mantine/core'
 import { resolveAccountTab } from '../src/features/account/accountTabs'
 import { AccountProfilePage } from '../src/pages/AccountProfilePage'
 
-const auth = vi.hoisted(() => ({ mustChangePassword: false }))
+const auth = vi.hoisted(() => ({ mustChangePassword: false, isImpersonating: false }))
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 vi.mock('../src/lib/toast', () => ({ useToast: () => ({ pushToast: vi.fn() }) }))
 vi.mock('../src/lib/auth', () => ({
-    useAuth: () => ({ user: { must_change_password: auth.mustChangePassword } }),
+    useAuth: () => ({ user: { must_change_password: auth.mustChangePassword }, isImpersonating: auth.isImpersonating }),
 }))
 // The cards have their own concerns and API calls; what is under test here is
 // which of them the page shows for which tab.
@@ -74,6 +74,7 @@ const cleanups: (() => void)[] = []
 afterEach(() => {
     cleanups.splice(0).forEach((cleanup) => cleanup())
     auth.mustChangePassword = false
+    auth.isImpersonating = false
 })
 
 async function render(url: string) {
@@ -101,6 +102,21 @@ function visibleText(container: Element) {
 }
 
 describe('account page tabs', () => {
+    it.each([true, false])('restricts security only during impersonation (%s)', async (isImpersonating) => {
+        auth.isImpersonating = isImpersonating
+        const container = await render('/account?tab=security')
+
+        const security = container.querySelector<HTMLFieldSetElement>('fieldset[aria-label="account.tabs.security"]')!
+        expect(security.disabled).toBe(isImpersonating)
+        for (const card of ['password-card', 'linked-card', 'sessions-card', 'two-factor-card']) {
+            expect(security.textContent).toContain(card)
+        }
+        expect(security.textContent).not.toContain('profile-card')
+        expect(container.querySelector('[role="status"]')?.textContent ?? '').toBe(
+            isImpersonating ? 'account.impersonationRestrictions' : '',
+        )
+    })
+
     it('renders the standard tab strip with three tabs', async () => {
         const container = await render('/account')
 

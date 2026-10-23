@@ -1,19 +1,39 @@
-"""SDAT-CH metering import tests."""
+"""SDAT-CH metering import tests (spec-compliant E66 ValidatedMeteredData)."""
 
-from datetime import date, datetime, timezone
+import gzip
+import os
+from copy import deepcopy
+from datetime import datetime, timezone
 from decimal import Decimal
 from unittest import mock
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.utils import timezone as django_timezone
+from lxml import etree
 from rest_framework.test import APIClient
 
 from accounts.models import UserRole
 from metering.importers import csv_importer, sdatch_importer
-from metering.models import ImportLog, ImportSource, MeterReading, ReadingDirection
+from metering.models import ImportLog, ImportSource, MeterReading, QuarantinedReading, ReadingDirection
 from testing.helpers import authenticate as auth, make_user, create_managed_zev
 from zev.models import MeteringPoint, MeteringPointAssignment, MeteringPointType, Participant
+
+FIXTURES = os.path.join(os.path.dirname(__file__), "test_fixtures", "sdatch")
+
+CONS_ID = "CH9999901234500000000000000000001"
+PROD_ID = "CH9999901234500000000000000000002"
+ALT_ID = "CH9999901234500000000000000000009"
+
+TS0 = datetime(2025, 6, 2, 22, 0, tzinfo=timezone.utc)
+TS1 = datetime(2025, 6, 2, 22, 15, tzinfo=timezone.utc)
+TS2 = datetime(2025, 6, 2, 22, 30, tzinfo=timezone.utc)
+TS3 = datetime(2025, 6, 2, 22, 45, tzinfo=timezone.utc)
+
+
+def fixture(name):
+    with open(os.path.join(FIXTURES, name), "rb") as fh:
+        return fh.read()
 
 
 class SdatchImportTests(TestCase):
@@ -31,17 +51,22 @@ class SdatchImportTests(TestCase):
             first_name="SDAT",
             last_name="Participant",
             email="sdatch.participant@example.com",
-            valid_from=date(2026, 1, 1),
+            valid_from=datetime(2026, 1, 1).date(),
         )
-        self.metering_point = MeteringPoint.objects.create(
+        self.cons_mp = MeteringPoint.objects.create(
             zev=self.zev,
-            meter_id="CH-SDAT-1",
+            meter_id=CONS_ID,
             meter_type=MeteringPointType.CONSUMPTION,
         )
+        self.prod_mp = MeteringPoint.objects.create(
+            zev=self.zev,
+            meter_id=PROD_ID,
+            meter_type=MeteringPointType.PRODUCTION,
+        )
         MeteringPointAssignment.objects.create(
-            metering_point=self.metering_point,
+            metering_point=self.cons_mp,
             participant=self.participant,
-            valid_from=date(2026, 1, 1),
+            valid_from=datetime(2026, 1, 1).date(),
         )
 
     def _upload(self, name, content, *, zev=None):
@@ -52,41 +77,8 @@ class SdatchImportTests(TestCase):
             format="multipart",
         )
 
-    def _xml(self, body):
-        return f"""<?xml version="1.0" encoding="UTF-8"?>
-<MeteringData>
-  {body}
-</MeteringData>
-""".encode()
-
-    def _meter_xml(self, meter_id, intervals):
-        return f"""
-<MeteringPoint>
-  <MeteringPointID>{meter_id}</MeteringPointID>
-  {intervals}
-</MeteringPoint>
-"""
-
-    def _interval_xml(self, *, start="2026-01-01T00:00:00Z", resolution="PT15M", observations=""):
-        return f"""
-<Interval>
-  <Start>{start}</Start>
-  <Resolution>{resolution}</Resolution>
-  {observations}
-</Interval>
-"""
-
-    def _observation_xml(self, quantity="1.0000", direction=None, *, tag="Volume"):
-        direction_xml = f"<Direction>{direction}</Direction>" if direction is not None else ""
-        return f"""
-<Observation>
-  <{tag}>{quantity}</{tag}>
-  {direction_xml}
-</Observation>
-"""
-
     def test_sdatch_without_zev_id_is_rejected(self):
-        upload = SimpleUploadedFile("no-zev.xml", self._xml(self._meter_xml("CH-SDAT-1", self._interval_xml())), content_type="application/xml")
+        upload = SimpleUploadedFile("no-zev.xml", fixture("e66_basic.xml"), content_type="application/xml")
 
         resp = self.client.post("/api/v1/metering/import/sdatch/", {"file": upload}, format="multipart")
 
@@ -95,7 +87,7 @@ class SdatchImportTests(TestCase):
         self.assertEqual(MeterReading.objects.count(), 0)
 
     def test_sdatch_with_invalid_zev_id_is_rejected(self):
-        upload = SimpleUploadedFile("bad-zev.xml", self._xml(self._meter_xml("CH-SDAT-1", self._interval_xml())), content_type="application/xml")
+        upload = SimpleUploadedFile("bad-zev.xml", fixture("e66_basic.xml"), content_type="application/xml")
 
         resp = self.client.post(
             "/api/v1/metering/import/sdatch/", {"file": upload, "zev_id": "not-a-uuid"}, format="multipart"
@@ -106,7 +98,7 @@ class SdatchImportTests(TestCase):
         self.assertEqual(MeterReading.objects.count(), 0)
 
     def test_sdatch_with_unknown_zev_id_returns_404(self):
-        upload = SimpleUploadedFile("unknown-zev.xml", self._xml(self._meter_xml("CH-SDAT-1", self._interval_xml())), content_type="application/xml")
+        upload = SimpleUploadedFile("unknown-zev.xml", fixture("e66_basic.xml"), content_type="application/xml")
 
         resp = self.client.post(
             "/api/v1/metering/import/sdatch/",
@@ -125,134 +117,309 @@ class SdatchImportTests(TestCase):
         self.assertTrue(resp.data["errors"])
         self.assertIn("Malformed SDAT-CH XML", resp.data["errors"][0]["error"])
 
-    def test_valid_sdatch_import_creates_readings_and_log(self):
-        observations = self._observation_xml("1.2500") + self._observation_xml("2.5000")
-        xml = self._xml(self._meter_xml("CH-SDAT-1", self._interval_xml(observations=observations)))
-
-        resp = self._upload("valid.xml", xml)
+    def test_e66_basic_imports_billable_and_quarantines_temporary(self):
+        resp = self._upload("basic.xml", fixture("e66_basic.xml"))
 
         self.assertEqual(resp.status_code, 201)
-        self.assertEqual(resp.data["rows_total"], 2)
-        self.assertEqual(resp.data["rows_imported"], 2)
+        self.assertEqual(resp.data["rows_total"], 8)
+        self.assertEqual(resp.data["rows_imported"], 6)
         self.assertEqual(resp.data["rows_skipped"], 0)
-        readings = list(MeterReading.objects.filter(metering_point=self.metering_point).order_by("timestamp"))
-        self.assertEqual([reading.timestamp for reading in readings], [
-            datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc),
-            datetime(2026, 1, 1, 0, 15, tzinfo=timezone.utc),
-        ])
-        self.assertEqual([reading.energy_kwh for reading in readings], [Decimal("1.2500"), Decimal("2.5000")])
-        self.assertEqual([reading.import_source for reading in readings], [ImportSource.SDATCH, ImportSource.SDATCH])
+
+        readings = list(MeterReading.objects.order_by("metering_point__meter_id", "timestamp"))
+        self.assertEqual(len(readings), 6)
+        # seq1 (Condition 21, temporary) is quarantined, not billed.
+        self.assertEqual(
+            [r.timestamp for r in readings if r.metering_point == self.cons_mp], [TS1, TS2, TS3]
+        )
+        self.assertEqual(
+            [r.energy_kwh for r in readings if r.metering_point == self.cons_mp],
+            [Decimal("101.0000"), Decimal("102.1020"), Decimal("103.0000")],
+        )
+        self.assertTrue(all(r.direction == ReadingDirection.IN for r in readings if r.metering_point == self.cons_mp))
+        self.assertTrue(all(r.direction == ReadingDirection.OUT for r in readings if r.metering_point == self.prod_mp))
+        self.assertTrue(all(r.import_source == ImportSource.SDATCH for r in readings))
+        self.assertTrue(all(r.source_creation is not None for r in readings))
+
+        quarantined = list(QuarantinedReading.objects.order_by("timestamp"))
+        self.assertEqual(len(quarantined), 2)
+        self.assertTrue(all(q.timestamp == TS0 for q in quarantined))
+        self.assertTrue(all(q.condition == "21" for q in quarantined))
 
         log = ImportLog.objects.get(id=resp.data["id"])
         self.assertEqual(log.zev, self.zev)
         self.assertEqual(log.imported_by, self.owner)
+        self.assertEqual(log.timestamp_timezone, "Europe/Zurich")
+        self.assertTrue(any("Quarantined 2" in w["warning"] for w in log.warnings))
 
-    def test_unknown_meter_id_is_reported_and_skipped(self):
-        observations = self._observation_xml("1.0000")
-        xml = self._xml(self._meter_xml("CH-UNKNOWN", self._interval_xml(observations=observations)))
+    def test_e66_repeat_import_skips_duplicates(self):
+        first = self._upload("first.xml", fixture("e66_basic.xml"))
+        self.assertEqual(first.data["rows_imported"], 6)
 
-        resp = self._upload("unknown.xml", xml)
+        second = self._upload("second.xml", fixture("e66_basic.xml"))
+
+        self.assertEqual(second.status_code, 201)
+        self.assertEqual(second.data["rows_total"], 8)
+        self.assertEqual(second.data["rows_imported"], 0)
+        self.assertEqual(second.data["rows_skipped"], 8)
+        self.assertEqual(MeterReading.objects.count(), 6)
+        self.assertEqual(QuarantinedReading.objects.count(), 2)
+
+    def test_e66_replace_overwrites_and_promotes_quarantine(self):
+        self._upload("basic.xml", fixture("e66_basic.xml"))
+
+        resp = self._upload("replace.xml", fixture("e66_replace.xml"))
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["rows_imported"], 2)  # seq1 slots are new billable rows
+        self.assertEqual(resp.data["rows_overwritten"], 6)
+        self.assertEqual(
+            [r.energy_kwh for r in MeterReading.objects.filter(metering_point=self.cons_mp).order_by("timestamp")],
+            [Decimal("110.0000"), Decimal("111.0000"), Decimal("112.1120"), Decimal("113.0000")],
+        )
+        # The quarantined seq1 observations were promoted into billing.
+        self.assertEqual(QuarantinedReading.objects.count(), 0)
+        self.assertTrue(any("promoted 2" in w["warning"] for w in ImportLog.objects.get(id=resp.data["id"]).warnings))
+
+    def test_e66_stale_replace_is_skipped(self):
+        self._upload("basic.xml", fixture("e66_basic.xml"))
+
+        resp = self._upload("stale.xml", fixture("e66_stale_replace.xml"))
+
+        self.assertEqual(resp.status_code, 201)
+        # Newer held data must not block validated billing. The stale Status=5
+        # delivery is older than every stored row: its three measured slots
+        # are stale skips — but seq1 has no billable row yet (basic delivered
+        # it as temporary), so the stale validated value still lands in
+        # billing while the newer held row stays visible.
+        self.assertEqual(resp.data["rows_imported"], 1)
+        self.assertEqual(resp.data["rows_overwritten"], 0)
+        self.assertEqual(resp.data["rows_skipped"], 3)
+        self.assertEqual(resp.data["result_counts"]["stale"], 3)
+        self.assertEqual(
+            MeterReading.objects.get(metering_point=self.cons_mp, timestamp=TS0).energy_kwh,
+            Decimal("110.0000"),
+        )
+        # The slot basic delivered as Status=9 measured keeps its value.
+        self.assertEqual(
+            MeterReading.objects.get(metering_point=self.cons_mp, timestamp=TS1).energy_kwh,
+            Decimal("101.0000"),
+        )
+        self.assertEqual(QuarantinedReading.objects.count(), 2)
+
+    def test_e66_replace_rejects_whole_file_on_csv_overlap(self):
+        MeterReading.objects.create(
+            metering_point=self.cons_mp,
+            timestamp=TS1,
+            direction=ReadingDirection.IN,
+            energy_kwh=Decimal("9.0000"),
+            import_source=ImportSource.CSV,
+        )
+
+        resp = self._upload("basic.xml", fixture("e66_basic.xml"))
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["result_status"], "rejected")
+        self.assertEqual(resp.data["rows_total"], 8)
+        self.assertEqual(resp.data["rows_imported"], 0)
+        self.assertEqual(resp.data["rows_overwritten"], 0)
+        self.assertTrue(
+            any("CSV/manual" in error["error"] for error in resp.data["errors"]),
+            resp.data["errors"],
+        )
+        self.assertEqual(
+            [issue["code"] for issue in resp.data["issues"]].count("source_conflict"), 1
+        )
+        row = MeterReading.objects.get(metering_point=self.cons_mp, timestamp=TS1)
+        self.assertEqual(row.energy_kwh, Decimal("9.0000"))
+        self.assertEqual(row.import_source, ImportSource.CSV)
+        self.assertEqual(MeterReading.objects.count(), 1)
+        self.assertEqual(QuarantinedReading.objects.count(), 0)
+        log = ImportLog.objects.get(id=resp.data["id"])
+        self.assertTrue(log.errors)
+
+    def test_c38_info_file_is_fully_quarantined(self):
+        resp = self._upload("info.xml", fixture("e66_c38_info.xml"))
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["rows_total"], 4)
+        self.assertEqual(resp.data["rows_imported"], 0)
+        self.assertEqual(MeterReading.objects.count(), 0)
+        self.assertEqual(QuarantinedReading.objects.count(), 4)
+        self.assertTrue(all(q.business_reason == "C38" for q in QuarantinedReading.objects.all()))
+
+    def test_aggregated_metered_data_is_rejected_loudly(self):
+        resp = self._upload("agg.xml", fixture("e31_aggregated.xml"))
 
         self.assertEqual(resp.status_code, 201)
         self.assertEqual(resp.data["rows_total"], 0)
         self.assertEqual(resp.data["rows_imported"], 0)
-        self.assertTrue(any(error.get("meter_id") == "CH-UNKNOWN" for error in resp.data["errors"]))
+        self.assertIn("AggregatedMeteredData", resp.data["errors"][0]["error"])
         self.assertEqual(MeterReading.objects.count(), 0)
+        self.assertEqual(QuarantinedReading.objects.count(), 0)
 
-    def test_repeated_import_skips_duplicate_observations(self):
-        observations = self._observation_xml("3.0000")
-        xml = self._xml(self._meter_xml("CH-SDAT-1", self._interval_xml(observations=observations)))
+    def test_reactive_and_leg_products_are_skipped_with_notes(self):
+        resp = self._upload("products.xml", fixture("e66_products.xml"))
 
-        first_resp = self._upload("first.xml", xml)
-        self.assertEqual(first_resp.status_code, 201)
-        self.assertEqual(first_resp.data["rows_imported"], 1)
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["rows_total"], 4)
+        self.assertEqual(resp.data["rows_imported"], 0)
+        self.assertEqual(resp.data["rows_skipped"], 4)
+        self.assertEqual(MeterReading.objects.count(), 0)
+        log = ImportLog.objects.get(id=resp.data["id"])
+        self.assertTrue(any("reactive" in w["warning"] for w in log.warnings))
+        self.assertTrue(any("LEG" in w["warning"] for w in log.warnings))
 
-        second_resp = self._upload("second.xml", xml)
-
-        self.assertEqual(second_resp.status_code, 201)
-        self.assertEqual(second_resp.data["rows_total"], 1)
-        self.assertEqual(second_resp.data["rows_imported"], 0)
-        self.assertEqual(second_resp.data["rows_skipped"], 1)
-        self.assertEqual(MeterReading.objects.filter(metering_point=self.metering_point).count(), 1)
-
-    def test_invalid_timestamp_is_reported_without_creating_readings(self):
-        observations = self._observation_xml("1.0000")
-        xml = self._xml(self._meter_xml("CH-SDAT-1", self._interval_xml(start="not-a-date", observations=observations)))
-
-        resp = self._upload("invalid-ts.xml", xml)
+    def test_block_without_resolution_is_rejected(self):
+        resp = self._upload("nores.xml", fixture("e66_no_resolution.xml"))
 
         self.assertEqual(resp.status_code, 201)
         self.assertEqual(resp.data["rows_imported"], 0)
-        self.assertTrue(any("Invalid timestamp" in error["error"] for error in resp.data["errors"]))
+        self.assertIn("Resolution", resp.data["errors"][0]["error"])
         self.assertEqual(MeterReading.objects.count(), 0)
 
-    def test_out_direction_and_quantity_alias_are_imported(self):
-        observations = self._observation_xml("4.2500", "OUT", tag="Quantity")
-        xml = self._xml(self._meter_xml("CH-SDAT-1", self._interval_xml(observations=observations)))
-
-        resp = self._upload("out.xml", xml)
+    def test_schema_invalid_file_is_rejected(self):
+        resp = self._upload("badcond.xml", fixture("e66_bad_condition.xml"))
 
         self.assertEqual(resp.status_code, 201)
-        self.assertEqual(resp.data["rows_imported"], 1)
-        reading = MeterReading.objects.get(metering_point=self.metering_point)
-        self.assertEqual(reading.direction, ReadingDirection.OUT)
-        self.assertEqual(reading.energy_kwh, Decimal("4.2500"))
+        self.assertEqual(resp.data["rows_imported"], 0)
+        self.assertIn("Schema validation failed", resp.data["errors"][0]["error"])
+        self.assertEqual(MeterReading.objects.count(), 0)
 
-    def test_30_and_60_minute_resolutions_offset_observations(self):
-        observations_30 = self._observation_xml("1.0000") + self._observation_xml("2.0000")
-        observations_60 = self._observation_xml("3.0000") + self._observation_xml("4.0000")
-        intervals = (
-            self._interval_xml(start="2026-01-02T00:00:00Z", resolution="PT30M", observations=observations_30)
-            + self._interval_xml(start="2026-01-03T00:00:00Z", resolution="PT1H", observations=observations_60)
+    def test_exchange_metering_point_is_skipped(self):
+        resp = self._upload("exchange.xml", fixture("e66_exchange.xml"))
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["rows_imported"], 0)
+        self.assertEqual(MeterReading.objects.count(), 0)
+        log = ImportLog.objects.get(id=resp.data["id"])
+        self.assertTrue(any("Exchange" in w["warning"] for w in log.warnings))
+
+    def test_cancellation_is_rejected(self):
+        seed = self._upload("basic.xml", fixture("e66_basic.xml"))
+        self.assertEqual(seed.status_code, 201)
+        self.assertEqual(seed.data["result_status"], "accepted")
+        readings = list(MeterReading.objects.order_by("id").values())
+        held = list(QuarantinedReading.objects.order_by("id").values())
+        self.assertEqual(len(readings), 6)
+        self.assertEqual(len(held), 2)
+
+        # Cancellation rejection takes precedence over freshness and delivery scope.
+        for creation in ("2025-06-04T15:40:05Z", "2025-06-05T15:40:05Z", "2025-06-06T15:40:05Z"):
+            for has_metering_data in (True, False):
+                with self.subTest(creation=creation, has_metering_data=has_metering_data):
+                    root = etree.fromstring(fixture("e66_cancellation.xml"))
+                    root.find(".//{http://www.strom.ch}Creation").text = creation
+                    if not has_metering_data:
+                        for block in root.findall("{http://www.strom.ch}MeteringData"):
+                            root.remove(block)
+                    resp = self._upload("cancel.xml", etree.tostring(root))
+
+                    self.assertEqual(resp.status_code, 201)
+                    log = ImportLog.objects.get(id=resp.data["id"])
+                    self.assertEqual(log.result_status, "rejected")
+                    self.assertEqual([issue["code"] for issue in log.issues], ["cancellation_rejected"])
+                    self.assertEqual(log.rows_imported, 0)
+                    self.assertEqual(log.rows_overwritten, 0)
+                    self.assertEqual(log.reading_changes, [])
+                    self.assertIn("cancellation", log.errors[0]["error"].lower())
+                    self.assertEqual(list(MeterReading.objects.order_by("id").values()), readings)
+                    self.assertEqual(list(QuarantinedReading.objects.order_by("id").values()), held)
+
+        # This replacement predates the newest rejected cancellation, but follows the seed.
+        replacement = self._upload("replace.xml", fixture("e66_replace.xml"))
+        self.assertEqual(replacement.data["result_status"], "accepted")
+        self.assertEqual(replacement.data["rows_imported"], 2)
+        self.assertEqual(replacement.data["rows_overwritten"], 6)
+        self.assertEqual(QuarantinedReading.objects.count(), 0)
+        self.assertEqual(
+            MeterReading.objects.get(metering_point=self.cons_mp, timestamp=TS1).energy_kwh,
+            Decimal("111.0000"),
         )
-        xml = self._xml(self._meter_xml("CH-SDAT-1", intervals))
 
-        resp = self._upload("resolutions.xml", xml)
+    def test_secondary_meter_id_matches_alias(self):
+        self.cons_mp.secondary_meter_id = ALT_ID
+        self.cons_mp.save(update_fields=["secondary_meter_id"])
+
+        resp = self._upload("alias.xml", fixture("e66_alias.xml"))
 
         self.assertEqual(resp.status_code, 201)
-        self.assertEqual(resp.data["rows_imported"], 4)
-        readings = list(MeterReading.objects.filter(metering_point=self.metering_point).order_by("timestamp"))
-        self.assertEqual([reading.timestamp for reading in readings], [
-            datetime(2026, 1, 2, 0, 0, tzinfo=timezone.utc),
-            datetime(2026, 1, 2, 0, 30, tzinfo=timezone.utc),
-            datetime(2026, 1, 3, 0, 0, tzinfo=timezone.utc),
-            datetime(2026, 1, 3, 1, 0, tzinfo=timezone.utc),
-        ])
+        self.assertEqual(resp.data["rows_imported"], 3)
+        readings = list(
+            MeterReading.objects.filter(metering_point=self.cons_mp).order_by("timestamp")
+        )
+        self.assertEqual(
+            [(r.timestamp, r.energy_kwh) for r in readings],
+            [(TS1, Decimal("101.0000")), (TS2, Decimal("102.0000")), (TS3, Decimal("103.0000"))],
+        )
+        held = QuarantinedReading.objects.get(metering_point=self.cons_mp, timestamp=TS0)
+        self.assertEqual(held.energy_kwh, Decimal("100.0000"))
+
+    def test_unknown_meter_id_rejects_whole_file(self):
+        resp = self._upload("alias.xml", fixture("e66_alias.xml"))
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["result_status"], "rejected")
+        self.assertEqual(resp.data["rows_total"], 4)
+        self.assertEqual(resp.data["rows_imported"], 0)
+        self.assertTrue(any(error.get("meter_id") == ALT_ID for error in resp.data["errors"]))
+        self.assertTrue(any(issue["code"] == "unknown_meter" for issue in resp.data["issues"]))
+        self.assertEqual(MeterReading.objects.count(), 0)
+        self.assertEqual(QuarantinedReading.objects.count(), 0)
+
+    def test_gzipped_upload_is_decompressed(self):
+        resp = self._upload("basic.xml.gz", gzip.compress(fixture("e66_basic.xml")))
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["rows_imported"], 6)
+        self.assertEqual(MeterReading.objects.count(), 6)
 
     def test_owner_cannot_import_sdatch_for_other_owners_zev(self):
-        xml = self._xml(self._meter_xml("CH-SDAT-1", self._interval_xml(observations=self._observation_xml("1.0000"))))
-
-        resp = self._upload("forbidden.xml", xml, zev=self.other_zev)
+        resp = self._upload("forbidden.xml", fixture("e66_basic.xml"), zev=self.other_zev)
 
         self.assertEqual(resp.status_code, 403)
         self.assertEqual(MeterReading.objects.count(), 0)
 
-    def test_admin_can_import_sdatch_for_any_zev(self):
-        admin_meter = MeteringPoint.objects.create(
+    def test_admin_import_resolves_meters_in_target_zev(self):
+        other_cons = MeteringPoint.objects.create(
             zev=self.other_zev,
-            meter_id="CH-ADMIN-SDAT",
+            meter_id="CH9999901234500000000000000000010",
             meter_type=MeteringPointType.CONSUMPTION,
         )
+        other_prod = MeteringPoint.objects.create(
+            zev=self.other_zev,
+            meter_id="CH9999901234500000000000000000020",
+            meter_type=MeteringPointType.PRODUCTION,
+        )
         auth(self.client, self.admin)
-        xml = self._xml(self._meter_xml("CH-ADMIN-SDAT", self._interval_xml(observations=self._observation_xml("1.0000"))))
+        content = fixture("e66_basic.xml").replace(
+            CONS_ID.encode(), b"CH9999901234500000000000000000010"
+        ).replace(
+            PROD_ID.encode(), b"CH9999901234500000000000000000020"
+        )
 
-        resp = self._upload("admin.xml", xml, zev=self.other_zev)
+        resp = self._upload("admin.xml", content, zev=self.other_zev)
 
         self.assertEqual(resp.status_code, 201)
-        self.assertEqual(resp.data["rows_imported"], 1)
-        self.assertTrue(MeterReading.objects.filter(metering_point=admin_meter).exists())
+        self.assertEqual(resp.data["rows_imported"], 6)
+        self.assertTrue(MeterReading.objects.filter(metering_point=other_cons).exists())
+        self.assertTrue(MeterReading.objects.filter(metering_point=other_prod).exists())
+        self.assertFalse(MeterReading.objects.filter(metering_point=self.cons_mp).exists())
+
+    def test_admin_import_rejects_file_with_foreign_meter(self):
+        auth(self.client, self.admin)
+        resp = self._upload("admin.xml", fixture("e66_basic.xml"), zev=self.other_zev)
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["result_status"], "rejected")
+        self.assertEqual(resp.data["rows_imported"], 0)
+        self.assertEqual(MeterReading.objects.count(), 0)
+        self.assertEqual(QuarantinedReading.objects.count(), 0)
 
     def test_owner_cannot_import_sdatch_into_disabled_zev(self):
         self.zev.disabled_at = django_timezone.now()
         self.zev.save(update_fields=["disabled_at"])
-        xml = self._xml(
-            self._meter_xml(
-                "CH-SDAT-1",
-                self._interval_xml(observations=self._observation_xml("1.0000")),
-            )
-        )
 
-        resp = self._upload("disabled-zev.xml", xml)
+        resp = self._upload("disabled-zev.xml", fixture("e66_basic.xml"))
 
         self.assertEqual(resp.status_code, 400)
         self.assertIn("This ZEV is disabled", resp.data["error"])
@@ -260,26 +427,30 @@ class SdatchImportTests(TestCase):
         self.assertFalse(ImportLog.objects.exists())
 
     def test_admin_can_import_sdatch_into_disabled_zev(self):
-        admin_meter = MeteringPoint.objects.create(
+        other_cons = MeteringPoint.objects.create(
             zev=self.other_zev,
-            meter_id="CH-ADMIN-DISABLED-SDAT",
+            meter_id="CH9999901234500000000000000000011",
             meter_type=MeteringPointType.CONSUMPTION,
+        )
+        other_prod = MeteringPoint.objects.create(
+            zev=self.other_zev,
+            meter_id="CH9999901234500000000000000000021",
+            meter_type=MeteringPointType.PRODUCTION,
         )
         self.other_zev.disabled_at = django_timezone.now()
         self.other_zev.save(update_fields=["disabled_at"])
         auth(self.client, self.admin)
-        xml = self._xml(
-            self._meter_xml(
-                "CH-ADMIN-DISABLED-SDAT",
-                self._interval_xml(observations=self._observation_xml("1.0000")),
-            )
+        content = fixture("e66_basic.xml").replace(
+            CONS_ID.encode(), b"CH9999901234500000000000000000011"
+        ).replace(
+            PROD_ID.encode(), b"CH9999901234500000000000000000021"
         )
 
-        resp = self._upload("admin-disabled-zev.xml", xml, zev=self.other_zev)
+        resp = self._upload("admin-disabled-zev.xml", content, zev=self.other_zev)
 
         self.assertEqual(resp.status_code, 201)
-        self.assertEqual(resp.data["rows_imported"], 1)
-        self.assertTrue(MeterReading.objects.filter(metering_point=admin_meter).exists())
+        self.assertTrue(MeterReading.objects.filter(metering_point=other_cons).exists())
+        self.assertTrue(MeterReading.objects.filter(metering_point=other_prod).exists())
 
 
 class SdatchLimitTests(TestCase):
@@ -309,10 +480,18 @@ class SdatchLimitTests(TestCase):
         self.assertEqual(MeterReading.objects.count(), 0)
 
     def test_row_error_list_is_capped_with_a_truncation_note(self):
-        meters = "".join(
-            f"<MeteringPoint><ID>NOPE-{i}</ID></MeteringPoint>" for i in range(60)
-        )
-        xml = f'<?xml version="1.0" encoding="UTF-8"?><MeteringData>{meters}</MeteringData>'.encode()
+        root = etree.fromstring(fixture("e66_basic.xml"))
+        ns = "http://www.strom.ch"
+        block = root.find(f"{{{ns}}}MeteringData")
+        for md in list(root.iter(f"{{{ns}}}MeteringData")):
+            root.remove(md)
+        for i in range(60):
+            clone = deepcopy(block)
+            clone.find(f"{{{ns}}}DocumentID").text = f"FIX-CAP-{i:03d}"
+            point = clone.find(f"{{{ns}}}ConsumptionMeteringPoint")
+            point.find(f"{{{ns}}}VSENationalID").text = f"CH99999012345{i:020d}"
+            root.append(clone)
+        xml = etree.tostring(root, xml_declaration=True, encoding="UTF-8")
 
         upload = SimpleUploadedFile("errs.xml", xml, content_type="application/xml")
         resp = self.client.post(

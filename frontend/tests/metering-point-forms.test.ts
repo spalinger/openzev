@@ -22,6 +22,7 @@ describe('metering point form helpers', () => {
     expect(defaultMeteringPointForm()).toEqual({
       zev: '',
       meter_id: '',
+      secondary_meter_id: '',
       meter_type: 'consumption',
       is_active: true,
       location_description: '',

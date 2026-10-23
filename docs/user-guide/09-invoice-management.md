@@ -269,7 +269,7 @@ the rest under **More**:
 | *(none)* / Cancelled | **Generate invoice** / **Generate again** | Delete invoice (cancelled), Open PDF, Generate/Regenerate PDF |
 | Draft | **Approve** | Regenerate invoice, Delete invoice, Open PDF, Generate/Regenerate PDF |
 | Approved | **Send Email** | Mark as Sent, Open PDF, Generate/Regenerate PDF |
-| Sent | **Mark Paid** | Open PDF, Generate/Regenerate PDF, Resend Email |
+| Sent | **Mark Paid** / **Mark rest as paid** | Record payment, Open PDF, Generate/Regenerate PDF, Resend Email |
 | Paid | — | Open PDF, Generate/Regenerate PDF |
 
 **More** groups invoice actions first, then PDF and email actions. **Open PDF**
@@ -330,6 +330,29 @@ Regeneration keeps one-off [charges](07-tariff-configuration.md#one-off-charges)
 they are stored separately and added to the new draft again.
 
 > **Tip:** You can generate invoices even when metering data is incomplete, but totals may be inaccurate. It is best to resolve missing data first.
+
+### Metering corrections on issued invoices
+
+A committed metering correction (or an import deletion) never rewrites an
+invoice — amounts, PDFs and delivery records stay as issued. Instead the
+affected invoices stay in the **Issues** filter and carry a **Data review**
+flag. The period rows and invoice detail page identify them; managers and viewers
+also see source evidence (delivery ID or CSV filename, changed intervals) on the
+detail page. The **Overview** readiness
+check gains a **Data corrections** step linking to the period's billing page.
+
+| Invoice status | What to do |
+| --- | --- |
+| **Draft** | **More → Regenerate invoice** bills the corrected values. |
+| **Approved / Sent** | With no payments, cancel through the API and generate a new invoice. A sent invoice with payments needs **Correct invoice → Reverse the invoice** first. |
+| **Paid** | Use **Correct invoice → Reverse the invoice**, then generate a new invoice. Payments and partial credits leave the review flag open. |
+
+Full reversal is available for a positive invoice with uncredited payments
+or applied credit. If neither remains, the flag stays open for review.
+Zero invoices and payouts cannot be reversed.
+
+Participants see the review flag on their own sent and paid invoices,
+without internal import evidence or management actions.
 
 ## Reviewing Invoices
 
@@ -456,15 +479,19 @@ Email sending is asynchronous via Celery with automatic retries. For delivery me
 When a participant has paid the whole invoice, click **Mark Paid** on the row
 (shown for `Sent` invoices). It records one payment for the outstanding amount,
 dated today, and the status changes to `Paid`. It is a single-click action.
+Once part of the money has been recorded, the same row action reads **Mark rest
+as paid** and books only what is still open.
 
-For a partial payment, or to record the date the money actually arrived, open
-the invoice and use the **Payments** card:
+To record an amount or a payment date, choose **Record payment** from the row's
+**More** menu or from the invoice's **Payments** card:
 
-1. Click **Record payment**.
-2. Enter the amount (it starts at the outstanding amount and can't exceed it),
+1. Enter the amount (it starts at the outstanding amount and can't exceed it),
    the date it was paid (not in the future) and, optionally, a note such as the
    bank reference.
-3. Click **Record payment**.
+2. Click **Record payment**.
+
+In the period table, **Record payment** and **Mark Paid** (or **Mark rest as paid**)
+stay unavailable while either action is saving, even if you close the payment dialog.
 
 ![Record payment dialog](screenshots/08h-record-payment-dialog.png)
 
@@ -686,3 +713,12 @@ available after billing. The selected community appears above the page title.
 - **Configure email delivery:** [Email Configuration](10-email-configuration.md)
 - **Understand billing logic:** [Billing & Allocation Explained](08-billing-allocation-explained.md)
 - **Manage tariffs:** [Tariff Configuration](07-tariff-configuration.md)
+
+Legacy CSV timestamp repairs also flag invoices for review, including periods
+on either side of a Swiss date boundary. Their evidence identifies a CSV
+timestamp correction rather than an SDAT delivery or an import deletion.
+
+The Data review notice initially lists the newest 20 corrections. Open the
+invoice detail and choose **Show all** to inspect a longer open history;
+**Show newest 20** collapses it again. Period overview keeps the complete count
+while returning only the newest 20 evidence entries per invoice.

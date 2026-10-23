@@ -27,6 +27,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 from django.core.management.base import BaseCommand, CommandError
+from django.conf import settings
 from django.db import transaction
 
 from allocation.validity import period_window, wall_clock
@@ -137,6 +138,8 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        if not settings.DEBUG:
+            raise CommandError("Sample reading generation is only available when DEBUG=True.")
         meter_id = options["meter_id"]
         data_type = options["type"]
         interval = options["interval"]

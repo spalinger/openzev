@@ -146,7 +146,7 @@ class CsvLimitTests(TestCase):
             f"NOPE-{i},2026-01-01T00:00:00Z,1.0\n".encode() for i in range(60)
         )
         upload_csv(self.client, "ov.csv", header + rows, zev_id=str(self.zev.id))
-        resp = upload_csv(self.client, "ov.csv", header + rows, overwrite_existing="true", zev_id=str(self.zev.id))
+        resp = upload_csv(self.client, "ov.csv", header + rows.replace(b"CH-LIMIT-1,2026-01-01T00:00:00Z,1.0", b"CH-LIMIT-1,2026-01-01T00:00:00Z,2.0"), overwrite_existing="true", zev_id=str(self.zev.id))
 
         self.assertEqual(resp.status_code, 201)
         errors = resp.data["errors"]

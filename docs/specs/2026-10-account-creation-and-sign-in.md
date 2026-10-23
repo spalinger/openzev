@@ -219,6 +219,28 @@ Admin and inactive targets are refused. The admin's own tokens are parked in bac
 and restored by `POST /auth/users/stop-impersonation/`. Both ends are audited
 (`impersonation.issue_token`, `impersonation.end`).
 
+Impersonation must not issue credentials that remain usable after the session ends.
+`CookieJWTAuthentication.authenticate` calls `enforce_impersonation_limits` for cookie and bearer
+sessions. Safe methods pass; unsafe `accounts` requests are default-denied except
+`token_refresh`, `token-mfa`, `stop-impersonation`, `logout`, `PATCH /auth/me/` and
+`DELETE /auth/me/api-keys/<id>/`. `SelfUserSerializer` makes security fields read-only.
+
+External issuers use `NotWhileImpersonating`: analytics-token creation and supplementary-source
+creation/push-token rotation are refused. Analytics-token revocation and supplementary
+data-management actions remain available. Both guards return
+`403 {"detail": "This is not available while impersonating another account."}` and call
+`audit_impersonation_refusal`, which records `auth.impersonation.refused` (`DENIED`, metadata
+`url_name`, `method`, and the centrally attributed `impersonated_by`).
+
+The default-deny rule covers only the `accounts` app; any new issuer outside it that creates
+credentials for the impersonated account must explicitly use `NotWhileImpersonating`.
+
+The account page disables its Security fieldset, hides email-change controls, and explains
+the restrictions. Credential-creation and energy-token rotation buttons remain visible but
+disabled with the restriction as their tooltip. The credentials response advertises no creation or
+rotation during impersonation; revocation remains available for all three token types.
+Supplementary-source connect and rotate buttons are also disabled.
+
 ### 5.11 Deleting accounts
 
 `DELETE /auth/users/<id>/` is refused for the last admin, for accounts linked to a participant,
@@ -253,3 +275,7 @@ The uniqueness rules are covered by `accounts/test_unique_email.py` (constraint,
 `test_session_hardening.py`, `test_registration_concurrency.py`,
 `test_admin_account_actions.py`, `zev/test_login_protection.py`, `zev/test_onboarding.py`
 and `zev/test_access_api.py`.
+
+Frontend `account-tabs.test.ts` checks the impersonation notice and disabled Security fieldset
+alongside an ordinary session; `email-change-capability.test.ts` checks that impersonation hides
+email-change controls and suppresses the managed-account hint.

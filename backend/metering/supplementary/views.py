@@ -32,6 +32,8 @@ from zev import access
 from zev.models import AllocationMode, MeteringPointAssignment
 from zev.scoping import ZevScopedQuerySetMixin
 
+from accounts.permissions import NotWhileImpersonating
+
 from ..models import SupplementaryProvider, SupplementarySource, SupplementaryStatus
 from ..tasks import queue_sync, sync_supplementary_source
 from . import ingest as ingest_service
@@ -87,9 +89,14 @@ class SupplementarySourceViewSet(
     viewsets.GenericViewSet,
 ):
     serializer_class = SupplementarySourceSerializer
-    permission_classes = [IsAuthenticated, SupplementarySourcePermission]
+    permission_classes = [IsAuthenticated, NotWhileImpersonating, SupplementarySourcePermission]
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
     parser_classes = [JSONParser, FormParser, MultiPartParser]
+    # Source creation and push-token rotation are unavailable during impersonation.
+    impersonation_exempt_actions = frozenset(
+        {"partial_update", "destroy", "disconnect", "purge", "test", "sync",
+         "import_csv", "revoke_push_token"}
+    )
 
     zev_lookup = "metering_point__zev"
     participant_path = "participant"

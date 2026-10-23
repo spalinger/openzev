@@ -59,7 +59,7 @@ participant paid moves onto their next invoice:
 | 0 | this spec | docs | This spec, ADR 0037 |
 | 1 | Payments | model | `Payment`. `Invoice.approved_at`. Data migration creating payments for existing paid invoices and filling `approved_at`. |
 | 1 | Payments | workflow | `record_payment`, `delete_payment`. `mark_invoice_paid` records one full payment. `cancel_invoice` and invoice deletion refuse invoices that have payments. |
-| 1 | Payments | retention | `_discard_replaceable_invoices` and `can_delete_invoice` spare issued invoices |
+| 1 | Payments | retention | Regeneration and `can_delete_invoice` spare issued invoices |
 | 1 | Payments | reports | One aggregation rule, "issued and not cancelled", for the financial summary, annual statement and annual report (§4.6) |
 | 1 | Payments | frontend | Record-payment dialog. Payments card on the invoice detail page. "Partly paid" badge. |
 | 2 | Credits | model | `Credit`, the credit-note number sequence on `Zev`, the credit-note PDF |
@@ -281,8 +281,9 @@ original is kept (§4.5).
 | Admin `DELETE` | any | any invoice **without payments**, and from phase 2 without credits. An admin can still remove an issued invoice that never received money. |
 | `cancel` with payments | — | refused: "Invoices with recorded payments cannot be cancelled." (phase 2 points to `correct`) |
 
-`_discard_replaceable_invoices` filters on
-`status__in=[DRAFT, CANCELLED], approved_at__isnull=True`. `can_delete_invoice` gains the same
+Regeneration selects replacements with
+`status__in=[DRAFT, CANCELLED], approved_at__isnull=True` and deletes them through
+`reading_impact.settle_regeneration` only after creating the replacement. `can_delete_invoice` uses the same
 condition. ADR 0006's "regeneration may replace only draft/cancelled invoices" becomes "only never
 issued draft/cancelled invoices".
 
@@ -453,12 +454,23 @@ SPEC-2026-04. All text goes through i18n (de, fr, it, en).
 
 ### 7.1 Phase 1
 
-- **Billing period table** (`useInvoiceActions.tsx`): unchanged. "Mark paid" stays the one-click
-  primary action of a sent row and books the full outstanding amount.
+- **Billing period table** (`useInvoiceActions.tsx`): the sent row's primary action is "Mark paid"
+  and books the full outstanding amount; once `paid_chf ≠ 0` it reads "Mark rest as paid" and books
+  only what is still open. The overflow menu offers "Record payment" while `canRecordPayment`
+  (`invoiceCredits.ts`) holds: status is `sent`, amount due (falling back to the total) is positive,
+  and `outstanding_chf` is positive. A missing outstanding amount is treated as zero; the detail
+  and period-overview invoice serializer supplies it. This opens the same `RecordPaymentModal`
+  as the detail page.
+  While either mark-paid or record-payment is pending, both actions are disabled across the
+  table and payment dialog, including after dismissing the dialog. The record-payment mutation
+  carries its submitting write scope and period query key; dispatch rejects an obsolete/read-only
+  scope, success refreshes the submitted period and
+  community's cockpit, and completion feedback/dialog closure requires the same scope lifetime.
 - **`frontend/src/features/invoices/InvoicePaymentsCard.tsx`** (new), on `InvoiceDetailPage.tsx`
   for non-participants whenever the invoice carries `payments`. A `card` with a `card-header`:
-  "Payments" plus, for managers on a `sent` invoice, "Record payment" (only when
-  `total_chf > 0`) and "Mark paid" (labelled "Mark rest as paid" once payments exist). Below: the
+  "Payments" plus, for managers on a `sent` invoice, "Record payment" (only while
+  `canRecordPayment` holds) and "Mark paid" (labelled "Mark rest as paid" for a partly paid
+  invoice). Below: the
   summary "Received {paid} · outstanding {outstanding}" (or "· the invoice is cancelled"), and a
   `data-table` of payments (paid on, amount, note or the source label, recorded by) with a
   `ConfirmDialog`-guarded remove action per row for managers while the invoice isn't cancelled.
@@ -468,7 +480,8 @@ SPEC-2026-04. All text goes through i18n (de, fr, it, en).
 - **`frontend/src/features/invoices/RecordPaymentModal.tsx`** (new): `FormModal` (480px) with amount
   (defaults to `outstanding_chf`, validated `> 0` and `≤ outstanding` inline), paid on
   (`CivilDateInput`, defaults to today, `maxDate` today) and an optional note, submitted through
-  `FormModalFooter`.
+  `FormModalFooter`. Mounted by the detail Payments card and by `InvoicesPage` for the row menu,
+  which passes the optional `invoiceNumber` for a line naming the invoice.
 - **Partly paid** (`invoiceStatus.ts` `isPartlyPaid`): a `sent` invoice with `paid_chf ≠ 0`.
   `InvoiceStatusBadge` takes an optional `paidChf` and then reads "Partly paid" (detail page, admin
   invoice list, My invoices, participant dashboard card). In the period table's progress
@@ -476,7 +489,8 @@ SPEC-2026-04. All text goes through i18n (de, fr, it, en).
 - API client (`lib/api/invoices.ts`): `recordPayment(invoiceId, body)`,
   `deletePayment(invoiceId, paymentId)`, `markInvoicePaid(invoiceId, paidOn?)`.
 - i18n: `invoice.status.partlyPaid`, `pages.invoices.progress.reasons.partlyPaid`,
-  `pages.invoiceDetail.payments.*` in de, fr, it, en.
+  `pages.invoices.markRestPaid` (the shared "rest as paid" label of the period row and the detail
+  card), `pages.invoiceDetail.payments.*` in de, fr, it, en.
 
 ```typescript
 export interface Payment {
@@ -589,7 +603,12 @@ Also changed: `test_participant_invoice_visibility.py::ParticipantAnnualStatemen
 `isPartlyPaid`; the paid progress step (`open` → `active`/`partlyPaid` → `done`); the payments card
 lists payments with the summary and "Mark rest as paid"; recording a payment through the dialog
 (defaults to the outstanding amount, calls `recordPayment`, reports the new invoice); a payout
-offers only mark-paid; a viewer with no payments sees no card.
+offers only mark-paid; a viewer with no payments sees no card. The period-row entry point is
+covered by `frontend/tests/invoice-actions-hook.test.ts` (menu eligibility, invalidation keys,
+error toast) and `frontend/tests/invoices-page-record-payment.test.ts` (menu → dialog → booking →
+close, with the invoice named in the dialog; cross-row and mutual mark-paid/record-payment locks,
+including an open dialog; original-period invalidation
+and suppressed success/error feedback after changing period).
 
 ### Phase 2 — `invoices/test_credits.py` (48 tests)
 

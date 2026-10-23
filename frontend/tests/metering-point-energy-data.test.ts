@@ -11,6 +11,8 @@ import { waitForCondition } from './helpers/waitForCondition'
 vi.mock('react-i18next', () => ({
     useTranslation: () => ({ t: (key: string, options?: Record<string, unknown>) => (options ? `${key}${JSON.stringify(options)}` : key) }),
 }))
+const auth = vi.hoisted(() => ({ isImpersonating: false }))
+vi.mock('../src/lib/auth', () => ({ useAuth: () => auth }))
 
 const pushToast = vi.fn()
 vi.mock('../src/lib/toast', () => ({ useToast: () => ({ pushToast }) }))
@@ -65,6 +67,7 @@ function Harness() {
 
 beforeEach(() => {
     vi.clearAllMocks()
+    auth.isImpersonating = false
     api.fetchEligibleOrNull.mockResolvedValue([point])
     api.listSupplementarySources.mockResolvedValue([])
 })
@@ -86,6 +89,17 @@ async function click(element: HTMLElement) {
 }
 
 describe('MeteringPointEnergyData without a source', () => {
+    it('cannot connect a source while impersonating', async () => {
+        auth.isImpersonating = true
+        const { container } = await mount()
+
+        const connect = buttonWith(container, 'supplementary.section.connect')
+        expect(connect.disabled).toBe(true)
+        await click(connect)
+        expect(dialog()).toBeNull()
+        expect(api.createSupplementarySource).not.toHaveBeenCalled()
+    })
+
     it('offers to connect the flagged meter', async () => {
         const { container } = await mount()
 
@@ -94,6 +108,18 @@ describe('MeteringPointEnergyData without a source', () => {
         expect(container.textContent).toContain('supplementary.section.notConnected')
         expect(buttonWith(container, 'supplementary.section.connect')).toBeDefined()
     })
+})
+
+it('cannot rotate a push token while impersonating but can still import data', async () => {
+    auth.isImpersonating = true
+    const { container } = await mount([source({ provider: 'push', external_id: '', has_credential: false })])
+
+    const rotate = buttonWith(container, 'supplementary.actions.rotate')
+    expect(rotate.disabled).toBe(true)
+    expect(buttonWith(container, 'supplementary.actions.importCsv').disabled).toBe(false)
+    await click(rotate)
+    expect(dialog()).toBeNull()
+    expect(api.rotateSupplementaryPushToken).not.toHaveBeenCalled()
 })
 
 describe('a push source\'s one-time token', () => {

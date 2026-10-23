@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+import { useAuth } from '../../lib/auth'
 import {
     deleteSupplementarySource,
     disconnectSupplementarySource,
@@ -38,6 +39,7 @@ interface Props {
 /** One connected source, with everything its owner can do to it. The credential is never shown. */
 export function SupplementarySourceCard({ point, source, confirm }: Props) {
     const { t } = useTranslation()
+    const { isImpersonating } = useAuth()
     const { settings } = useAppSettings()
     const { pushToast } = useToast()
     const queryClient = useQueryClient()
@@ -247,7 +249,8 @@ export function SupplementarySourceCard({ point, source, confirm }: Props) {
                         <button
                             type="button"
                             className="button button-secondary button-compact"
-                            disabled={busy}
+                            disabled={busy || isImpersonating}
+                            title={isImpersonating ? t('account.impersonationRestrictions') : undefined}
                             onClick={() =>
                                 confirm({
                                     title: t('supplementary.confirm.rotateTitle'),

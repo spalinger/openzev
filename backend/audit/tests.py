@@ -982,3 +982,57 @@ class AuditPhase3InstrumentationTests(TestCase):
         self.assertEqual(event.changes_json.get("first_name", {}).get("after"), "Updated")
         self.assertEqual(event.changes_json.get("last_name", {}).get("after"), "Name")
         self.assertEqual(event.changes_json.get("must_change_password", {}).get("after"), True)
+
+
+class ImpersonationAttributionTests(TestCase):
+    """Attribute impersonated actions to the account and the admin."""
+
+    class _Request:
+        """The bits of a DRF request ``record_audit_event`` reads."""
+
+        def __init__(self, auth, user=None):
+            from accounts.jwt_utils import impersonator_of
+
+            self.impersonator_id = impersonator_of(auth)
+            self.user = user
+
+    def _record(self, request):
+        return record_audit_event(
+            request=request,
+            action_category=AuditActionCategory.AUTH,
+            action_type="impersonation.probe",
+            target_type="accounts.User",
+            summary="Probe.",
+        )
+
+    def _token(self, user, **kwargs):
+        from rest_framework_simplejwt.tokens import AccessToken
+
+        from accounts.jwt_utils import make_jwt_for_user
+
+        return AccessToken(make_jwt_for_user(user, **kwargs)["access"])
+
+    def test_an_event_written_while_impersonating_names_the_admin(self):
+        admin = make_user("attr_admin")
+        target = make_user("attr_target")
+
+        event = self._record(self._Request(self._token(target, impersonated_by=admin.pk), user=target))
+
+        self.assertEqual(event.metadata_json["impersonated_by"], admin.pk)
+        # The actor is still the impersonated account; the marker is the only
+        # record of who was driving.
+        self.assertEqual(event.actor_user_id, target.pk)
+
+    def test_an_ordinary_session_records_no_impersonator(self):
+        event = self._record(self._Request(self._token(make_user("attr_plain"))))
+
+        self.assertNotIn("impersonated_by", event.metadata_json)
+
+    def test_an_api_key_request_is_not_an_impersonation(self):
+        from accounts.models import ApiKey
+
+        key = ApiKey(user=make_user("attr_key"), name="probe", prefix="attrkey", hashed_key="x" * 64)
+
+        event = self._record(self._Request(key))
+
+        self.assertNotIn("impersonated_by", event.metadata_json)
