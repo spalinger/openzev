@@ -209,10 +209,18 @@ the file and preserve the existing data. Corrections that touch already
 invoiced periods flag those invoices for review instead of changing them —
 see [Invoice Management](09-invoice-management.md#metering-corrections-on-issued-invoices).
 
-Cancellation deliveries (`Status 1`) are rejected with a cancellation error in
-the import protocol, without changing readings or invoices or blocking billing.
-For corrected readings, request a replacement delivery (`Status 5`) from your
-grid operator.
+#### Handling rejected Status 1 uploads
+
+Uploads carrying header `Status 1` are rejected without changing readings or
+invoices. Rejection does not establish that stored values are correct. If those
+values are disputed, ask your grid operator for a corrected `Status 5` delivery.
+If replacement values are unavailable, request the affected data and intended
+resolution in writing. The recommended response is to defer generation,
+approval and sending for that period until the concern is resolved.
+
+There is no manual billing-period hold. Quarantined observations are excluded
+from billing, but quarantine does not invalidate previously accepted readings.
+Invoice review flags are advisory.
 
 SDAT-CH uploads open the result protocol even for held-only files and
 unchanged replays. Its counters distinguish billable writes, held values and
@@ -496,10 +504,11 @@ values; the protocol reports those skipped originals separately from replays.
 The protocol shows localized findings and relevant identifiers; expand
 **Technical details** for the raw diagnostic.
 
-Cancellation deliveries remain unsupported. For an exceptional removal, an
-admin can delete a point's readings for a date range using **Delete data**;
-this is a deletion, not an undo of a replacement, and affected invoices still
-require review. Request corrected source data before reimporting.
+Uploads carrying header `Status 1` remain unsupported. For an exceptional
+removal, an admin can use **Delete data** for a point and date range; this is a
+deletion, not an undo of a replacement, and affected invoices still require
+review. For disputed values without replacement data, follow
+[Handling rejected Status 1 uploads](#handling-rejected-status-1-uploads).
 
 
 The supported E66 profile requires an explicit 15-minute resolution and complete

@@ -18,6 +18,7 @@ exercise one rule each) and labelled as such in the test names.
 
 import gzip
 import os
+import re
 import threading
 import tracemalloc
 import unittest
@@ -499,6 +500,25 @@ class StrictHeaderTests(StrictBase):
     def _four_slot(self, **kwargs):
         return build_e66([quarter_block(CONS_ID, "2025-06-02T22:00:00Z", 4)], **kwargs)
 
+    def _second_instance(self, xml, *, status):
+        """Duplicate the header InstanceDocument (schema-invalid) with another Status."""
+        match = re.search(rb"<rsm:InstanceDocument>.*?</rsm:InstanceDocument>", xml, re.S)
+        self.assertIsNotNone(match, "Expected an InstanceDocument in the derived fixture")
+        instance = match.group(0)
+        duplicate, count = re.subn(
+            rb"<rsm:DocumentID>[^<]+</rsm:DocumentID>",
+            b"<rsm:DocumentID>DERIVED-DOC-2</rsm:DocumentID>",
+            instance,
+        )
+        self.assertEqual(count, 1, "Expected one InstanceDocument DocumentID")
+        duplicate, count = re.subn(
+            rb"<rsm:Status>[^<]+</rsm:Status>",
+            f"<rsm:Status>{status}</rsm:Status>".encode(),
+            duplicate,
+        )
+        self.assertEqual(count, 1, "Expected one InstanceDocument Status")
+        return xml.replace(instance, instance + duplicate, 1)
+
     def test_derived_hourly_resolution_is_rejected(self):
         block = build_block(
             CONS_ID,
@@ -555,6 +575,70 @@ class StrictHeaderTests(StrictBase):
                 schema.assertValid(etree.fromstring(self._four_slot(status=status)))
         with self.assertRaisesRegex(etree.DocumentInvalid, "Status"):
             schema.assertValid(etree.fromstring(self._four_slot(status="1")))
+
+    def test_derived_nested_status_does_not_trigger_cancellation(self):
+        # The nested Status comes first in document order, so a `.//Status`
+        # implementation would read 1 here; only a direct-child read sees the
+        # header Status 9. The unknown element keeps the file schema-invalid.
+        xml = self._four_slot(status="9").replace(
+            b"<rsm:Status>9</rsm:Status>",
+            b"<rsm:OperationMode><rsm:Status>1</rsm:Status></rsm:OperationMode>"
+            b"<rsm:Status>9</rsm:Status>",
+        )
+
+        resp = self._import(xml)
+
+        self.assertRejected(resp, "schema_invalid")
+        self.assertEqual([issue["code"] for issue in resp.data["issues"]], ["schema_invalid"])
+        self.assertEqual(MeterReading.objects.count(), 0)
+
+    def test_derived_foreign_namespace_status_does_not_trigger_cancellation(self):
+        xml = self._four_slot(status="9").replace(
+            b"<rsm:Status>9</rsm:Status>",
+            b'<ext:Status xmlns:ext="urn:example">1</ext:Status><rsm:Status>9</rsm:Status>',
+        )
+
+        resp = self._import(xml)
+
+        self.assertRejected(resp, "schema_invalid")
+        self.assertEqual([issue["code"] for issue in resp.data["issues"]], ["schema_invalid"])
+        self.assertFalse(MeterReading.objects.exists())
+        self.assertFalse(QuarantinedReading.objects.exists())
+
+    def test_derived_multiple_instances_reject_without_observation_writes(self):
+        # Status 1 in the first instance currently reaches the pre-check;
+        # in the second it reaches schema validation. Both must preserve data.
+        for first, second in (("9", "1"), ("1", "9")):
+            with self.subTest(first=first, second=second):
+                xml = self._second_instance(self._four_slot(status=first), status=second)
+                resp = self._import(xml)
+
+                self.assertRejected(resp)
+                self.assertEqual(ImportLog.objects.get(pk=resp.data["id"]).result_status, "rejected")
+                self.assertEqual(resp.data["reading_changes"], [])
+                self.assertFalse(MeterReading.objects.exists())
+                self.assertFalse(QuarantinedReading.objects.exists())
+
+    def test_derived_malformed_cancellation_text_is_malformed_xml(self):
+        resp = self._import(
+            b'<rsm:ValidatedMeteredData_16 xmlns:rsm="http://www.strom.ch">'
+            b"<rsm:Status>1</rsm:Status>"
+        )
+
+        self.assertRejected(resp, "malformed_xml")
+        self.assertEqual([issue["code"] for issue in resp.data["issues"]], ["malformed_xml"])
+
+    def test_derived_root_gate_runs_before_cancellation_detection(self):
+        for xml, code in (
+            (self._four_slot(root="ValidatedMeteredData_15", status="1"), "unsupported_schema_version"),
+            (self._four_slot(namespace="urn:example", status="1"), "unsupported_root"),
+        ):
+            with self.subTest(code=code):
+                resp = self._import(xml)
+
+                self.assertRejected(resp, code)
+                self.assertEqual([issue["code"] for issue in resp.data["issues"]], [code])
+                self.assertEqual(MeterReading.objects.count(), 0)
 
     def test_derived_missing_creation_is_rejected(self):
         xml = self._four_slot().replace(b"<rsm:Creation>2025-06-05T15:40:05Z</rsm:Creation>", b"")
