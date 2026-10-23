@@ -40,7 +40,7 @@ from zev.models import MeteringPoint, MeteringPointAssignment, MeteringPointType
 
 from testing.sdat import (
     CONS_ID, PROD_ID, TS0, ACTIVE_PRODUCT, REACTIVE_PRODUCT, LEG_PRODUCT,
-    build_e66, build_block, quarter_block, _obs,
+    build_e66, build_block, quarter_block, observation,
 )
 
 
@@ -94,6 +94,98 @@ class StrictBase(TestCase):
 FIXTURE_1_4_4 = os.path.join(
     os.path.dirname(__file__), "test_fixtures", "sdatch", "e66_1_4_4_customer.xml"
 )
+
+
+class BatchedPersistenceTests(StrictBase):
+    def test_replacement_updates_in_bounded_batches(self):
+        original = build_block(CONS_ID, observation(1, "1", "21") + "".join(observation(s, "1") for s in range(2, 5)))
+        self._import(build_e66([original]))
+        identity_before = dict(MeterReading.objects.values_list("pk", "created_at"))
+        replacement = build_block(CONS_ID, "".join(observation(s, str(s + 1)) for s in range(1, 5)))
+        with unittest_mock.patch.object(sdatch_importer, "PERSIST_BATCH_SIZE", 2), unittest_mock.patch.object(
+            MeterReading.objects, "bulk_create", wraps=MeterReading.objects.bulk_create,
+        ) as update:
+            response = self._import(build_e66([replacement], status="5", creation="2025-06-06T15:40:05Z"))
+        self.assertEqual(response.data["result_status"], "accepted")
+        update_calls = [call for call in update.call_args_list if call.kwargs.get("update_conflicts")]
+        create_calls = [call for call in update.call_args_list if not call.kwargs.get("update_conflicts")]
+        self.assertEqual([len(call.args[0]) for call in update_calls], [2, 1])
+        self.assertEqual(response.data["result_counts"]["promoted"], 1)
+        self.assertEqual(
+            list(MeterReading.objects.order_by("timestamp").values_list("energy_kwh", flat=True)),
+            [Decimal(s + 1) for s in range(1, 5)],
+        )
+        self.assertEqual(len(create_calls), 1)
+        self.assertEqual(create_calls[0].kwargs["batch_size"], 2)
+        self.assertFalse(QuarantinedReading.objects.exists())
+        self.assertEqual(dict(MeterReading.objects.filter(pk__in=identity_before).values_list("pk", "created_at")), identity_before)
+
+    def test_held_replacement_and_promotion_cross_batch_boundaries(self):
+        original = build_block(CONS_ID, "".join(observation(s, str(s), "21") for s in range(1, 6)),
+                               end="2025-06-02T23:15:00Z")
+        self.assertEqual(self._import(build_e66([original])).data["result_status"], "held")
+        before = {
+            row.timestamp: (row.pk, row.created_at)
+            for row in QuarantinedReading.objects.all()
+        }
+        replacement = build_block(CONS_ID, "".join(observation(s, str(s + 10), "21") for s in range(1, 6)),
+                                  end="2025-06-02T23:15:00Z")
+        with unittest_mock.patch.object(sdatch_importer, "PERSIST_BATCH_SIZE", 2), unittest_mock.patch.object(
+            QuarantinedReading.objects, "bulk_create", wraps=QuarantinedReading.objects.bulk_create,
+        ) as update:
+            response = self._import(build_e66(
+                [replacement], status="5", creation="2025-06-06T15:40:05Z", delivery_id="HELD-REPLACEMENT",
+            ))
+        self.assertEqual(response.data["result_counts"]["quarantine_overwritten"], 5)
+        self.assertEqual([len(call.args[0]) for call in update.call_args_list], [2, 2, 1])
+        for slot, row in enumerate(QuarantinedReading.objects.order_by("timestamp"), 1):
+            self.assertEqual((row.pk, row.created_at), before[row.timestamp])
+            self.assertEqual(row.energy_kwh, Decimal(slot + 10))
+            self.assertEqual(row.source_delivery_id, "HELD-REPLACEMENT")
+            self.assertEqual(str(row.import_batch), response.data["batch_id"])
+
+        promoted = build_block(CONS_ID, "".join(observation(s, str(s + 20)) for s in range(1, 6)),
+                               end="2025-06-02T23:15:00Z")
+        with unittest_mock.patch.object(sdatch_importer, "PERSIST_BATCH_SIZE", 2), unittest_mock.patch.object(
+            QuarantinedReading.objects, "filter", wraps=QuarantinedReading.objects.filter,
+        ) as selection:
+            response = self._import(build_e66([promoted], status="5", creation="2025-06-07T15:40:05Z"))
+        delete_batches = [call.kwargs["pk__in"] for call in selection.call_args_list if "pk__in" in call.kwargs]
+        self.assertEqual([len(batch) for batch in delete_batches], [2, 2, 1])
+        self.assertEqual({pk for batch in delete_batches for pk in batch}, {pk for pk, _ in before.values()})
+        self.assertEqual(response.data["result_counts"]["promoted"], 5)
+        self.assertFalse(QuarantinedReading.objects.exists())
+        self.assertEqual(
+            list(MeterReading.objects.order_by("timestamp").values_list("energy_kwh", flat=True)),
+            [Decimal(s + 20) for s in range(1, 6)],
+        )
+
+    def test_later_batch_failure_rolls_back_creates_updates_and_provenance(self):
+        original = build_block(CONS_ID, observation(1, "1", "21") + "".join(observation(s, "1") for s in range(2, 5)))
+        self._import(build_e66([original]))
+        before = list(MeterReading.objects.order_by("id").values())
+        held_before = list(QuarantinedReading.objects.order_by("id").values())
+        replacement = build_block(CONS_ID, "".join(observation(s, "2") for s in range(1, 5)))
+        bulk_create = MeterReading.objects.bulk_create
+        calls = 0
+
+        def fail_later(rows, **kwargs):
+            nonlocal calls
+            if kwargs.get("update_conflicts"):
+                calls += 1
+                if calls == 2:
+                    raise RuntimeError("Synthetic second-batch failure")
+            return bulk_create(rows, **kwargs)
+
+        with unittest_mock.patch.object(sdatch_importer, "PERSIST_BATCH_SIZE", 2), unittest_mock.patch.object(
+            MeterReading.objects, "bulk_create", side_effect=fail_later,
+        ):
+            response = self._import(build_e66([replacement], status="5", creation="2025-06-06T15:40:05Z"))
+        self.assertRejected(response, "internal_error")
+        self.assertEqual(calls, 2)
+        self.assertEqual(list(MeterReading.objects.order_by("id").values()), before)
+        self.assertEqual(list(QuarantinedReading.objects.order_by("id").values()), held_before)
+        self.assertEqual(response.data["reading_changes"], [])
 
 
 class OfficialCustomerAcceptanceTests(StrictBase):
@@ -201,14 +293,14 @@ class StrictUnitTests(StrictBase):
     def test_out_of_range_volumes_are_rejected_before_rounding(self):
         for volume in ("123456789012345678901234567890", "100000000"):
             with self.subTest(volume=volume):
-                block = build_block(CONS_ID, _obs(1, volume) + "".join(_obs(s, "10") for s in range(2, 5)))
+                block = build_block(CONS_ID, observation(1, volume) + "".join(observation(s, "10") for s in range(2, 5)))
                 resp = self._import(build_e66([block]))
                 self.assertRejected(resp, "invalid_volume")
                 self.assertEqual(MeterReading.objects.count(), 0)
 
     def test_derived_kwt_unit_rejects_whole_file(self):
         # Regression: schema-valid KWT must never be stored as kWh.
-        block = build_block(CONS_ID, "".join(_obs(s, "10") for s in range(1, 5)), unit="KWT")
+        block = build_block(CONS_ID, "".join(observation(s, "10") for s in range(1, 5)), unit="KWT")
 
         resp = self._import(build_e66([block]))
 
@@ -216,7 +308,7 @@ class StrictUnitTests(StrictBase):
         self.assertIn("KWT", resp.data["errors"][0]["error"])
 
     def test_derived_kwh_unit_is_billed(self):
-        block = build_block(CONS_ID, "".join(_obs(s, "10") for s in range(1, 5)), unit="KWH")
+        block = build_block(CONS_ID, "".join(observation(s, "10") for s in range(1, 5)), unit="KWH")
 
         resp = self._import(build_e66([block]))
 
@@ -227,7 +319,7 @@ class StrictUnitTests(StrictBase):
     def test_derived_other_supported_product_rejects_file(self):
         # 8716867000016 passes the XSD enumeration but has no billing meaning here.
         block = build_block(
-            CONS_ID, "".join(_obs(s, "10") for s in range(1, 5)), product="8716867000016"
+            CONS_ID, "".join(observation(s, "10") for s in range(1, 5)), product="8716867000016"
         )
 
         resp = self._import(build_e66([block]))
@@ -236,7 +328,7 @@ class StrictUnitTests(StrictBase):
 
     def test_derived_garbage_product_is_schema_rejected(self):
         block = build_block(
-            CONS_ID, "".join(_obs(s, "10") for s in range(1, 5)), product="9999999999999"
+            CONS_ID, "".join(observation(s, "10") for s in range(1, 5)), product="9999999999999"
         )
 
         resp = self._import(build_e66([block]))
@@ -247,7 +339,7 @@ class StrictUnitTests(StrictBase):
     def test_derived_leg_product_is_excluded_with_named_issue(self):
         block = build_block(
             CONS_ID,
-            "".join(_obs(s, "10") for s in range(1, 5)),
+            "".join(observation(s, "10") for s in range(1, 5)),
             product=LEG_PRODUCT,
             product_scheme="VSENationalCode",
             product_agency="260",
@@ -265,14 +357,14 @@ class StrictUnitTests(StrictBase):
     def test_derived_nan_volume_is_schema_rejected(self):
         # The XSD decimal type already refuses NaN; the importer additionally
         # guards finiteness before any write. Either way: rejected, no writes.
-        block = build_block(CONS_ID, _obs(1, "NaN") + "".join(_obs(s, "10") for s in range(2, 5)))
+        block = build_block(CONS_ID, observation(1, "NaN") + "".join(observation(s, "10") for s in range(2, 5)))
 
         resp = self._import(build_e66([block]))
 
         self.assertRejected(resp, "schema_invalid")
 
     def test_derived_negative_volume_rejects_file(self):
-        block = build_block(CONS_ID, _obs(1, "-5") + "".join(_obs(s, "10") for s in range(2, 5)))
+        block = build_block(CONS_ID, observation(1, "-5") + "".join(observation(s, "10") for s in range(2, 5)))
 
         resp = self._import(build_e66([block]))
 
@@ -280,7 +372,7 @@ class StrictUnitTests(StrictBase):
 
     def test_derived_bad_condition_is_schema_rejected(self):
         block = build_block(
-            CONS_ID, _obs(1, "10", "99") + "".join(_obs(s, "10") for s in range(2, 5))
+            CONS_ID, observation(1, "10", "99") + "".join(observation(s, "10") for s in range(2, 5))
         )
 
         resp = self._import(build_e66([block]))
@@ -290,7 +382,7 @@ class StrictUnitTests(StrictBase):
 
 class StrictPositionTests(StrictBase):
     def test_long_interval_with_missing_positions_has_bounded_diagnostics(self):
-        block = build_block(CONS_ID, _obs(1, "10"), end="2099-06-02T23:00:00Z")
+        block = build_block(CONS_ID, observation(1, "10"), end="2099-06-02T23:00:00Z")
         tracemalloc.start()
         try:
             resp = self._import(build_e66([block]))
@@ -307,14 +399,14 @@ class StrictPositionTests(StrictBase):
 
     def test_derived_out_of_range_position_rejects_file(self):
         # Regression: seq 999 in a 4-slot block must not write outside it.
-        obs = "".join(_obs(s, "10") for s in range(1, 4)) + _obs(999, "10")
+        obs = "".join(observation(s, "10") for s in range(1, 4)) + observation(999, "10")
 
         resp = self._four_slot(obs)
 
         self.assertRejected(resp, "invalid_position")
 
     def test_derived_gap_rejects_file_without_inventing_readings(self):
-        obs = _obs(1, "10") + _obs(2, "10") + _obs(3, "10") + _obs(5, "10")
+        obs = observation(1, "10") + observation(2, "10") + observation(3, "10") + observation(5, "10")
 
         resp = self._four_slot(obs)
 
@@ -323,7 +415,7 @@ class StrictPositionTests(StrictBase):
         self.assertIn("invalid_position", codes)
 
     def test_derived_missing_position_rejects_file(self):
-        obs = "".join(_obs(s, "10") for s in range(1, 4))  # seq4 absent
+        obs = "".join(observation(s, "10") for s in range(1, 4))  # seq4 absent
 
         resp = self._four_slot(obs)
 
@@ -331,22 +423,22 @@ class StrictPositionTests(StrictBase):
         self.assertIn("4", resp.data["errors"][0]["error"])
 
     def test_derived_duplicate_position_rejects_file(self):
-        obs = "".join(_obs(s, "10") for s in range(1, 5)) + _obs(2, "10")
+        obs = "".join(observation(s, "10") for s in range(1, 5)) + observation(2, "10")
 
         resp = self._four_slot(obs)
 
         self.assertRejected(resp, "duplicate_position")
 
     def test_derived_conflicting_overlap_rejects_file(self):
-        first = build_block(CONS_ID, "".join(_obs(s, "10") for s in range(1, 5)), doc="BLOCK-A")
-        second = build_block(CONS_ID, "".join(_obs(s, "99") for s in range(1, 5)), doc="BLOCK-B")
+        first = build_block(CONS_ID, "".join(observation(s, "10") for s in range(1, 5)), doc="BLOCK-A")
+        second = build_block(CONS_ID, "".join(observation(s, "99") for s in range(1, 5)), doc="BLOCK-B")
 
         resp = self._import(build_e66([first, second]))
 
         self.assertRejected(resp, "conflicting_position")
 
     def test_derived_zero_position_is_schema_rejected(self):
-        obs = _obs(0, "10") + "".join(_obs(s, "10") for s in range(2, 5))
+        obs = observation(0, "10") + "".join(observation(s, "10") for s in range(2, 5))
 
         resp = self._four_slot(obs)
 
@@ -355,7 +447,7 @@ class StrictPositionTests(StrictBase):
     def test_derived_unaligned_interval_rejects_file(self):
         block = build_block(
             CONS_ID,
-            "".join(_obs(s, "10") for s in range(1, 5)),
+            "".join(observation(s, "10") for s in range(1, 5)),
             start="2025-06-02T22:07:00Z",
             end="2025-06-02T23:07:00Z",
         )
@@ -367,7 +459,7 @@ class StrictPositionTests(StrictBase):
     def test_derived_indivisible_interval_rejects_file(self):
         block = build_block(
             CONS_ID,
-            "".join(_obs(s, "10") for s in range(1, 5)),
+            "".join(observation(s, "10") for s in range(1, 5)),
             start="2025-06-02T22:00:00Z",
             end="2025-06-02T22:50:00Z",
         )
@@ -380,7 +472,7 @@ class StrictPositionTests(StrictBase):
         good = quarter_block(CONS_ID, "2025-06-02T22:00:00Z", 4, doc="GOOD")
         bad = build_block(
             PROD_ID,
-            "".join(_obs(s, "10") for s in range(1, 4)),
+            "".join(observation(s, "10") for s in range(1, 4)),
             doc="BAD",
             point="ProductionMeteringPoint",
         )
@@ -410,7 +502,7 @@ class StrictHeaderTests(StrictBase):
     def test_derived_hourly_resolution_is_rejected(self):
         block = build_block(
             CONS_ID,
-            "".join(_obs(s, "10") for s in range(1, 5)),
+            "".join(observation(s, "10") for s in range(1, 5)),
             start="2025-06-02T22:00:00Z",
             end="2025-06-03T02:00:00Z",
             resolution="60",
@@ -426,7 +518,7 @@ class StrictHeaderTests(StrictBase):
     def test_derived_offset_less_interval_is_rejected(self):
         block = build_block(
             CONS_ID,
-            "".join(_obs(s, "10") for s in range(1, 5)),
+            "".join(observation(s, "10") for s in range(1, 5)),
             start="2025-06-02T22:00:00",
             end="2025-06-02T23:00:00",
         )
@@ -483,7 +575,7 @@ class StrictHeaderTests(StrictBase):
 
     def test_derived_missing_interval_is_rejected(self):
         block = build_block(
-            CONS_ID, "".join(_obs(s, "10") for s in range(1, 5)), omit_interval=True
+            CONS_ID, "".join(observation(s, "10") for s in range(1, 5)), omit_interval=True
         )
 
         resp = self._import(build_e66([block]))
@@ -492,7 +584,7 @@ class StrictHeaderTests(StrictBase):
 
     def test_derived_missing_point_is_rejected(self):
         block = build_block(
-            CONS_ID, "".join(_obs(s, "10") for s in range(1, 5)), omit_point=True
+            CONS_ID, "".join(observation(s, "10") for s in range(1, 5)), omit_point=True
         )
 
         resp = self._import(build_e66([block]))
@@ -510,7 +602,7 @@ class StrictProfileTests(StrictBase):
         return quarter_block(CONS_ID, "2025-06-02T22:00:00Z", 4, **kwargs)
 
     def test_derived_temporary_only_file_is_held(self):
-        obs = "".join(_obs(s, "10", "21") for s in range(1, 5))
+        obs = "".join(observation(s, "10", "21") for s in range(1, 5))
 
         resp = self._import(build_e66([build_block(CONS_ID, obs)]))
 
@@ -553,7 +645,7 @@ class StrictProfileTests(StrictBase):
     def test_derived_exchange_only_file_is_unchanged_with_named_issue(self):
         block = build_block(
             "CH9999901234500000000000000000033",
-            "".join(_obs(s, "10") for s in range(1, 5)),
+            "".join(observation(s, "10") for s in range(1, 5)),
             point="ExchangeMeteringPoint",
             start="2025-06-05T22:00:00Z",
             end="2025-06-05T23:00:00Z",
@@ -573,7 +665,7 @@ class StrictProfileTests(StrictBase):
         # resolution: must never become quarter-hour slots.
         block = build_block(
             CONS_ID,
-            _obs(1, "12345"),
+            observation(1, "12345"),
             start="2025-01-01T00:00:00Z",
             end="2025-04-01T00:00:00Z",
             omit_resolution=True,
@@ -587,7 +679,7 @@ class StrictProfileTests(StrictBase):
     def test_derived_sparse_delivery_with_resolution_is_rejected(self):
         block = build_block(
             CONS_ID,
-            _obs(1, "10"),
+            observation(1, "10"),
             start="2025-01-01T00:00:00Z",
             end="2025-01-02T00:00:00Z",
         )
@@ -610,7 +702,7 @@ class RevisionTests(StrictBase):
         return quarter_block(CONS_ID, "2025-06-02T22:00:00Z", 4, **kwargs)
 
     def _replace_four(self, values, *, creation, status="5", delivery_id="DERIVED-REPL"):
-        obs = "".join(_obs(s, v) for s, v in zip(range(1, 5), values))
+        obs = "".join(observation(s, v) for s, v in zip(range(1, 5), values))
         return build_e66(
             [build_block(CONS_ID, obs, doc="DERIVED-REPL-C")],
             status=status,
@@ -712,7 +804,7 @@ class RevisionTests(StrictBase):
         )
         block = build_block(
             CONS_ID,
-            _obs(1, "50") + "".join(_obs(s, str(100 + s)) for s in range(2, 5)),
+            observation(1, "50") + "".join(observation(s, str(100 + s)) for s in range(2, 5)),
         )
 
         resp = self._import(build_e66([block], status="5", creation="2025-06-06T10:00:00Z"))
@@ -844,7 +936,7 @@ class QuarantineLifecycleTests(StrictBase):
         self._import(
             build_e66([self._four()], reason_xml=self.C38, creation="2025-06-04T10:00:00Z")
         )
-        obs = "".join(_obs(s, str(200 + s)) for s in range(1, 5))
+        obs = "".join(observation(s, str(200 + s)) for s in range(1, 5))
         block = build_block(CONS_ID, obs)
 
         resp = self._import(
@@ -934,7 +1026,7 @@ class ResultContractTests(StrictBase):
         )
 
     def test_rejection_counts_unparsed_later_blocks(self):
-        bad = build_block(CONS_ID, "".join(_obs(position, "10") for position in range(1, 4)))
+        bad = build_block(CONS_ID, "".join(observation(position, "10") for position in range(1, 4)))
         later = quarter_block(PROD_ID, "2025-06-02T22:00:00Z", 4, point="ProductionMeteringPoint")
         resp = self._import(build_e66([bad, later]))
         self.assertRejected(resp, "missing_position")
@@ -953,7 +1045,7 @@ class ResultContractTests(StrictBase):
         self.assertEqual(accounted, good.data["rows_total"])
         self.assertEqual(counts["rejected"], 0)
 
-        bad_block = build_block(CONS_ID, "".join(_obs(s, "10") for s in range(1, 4)))
+        bad_block = build_block(CONS_ID, "".join(observation(s, "10") for s in range(1, 4)))
         bad = self._import(build_e66([bad_block]))
         bad_counts = bad.data["result_counts"]
         self.assertEqual(
@@ -968,7 +1060,7 @@ class ResultContractTests(StrictBase):
 
         bad_block = build_block(
             PROD_ID,
-            "".join(_obs(s, "10") for s in range(1, 4)),
+            "".join(observation(s, "10") for s in range(1, 4)),
             point="ProductionMeteringPoint",
         )
         bad_resp = self._import(build_e66([bad_block]))
@@ -986,7 +1078,7 @@ class ResultContractTests(StrictBase):
             energy_kwh=Decimal("9.0000"),
             import_source=ImportSource.MANUAL,
         )
-        obs = "".join(_obs(s, "10", "21") for s in range(1, 5))
+        obs = "".join(observation(s, "10", "21") for s in range(1, 5))
 
         resp = self._import(
             build_e66(
@@ -1023,11 +1115,11 @@ class AmbiguityTests(StrictBase):
         self.cons_mp.secondary_meter_id = "CH9999901234500000000000000000098"
         self.cons_mp.save(update_fields=["secondary_meter_id"])
         first = build_block(
-            CONS_ID, "".join(_obs(s, "10") for s in range(1, 5)), doc="BLOCK-PRIMARY"
+            CONS_ID, "".join(observation(s, "10") for s in range(1, 5)), doc="BLOCK-PRIMARY"
         )
         second = build_block(
             "CH9999901234500000000000000000098",
-            "".join(_obs(s, "10") for s in range(1, 5)),
+            "".join(observation(s, "10") for s in range(1, 5)),
             doc="BLOCK-ALIAS",
         )
 
@@ -1124,7 +1216,7 @@ class DstBoundaryTests(StrictBase):
     def _day(self, start, count, **kwargs):
         start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
         end = (start_dt + timedelta(minutes=15 * count)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        obs = "".join(_obs(seq, str(100 + seq)) for seq in range(1, count + 1))
+        obs = "".join(observation(seq, str(100 + seq)) for seq in range(1, count + 1))
         return build_e66(
             [build_block(CONS_ID, obs, start=start, end=end, doc="DERIVED-DAY")], **kwargs
         )
@@ -1240,7 +1332,7 @@ class InvoiceBillingRegressionTests(TestCase):
 
         from invoices.engine import generate_invoice
 
-        obs = _obs(1, "100", "21") + _obs(2, "50", "56") + _obs(3, "10") + _obs(4, "10")
+        obs = observation(1, "100", "21") + observation(2, "50", "56") + observation(3, "10") + observation(4, "10")
         resp = self._upload(build_e66([build_block(CONS_ID, obs)]))
         self.assertEqual(resp.data["result_status"], "accepted")
 
@@ -1257,7 +1349,7 @@ class InvoiceBillingRegressionTests(TestCase):
         )
 
         # A later billable delivery promotes the temporary slot into billing.
-        promote = _obs(1, "100") + _obs(2, "50", "56") + _obs(3, "10") + _obs(4, "10")
+        promote = observation(1, "100") + observation(2, "50", "56") + observation(3, "10") + observation(4, "10")
         resp2 = self._upload(build_e66([build_block(CONS_ID, promote, doc="PROMOTE")]))
         self.assertEqual(resp2.data["result_counts"]["promoted"], 1)
         self.assertEqual(
@@ -1286,7 +1378,7 @@ class SdatConcurrencyTests(TransactionTestCase):
         self.owner_id = self.owner.pk
 
     def _file(self, values, *, creation, status="9", delivery_id="DERIVED"):
-        obs = "".join(_obs(s, v) for s, v in zip(range(1, 5), values))
+        obs = "".join(observation(s, v) for s, v in zip(range(1, 5), values))
         return build_e66(
             [build_block(CONS_ID, obs, doc=f"{delivery_id}-C")],
             status=status,
@@ -1401,7 +1493,7 @@ class SdatConcurrencyTests(TransactionTestCase):
         self.assertEqual(MeterReading.objects.count(), 4)
 
     def test_concurrent_promotion_runs_once(self):
-        held_obs = "".join(_obs(s, "10", "21") for s in range(1, 5))
+        held_obs = "".join(observation(s, "10", "21") for s in range(1, 5))
         sdatch_importer.import_sdatch(
             SimpleUploadedFile("held.xml", build_e66([build_block(CONS_ID, held_obs)]),
                                content_type="application/xml"),
@@ -1469,7 +1561,7 @@ class DeliveryBoundaryTests(StrictBase):
                 with self.subTest(options=options, omission=omission):
                     stamp = (TS0 + timedelta(minutes=15 * (i * 2 + j))).strftime("%Y-%m-%dT%H:%M:%SZ")
                     good = quarter_block(CONS_ID, stamp, 1, doc="GOOD")
-                    excluded = build_block(CONS_ID, _obs(1, "1"), doc="EXCLUDED", **options, **{omission: True})
+                    excluded = build_block(CONS_ID, observation(1, "1"), doc="EXCLUDED", **options, **{omission: True})
                     response = self._import(build_e66([good, excluded]))
                     self.assertEqual(response.data["result_status"], "accepted", response.data)
                     self.assertEqual(response.data["result_counts"]["excluded"], 1)
@@ -1510,7 +1602,7 @@ class DeliveryBoundaryTests(StrictBase):
         self.assertNotIn(unrelated.pk, loaded)
 
     def test_informational_issue_truncation_is_not_an_error(self):
-        blocks = [build_block(CONS_ID, _obs(1, "1"), doc=f"EXCLUDED-{i}", product=REACTIVE_PRODUCT) for i in range(3)]
+        blocks = [build_block(CONS_ID, observation(1, "1"), doc=f"EXCLUDED-{i}", product=REACTIVE_PRODUCT) for i in range(3)]
         with unittest_mock.patch.object(sdatch_importer, "MAX_ISSUES", 1):
             response = self._import(build_e66(blocks))
         self.assertEqual(response.data["result_status"], "unchanged", response.data)
@@ -1523,7 +1615,7 @@ class RevisionBoundaryTests(StrictBase):
     def test_tariff_band_observations_reject_whole_delivery(self):
         for feature in ("E10", "E11", "E12"):
             with self.subTest(feature=feature):
-                obs = _obs(1, "5").replace("</rsm:Observation>",
+                obs = observation(1, "5").replace("</rsm:Observation>",
                     f'<rsm:Feature listAgencyID="260">{feature}</rsm:Feature></rsm:Observation>')
                 blocks = [quarter_block(CONS_ID, "2025-06-02T22:00:00Z", 1, doc="GOOD"),
                           build_block(CONS_ID, obs, doc="BAND", start="2025-06-02T22:15:00Z", end="2025-06-02T22:30:00Z")]
@@ -1536,7 +1628,7 @@ class RevisionBoundaryTests(StrictBase):
                 stamp = (TS0 + timedelta(minutes=15 * index)).strftime("%Y-%m-%dT%H:%M:%SZ")
                 response = self._import(build_e66([
                     quarter_block(CONS_ID, stamp, 1, doc="ACTIVE"),
-                    build_block(CONS_ID, _obs(1, "5"), doc="REACTIVE", product=product, omit_resolution=True),
+                    build_block(CONS_ID, observation(1, "5"), doc="REACTIVE", product=product, omit_resolution=True),
                 ]))
                 self.assertEqual(response.data["result_status"], "accepted", response.data)
                 self.assertEqual(response.data["result_counts"]["excluded"], 1)
@@ -1578,9 +1670,9 @@ class RevisionBoundaryTests(StrictBase):
             with self.subTest(reason=reason):
                 self.cons_mp.readings.all().delete()
                 self.cons_mp.quarantined_readings.all().delete()
-                block = build_block(CONS_ID, _obs(1, "5"), end="2025-06-02T22:15:00Z")
+                block = build_block(CONS_ID, observation(1, "5"), end="2025-06-02T22:15:00Z")
                 self._import(build_e66([block], reason_xml=reason))
-                changed = build_block(CONS_ID, _obs(1, "5", "56"), end="2025-06-02T22:15:00Z")
+                changed = build_block(CONS_ID, observation(1, "5", "56"), end="2025-06-02T22:15:00Z")
                 self.assertRejected(self._import(build_e66([changed], reason_xml=reason, status="5")), "equal_creation_conflict")
 
     def test_original_existing_guidance_survives_mixed_accepted_outcome(self):
@@ -1629,7 +1721,7 @@ class RevisionBoundaryTests(StrictBase):
         self.assertFalse(MeterReading.objects.exists())
 
     def test_resolution_failure_rejects_even_when_info_already_filled_issue_cap(self):
-        blocks = [build_block(CONS_ID, _obs(1, "1"), doc=f"INFO-{i}", product=REACTIVE_PRODUCT) for i in range(3)]
+        blocks = [build_block(CONS_ID, observation(1, "1"), doc=f"INFO-{i}", product=REACTIVE_PRODUCT) for i in range(3)]
         blocks.append(quarter_block("CH9999901234500000000000000000099", "2025-06-02T22:00:00Z", 1, doc="UNKNOWN"))
         with unittest_mock.patch.object(sdatch_importer, "MAX_ISSUES", 2):
             response = self._import(build_e66(blocks))

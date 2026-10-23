@@ -14,7 +14,7 @@ REACTIVE_PRODUCT = "8716867000047"
 LEG_PRODUCT = "2404050010123"
 
 
-def _obs(seq, volume, condition=None):
+def observation(seq, volume, condition=None):
     cond = f"<rsm:Condition>{condition}</rsm:Condition>" if condition else ""
     return (
         f"<rsm:Observation><rsm:Position><rsm:Sequence>{seq}</rsm:Sequence></rsm:Position>"
@@ -24,9 +24,9 @@ def _obs(seq, volume, condition=None):
 
 def _full_day_obs(temp="100", estimated="101", base=Decimal("102")):
     """96 observations: seq1 temporary, seq2 estimated, rest measured."""
-    out = [_obs(1, temp, "21"), _obs(2, estimated, "56")]
+    out = [observation(1, temp, "21"), observation(2, estimated, "56")]
     for seq in range(3, 97):
-        out.append(_obs(seq, str(base + seq)))
+        out.append(observation(seq, str(base + seq)))
     return "".join(out)
 
 
@@ -163,5 +163,5 @@ def quarter_block(meter_id, start, count, *, doc="DERIVED-BLOCK", point="Consump
     """A complete 15-minute block of ``count`` measured observations."""
     start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
     end = (start_dt + timedelta(minutes=15 * count)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    obs = "".join(_obs(seq, str(100 + seq)) for seq in range(1, count + 1))
-    return build_block(meter_id, obs, doc=doc, point=point, start=start, end=end, **kwargs)
+    observations = "".join(observation(seq, str(100 + seq)) for seq in range(1, count + 1))
+    return build_block(meter_id, observations, doc=doc, point=point, start=start, end=end, **kwargs)
