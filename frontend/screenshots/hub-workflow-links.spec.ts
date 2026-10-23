@@ -104,9 +104,12 @@ for (const role of ['admin', 'manager', 'viewer'] as const) {
     await page.goto('/tariffs?tariff=42%3ADynamic+tariff')
     const drawer = page.locator('.tariff-pane')
     await expect(drawer).toBeVisible()
-    await expect(drawer).toContainText('Across the platform: 7 tariffs · 3 ZEVs')
     await expect(drawer).toContainText('Disabled')
     await expect(drawer).toContainText('Operator unavailable')
+    // Where the source is fetched from and what it covers sit in a disclosure.
+    await expect(drawer).not.toContainText('Across the platform')
+    await drawer.getByText('Source details', { exact: true }).click()
+    await expect(drawer).toContainText('Across the platform: 7 tariffs · 3 ZEVs')
     await expect(drawer).toContainText('Stored coverage may contain gaps')
     const operations = drawer.getByRole('link', { name: 'Manage source in platform admin' })
     if (role === 'admin') await expect(operations).toHaveAttribute('href', '/admin/dynamic-sources?source=s1')
