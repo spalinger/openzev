@@ -1,5 +1,6 @@
+import { useId, type ReactNode } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faChevronLeft, faChevronRight, faCircleExclamation, faPen, faPlus, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
+import { faChevronUp, faChevronDown, faClock, faCircleExclamation, faPen, faPlus, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
 import { useTranslation } from 'react-i18next'
 import { formatShortDate } from '../../lib/appSettings'
 import { todayBusinessIso } from '../../lib/dates'
@@ -24,28 +25,34 @@ type TariffCategorySectionsProps = {
     rows: TariffOverviewRow[]
     kind: TariffRowsKind
     settings: AppSettings
-    /** The series and version shown in the detail pane, so its row can be highlighted. */
+    /** The only expanded tariff and its URL-linked version. */
     selected: { seriesKey: string, versionId: string } | null
     /** Open the exact version displayed by the row. */
     onOpenDetail: (series: TariffSeries, versionId: string) => void
-    onCloseDetail: () => void
+    expandedVersion: (series: TariffSeries) => string | null
+    renderActions?: (series: TariffSeries, versionId: string) => ReactNode
+    renderDetail: (series: TariffSeries, versionId: string) => ReactNode
+    onCloseDetail: (series: TariffSeries) => void
     onRepairBand?: (series: TariffSeries, versionId: string, period?: TariffPeriod) => void
 }
 
 /**
- * One row per tariff series and group, in the category order; details and
- * write actions live in the detail pane.
+ * One expandable row per tariff; values and controls share its existing cells.
  */
 export function TariffCategorySections({
     rows,
     kind,
     settings,
     selected,
+    expandedVersion,
+    renderDetail,
+    renderActions,
     onOpenDetail,
     onCloseDetail,
     onRepairBand,
 }: TariffCategorySectionsProps) {
     const { t } = useTranslation()
+    const detailPrefix = useId()
     const today = todayBusinessIso()
     const display = useTariffDisplay(settings, today)
     const { sourceById, validityBadge } = display
@@ -58,29 +65,31 @@ export function TariffCategorySections({
     function upcomingStart(validFrom: string) {
         const [before, after] = t('pages.tariffs.validity.starts', { date: DATE_SLOT }).split(DATE_SLOT)
         const parts = emphasizedDate(formatShortDate(validFrom, settings), settings.date_format_short, validFrom.slice(0, 4) === today.slice(0, 4))
-        return <>{before}{parts.map((part, index) => (part.strong ? <strong key={index}>{part.text}</strong> : part.text))}{after}</>
+        return <><span className="tariff-future-icon" role="img" aria-label={t('pages.tariffs.overview.upcoming')} title={t('pages.tariffs.overview.upcoming')}>
+            <FontAwesomeIcon icon={faClock} fixedWidth aria-hidden="true" />
+        </span>{' '}{before}{parts.map((part, index) => (part.strong ? <strong key={index}>{part.text}</strong> : part.text))}{after}</>
     }
 
     return (
-        <div className="table-card invoice-rows tariff-list">
+        <div className="table-card tariff-list">
             {tariffSections.map((section) => (
                 <table key={section.category} className="tariff-table">
-                    <thead>
+                    <thead className={expandedVersion(section.rows[0].series) ? 'tariff-table-heading-merged' : undefined}>
                         <tr>
                             <th scope="col">
-                                {t(`pages.tariffs.categories.${section.category}` as Parameters<typeof t>[0])}
+                                <span>{t(`pages.tariffs.categories.${section.category}` as Parameters<typeof t>[0])}</span>
                             </th>
-                            <th scope="col" id={`tariff-applies-${kind}-${section.category}`}>{t('pages.tariffs.rateCard.applies')}</th>
-                            <th scope="col" id={`tariff-price-${kind}-${section.category}`} className="numeric">{t('pages.tariffs.rateCard.price')}</th>
-                            <th scope="col" id={`tariff-unit-${kind}-${section.category}`} className="tariff-table-unit">{t('pages.tariffs.rateCard.unit')}</th>
-                            <th scope="col" className="tariff-table-valid">{t('pages.tariffs.rateCard.valid')}</th>
+                            <th scope="col" className="tariff-table-valid"><span>{t('pages.tariffs.rateCard.period')}</span></th>
+                            <th scope="col" id={`tariff-applies-${kind}-${section.category}`}><span>{t('pages.tariffs.rateCard.applies')}</span></th>
+                            <th scope="col" id={`tariff-price-${kind}-${section.category}`} className="numeric"><span>{t('pages.tariffs.rateCard.price')}</span></th>
+                            <th scope="col" id={`tariff-unit-${kind}-${section.category}`} className="tariff-table-unit"><span>{t('pages.tariffs.rateCard.unit')}</span></th>
                             <th scope="col" className="tariff-table-open">
                                 <span className="visually-hidden">{t('pages.tariffs.viewDetails')}</span>
                             </th>
                         </tr>
                     </thead>
                     <tbody>
-                        {section.rows.map(row => {
+                        {section.rows.map((row, index) => {
                             const { series, version: shown } = row
                             const seriesKey = seriesKeyOf(series)
 
@@ -88,106 +97,140 @@ export function TariffCategorySections({
                             const fetchFailed = dynamicSource?.last_fetch_status === 'failed'
                             const badge = validityBadge(shown)
                             const notes = shown.notes?.trim()
-                            const isOpen = seriesKey === selected?.seriesKey
+                            const expandedId = expandedVersion(series)
+                            const isOpen = expandedId !== null
+                            const detailId = `${detailPrefix}-${shown.id}`
                             const scheduled = validityState(shown, today) === 'scheduled'
-                            const currentHasEnd = kind === 'current' && !scheduled && Boolean(shown.valid_to)
                             const incomplete = !shown.dynamic_source && (series.billing_mode === 'energy' || series.billing_mode === 'percentage_of_energy') && shown.periods.length === 0
                             const bandToReview = shown.periods.find(period => period.period_type !== 'flat' && !bandWindow(period))
                                 ?? bandCoverage(shown.periods).fallbacks[0]?.band
 
                             function openRow() {
-                                if (isOpen && selected.versionId === shown.id) onCloseDetail()
+                                if (isOpen) onCloseDetail(series)
                                 else onOpenDetail(series, shown.id)
                             }
 
+                            const title = (
+                                <div className="tariff-table-name">
+                                    <button
+                                        type="button"
+                                        className="tariff-select"
+                                        aria-expanded={isOpen}
+                                        aria-controls={isOpen ? detailId : undefined}
+                                        onClick={(event) => {
+                                            event.stopPropagation()
+                                            openRow()
+                                        }}
+                                    >
+                                        {series.name}
+                                    </button>
+                                    {expandedId && renderActions?.(series, expandedId)}
+                                    {series.gaps.length > 0 && (
+                                        <span className="badge badge-danger" title={t('pages.tariffs.versions.gapTooltip')}>
+                                            <FontAwesomeIcon icon={faTriangleExclamation} fixedWidth />{' '}
+                                            {t('pages.tariffs.versions.gapBadge', { count: series.gaps.length })}
+                                        </span>
+                                    )}
+                                    {fetchFailed && (
+                                        <span
+                                            className="badge badge-danger"
+                                            title={t('pages.tariffs.dynamicFetchFailedTooltip', { error: dynamicSource.last_fetch_error })}
+                                        >
+                                            <FontAwesomeIcon icon={faTriangleExclamation} fixedWidth />{' '}
+                                            {t('pages.tariffs.dynamicFetchFailed')}
+                                        </span>
+                                    )}
+                                </div>
+                            )
+                            const metadata = <>
+                                <div className="tariff-table-context">
+                                {series.energy_type && (
+                                    <div className="tariff-table-meta">
+                                        {t(`pages.tariffs.energyTypes.${series.energy_type}` as Parameters<typeof t>[0])}
+                                    </div>
+                                )}
+                                {!isOpen && notes && <div className="tariff-table-notes" title={notes}>{series.energy_type && !isOpen && <span aria-hidden="true">· </span>}{notes}</div>}
+                                </div>
+                                {!shown.dynamic_source && (series.billing_mode === 'energy' || series.billing_mode === 'percentage_of_energy') && shown.periods.length > 0 && (
+                                    <TariffBandCoverage bands={shown.periods} warningsOnly />
+                                )}
+                                {!isOpen && (incomplete || bandToReview) && <div className="tariff-row-repair">
+                                    {onRepairBand ? <button type="button" className="button button-secondary button-compact" data-action-key={`repair-${shown.id}`} onClick={event => {
+                                        event.stopPropagation()
+                                        onRepairBand(series, shown.id, bandToReview)
+                                    }}><FontAwesomeIcon icon={incomplete ? faPlus : faPen} fixedWidth />{t(incomplete ? 'pages.tariffs.ux.addPrices' : 'pages.tariffs.ux.reviewWindow')}</button>
+                                        : <span><FontAwesomeIcon icon={faTriangleExclamation} fixedWidth />{' '}{incomplete ? t('pages.tariffs.workspace.incomplete') : t('pages.tariffs.ux.reviewWindow')}</span>}
+                                </div>}
+                                {shown.dynamic_price_summary?.status === 'partial' && <div className="tariff-band-coverage">
+                                    <div className="tariff-band-warning">
+                                        <FontAwesomeIcon icon={faCircleExclamation} fixedWidth aria-hidden="true" />
+                                        <p><button type="button" className="tariff-warning-link" onClick={event => {
+                                            event.stopPropagation()
+                                            onOpenDetail(series, shown.id)
+                                        }}>{t('pages.tariffs.ux.partial')}</button></p>
+                                    </div>
+                                </div>}
+                            </>
+                            const toggle = (
+                                <button
+                                    type="button"
+                                    className="button button-ghost button-icon button-compact"
+                                    aria-label={isOpen ? t('common.close') : t('pages.tariffs.viewDetails')}
+                                    aria-expanded={isOpen}
+                                    aria-controls={isOpen ? detailId : undefined}
+                                    onClick={(event) => {
+                                        event.stopPropagation()
+                                        if (isOpen) onCloseDetail(series)
+                                        else openRow()
+                                    }}
+                                >
+                                    <FontAwesomeIcon icon={isOpen ? faChevronUp : faChevronDown} fixedWidth />
+                                </button>
+                            )
+
                             return (
-                                <tr
-                                    key={`${seriesKey}:${shown.id}`}
+                                <tr key={seriesKey}
                                     data-row-key={`${seriesKey}:${shown.id}`}
                                     data-series-key={seriesKey}
-                                    className={[isOpen && 'is-selected', kind === 'history' && 'is-ended'].filter(Boolean).join(' ') || undefined}
-                                    onClick={() => { if (!window.getSelection()?.toString()) openRow() }}
-                                >
-                                    <td className="tariff-table-tariff">
-                                        <div className="tariff-table-name">
-                                            <button
-                                                type="button"
-                                                className="tariff-select"
-                                                aria-expanded={isOpen}
-                                                onClick={(event) => {
-                                                    event.stopPropagation()
-                                                    openRow()
-                                                }}
-                                            >
-                                                {series.name}
-                                            </button>
-                                            {series.gaps.length > 0 && (
-                                                <span className="badge badge-danger" title={t('pages.tariffs.versions.gapTooltip')}>
-                                                    <FontAwesomeIcon icon={faTriangleExclamation} fixedWidth />{' '}
-                                                    {t('pages.tariffs.versions.gapBadge', { count: series.gaps.length })}
-                                                </span>
-                                            )}
-                                            {fetchFailed && (
-                                                <span
-                                                    className="badge badge-danger"
-                                                    title={t('pages.tariffs.dynamicFetchFailedTooltip', { error: dynamicSource.last_fetch_error })}
-                                                >
-                                                    <FontAwesomeIcon icon={faTriangleExclamation} fixedWidth />{' '}
-                                                    {t('pages.tariffs.dynamicFetchFailed')}
-                                                </span>
-                                            )}
-                                        </div>
-                                        <div className="tariff-table-context">
-                                        {series.energy_type && (
-                                            <div className="tariff-table-meta">
-                                                {t(`pages.tariffs.energyTypes.${series.energy_type}` as Parameters<typeof t>[0])}
+                                    className={['tariff-summary-row', isOpen && 'is-selected is-expanded', selected?.seriesKey === seriesKey && 'is-active', kind === 'history' && 'is-ended'].filter(Boolean).join(' ')}
+                                    onClick={event => {
+                                        if (!(event.target as Element).closest('button, a, input, select, textarea, summary, .tariff-expanded-content') && !window.getSelection()?.toString()) openRow()
+                                    }}>
+                                    {expandedId ? <td colSpan={6} className="tariff-table-expanded">
+                                        <div className="tariff-expanded-heading">
+                                            <div className="tariff-expanded-title">
+                                                {index === 0 && <span className="tariff-expanded-category">{t(`pages.tariffs.categories.${section.category}` as Parameters<typeof t>[0])}</span>}
+                                                {title}
                                             </div>
-                                        )}
-                                        {notes && <div className="tariff-table-notes" title={notes}>{series.energy_type && <span aria-hidden="true">· </span>}{notes}</div>}
-                                        </div>
-                                        {!shown.dynamic_source && (series.billing_mode === 'energy' || series.billing_mode === 'percentage_of_energy') && shown.periods.length > 0 && (
-                                            <TariffBandCoverage bands={shown.periods} warningsOnly />
-                                        )}
-                                        {(incomplete || bandToReview) && <div className="tariff-row-repair">
-                                            {onRepairBand ? <button type="button" className="button button-secondary button-compact" data-action-key={`repair-${shown.id}`} onClick={event => {
-                                                event.stopPropagation()
-                                                onRepairBand(series, shown.id, bandToReview)
-                                            }}><FontAwesomeIcon icon={incomplete ? faPlus : faPen} fixedWidth />{t(incomplete ? 'pages.tariffs.ux.addPrices' : 'pages.tariffs.ux.reviewWindow')}</button>
-                                                : <span><FontAwesomeIcon icon={faTriangleExclamation} fixedWidth />{' '}{incomplete ? t('pages.tariffs.workspace.incomplete') : t('pages.tariffs.ux.reviewWindow')}</span>}
-                                        </div>}
-                                        {shown.dynamic_price_summary?.status === 'partial' && <div className="tariff-band-coverage">
-                                            <div className="tariff-band-warning">
-                                                <FontAwesomeIcon icon={faCircleExclamation} fixedWidth aria-hidden="true" />
-                                                <p><button type="button" className="tariff-warning-link" onClick={event => {
-                                                    event.stopPropagation()
-                                                    onOpenDetail(series, shown.id)
-                                                }}>{t('pages.tariffs.ux.partial')}</button></p>
+                                            <div className="tariff-expanded-pricing-head">
+                                                <div className="tariff-version-columns">
+                                                    <span>{t('pages.tariffs.rateCard.period')}</span>
+                                                    <span className="tariff-version-price-heading">
+                                                        <span>{t('pages.tariffs.rateCard.applies')}</span>
+                                                        <span>{t('pages.tariffs.rateCard.price')}</span>
+                                                        <span>{t('pages.tariffs.rateCard.unit')}</span>
+                                                    </span>
+                                                    <div className="tariff-expanded-close">{toggle}</div>
+                                                </div>
                                             </div>
-                                        </div>}
-                                    </td>
-                                    <TariffPricesCell row={row} kind={kind} today={today} settings={settings} display={display} onOpenDetail={onOpenDetail} />
-                                    <td className="tariff-table-valid">
-                                        {currentHasEnd ? null : scheduled
-                                            ? upcomingStart(shown.valid_from)
-                                            : kind === 'history'
-                                                ? <span>{formatShortDate(shown.valid_from, settings)} – {formatShortDate(shown.valid_to ?? shown.valid_from, settings)}</span>
-                                                : <span title={badge.tooltip}>{badge.label}</span>}
-                                    </td>
-                                    <td className="tariff-table-open">
-                                        <button
-                                            type="button"
-                                            className="button button-ghost button-icon button-compact"
-                                            aria-label={isOpen ? t('common.close') : t('pages.tariffs.viewDetails')}
-                                            aria-expanded={isOpen}
-                                            onClick={(event) => {
-                                                event.stopPropagation()
-                                                if (isOpen) onCloseDetail()
-                                                else openRow()
-                                            }}
-                                        >
-                                            <FontAwesomeIcon icon={isOpen ? faChevronLeft : faChevronRight} fixedWidth />
-                                        </button>
-                                    </td>
+                                        </div>
+                                        <div className="tariff-expanded-body">
+                                            <div className="tariff-expanded-metadata">{metadata}</div>
+                                            <div id={detailId} className="tariff-expanded-content" data-detail-series-key={seriesKey}>
+                                                {renderDetail(series, expandedId)}
+                                            </div>
+                                        </div>
+                                    </td> : <>
+                                        <td className="tariff-table-tariff">{title}{metadata}</td>
+                                        <td className="tariff-table-valid">
+                                            {scheduled ? upcomingStart(shown.valid_from)
+                                                : kind === 'history'
+                                                    ? <span>{formatShortDate(shown.valid_from, settings)} – {formatShortDate(shown.valid_to ?? shown.valid_from, settings)}</span>
+                                                    : <span title={badge.tooltip}>{badge.label}</span>}
+                                        </td>
+                                        <TariffPricesCell row={row} kind={kind} today={today} settings={settings} display={display} onOpenDetail={onOpenDetail} />
+                                        <td className="tariff-table-open"><div className="tariff-row-actions">{toggle}</div></td>
+                                    </>}
                                 </tr>
                             )
                         })}

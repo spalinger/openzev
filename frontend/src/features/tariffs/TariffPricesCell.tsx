@@ -28,7 +28,6 @@ export function TariffPricesCell({ row: { series, version: shown, upcomingVersio
   const hasPlannedPrices = planned && plannedLines.some(line => line.price && line.price !== '—')
   const comparable = !scheduled && lines.length === plannedLines.length && lines.every((line, index) =>
     line.applies === plannedLines[index].applies && line.unit === plannedLines[index].unit)
-  const currentHasEnd = kind === 'current' && !scheduled && Boolean(shown.valid_to)
 
   function priceComparison(line: RateLine, index: number) {
       return (
@@ -54,7 +53,7 @@ export function TariffPricesCell({ row: { series, version: shown, upcomingVersio
   return (
     <td className="tariff-table-bands" colSpan={3}
         headers={`tariff-applies-${kind}-${series.category} tariff-price-${kind}-${series.category} tariff-unit-${kind}-${series.category}`}>
-        {(hasPlannedPrices && (scheduled || comparable) || currentHasEnd) && (
+        {(hasPlannedPrices && (scheduled || comparable)) && (
             <div className="tariff-table-band tariff-price-headings">
                 <span />
                 <span className="tariff-table-band-price">
@@ -62,7 +61,6 @@ export function TariffPricesCell({ row: { series, version: shown, upcomingVersio
                         {hasPlannedPrices && (scheduled || comparable) && <span className="tariff-price-planned-heading">{t('pages.tariffs.workspace.from', { date: formatShortDate(planned.valid_from, settings) })}</span>}
                         {!scheduled && <span className="tariff-price-current-heading">
                             <span>{t('pages.tariffs.workspace.today')}</span>
-                            {currentHasEnd && <span className="tariff-current-validity">{t('pages.tariffs.validity.until', { date: formatShortDate(shown.valid_to!, settings) })}</span>}
                         </span>}
                     </span>
                     <span className="tariff-table-band-unit" />

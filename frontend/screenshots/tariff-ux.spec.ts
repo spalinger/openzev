@@ -160,10 +160,9 @@ for (const width of [1440, 400]) for (const missingBands of [true, false]) {
     await expect(page.locator('select[name="period_type"]')).toHaveValue(missingBands ? 'flat' : 'low')
     await expect(page.getByRole('button', { name: 'Save band', exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'Cancel', exact: true }).click()
-    if (width === 400) await expect(page.locator('.tariff-pane h2')).toBeFocused()
-    else await expect(page.locator('[data-action-key="repair-current"]')).toBeFocused()
+    await expect(page.locator('.tariff-summary-row.is-active .tariff-select')).toBeFocused()
     if (missingBands) {
-      const pane = page.locator('.tariff-pane')
+      const pane = page.locator('.tariff-pane, .tariff-split[data-pane="closed"] .tariff-summary-row.is-expanded')
       await expect(pane.getByRole('button', { name: 'Add prices', exact: true })).toHaveCount(1)
       await expect(pane.getByRole('button', { name: 'Add first price', exact: true })).toHaveCount(0)
       await pane.getByRole('button', { name: 'Add prices', exact: true }).click()
@@ -172,7 +171,7 @@ for (const width of [1440, 400]) for (const missingBands of [true, false]) {
   })
 }
 
-test('compact rows hide notes and keep scheduled versions in the detail table', async ({ page }) => {
+test('expanded rows retain overview notes and scheduled versions in the detail table', async ({ page }) => {
   await page.setViewportSize({ width: 1536, height: 900 })
   await mockApi(page)
   await page.addInitScript(() => localStorage.setItem('openzev.sidebarCollapsed', 'true'))
@@ -180,13 +179,14 @@ test('compact rows hide notes and keep scheduled versions in the detail table', 
   await page.goto('/tariffs')
   await page.getByRole('button', { name: current.name, exact: true }).click()
   const row = page.locator('#tariff-overview-current tr.is-selected')
-  await expect(row.locator('.tariff-table-notes')).toBeHidden()
+  await expect(row.locator('.tariff-table-notes')).toBeVisible()
   await expect(row.getByRole('button', { name: 'Change from 01.01.2027', exact: true })).toHaveCount(0)
   const identity = await row.locator('.tariff-table-tariff').boundingBox()
-  const prices = await row.locator('.tariff-table-bands').boundingBox()
-  expect(prices!.x).toBeGreaterThan(identity!.x + identity!.width)
+  const prices = await row.locator('.tariff-table-expanded').boundingBox()
+  expect(prices!.x).toBeGreaterThanOrEqual(identity!.x + identity!.width)
   // A warning, repair action and dated prices should fit without a tall empty block.
-  expect((await row.boundingBox())!.height).toBeLessThan(180)
+  await expect(row.locator('.tariff-select')).toHaveCount(1)
+  await expect(row.locator('table')).toHaveCount(0)
   await page.locator('.tariff-version-select').filter({ hasText: '01.01.2027' }).click()
   await expect(page).toHaveURL(/version=next/)
 })
@@ -230,7 +230,7 @@ for (const language of ['en', 'de', 'fr', 'it']) {
     await page.locator('.tariff-pane-form > .dialog-actions button[type="submit"]').click()
     await expect(page.locator('.is-shown .tariff-version-rate')).toHaveCount(6)
     expect(writes).toBe(1)
-    await expect(page.locator('.tariff-pane h2')).toBeFocused()
+    await expect(page.locator('.tariff-summary-row.is-active .tariff-select')).toBeFocused()
     await page.locator('[data-action-key="new-version"]').click()
     await expect(page.locator('.tariff-version-price-row')).toHaveCount(6)
     await expect(page.locator('.tariff-version-price-row').first()).toContainText('00:00–04:00')

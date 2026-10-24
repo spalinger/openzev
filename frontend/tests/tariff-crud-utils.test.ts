@@ -4,6 +4,14 @@ import { formatTariffError } from '../src/features/tariffs/errors'
 import type { Tariff } from '../src/types/api'
 
 describe('tariff errors', () => {
+  it.each(['time_from', 'time_to'])('translates a missing timed-band endpoint (%s)', field => {
+    const error = { isAxiosError: true, response: { data: {
+      [field]: ['A timed band needs both a start and an end time.'],
+    } } }
+    expect(formatTariffError(error, 'fallback', key => `translated:${key}`))
+      .toBe('translated:pages.tariffs.form.errorTimedBand')
+  })
+
   it.each(['1,2,3', '1,2,3,4,5,6,7,8,9,10,11,12'])('translates a flat/timed conflict for months %s', months => {
     const error = { isAxiosError: true, response: { data: {
       period_type: [`A flat band and a timed band cannot both apply in months ${months}: the flat price is used for every hour, so the timed bands would never apply. Give them different months, or make them all timed.`],

@@ -6,8 +6,6 @@ import { allowNavigation } from './useDraftGuard'
 import { listedVersion } from './validity'
 import { seriesKeyOf } from './useTariffDisplay'
 
-// Whole-workspace threshold; the list has its own 56rem card breakpoint (§4/§5.1).
-const SPLIT_MIN_REM = 62
 const PANE_STATE = { tariffPane: true }
 
 type Params = {
@@ -16,11 +14,11 @@ type Params = {
   scopeKey: string
   settled: boolean
   editor: string | null
-  onSelectionChange: (series: TariffSeries | null) => void
+  onSelectionChange: (versionId: string | null) => void
   onScopeChange: () => void
 }
 
-/** URL selection, one history step, and focus/scroll restoration for the pane. */
+/** One URL-linked expanded tariff and one guarded editing task. */
 export function useTariffPaneNavigation({ allSeries, today, scopeKey, settled, editor, onSelectionChange, onScopeChange }: Params) {
   const [params, setParams] = useSearchParams()
   const location = useLocation()
@@ -35,16 +33,14 @@ export function useTariffPaneNavigation({ allSeries, today, scopeKey, settled, e
     const version = openSeries.versions.find(version => version.id === shownVersionId) ?? listedVersion(openSeries.versions, today)
     return { seriesKey: seriesKeyOf(openSeries), versionId: version.id }
   }, [openSeries, shownVersionId, today])
-  const [splitRef, fitsTwoPanes] = useMinWidth<HTMLDivElement>(SPLIT_MIN_REM)
+  const [splitRef, fitsTwoPanes] = useMinWidth<HTMLDivElement>(62)
   const pageRef = useRef<HTMLDivElement>(null)
   const paneTitleRef = useRef<HTMLHeadingElement>(null)
   const bypassGuard = useRef(false)
   const pendingSelection = useRef<string | null>(null)
-  const listScroll = useRef<number | null>(null)
-  const returnSeries = useRef<string | null>(null)
   const returnAction = useRef<string | null>(null)
-  const focusTitle = useRef(false)
-  const paneOpen = openSeries !== null || editor === 'create'
+  const listScroll = useRef<number | null>(null)
+  const paneOpen = editor !== null
   const listHidden = paneOpen && !fitsTwoPanes
 
   function update(change: (next: URLSearchParams) => void, replace = true, state = location.state) {
@@ -56,37 +52,42 @@ export function useTariffPaneNavigation({ allSeries, today, scopeKey, settled, e
   }
 
   function select(series: Pick<TariffSeries, 'zev' | 'name'>, versionId: string) {
-    // A rapid second click can precede the first router commit: push only once.
     const fromList = !tariffParam && !pendingSelection.current
     pendingSelection.current = `${seriesKeyOf(series)}:${versionId}`
-    if (fromList && !fitsTwoPanes) listScroll.current = window.scrollY
-    focusTitle.current = true
     update(next => {
       next.set('tariff', seriesKeyOf(series))
       next.set('version', versionId)
     }, !fromList, !tariffParam ? PANE_STATE : location.state)
   }
 
-  function deselect() {
-    returnSeries.current = selected?.seriesKey ?? null
-    if (location.state?.tariffPane) allowNavigation(bypassGuard, () => navigate(-1))
-    else update(next => { next.delete('tariff'); next.delete('version') })
+  function collapse(series: TariffSeries) {
+    pageRef.current?.querySelector<HTMLElement>(`[data-series-key="${CSS.escape(seriesKeyOf(series))}"] .tariff-select`)?.focus()
+    if (selected?.seriesKey === seriesKeyOf(series)) {
+      if (location.state?.tariffPane) allowNavigation(bypassGuard, () => navigate(-1))
+      else update(next => { next.delete('tariff'); next.delete('version') })
+    }
   }
 
   const selectionChanged = useEffectEvent(onSelectionChange)
   const previousVersion = useRef(selected?.versionId)
+  const previousSeries = useRef(selected?.seriesKey)
   useLayoutEffect(() => { pendingSelection.current = null }, [tariffParam, shownVersionId])
   useLayoutEffect(() => {
-    if (previousVersion.current === selected?.versionId) return
+    const previous = previousVersion.current
+    const wasSeries = previousSeries.current
     previousVersion.current = selected?.versionId
-    focusTitle.current = Boolean(openSeries)
-    selectionChanged(openSeries)
-  }, [selected?.versionId, openSeries])
+    previousSeries.current = selected?.seriesKey
+    if (previous !== selected?.versionId) {
+      returnAction.current = null
+      selectionChanged(selected?.versionId ?? null)
+      if (selected && wasSeries !== selected.seriesKey) pageRef.current?.querySelector<HTMLElement>(`[data-series-key="${CSS.escape(selected.seriesKey)}"] .tariff-select`)?.focus()
+    }
+  }, [selected?.versionId, openSeries, selected])
 
   const resetScope = useEffectEvent(onScopeChange)
   const clearSelection = useEffectEvent(() => update(next => { next.delete('tariff'); next.delete('version') }))
   const previousScope = useRef(scopeKey)
-  useEffect(() => {
+  useLayoutEffect(() => {
     const previous = previousScope.current
     previousScope.current = scopeKey
     if (previous === scopeKey || previous.startsWith('|')) return
@@ -100,29 +101,22 @@ export function useTariffPaneNavigation({ allSeries, today, scopeKey, settled, e
   })
   useEffect(() => { normalize() }, [tariffParam, openSeries, settled])
 
-  const previousSeries = useRef(selected?.seriesKey)
   const previousEditor = useRef(editor)
   useLayoutEffect(() => {
     const wasEditing = previousEditor.current !== null
     previousEditor.current = editor
-    if (!paneOpen && previousSeries.current) returnSeries.current ??= previousSeries.current
-    previousSeries.current = selected?.seriesKey
-    if (paneOpen && focusTitle.current) {
-      focusTitle.current = false
+    if (editor !== null && !wasEditing) {
+      if (!fitsTwoPanes) listScroll.current = window.scrollY
+      // Forms with their own field focus keep it; the heading is the fallback.
+      if (!pageRef.current?.querySelector('.tariff-pane')?.contains(document.activeElement)) paneTitleRef.current?.focus()
+    } else if (editor === null && wasEditing) {
+      const detail = selected && pageRef.current?.querySelector<HTMLElement>(`[data-series-key="${CSS.escape(selected.seriesKey)}"]`)
+      const key = returnAction.current
+      const action = key && (detail?.querySelector<HTMLElement>(`[data-action-key="${CSS.escape(key)}"]`) || pageRef.current?.querySelector<HTMLElement>(`[data-action-key="${CSS.escape(key)}"]`))
       returnAction.current = null
-      paneTitleRef.current?.focus()
-    } else if (!paneOpen && returnSeries.current) {
-      const key = CSS.escape(returnSeries.current)
-      const row = pageRef.current?.querySelector<HTMLElement>(`[data-series-key="${key}"] .tariff-select`)
-      returnSeries.current = null
-      ;(row ?? pageRef.current?.querySelector<HTMLElement>('#tariff-overview-current'))?.focus()
-    } else if (editor === null && wasEditing && returnAction.current) {
-      const key = CSS.escape(returnAction.current)
-      returnAction.current = null
-      const action = pageRef.current?.querySelector<HTMLElement>(`[data-action-key="${key}"]`)
-      ;(action && !action.closest('[hidden]') ? action : paneTitleRef.current)?.focus()
+      ;(action || detail?.querySelector<HTMLElement>('.tariff-select') || pageRef.current?.querySelector<HTMLElement>('#tariff-overview-current'))?.focus()
     }
-  }, [paneOpen, selected?.seriesKey, selected?.versionId, editor])
+  }, [editor, fitsTwoPanes, selected])
 
   useLayoutEffect(() => {
     if (!listHidden && listScroll.current !== null) {
@@ -133,9 +127,9 @@ export function useTariffPaneNavigation({ allSeries, today, scopeKey, settled, e
 
   return {
     pageRef, splitRef, paneTitleRef, bypassGuard, openSeries, shownVersionId, selected, paneOpen, listHidden, fitsTwoPanes,
-    select, deselect,
+    select, collapse,
+    expandedVersion: (series: TariffSeries) => selected?.seriesKey === seriesKeyOf(series) ? selected.versionId : null,
     isSelecting: (series: Pick<TariffSeries, 'zev' | 'name'>, id: string) => pendingSelection.current === `${seriesKeyOf(series)}:${id}`,
-    editingFrom: (key: string) => { focusTitle.current = false; returnAction.current = key },
-    focusTitle: () => { focusTitle.current = true },
+    editingFrom: (key: string) => { returnAction.current = key },
   }
 }

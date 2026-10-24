@@ -675,7 +675,7 @@ price points; source identity fields are read-only after creation.
 Managers/admins discover and create sources from the energy-tariff form.
 Viewers read linked tariffs/history; existing-source maintenance is admin-only.
 
-`DynamicSourceSummary` in the tariff detail pane shows the linked source's
+`DynamicSourceSummary` in the expanded tariff detail shows the linked source's
 label, fetch status, disabled state, last success and user-safe fetch error
 up front, and the endpoint, protocol, component/product, stored range/point
 count and global linked-tariff/ZEV totals in a “Source details” disclosure. Its
@@ -758,10 +758,10 @@ positive coverage and maintenance-link permissions.
   price (`rateLines`); the dates are the summary's `reference_from` /
   `reference_to`, the window the average covers, which ends today and is not
   the version's validity shown in the Valid column;
-  the pane uses the same formatter in each validity row's price column and
+  the expanded detail uses the same formatter in each version block's price area and
   shows source details below the table. When the source's `last_fetch_status`
   is `failed`, the overview shows a danger warning icon beside the tariff
-  identity and the pane shows a "Price fetch failed" notice
+  identity and the expanded detail shows a "Price fetch failed" notice
   (`pages.tariffs.dynamicFetchFailed`), with the fetch error as its tooltip.
   Its representative number and percentage-of-grid display use the API's
   bounded summary; partial and unavailable data are labelled instead of shown
@@ -776,9 +776,9 @@ positive coverage and maintenance-link permissions.
 - **`types/api.ts`** — `DynamicTariffSource`, `DynamicTariffType`,
   `Tariff.dynamic_source` / `TariffInput.dynamic_source`,
   `VseTariffCandidate.dynamic_url`, `VseTariffImportResult.created[].dynamic`.
-- **`DynamicPriceHistoryPanel`** — embedded directly in the tariff pane with
+- **`DynamicPriceHistoryPanel`** — embedded directly in the expanded tariff detail with
   `compact`, and used by `DynamicPriceHistoryModal` for platform admin. The
-  tariff pane leads with date filters and a step chart of fetched interval
+  expanded tariff detail leads with date filters and a step chart of fetched interval
   prices, scoped to the selected version and applying its minimum price. Its
   initial request already uses `defaultHistoryDateRange`: last week for VSE,
   stored coverage for BFE, clipped to tariff validity. The compact panel omits

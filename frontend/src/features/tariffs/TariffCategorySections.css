@@ -1,12 +1,7 @@
-/* One row per series; details and write actions live in the detail pane. */
+/* One expandable row per series; expanded content spans the full sheet. */
 
 .tariff-list {
-  container-type: inline-size;
-}
-
-.tariff-split[data-pane='open'] .tariff-list {
-  --tariff-comparison-columns: 1;
-  --tariff-planned-display: none;
+  container: tariff-list / inline-size;
 }
 
 /* Fixed columns, so every category's table lines up under the one above. */
@@ -15,11 +10,11 @@
   table-layout: fixed;
 }
 
-.tariff-list .tariff-table td {
+.tariff-list .tariff-table > tbody > tr > td {
   vertical-align: top;
 }
 
-.tariff-table th:first-child {
+.tariff-table > thead th:first-child {
   width: 26%;
 }
 
@@ -39,20 +34,13 @@
   text-align: right;
 }
 
-.tariff-table tbody tr {
+.tariff-table > tbody > tr.tariff-summary-row {
   cursor: pointer;
 }
 
-.tariff-table tbody tr.is-selected > td,
-.tariff-table tbody tr:has(:focus-visible) > td {
+.tariff-table > tbody > tr.tariff-summary-row.is-selected > td,
+.tariff-table > tbody > tr.tariff-summary-row:has(:focus-visible) > td {
   background: var(--surface);
-}
-
-/* The series whose drawer is open — so it stays identifiable once you've
-   scrolled or the list re-sorts under you. */
-
-.tariff-table tbody tr.is-selected > td:first-child {
-  box-shadow: inset 3px 0 0 var(--brand-mid);
 }
 
 /* An ended version: the whole row a step greyer, ground and text alike, in
@@ -60,12 +48,12 @@
    text stays above 4.5:1 on that ground, where the muted grey would not; a
    problem pill keeps its own tone. */
 
-.tariff-table tbody tr.is-ended > td,
-.tariff-list .tariff-table tbody tr.is-ended {
+.tariff-table > tbody > tr.is-ended > td,
+.tariff-list .tariff-table > tbody > tr.is-ended {
   background: color-mix(in srgb, var(--status-neutral) 60%, var(--surface-card));
 }
 
-.tariff-table tbody tr.is-ended :is(.tariff-select, td, .tariff-table-meta, .tariff-table-notes) {
+.tariff-table > tbody > tr.is-ended :is(.tariff-select, td, .tariff-table-meta, .tariff-table-notes) {
   color: color-mix(in srgb, var(--text-body) 50%, var(--text-muted));
 }
 
@@ -253,7 +241,7 @@ td.tariff-table-valid {
 }
 
 .tariff-table-valid {
-  text-align: right;
+  text-align: left;
 }
 
 .tariff-table-valid strong {
@@ -277,7 +265,7 @@ td.tariff-table-valid {
   padding-inline-end: 0.875rem;
 }
 
-@container (max-width: 56rem) {
+@container tariff-list (max-width: 56rem) {
   .tariff-table {
     --tariff-comparison-columns: 1;
     --tariff-planned-display: none;
@@ -285,13 +273,13 @@ td.tariff-table-valid {
 
   /* Small card: identity and validity first, then one block per band. */
   .tariff-table,
-  .tariff-table thead,
-  .tariff-table thead tr,
-  .tariff-table tbody {
+  .tariff-table > thead,
+  .tariff-table > thead tr,
+  .tariff-table > tbody {
     display: block;
   }
 
-  .tariff-table thead th:first-child {
+  .tariff-table > thead th:first-child {
     display: block;
     width: auto;
   }
@@ -303,7 +291,7 @@ td.tariff-table-valid {
 
   /* The shared row table hides its header on cards; here the category
      names the group, so its cell stays. */
-  .invoice-rows.tariff-list .tariff-table thead {
+  .tariff-list .tariff-table > thead {
     position: static;
     width: auto;
     height: auto;
@@ -313,12 +301,12 @@ td.tariff-table-valid {
   }
 
   /* The band opens the sheet, as on the wide table. */
-  .table-card.invoice-rows.tariff-list > table:first-child {
+  .table-card.tariff-list > table:first-child {
     margin-top: calc(-1 * var(--sheet-pad-block));
   }
 
   /* Out of sight, not out of the accessibility tree. */
-  .tariff-table thead th:not(:first-child) {
+  .tariff-table > thead th:not(:first-child) {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -327,7 +315,7 @@ td.tariff-table-valid {
     white-space: nowrap;
   }
 
-  .tariff-list .tariff-table tbody tr {
+  .tariff-list .tariff-table > tbody > tr.tariff-summary-row {
     display: grid;
     grid-template:
       'tariff open' auto
@@ -339,12 +327,12 @@ td.tariff-table-valid {
     border-bottom: 1px solid var(--border-default);
   }
 
-  .tariff-list .tariff-table tbody tr:last-child {
+  .tariff-list .tariff-table > tbody > tr:last-child {
     border-bottom: 0;
   }
 
-  .tariff-list .tariff-table tbody td,
-  .tariff-list .tariff-table tbody tr.is-selected > td:first-child {
+  .tariff-list .tariff-table > tbody > tr > td,
+  .tariff-list .tariff-table > tbody > tr.tariff-summary-row.is-selected > td:first-child {
     width: auto;
     padding: 0;
     border: 0;
@@ -354,18 +342,14 @@ td.tariff-table-valid {
 
   /* The row is the card, so the row carries the ground; the cells are grid
      areas and would tint only their own text. */
-  .tariff-list .tariff-table tbody tr:hover > td {
+  .tariff-list .tariff-table > tbody > tr.tariff-summary-row:hover > td {
     background: transparent;
   }
 
-  .tariff-list .tariff-table tbody tr:hover,
-  .tariff-list .tariff-table tbody tr.is-selected,
-  .tariff-list .tariff-table tbody tr:has(:focus-visible) {
+  .tariff-list .tariff-table > tbody > tr.tariff-summary-row:hover,
+  .tariff-list .tariff-table > tbody > tr.tariff-summary-row.is-selected,
+  .tariff-list .tariff-table > tbody > tr.tariff-summary-row:has(:focus-visible) {
     background: var(--surface);
-  }
-
-  .tariff-list .tariff-table tbody tr.is-selected {
-    box-shadow: inset 3px 0 0 var(--brand-mid);
   }
 
   .tariff-table-tariff {
@@ -411,11 +395,11 @@ td.tariff-table-valid {
   }
 }
 
-@container (40rem < width <= 56rem) {
-  .tariff-list .tariff-table tbody tr {
+@container tariff-list (40rem < width <= 56rem) {
+  .tariff-list .tariff-table > tbody > tr.tariff-summary-row {
     grid-template:
       'tariff bands open' auto
-      'valid bands open' auto / minmax(12rem, 0.85fr) minmax(0, 1.4fr) 2.25rem;
+      'valid bands open' auto / minmax(12rem, 0.85fr) minmax(0, 1.4fr) 2.75rem;
     align-items: start;
     column-gap: 1rem;
   }
@@ -425,7 +409,7 @@ td.tariff-table-valid {
   }
 }
 
-@container (max-width: 28rem) {
+@container tariff-list (max-width: 28rem) {
   .tariff-table-band-price {
     display: grid;
     justify-items: end;
@@ -457,11 +441,7 @@ td.tariff-table-valid {
   text-decoration: underline;
 }
 
-.tariff-split[data-pane='open'] .tariff-table-notes {
-  display: none;
-}
-
-@container (max-width: 56rem) {
+@container tariff-list (max-width: 56rem) {
   .tariff-table-notes {
     display: none;
   }
@@ -474,4 +454,164 @@ td.tariff-table-valid {
 .tariff-current-validity {
   justify-self: end;
   white-space: nowrap;
+}
+
+/* Expansion enriches the existing tariff row; it never inserts a second row. */
+.tariff-table > tbody > tr.is-expanded {
+  height: auto;
+}
+
+.tariff-series-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+}
+
+.tariff-list .tariff-table > tbody > tr.is-expanded > td.tariff-table-expanded {
+  width: auto;
+  padding: 0;
+  cursor: default;
+}
+
+.tariff-expanded-heading,
+.tariff-expanded-body {
+  display: grid;
+  grid-template-columns: 26% minmax(0, 1fr);
+}
+
+.tariff-expanded-heading {
+  background: var(--brand-deep);
+  color: var(--white);
+}
+
+.tariff-expanded-title {
+  display: grid;
+  align-content: center;
+  gap: 0.125rem;
+  min-width: 0;
+  padding: 0.625rem var(--sheet-pad-inline);
+}
+
+.tariff-expanded-category {
+  color: var(--brand-accent);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+/* Retain the column widths and accessible labels, merging the first open row's bar. */
+.tariff-list .tariff-table > thead.tariff-table-heading-merged th {
+  position: static;
+  height: 0;
+  padding-block: 0;
+  border: 0;
+  line-height: 0;
+  background: transparent;
+}
+
+.tariff-table-heading-merged th::before {
+  display: none;
+}
+
+.tariff-table-heading-merged th > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.tariff-table:first-child:has(> .tariff-table-heading-merged) .tariff-expanded-heading {
+  border-start-start-radius: calc(var(--radius-lg) - 1px);
+  border-start-end-radius: calc(var(--radius-lg) - 1px);
+}
+
+.tariff-expanded-title .tariff-select {
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+
+.tariff-expanded-title .button,
+.tariff-expanded-close .button {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--white);
+}
+
+.tariff-expanded-title .button:hover,
+.tariff-expanded-close .button:hover {
+  background: var(--brand-mid);
+}
+
+.tariff-expanded-title .button:focus-visible,
+.tariff-expanded-close .button:focus-visible,
+.tariff-expanded-title .tariff-select:focus-visible {
+  outline-color: var(--brand-accent);
+}
+
+.tariff-expanded-pricing-head {
+  container-type: inline-size;
+  min-width: 0;
+}
+
+.tariff-expanded-close {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+  align-self: center;
+}
+
+.tariff-expanded-metadata {
+  min-width: 0;
+  padding: 0.875rem var(--sheet-pad-inline);
+}
+
+.tariff-expanded-content {
+  min-width: 0;
+  cursor: default;
+}
+
+@container tariff-list (max-width: 56rem) {
+  .tariff-expanded-heading,
+  .tariff-expanded-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tariff-list .tariff-table > tbody > tr.tariff-summary-row.is-expanded {
+    display: block;
+    padding: 0;
+  }
+
+  .tariff-list .tariff-table > tbody > tr.is-expanded > td.tariff-table-expanded {
+    display: block;
+    width: 100%;
+  }
+}
+
+.tariff-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.125rem;
+}
+
+/* Keep the open record on white paper; the header and chevron show its state. */
+.tariff-list .tariff-table > tbody > tr.tariff-summary-row.is-expanded,
+.tariff-list .tariff-table > tbody > tr.tariff-summary-row.is-expanded > td,
+.tariff-list .tariff-table > tbody > tr.tariff-summary-row.is-expanded:hover,
+.tariff-list .tariff-table > tbody > tr.tariff-summary-row.is-expanded:hover > td {
+  background: var(--surface-card);
+}
+
+.tariff-list .tariff-table > tbody > tr.tariff-summary-row.is-expanded .tariff-table-open {
+  vertical-align: top;
+}
+
+.tariff-future-icon {
+  flex-shrink: 0;
+  color: var(--brand-mid);
+  font-size: 0.8125rem;
 }

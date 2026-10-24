@@ -1,7 +1,5 @@
-/* ── Tariff list and pane ────────────────────────────────────────────────
-   Two columns when both fit; otherwise the pane takes the whole area and
-   the list steps aside (hidden, so out of the tab order too). The page
-   decides which layout applies (data-layout) from its measured width. */
+/* The list stays full-width for inspection. Only an editing task adds a
+   side column, or temporarily replaces the list when two columns cannot fit. */
 
 .tariff-split {
   display: grid;

@@ -278,6 +278,8 @@ describe('tariff list narrow markup', () => {
                     kind: 'current',
                     settings,
                     selected: null,
+                    expandedVersion: () => null,
+                    renderDetail: () => null,
                     onOpenDetail,
                     onCloseDetail: vi.fn(),
                 }),

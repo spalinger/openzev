@@ -1,6 +1,7 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCheck, faTriangleExclamation, faXmark } from '@fortawesome/free-solid-svg-icons'
 import dayjs from 'dayjs'
+import { TimePicker } from '@mantine/dates'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FormModalFooter } from '../../components/FormModalFooter'
@@ -106,6 +107,7 @@ export function TariffVersionForm({
   const usesPeriods = (series.billing_mode === 'energy' && !isDynamic) || isPercentage
   const usesFixedPrice = !usesPeriods && !isDynamic
   const usesMinimumPrice = isDynamic && series.energy_type === 'feed_in'
+  const hasIncompleteTimes = usesPeriods && periods.some(period => period.period_type !== 'flat' && (!period.time_from || !period.time_to))
 
   function buildPayload(): TariffVersionInput {
     const payload: TariffVersionInput = { valid_from: validFrom }
@@ -132,6 +134,7 @@ export function TariffVersionForm({
       onSubmitRename(source.id, name.trim())
       return
     }
+    if (hasIncompleteTimes) return
     if (kind === 'duplicate') {
       onSubmitDuplicate(source.id, { ...buildPayload(), name: name.trim() })
       return
@@ -148,6 +151,7 @@ export function TariffVersionForm({
     : null
   const endingDate = successor ? dayBefore(successor.valid_from) : null
   const submitDisabled = isPending
+    || (kind !== 'rename' && hasIncompleteTimes)
     || (kind === 'rename' && (!name.trim() || name.trim() === series.name))
     || (kind === 'duplicate' && (!name.trim() || !validFrom))
     || (kind === 'new-version' && !validFrom)
@@ -193,10 +197,17 @@ export function TariffVersionForm({
           </label>
         )}
 
-        {kind === 'new-version' && validFrom && (closingDate || endingDate) && (
+        {kind === 'new-version' && validFrom && endingDate && (
+          <label className="tariff-version-effective-date">
+            <span>{t('pages.tariffs.form.validTo')}</span>
+            <input value={formatShortDate(endingDate, settings)} readOnly aria-describedby={`${formId}-end-hint`} />
+            <small id={`${formId}-end-hint`} className="muted">{t('pages.tariffs.workspace.endAutomatic')}</small>
+          </label>
+        )}
+
+        {kind === 'new-version' && validFrom && closingDate && (
           <div className="tariff-change-preview">
-            {closingDate && <p>{t('pages.tariffs.versions.closesPrevious', { date: formatShortDate(closingDate, settings) })}</p>}
-            {endingDate && <p>{t('pages.tariffs.workspace.newEnds', { date: formatShortDate(endingDate, settings) })}</p>}
+            <p>{t('pages.tariffs.versions.closesPrevious', { date: formatShortDate(closingDate, settings) })}</p>
           </div>
         )}
 
@@ -239,45 +250,57 @@ export function TariffVersionForm({
             ) : (
               <div className="tariff-version-price-list">
                 {periods.map((period, index) => (
-                  <label key={`${period.period_type}-${index}`} className="tariff-version-price-row">
-                    <span>
-                      {bandName(period, t(`pages.tariffs.periodTypes.${period.period_type}` as Parameters<typeof t>[0], {
-                        defaultValue: period.period_type,
-                      }))}
-                    </span>
-                    {isPercentage ? (
-                      <>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={period.percentage}
-                          onChange={(event) => setPeriods((current) => current.map(
-                            (entry, entryIndex) => entryIndex === index
-                              ? { ...entry, percentage: event.target.value }
-                              : entry,
-                          ))}
-                          required
-                        />
-                        <span className="muted">%</span>
-                      </>
-                    ) : (
-                      <>
-                        <input
-                          type="number"
-                          step="0.00001"
-                          value={period.price_chf_per_kwh}
-                          onChange={(event) => setPeriods((current) => current.map(
-                            (entry, entryIndex) => entryIndex === index
-                              ? { ...entry, price_chf_per_kwh: event.target.value }
-                              : entry,
-                          ))}
-                          required
-                        />
-                        <span className="muted">{t('pages.tariffs.chfPerKwh')}</span>
-                      </>
-                    )}
-                  </label>
+                  <div key={`${period.period_type}-${index}`} className="tariff-version-band">
+                    <label className="tariff-version-price-row">
+                      <span>
+                        {bandName(period, t(`pages.tariffs.periodTypes.${period.period_type}` as Parameters<typeof t>[0], {
+                          defaultValue: period.period_type,
+                        }))}
+                      </span>
+                      {isPercentage ? (
+                        <>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={period.percentage}
+                            onChange={(event) => setPeriods((current) => current.map(
+                              (entry, entryIndex) => entryIndex === index
+                                ? { ...entry, percentage: event.target.value }
+                                : entry,
+                            ))}
+                            required
+                          />
+                          <span className="muted">%</span>
+                        </>
+                      ) : (
+                        <>
+                          <input
+                            type="number"
+                            step="0.00001"
+                            value={period.price_chf_per_kwh}
+                            onChange={(event) => setPeriods((current) => current.map(
+                              (entry, entryIndex) => entryIndex === index
+                                ? { ...entry, price_chf_per_kwh: event.target.value }
+                                : entry,
+                            ))}
+                            required
+                          />
+                          <span className="muted">{t('pages.tariffs.chfPerKwh')}</span>
+                        </>
+                      )}
+                    </label>
+                    {period.period_type !== 'flat' && <div className="tariff-time-row">
+                      {(['time_from', 'time_to'] as const).map(field => {
+                        const label = t(field === 'time_from' ? 'pages.tariffs.form.timeFrom' : 'pages.tariffs.form.timeTo')
+                        return <TimePicker key={field} label={label} format="24h" value={period[field] || ''} disabled={isPending} required
+                          error={!period[field] ? t('pages.tariffs.form.errorRequired') : undefined}
+                          onChange={next => setPeriods(current => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, [field]: next || null } : entry))}
+                          hoursInputLabel={`${t('pages.tariffs.bandEntry.band', { number: index + 1 })} ${label}: ${t('pages.tariffs.form.hours')}`}
+                          minutesInputLabel={`${t('pages.tariffs.bandEntry.band', { number: index + 1 })} ${label}: ${t('pages.tariffs.form.minutes')}`} />
+                      })}
+                    </div>}
+                  </div>
                 ))}
               </div>
             )}

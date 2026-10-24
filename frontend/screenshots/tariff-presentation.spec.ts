@@ -27,7 +27,7 @@ async function tariffs(page: Page, series: TariffSeries[]) {
   await page.route('**/api/v1/tariffs/tariffs/series/**', route => route.fulfill({ json: series }))
 }
 
-test('next-price controls open the scheduled version and hide in split view', async ({ page }) => {
+test('next-price controls select scheduled versions within the expanded row', async ({ page }) => {
   await tariffs(page, [grid])
   await page.goto('/tariffs')
   const overview = page.locator('#tariff-overview-current')
@@ -40,17 +40,17 @@ test('next-price controls open the scheduled version and hide in split view', as
     await overview.locator('.tariff-upcoming-price:visible').focus()
     await page.keyboard.press(key)
     await expect(page).toHaveURL(/version=next/)
-    await expect(overview.locator('tr.is-selected .tariff-upcoming-price')).toBeHidden()
+    await expect(overview.locator('tr.is-selected .tariff-upcoming-price')).toHaveCount(0)
     await expect(page.locator('.tariff-version-row.is-shown')).toContainText('0.315')
     await expect(page.locator('.tariff-version-row.is-shown .tariff-version-status')).toHaveText('Upcoming')
     await page.locator('.tariff-version-select').filter({ hasText: '01.01.2028' }).click()
     await expect(page).toHaveURL(/version=later/)
     await expect(overview.locator('tr.is-selected')).toHaveCount(1)
-    await overview.locator('.tariff-select').click()
+    await page.locator('.tariff-version-select').filter({ hasText: '01.01.2026' }).click()
     await expect(page).toHaveURL(/version=current/)
     await expect(page.locator('.tariff-version-row.is-shown')).toContainText('0.295')
-    await page.locator('.tariff-pane header').getByRole('button', { name: 'Close', exact: true }).click()
-    await expect(page.locator('.tariff-pane')).toBeHidden()
+    await page.locator('.tariff-table-open button').click()
+    await expect(page.locator('.tariff-pane, .tariff-split[data-pane="closed"] .tariff-summary-row.is-expanded')).toBeHidden()
   }
 })
 
@@ -63,8 +63,8 @@ test('future-only tariffs keep their sole price in compact and split views', asy
     await expect(page.locator('.tariff-upcoming-price')).toHaveText('0.315')
     if (width === 1440) {
       await page.locator('.tariff-select').click()
-      await expect(page.locator('.tariff-pane')).toBeVisible()
-      await expect(page.locator('.tariff-upcoming-price')).toBeVisible()
+      await expect(page.locator('.tariff-pane, .tariff-split[data-pane="closed"] .tariff-summary-row.is-expanded')).toBeVisible()
+      await expect(page.locator('.tariff-version-amount strong')).toHaveText('0.315')
     }
   }
 })
@@ -96,8 +96,8 @@ for (const width of [1440, 400]) {
     await page.locator('.tariff-select').click()
     await expect(page).toHaveURL(/version=current/)
     if (width === 1440) {
-      await expect(page.locator('.tariff-table-band-price:visible').first()).toBeVisible()
-      await expect(tag).toBeHidden()
+      await expect(page.locator('.tariff-version-amount').first()).toBeVisible()
+      await expect(tag).toHaveCount(0)
     }
     await expect(page.locator('.tariff-version-table')).not.toContainText('dynamische Netznutzung')
 
@@ -118,13 +118,13 @@ test('a missing future band keeps current prices readable', async ({ page }) => 
     await page.goto('/tariffs')
     if (width === 1280) {
       await page.locator('.tariff-select').click()
-      await expect(page.locator('.tariff-pane')).toBeVisible()
+      await expect(page.locator('.tariff-pane, .tariff-split[data-pane="closed"] .tariff-summary-row.is-expanded')).toBeVisible()
     }
-    const bands = page.locator('td.tariff-table-bands:visible .tariff-table-band:not(.tariff-price-headings)')
+    const bands = page.locator('td.tariff-table-bands:visible .tariff-table-band:not(.tariff-price-headings), .tariff-version-row.is-shown .tariff-version-rate')
     await expect(bands).toHaveCount(2)
     for (const band of await bands.all()) {
-      await expect(band.locator('.tariff-table-band-applies')).toHaveCSS('white-space', 'normal')
-      expect(await band.locator('.tariff-table-band-applies').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+      await expect(band.locator('.tariff-table-band-applies, .tariff-version-applies')).toHaveCSS('white-space', 'normal')
+      expect(await band.locator('.tariff-table-band-applies, .tariff-version-applies').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   }
@@ -137,9 +137,9 @@ test('active clicks and a bare link use the current version despite a stale acti
   await expect(page.locator('.tariff-pane .info-banner')).toHaveCount(0)
   await expect(page.locator('.tariff-version-row').first()).toContainText('01.01.2028')
   await expect(page.locator('.tariff-version-row').last()).toContainText('01.01.2026')
-  await expect(page.locator('.tariff-pane-header')).toHaveCSS('background-color', 'rgb(13, 43, 29)')
-  await expect(page.locator('.tariff-pane-heading h2')).toHaveCSS('color', 'rgb(255, 255, 255)')
-  await page.locator('.tariff-pane header').getByRole('button', { name: 'Close', exact: true }).click()
+  await expect(page.locator('.tariff-pane')).toHaveCount(0)
+  await expect(page.locator('.tariff-summary-row.is-active .tariff-select')).toHaveCSS('color', 'rgb(15, 23, 42)')
+  await page.locator('.tariff-table-open button').click()
   await page.locator('#tariff-overview-current .tariff-select').click()
   await expect(page).toHaveURL(/version=current/)
   await expect(page.locator('.tariff-version-row.is-shown')).toContainText('0.295')
@@ -155,11 +155,11 @@ for (const width of [1440, 400]) {
     ] }
     await tariffs(page, [{ ...grid, versions: [next, seasonal, past] }])
     await page.goto('/tariffs?tariff=42%3AGrid&version=current')
-    const pane = page.locator('.tariff-pane')
+    const pane = page.locator('.tariff-pane, .tariff-split[data-pane="closed"] .tariff-summary-row.is-expanded')
     await expect(pane.locator('.is-shown .tariff-version-applies').first()).toContainText('07:00–21:00')
     await expect(pane.locator('.is-shown .tariff-version-applies').last()).toContainText('time window not configured')
     await expect(pane.locator('.is-shown .tariff-version-amount strong').first()).toHaveText('0.295')
-    await expect(pane.locator('.tariff-version-table thead th').first()).toHaveCSS('color', 'rgb(255, 255, 255)')
+    await expect(page.locator('.tariff-table > thead th').first()).toHaveCSS('color', 'rgb(255, 255, 255)')
 
     const pastVersion = pane.locator('.tariff-version-select').filter({ hasText: '01.01.2025' })
     await expect(pastVersion).toBeVisible()
@@ -172,7 +172,7 @@ for (const width of [1440, 400]) {
     await expect(pastVersion).toHaveAttribute('aria-pressed', 'true')
     await pane.locator('.tariff-version-select').filter({ hasText: '01.01.2026' }).click()
     await expect(page).toHaveURL(/version=current/)
-    await expect(pane.locator('h2')).toBeFocused()
+    await expect(pane.locator('h2, .tariff-select')).toBeFocused()
 
     const actions = pane.getByRole('button', { name: 'Actions', exact: true })
     for (const action of ['Duplicate']) {
@@ -206,7 +206,7 @@ for (const width of [1440, 400]) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     await pastVersion.click()
     await expect(pastVersion).toHaveAttribute('aria-pressed', 'true')
-    await (width === 400 ? pane.locator('.tariff-pane-back') : pane.getByRole('button', { name: 'Close', exact: true })).click()
+    await page.locator('.tariff-table-open button').click()
     await expect(page.getByRole('button', { name: 'Grid', exact: true })).toBeFocused()
   })
 }
@@ -264,7 +264,7 @@ test('dynamic fetched prices are the visible history and source maintenance stay
     } })
   })
   await page.goto('/tariffs?tariff=42%3AGrid&version=current')
-  const pane = page.locator('.tariff-pane')
+  const pane = page.locator('.tariff-pane, .tariff-split[data-pane="closed"] .tariff-summary-row.is-expanded')
   await expect(pane.locator('.tariff-dynamic-chart')).toBeVisible()
   await expect(pane.locator('.tariff-source-section .warning-banner')).toHaveCount(0)
   await expect(pane.locator('.tariff-chart-section .warning-banner')).toBeVisible()
@@ -299,7 +299,7 @@ test('dynamic fetched prices are the visible history and source maintenance stay
 test('notes have room for multiple lines and fixed source fields are plain values', async ({ page }) => {
   await tariffs(page, [grid])
   await page.goto('/tariffs?tariff=42%3AGrid&version=current')
-  const pane = page.locator('.tariff-pane')
+  const pane = page.locator('.tariff-pane, .tariff-split[data-pane="closed"] .tariff-summary-row.is-expanded')
   await expect(pane.locator('.tariff-version-row.is-shown .tariff-version-status')).toHaveText('Current')
   await pane.locator('[data-action-key="edit-current"]').click()
   const notes = pane.locator('textarea[name="notes"]')
@@ -313,22 +313,22 @@ test('notes have room for multiple lines and fixed source fields are plain value
   await expect(notes).toHaveValue('First line\nSecond line')
 })
 
-test('tariff rows toggle closed and the selected arrow points left', async ({ page }) => {
+test('tariff rows toggle closed and the expanded chevron points up', async ({ page }) => {
   await tariffs(page, [grid])
   await page.goto('/tariffs')
-  const row = page.locator('#tariff-overview-current tbody tr')
+  const row = page.locator('#tariff-overview-current .tariff-summary-row')
   for (const target of [row.locator('.tariff-select'), row.locator('.tariff-table-open button'), row.locator('td.tariff-table-tariff')]) {
     await row.locator('.tariff-select').click()
-    await expect(page.locator('.tariff-pane')).toBeVisible()
-    await expect(row.locator('.tariff-table-open svg')).toHaveAttribute('data-icon', 'chevron-left')
+    await expect(page.locator('.tariff-pane, .tariff-split[data-pane="closed"] .tariff-summary-row.is-expanded')).toBeVisible()
+    await expect(row.locator('.tariff-table-open svg')).toHaveAttribute('data-icon', 'chevron-up')
     await target.click()
-    await expect(page.locator('.tariff-pane')).toHaveCount(0)
-    await expect(row.locator('.tariff-table-open svg')).toHaveAttribute('data-icon', 'chevron-right')
+    await expect(page.locator('.tariff-pane, .tariff-split[data-pane="closed"] .tariff-summary-row.is-expanded')).toHaveCount(0)
+    await expect(row.locator('.tariff-table-open svg')).toHaveAttribute('data-icon', 'chevron-down')
   }
   await row.locator('.tariff-upcoming-price').click()
   await expect(page).toHaveURL(/version=next/)
   await row.locator('.tariff-table-open button').click()
-  await expect(page.locator('.tariff-pane')).toHaveCount(0)
+  await expect(page.locator('.tariff-pane, .tariff-split[data-pane="closed"] .tariff-summary-row.is-expanded')).toHaveCount(0)
 })
 
 for (const language of ['en', 'de', 'fr', 'it']) {
@@ -398,7 +398,7 @@ for (const width of [1440, 400]) {
     await page.route('**/api/v1/tariffs/periods/', route => { separateBandWrites++; return route.fulfill({ status: 500, json: {} }) })
     await page.goto('/tariffs')
     await page.locator('.page-header').getByRole('button', { name: 'New Tariff', exact: true }).click()
-    const pane = page.locator('.tariff-pane')
+    const pane = page.locator('.tariff-pane, .tariff-split[data-pane="closed"] .tariff-summary-row.is-expanded')
     await pane.locator('input[name="name"]').fill('New energy')
     await pane.getByRole('combobox', { name: 'Initial price bands', exact: true }).selectOption('htnt')
     const bands = pane.locator('.tariff-band-draft')
@@ -406,7 +406,7 @@ for (const width of [1440, 400]) {
     await bands.nth(1).getByRole('spinbutton', { name: 'CHF/kWh', exact: true }).fill('0.18')
     await expect(pane.locator('.tariff-band-coverage')).toContainText('covers all weekdays and months')
     await pane.getByRole('button', { name: 'Create Tariff', exact: true }).click()
-    await expect(pane.locator('h2')).toHaveText('New energy')
+    await expect(pane.locator('h2, .tariff-select')).toHaveText('New energy')
     await expect(pane.locator('.is-shown .tariff-version-amount strong')).toHaveText(['0.250', '0.180'])
     await expect(pane).not.toContainText('No prices configured')
     expect(writes).toBe(1)
@@ -419,7 +419,7 @@ test('community switching preserves a tariff draft until discard is confirmed', 
   await mockApi(page, { zevs: [{ id: '42', name: 'North' }, { id: '43', name: 'South' }] })
   await page.route('**/api/v1/tariffs/tariffs/series/**', route => route.fulfill({ json: new URL(route.request().url()).searchParams.get('zev_id') === '42' ? [grid] : [] }))
   await page.goto('/tariffs?tariff=42%3AGrid&version=current')
-  const pane = page.locator('.tariff-pane')
+  const pane = page.locator('.tariff-pane, .tariff-split[data-pane="closed"] .tariff-summary-row.is-expanded')
   await pane.locator('.tariff-version-row.is-shown .tariff-version-validity').getByRole('button', { name: 'Edit version', exact: true }).click()
   await pane.locator('textarea[name="notes"]').fill('Unsaved correction')
   await page.locator('.community-switch').click()
@@ -466,7 +466,7 @@ for (const width of [1440, 400]) {
     ] }))
     await page.goto('/tariffs')
     await page.locator('.page-header').getByRole('button', { name: 'New Tariff', exact: true }).click()
-    const pane = page.locator('.tariff-pane')
+    const pane = page.locator('.tariff-pane, .tariff-split[data-pane="closed"] .tariff-summary-row.is-expanded')
     const form = pane.locator('.tariff-configuration-form')
     await form.locator('input[name="name"]').fill('My tariff draft')
     const energyType = form.locator('select[name="energy_type"]')
@@ -531,19 +531,20 @@ for (const width of [1440, 400]) {
     await tariffs(page, [{ ...grid, versions: [{ ...current, notes: 'Comment about this tariff version' }] }])
     await page.addInitScript(() => localStorage.setItem('openzev.language', 'de'))
     await page.goto('/tariffs?tariff=42%3AGrid&version=current')
-    const pane = page.locator('.tariff-pane')
+    const pane = page.locator('.tariff-pane, .tariff-split[data-pane="closed"] .tariff-summary-row.is-expanded')
     const correct = pane.locator('.tariff-version-row.is-shown .tariff-version-validity').getByRole('button', { name: 'Version bearbeiten', exact: true })
     await expect(correct).toBeVisible()
     await expect(correct).toHaveAttribute('title', 'Version bearbeiten')
     await expect(correct).toHaveText('')
     await expect(correct.locator('svg[data-icon="pen"]')).toBeVisible()
     await expect(pane.locator('.tariff-version-section > [data-action-key="new-version"]')).toBeVisible()
-    const comment = (await pane.locator('.tariff-pane-header .tariff-version-card-notes').boundingBox())!
+    const comment = (await pane.locator('.tariff-table-notes').boundingBox())!
     const prices = (await pane.locator('.tariff-version-section').boundingBox())!
     const table = (await pane.locator('.is-shown .tariff-version-rate').last().boundingBox())!
     const add = pane.locator('.tariff-version-row.is-shown [data-action-key="add-period-current"]')
     const addBox = (await add.boundingBox())!
-    expect(comment.y + comment.height).toBeLessThanOrEqual(prices.y)
+    if (width === 400) expect(comment.y + comment.height).toBeLessThanOrEqual(prices.y)
+    else expect(comment.x + comment.width).toBeLessThanOrEqual(prices.x)
     expect(table.y + table.height).toBeLessThanOrEqual(addBox.y)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     await page.screenshot({ path: testInfo.outputPath(`tariff-actions-${width}.png`), fullPage: true })
@@ -586,9 +587,9 @@ for (const width of [1440, 400]) {
     }))
     await tariffs(page, [{ ...grid, versions, version_count: 7, active_version_id: 'version-6' }])
     await page.goto('/tariffs?tariff=42%3AGrid&version=version-6')
-    const pane = page.locator('.tariff-pane')
-    await expect(pane.locator('.tariff-pane-header .badge')).toHaveCount(0)
-    await expect(pane.locator('.tariff-pane-body > section').first()).toHaveClass('tariff-version-section')
+    const pane = page.locator('.tariff-pane, .tariff-split[data-pane="closed"] .tariff-summary-row.is-expanded')
+    await expect(pane.locator('.tariff-version-row .badge')).toHaveCount(0)
+    await expect(pane.locator('.tariff-detail > section').first()).toHaveClass('tariff-version-section')
     await expect(pane.locator('.tariff-version-row.is-shown .tariff-version-validity [data-action-key="edit-version-6"]')).toBeVisible()
     const list = pane.locator('.tariff-version-list')
     await expect(list.locator('.tariff-version-row')).toHaveCount(7)

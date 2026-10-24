@@ -34,7 +34,7 @@ afterEach(() => cleanups.splice(0).forEach((cleanup) => cleanup()))
 
 async function list(selected: { seriesKey: string, versionId: string } | null = null, onlyPast = false) {
     const groups = tariffOverview([onlyPast ? ({ ...series, versions: [past] } as TariffSeries) : series], TODAY)
-    const { container } = await renderWithProviders(createElement(TariffOverview, { groups, settings, selected, onOpenDetail: vi.fn(), onCloseDetail: vi.fn() }), cleanups)
+    const { container } = await renderWithProviders(createElement(TariffOverview, { groups, settings, selected, expandedVersion: () => selected?.versionId ?? null, renderDetail: () => createElement('p', null, 'Inline details'), onOpenDetail: vi.fn(), onCloseDetail: vi.fn() }), cleanups)
     return container
 }
 
@@ -100,21 +100,22 @@ describe('TariffVersionForm', () => {
 })
 
 
-it('toggles the selected tariff closed and dates future prices visibly', async () => {
+it('expands and closes the original row without duplicating its summary', async () => {
     const onOpenDetail = vi.fn()
     const onCloseDetail = vi.fn()
     const { container } = await renderWithProviders(createElement(TariffOverview, {
-        groups: tariffOverview([series], TODAY), settings, selected: { seriesKey: 'z:Grid', versionId: 'current' }, onOpenDetail, onCloseDetail,
+        groups: tariffOverview([series], TODAY), settings, selected: { seriesKey: 'z:Grid', versionId: 'current' }, expandedVersion: () => 'current', renderDetail: () => createElement('p', null, 'Inline details'), onOpenDetail, onCloseDetail,
     }), cleanups)
     await act(async () => container.querySelector<HTMLButtonElement>('.tariff-select')!.click())
-    expect(onCloseDetail).toHaveBeenCalledOnce()
-    expect(container.querySelector('.tariff-table-open svg')?.getAttribute('data-icon')).toBe('chevron-left')
-    expect(container.querySelector('.tariff-price-headings')?.textContent).toContain('pages.tariffs.workspace.today')
-    const comparison = container.querySelector('.tariff-table-band:not(.tariff-price-headings) .tariff-price-comparison')!
-    expect(comparison.firstElementChild?.className).toBe('tariff-upcoming-price')
-    expect(comparison.lastElementChild?.className).toBe('tariff-price-current')
-    await act(async () => container.querySelector<HTMLButtonElement>('.tariff-upcoming-price')!.click())
-    expect(onOpenDetail).toHaveBeenLastCalledWith(series, 'next')
+    expect(onCloseDetail).toHaveBeenCalledWith(series)
+    expect(container.querySelector('.tariff-expanded-close svg')?.getAttribute('data-icon')).toBe('chevron-up')
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(1)
+    expect(container.querySelectorAll('.tariff-select')).toHaveLength(1)
+    expect(container.querySelectorAll('table')).toHaveLength(1)
+    expect(container.querySelector('.tariff-expanded-content')?.textContent).toBe('Inline details')
+    expect(container.querySelector('thead')?.classList.contains('tariff-table-heading-merged')).toBe(true)
+    expect(container.querySelector('.tariff-expanded-category')?.textContent).toBe('pages.tariffs.categories.grid_fees')
+    expect(container.querySelector('.tariff-upcoming-price')).toBeNull()
 })
 
 it('previews the actual predecessor and successor when scheduling from a past version', async () => {
@@ -124,8 +125,32 @@ it('previews the actual predecessor and successor when scheduling from a past ve
         onCancel: vi.fn(), onDirtyChange: vi.fn(), onSubmitNewVersion: vi.fn(), onSubmitDuplicate: vi.fn(), onSubmitRename: vi.fn(),
     }), cleanups)
     expect(container.querySelector('.tariff-change-preview')?.textContent).toContain('pages.tariffs.versions.closesPrevious: 31.12.2026')
-    expect(container.querySelector('.tariff-change-preview')?.textContent).toContain('pages.tariffs.workspace.newEnds: 31.12.2027')
+    expect(container.querySelector<HTMLInputElement>('input[readonly]')?.value).toBe('31.12.2027')
+    expect(container.textContent).toContain('pages.tariffs.workspace.endAutomatic')
     expect(container.textContent).not.toContain('pages.tariffs.workspace.newStarts')
     expect(container.textContent).not.toContain('pages.tariffs.versions.resultingPrices')
     expect(container.querySelector('button[type="submit"]')?.textContent).toContain('pages.tariffs.workspace.scheduleChange')
+})
+
+it.each([true, false])('offers copied band times and blocks incomplete windows when filling a one-day gap (incomplete: %s)', async incomplete => {
+    const source: TariffVersion = { ...current, billing_mode: 'energy', energy_type: 'grid', valid_from: '2026-01-01', valid_to: '2026-06-29', periods: [{
+        id: 'ht', tariff: current.id, period_type: 'high', label: 'HT', price_chf_per_kwh: '0.3', percentage: null,
+        time_from: incomplete ? null : '07:00', time_to: incomplete ? null : '21:00', weekdays: '0,1,2,3,4', months: '6',
+    }] }
+    const owner: TariffSeries = { ...series, billing_mode: 'energy', energy_type: 'grid', versions: [source, { ...source, id: 'july', valid_from: '2026-07-01', valid_to: null }] }
+    const onSubmitNewVersion = vi.fn()
+    const { container } = await renderWithProviders(createElement(TariffVersionForm, {
+        dialog: { kind: 'new-version', series: owner, source, validFrom: '2026-06-30' }, settings, isPending: false,
+        onCancel: vi.fn(), onDirtyChange: vi.fn(), onSubmitNewVersion, onSubmitDuplicate: vi.fn(), onSubmitRename: vi.fn(),
+    }), cleanups)
+    expect(container.querySelector<HTMLInputElement>('input[readonly]')?.value).toBe('30.06.2026')
+    expect(container.querySelectorAll('.tariff-time-row')).toHaveLength(1)
+    expect(container.querySelector('.tariff-time-row')?.textContent).toContain('pages.tariffs.form.timeFrom')
+    expect(container.querySelector('.tariff-time-row')?.textContent).toContain('pages.tariffs.form.timeTo')
+    expect(container.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(incomplete)
+    await act(async () => { container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) })
+    if (incomplete) expect(onSubmitNewVersion).not.toHaveBeenCalled()
+    else expect(onSubmitNewVersion).toHaveBeenCalledWith(source.id, expect.objectContaining({ valid_from: '2026-06-30', periods: [expect.objectContaining({
+        time_from: '07:00', time_to: '21:00', weekdays: '0,1,2,3,4', months: '6', label: 'HT',
+    })] }))
 })

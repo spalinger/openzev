@@ -1,4 +1,4 @@
-# Feature Spec: Tariff split view (pilot for the detail pane)
+# Feature Spec: Expandable tariff rows and secondary task pane
 
 - Spec ID: SPEC-2026-10-tariff-split-view
 - Status: Implemented, pending review (pilot acceptance and ADR 0040 are not yet signed off)
@@ -14,18 +14,12 @@
 
 ---
 
-This describes the tariff screen as implemented for phase 1 of the UI patterns
-rollout. The overview hierarchy and the in-flow pane **replaced** the Valid /
-Upcoming / All tabs and the overlay detail drawer (SPEC-2026-08 §15.3); the
-baseline specs and the user guide were updated with the implementation (§9).
-No backend behaviour changes. §1 records the observations the change started
-from (commit `ecb0c962`); §11 records what the pilot decided.
-
-The detail-pane contract (reserved layout, viewing and editing modes, narrow
-behaviour, dirty guard, semantics) lives in the reference spec §6.2; this spec
-applies it to tariffs and records what is specific to them. The tariff screen
-is deliberately the first adopter: it validates the pattern on a hard case
-before the rest of the app follows.
+Tariff details expand inside their category table, within the existing tariff
+row, on desktop and narrow screens. The former viewing sidebar has been removed;
+only focused creation/editing tasks use the in-flow side pane. This supersedes
+the tariff pilot's original list-and-detail layout and is an explicit exception
+to the proposed reference-spec §5/§6.2 viewing-pane rule. Billing, API shapes,
+permissions and the forms' validation semantics are unchanged.
 
 ## 1. Problem and outcome
 
@@ -38,8 +32,8 @@ before the rest of the app follows.
 | Tariff forms have no dirty-close guard; save errors are toasts or a shared banner; submit disables but fields stay editable | The reference spec §6.1 and §8.2 apply. |
 | Participants and invoices share `.table-card.invoice-rows` and container-query reflow | The narrowed tariff list can reuse them. |
 
-Outcome: a tariff is opened beside its list, inspected and edited in the same
-place, and the list never disappears behind it.
+Outcome: tariffs are inspected in expandable table rows; a secondary task pane
+opens only for an explicit create/edit action. Only one tariff can be expanded at a time.
 
 ## 2. Scope
 
@@ -48,7 +42,7 @@ place, and the list never disappears behind it.
 | Area | Details |
 |---|---|
 | Overview | Current and upcoming prices together, Ended tariffs; plain validity dates; table treatment (§4) |
-| Pane | Viewing and editing in one pane; narrow behaviour; navigation (§5) |
+| Containers | Inline tariff details; secondary task pane; narrow behaviour and navigation (§5) |
 | Editing | Create, edit, rename, schedule a price change, periods (§6) |
 | Labels | Counts and badges on the tariff screen (§4) |
 
@@ -62,8 +56,8 @@ place, and the list never disappears behind it.
 ## 3. Actors, permissions, and ZEV scope
 
 Unchanged. A viewer reads only: no Edit, version, rename, duplicate, delete or
-band controls (#761), but the same pane and the same warnings. Scope and access
-changes clear the selection, the pane and any draft immediately; an obsolete
+band controls (#761), but the same inline details and warnings. Scope and access
+changes clear the selection, expanded rows, task pane and any draft immediately; an obsolete
 completion must not select or reopen anything (`useWriteScope`, reference spec §3).
 
 ## 4. Overview
@@ -78,25 +72,28 @@ completion must not select or reopen anything (`useWriteScope`, reference spec �
   This replaces the `FilterTabs` Valid / Upcoming / All view (`TariffListView`).
 - Each series appears once, using the version valid today or the nearest future
   version if none is active. Planned prices sit on the left under from-date;
-  current prices sit on the right under Today. An active version’s end date is
-  shown below Today and above its prices, including without a planned change,
-  and omitted from the separate validity cell. Planned prices are directly
+  current prices sit on the right under Today. The version’s validity stays
+  in the date-range column on the left; an end date is not repeated above prices. Planned prices are directly
   selectable, with quiet backgrounds. The extra planned column and changed-schedule
-  control are hidden whenever the detail pane is open or the list is at most
-  56rem wide; current prices use a single column without reserved comparison
+  control are hidden whenever the list is at most 56rem wide; current prices use a single column without reserved comparison
   space. Future-only tariffs retain their sole price. Scheduled versions remain
-  accessible in the detail pane. Versions without prices have no planned
+  accessible in the expanded row. Versions without prices have no planned
   price control. Matching applicability and units, in the same order, allow
   aligned band comparisons; otherwise an explicit prices/schedule-change action
   opens the future configuration. This avoids implying a band match. Ended
-  tariffs contains only series without current or scheduled versions. Earlier
-  versions of active/upcoming series live only in the pane. The right arrow, name and row open the detail. The selected series’ arrow turns
-  left and always closes it; clicking the name or row again closes it when that
-  displayed version is already selected.
+  tariffs contains only series without current or scheduled versions. Earlier versions of active/upcoming series live in the expanded row. The
+  downward chevron, name and row expand the tariff; the upward chevron, name
+  and row collapse it regardless of which version is shown. Independent action
+  buttons and selected text do not toggle the row. Opening another tariff closes the previous expansion. Each tariff remains exactly one `tr`. Expanding replaces its compact
+  cells with one `td colSpan={6}` containing the tariff title and aligned version
+  blocks spanning the full sheet width, with a stable `aria-controls`
+  target and a labelled validity region. No second tariff row, heading, nested
+  price table or repeated summary is rendered. No sidebar opens for
+  inspection or version selection.
 
 - Opening a tariff selects the version valid today, without changing the
-  version table’s newest-first chronological order. An explicitly selected past
-  or future version stays selected and is clearly identified. The version table stays visible; price charts appear only with changing prices;
+  version blocks’ newest-first chronological order. An explicitly selected past
+  or future version stays selected and is clearly identified. The version blocks stay visible; price charts appear only with changing prices;
   technical source details and fetched interval records remain on demand.
   Important warnings stay visible.
 - Historical rows are grey but readable, with explicit historical context. They
@@ -115,68 +112,86 @@ completion must not select or reopen anything (`useWriteScope`, reference spec �
 - Tooltips explain ambiguous or truncated information but are supplementary:
   essential meaning is available on touch, and explanatory interactions also
   work with the keyboard.
-- Rows have a named, keyboard-accessible control that opens the pane (the name
+- Rows have a named, keyboard-accessible control that expands the row (the name
   button, as today); row click is an extra. The tariff overview PDF's scope
   (valid or all) stays chosen at download.
 
-## 5. The pane
+## 5. Inline details and the task pane
 
 ### 5.1 Layout
 
-- On a suitable desktop width, selecting a tariff opens its pane in viewing mode
-  beside the list, reserving space. Both scroll independently; the heading and X
-  stay reachable.
-- When two usable panes do not fit, including phones around 400px, the selected
-  detail takes the tariff content area and the list is hidden from the
-  accessibility tree and tab order until shown again. Same screen, same detail
-  body, X to return; no new route. The viewing and editing modes work at both
-  widths and an active draft survives a change of layout. The split starts at
-  62rem of available content width, with a 28–34rem detail pane. The list’s
-  independent 56rem card/comparison breakpoint is defined in §4.
-- Exact widths and the breakpoint are pilot outputs, validated on a normal
-  laptop and a phone. Do not require a squeezed two-pane layout.
+- `TariffOverview` / `TariffCategorySections` keep one table row per tariff
+  both collapsed and expanded. A collapsed row uses the normal overview cells.
+  An expanded row uses one `td colSpan={6}`. The left identity column stays at
+  26% on wide screens; its tariff title and record menu sit in the shared dark
+  green header, aligned with Date range / Applies / Price / Unit to their right.
+  Energy type and warnings remain in the left body column. The close chevron
+  sits at the right end of the shared header. When the first row opens, the
+  category header merges into this bar, with the category above the tariff name;
+  the original column labels remain accessible and retain their column widths.
+  There is no nested version table or framed detail card. Below 56rem of list
+  width, the identity and pricing columns stack.
+- `TariffDetail` (in `TariffDetailPane.tsx`) renders version blocks beneath that
+  shared header, with scheduling, gap actions,
+  charts and source information below. Each version's note appears below its own
+  date range; notes are readable directly rather than switching a remote sidebar
+  or identity-cell paragraph when a version is selected. Collapsed rows retain
+  their listed version's short note. The title and prices are never duplicated.
+- The version list uses normal page flow instead of an independently scrolling
+  box capped at five rows. Expanded content remains in the existing category
+  sheet. Below 30rem of detail width, each date range and note sit above that
+  version's bands, while Price and Unit remain aligned.
+- Date selection still chooses the version used by the source/history context
+  and scheduling, but selecting another version of the same tariff does not
+  refocus the tariff title or jump the page back up.
+- Only an active editing task reserves the existing 28–34rem side column when
+  at least 62rem of content width is available. On narrow screens that task
+  temporarily replaces the list; cancelling/saving restores the expanded rows
+  and scroll position. Resizing preserves the mounted form and draft.
 
 ### 5.2 Navigation
 
-- Keep the `tariff` / `version` query parameters and unrelated parameters.
-  `tariff` uses the existing `seriesKeyOf` value (ZEV and name).
-- Opening detail from the list creates one history step. Switching tariff in the
-  open pane or changing the displayed version replaces that step. Browser Back
-  returns to the list. Viewing/editing mode adds no history entry.
-- Accepted selection changes close the editor when the selected version changes.
-  A renamed series with the same version normalizes its URL without discarding
-  input or prompting. Closing restores focus to the series’ visible row.
-- X returns to the originating list state. Direct entry has an explicit
-  same-screen list fallback; never navigate to an unrelated external origin.
-  Back, Forward, X and reload agree about the selection.
-- Preserve filters, ordering, list scroll and selection through inspection and
-  editing; closing the pane lets the list expand without losing its position. Do
-  not add sorting or filter features just to satisfy this.
-- Reload with a dirty form warns, then returns to the linked saved data in
-  viewing mode. No draft recovery and no editing route.
+- `useTariffPaneNavigation` retains `tariff` / `version` and unrelated query
+  parameters. Selection is the sole expansion state: opening another tariff
+  closes the previous one. A rename resolves the tariff by its stable version
+  ID and normalizes the name-derived URL key without discarding a draft.
+  Reload restores that one linked tariff, never an editing draft.
+- The first expansion pushes one history entry; switching tariffs or versions
+  replaces it. Back returns to the preceding URL, and Forward restores the
+  linked tariff/version. Collapsing the tariff returns through the marked
+  history entry, or removes the parameters in place for a direct link.
+- Selecting a version does not open a task pane. A task action selects its own
+  tariff/version before opening, including an action in a different open row.
+- X, Cancel, Escape and the narrow Back to tariff control close the task only.
+  Save selects the saved result in the inline details. Cancel restores focus to
+  the invoking action, with the original tariff name/list heading as fallback.
+- Dirty/saving tasks guard navigation, expansion/collapse, version selection,
+  replacement tasks and user-requested community switches. Forced scope,
+  permission or account changes clear tasks and expansions immediately.
 
 ## 6. Editing in the pane
 
-- Selecting a tariff starts in viewing mode. **Edit** replaces the body with
-  prefilled fields; the title and selected tariff stay recognisable. Only
+- Selecting a tariff expands its details. **Edit** opens the secondary task
+  pane with prefilled fields; the expanded tariff remains the owning context. Only
   fields the API already permits are editable; immutable identity fields keep
   their restrictions.
-- The pencil beside the tariff title opens the series rename form, with
-  **Rename tariff** as its tooltip and accessible name. On devices with a fine
-  pointer it appears when hovering the title or focusing the pencil with the
-  keyboard; it stays visible on touch devices. It affects all versions;
-  the form says how many. Each row’s **Valid** cell has edit/delete controls
-  for that version; name, category, billing mode and energy type stay read-only
-  in the version editor. Its **Price** cell has edit/delete controls beside each
-  static band and an Add period action beneath its bands. Fixed fees have a
-  price-edit control opening the existing version editor; fetched dynamic
-  prices remain read-only. Deletes retain their existing confirmations and
-  disabled states. The title’s overflow menu contains Duplicate.
-  Rename, **Schedule price change** and period changes use the pane's focused
-  editing mode, seeded from the selected record and version. **New tariff** opens
-  the pane with a blank creation form. Reuse the existing form logic
-  (`useTariffForms.ts`) independently of the dialog shell; there is no extra edit
-  dialog.
+- The tariff's record menu in the category/identity cell contains Rename and
+  Duplicate, visible only while expanded. A version is the parent of its
+  recurring price bands (`TariffPeriod.tariff` points to that dated `Tariff`).
+  The UI therefore puts its validity window on the left, followed by band
+  applicability, price and unit. **Zeitraum** means the version's dates;
+  **Preisband** means the recurring HT/NT/custom band, avoiding Periode for both.
+- Hovering the date range or its version’s band/applicability content reveals
+  the same correction pencil in the date cell; hovering a band also reveals its price pencil within the existing numeric cell. Both also reveal on
+  keyboard focus and stay visible on coarse-pointer/touch devices. A compact
+  reserved gutter prevents layout shifts. Date corrections use the existing
+  version editor; a static or percentage price pencil edits its owning band;
+  a fixed-fee pencil opens its version correction. Fetched prices stay read-only.
+- The version menu retains band deletion, Add price band and Delete version;
+  editing no longer requires that menu. Destructive confirmations, disabled
+  states and permissions are preserved. An unpriced version keeps Add prices.
+  Schedule price change appears once below the periods. All editing uses the
+  existing focused task pane with the selected version/band as context.
 - **Save** returns to viewing on the saved tariff or version. **Cancel** returns
   to the original viewing context, asking before discarding changed values.
   Cancelling creation restores the previous selection, or the list if there was
@@ -188,47 +203,49 @@ completion must not select or reopen anything (`useWriteScope`, reference spec �
   navigation and selecting another tariff or version. Staying keeps the draft
   and the original selection. Confirmations use the modal manager; the pane
   itself stays non-modal.
-- The header contains tariff identity and the displayed version’s comment,
-  without a repeated version status badge or validity window. One table leads
-  the body, including for a single-version tariff, with **Valid** and **Price**
-  columns and no repeated section title or separate Prices section. The table
-  retains **Validity periods** (DE: **Gültigkeitszeiträume**) as its accessible
-  name. Clicking non-action content anywhere in a row selects its version;
-  its date button provides the keyboard equivalent. All edit, delete and add
-  controls are separate buttons, never nested in the selection button, and do
-  not also select the row. Their accessible descriptions identify the row’s
-  validity dates. Editing a non-selected row uses that row’s version as editor
-  context; cancel restores its original action, while saving a band selects
-  the band’s owning version through the submitted tariff ID.
+- Each version shows its own note beneath its dates. There is no repeated tariff heading, nested price table or separate Prices
+  section. A dark green header labels Date range / Applies / Price / Unit above the
+  white version list. Selected dates use stronger type, with no green sideline
+  or tinted fill. Past periods use grey text; Current/Ended labels are omitted.
+  Future periods have a small clock icon with an accessible Upcoming label
+  beside the dates, without a coloured date box. The scrollable version region retains **Validity periods**
+  (DE: **Gültigkeitszeiträume**) as its accessible name. Passive version content has no click handler or hand cursor. The explicitly
+  named date button selects a version for the chart, source and scheduling context;
+  its note is already visible alongside its dates. The action menu does not also select the block or collapse the
+  tariff; its accessible label includes the validity dates. Cancelling an edit
+  returns focus to its pencil; menu tasks return to their menu trigger. Actions target their own version; saving a band
+  selects its owning version through the submitted tariff ID.
   Each version displays its own rate lines from `useTariffDisplay.rateLines`:
   band applicability, prices and units; percentage shares and derived prices;
   dynamic averages with their reference window; or fixed fees with their basis
   and frequency. Dynamic averages are not repeated in a separate summary
-  section; their fetched history and source details remain below the table.
+  section; their fetched history and source details remain below the version blocks.
   Static rate lines map to the same-order `version.periods`
   entries for their edit/delete targets. A missing-band row retains the
   incomplete-pricing explanation and Add prices action. Schedule price change
-  sits below the table and copies the selected version. The list shows at most
-  five version rows before vertical scrolling; its column headings stay
-  visible, and the selected or keyboard-focused row is scrolled into view.
+  sits below the version blocks and copies the selected version. All versions and their notes use normal page scrolling.
   The editor keeps its correction heading and explanation.
   Correction explains that it changes an existing period without automatically
-  recalculating invoices. Current/Upcoming/Ended and validity dates label
-  version-table rows; the editor exposes its version’s validity fields.
+  recalculating invoices. Date ranges identify the version blocks, with a clock for future periods; the editor exposes its version’s validity fields.
   Internal tables retain the shared high-contrast header treatment.
   Duplicate/scheduled-change price rows use plain band labels and aligned,
   equally wide numeric inputs, including at narrow widths.
   **Schedule price change** is the prominent task-oriented action for future
   prices; ordinary corrections remain separate. Show the effective-date picker
-  beside its label and the editable prices below it. Do not repeat the chosen
-  start date or prices in a summary; retain the predecessor/successor end-date
-  preview where applicable.
+  beside its label and the editable prices below it. A successor determines the
+  end date: show that date in a read-only Valid to field with an explanation.
+  Do not repeat the chosen start date or prices in a summary; retain the
+  predecessor end-date preview where applicable.
 - After a create or a scheduled change, select the resulting tariff or version.
   Rename keeps the selection and updates the name-derived series key in the URL.
   No billing or versioning semantics change. Its live date preview resolves
   the chronological predecessor/successor independently of the chosen source
   prices and preserves an already-closed predecessor. A gap action seeds the
-  missing start date and copies the preceding version for review.
+  missing start date and copies the preceding version for review. New-version
+  and duplicate forms expose both times for each non-flat band. Missing times
+  show translated required-field errors and prevent submission until supplied;
+  they are never inferred from legacy bands. The matching server validation
+  error is translated through the shared tariff error formatter (DE/EN/FR/IT).
 - **Creation field order.** Name, category and billing mode form one vertical
   sequence. Mode-specific fields follow that choice. Energy mode puts the source
   selector before energy type (editable for manual bands, a derived value for a
@@ -285,7 +302,7 @@ completion must not select or reopen anything (`useWriteScope`, reference spec �
   body text style as the coverage warning; the text remains a keyboard-accessible
   button that opens details. Compact
   rows omit notes, retain band/price typography, and keep the extra price column
-  hidden. Upcoming versions remain selectable in the detail version table;
+  hidden. Upcoming versions remain selectable in the expanded validity list;
   there is no redundant next-change text link in the overview.
   Row clicks ignore selected text. Full-width Ab/Today order stays unchanged.
 - **Dynamic inspection.** Average/reference period lead the body, followed by
@@ -323,13 +340,13 @@ boundary.
 
 | Scenario | Required observation |
 |---|---|
-| Overview hierarchy | One row per current/upcoming tariff, dated next-price control, then entirely ended tariffs; earlier versions only in the pane; correct displayed prices; no gratuitous counts |
+| Overview hierarchy | One row per current/upcoming tariff, dated next-price control, then entirely ended tariffs; earlier versions in the expanded row; correct displayed prices; no gratuitous counts |
 | Historical / disabled | Grey but readable history; a separate explicit reason for true disablement |
-| Wide layout | List fully visible, reflows by container width, scrolls independently of the pane |
-| Narrow layout | One usable pane, X returns to the list, no horizontal overflow, no detached price, unit or schedule |
+| Wide layout | Inspection uses full-width expanded rows; only editing adds a side column |
+| Narrow layout | Inspection stays inline; task exits restore expanded rows; no horizontal overflow |
 | Comprehension | Short labels only where needed; touch- and focus-accessible explanations; long translations wrap |
-| Selection | Direct links and reload show the intended series and version; Back, Forward and X keep the list state |
-| Editing | Prefilled fields in the same pane; Save and Cancel return to viewing, the table stays available; a layout change keeps the draft |
+| Selection | Direct links and reload show the intended series and version; Back/Forward and task exits keep the list state |
+| Editing | Prefilled fields in the secondary task pane; Save and Cancel return to viewing, the table stays available; a layout change keeps the draft |
 | Save / failure | Visible pending state, no duplicate submit or lost late edits, result selected; values and error stay on failure |
 | Dirty dismissal | X, Cancel, Escape, Back, navigation and tariff/version selection are guarded; staying keeps draft and selection; reload warns; explicit discard resets |
 | Scope / async | Old-scope data cleared; late completions cannot select or reopen unrelated detail or replace a newer edit; rename keeps selection |
@@ -355,7 +372,7 @@ in the reference spec §12.
 
 | Risk | Mitigation |
 |---|---|
-| The split view is cramped on a laptop | Real-width validation; one visible pane when two cannot be useful |
+| An editing task is cramped on a laptop | Real-width validation; task replaces list when two columns cannot fit |
 | Back or X loses the user's place | Test X, Back, Forward and reload; list state preserved |
 | Grey history reads as disabled | Readable text, explicit context, accessible corrections; disablement explained separately |
 | Creating a many-band or dynamic tariff does not fit a pane | Go/no-go in §6; page for that task only |
@@ -370,11 +387,11 @@ Values and decisions the pilot produced (reference spec §13, open question 3).
 | Pane width | `minmax(28rem, 34rem)` beside a flexible list. |
 | Dialog sizes | Not confirmed here: the pilot removed three tariff dialogs (create/edit, version, band) rather than sizing them. The provisional `FormModal` sizes stay provisional until phase 4. |
 | Table treatment | Category sheets and container reflow; normative behavior is in §4. |
-| Pane navigation | Opening from the list pushes one entry marked `state.tariffPane`; X takes it back with `navigate(-1)`. A direct link has no such entry, so X removes the parameters in place. Switching tariff or version replaces the entry and keeps the marker. A link to a tariff that no longer exists clears the parameters. A renamed tariff is found by the version in the URL, which the page then rewrites to the new name. |
-| Escape | In the pane, Escape cancels an open form (guarded) and otherwise closes the pane. An event already handled by a menu or picker (`defaultPrevented`) is left alone. X always closes the pane. |
+| Expansion navigation | Opening from the list pushes one entry marked `state.tariffPane`; collapsing the linked row takes it back with `navigate(-1)`. A direct link has no such entry, so collapse removes the parameters in place. Switching tariff or version replaces the entry and keeps the marker. A link to a tariff that no longer exists clears the parameters. A renamed tariff is found by the version in the URL, which the page then rewrites to the new name. |
+| Escape / X | Close only the editing task (guarded), preserving the inline detail. Picker/menu Escape is left alone when already handled. |
 | Dirty guard | `useDraftGuard`: pane actions (`run`), the router blocker for Back/Forward and links, `beforeunload` for reload. A save in flight counts as unsaved and the prompt says it may still complete. Scope, permission and account changes clear the selection and every draft without asking. Phase 2 moves the pane-independent part into `FormModal`. |
 | Saving | Fields lock during writes; scope and editing-session checks ignore stale UI completion. See §6. |
-| After a save | Create and duplicate select the saved tariff; schedule price change and rename keep the pane on the saved version, an edit stays on its version; focus moves to the pane title. Cancel returns focus to the control that opened the form (`data-action-key`). |
+| After a save | Create and duplicate select the saved tariff; schedule price change and rename select the saved version inline, an edit stays on its version; the task pane closes and focus returns to the action or original tariff name. Cancel returns focus to the control that opened the form (`data-action-key`). |
 | Go/no-go for creation | Fixed-fee and atomic HT/NT checks passed. Six-band creation and source-backed dynamic creation also passed against the live backend; temporary records were removed. Spoken screen-reader output remains a manual acceptance check. |
 | Static energy setup | Browser tests cover atomic HT/NT creation at 1440px/400px, cancellation without a write, direct legacy repair, and six-band creation at 400px in EN/DE/FR/IT. |
 | Duplicate | The spec did not name it; it follows rule A and is a pane form like schedule price change. Rename has its own focused form. |
@@ -387,10 +404,11 @@ stack; the keyboard, inertness and restoration behaviour is covered by
 `tariff-overview-list.test.ts`, `tariff-write-scope.test.ts` and the Playwright
 specs `tariff-presentation.spec.ts`, `tariff-editing-session.spec.ts`, `tariff-ux.spec.ts` and
 `hub-workflow-links.spec.ts`. The workspace follow-up also covers HT/NT setup at 1440px and 400px,
-dated current/future prices, planned-comparison hiding, future-only pricing, row toggling and selected-arrow closure, guarded community switching and mobile
+dated current/future prices, width-dependent comparison hiding, future-only pricing, inline expansion and chevron closure, guarded community switching and mobile
 navigation focus containment. Narrow rate labels are checked in English,
 German, French and Italian. Forced-colours rendering was visually checked in
 the live stack at 400px. Six-band creation, scheduling and source-entry forms
 are exercised at 400px in EN/DE/FR/IT, including labelled accessibility-tree
-controls and keyboard focus. Spoken screen-reader output remains unverified. The guide screenshot refresh is deferred; this branch
-retains the original images.
+controls and keyboard focus. Spoken screen-reader output remains unverified. The latest design iterations have not been validated or captured: tests,
+screenshots and automated validation are paused at the user’s request. Earlier
+runs and guide captures describe earlier layouts, not this current snapshot.

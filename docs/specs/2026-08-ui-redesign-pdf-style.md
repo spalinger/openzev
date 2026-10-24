@@ -1134,7 +1134,7 @@ Native `.field-error` text and Mantine `InputWrapper` error text use
     actions each take a full line.
 - Metering point list: one-line rows inside one sheet per building that open in
   place to their assignments (§15.4); Assign is `button-outline`.
-- Tariffs use category sheets and an in-flow detail pane. Its overview, version
+- Tariffs use category sheets with expandable detail rows and a secondary editing pane. Its overview, version
   actions, source disclosures and editing behavior are specified once in
   [Tariff split view, §§4–6](2026-10-tariff-split-view.md#4-overview).
 - Buttons: the primary `.button` is flat `--brand-deep` with a small forest
@@ -1148,7 +1148,7 @@ Native `.field-error` text and Mantine `InputWrapper` error text use
 - Status pills: fill + hairline of the next tone, sentence case. Colour is reserved for state; attributes (meter type, roles, counts)
   are outlined `.badge-tag`s (white, `--border-strong` hairline,
   `--text-body`), so a row shows one coloured pill — its state — among quiet
-  tags. The tariff list and pane header set their attributes as a muted
+  tags. The tariff list and expanded detail header set their attributes as a muted
   text line instead (see the tariff list above). Tariff validity `scheduled` is info (the blue of
   "upcoming" elsewhere); an inactive metering point is neutral, not danger. `.badge-brand` (brand-pale, brand-glow border, brand-mid text) is the
   invoice document's pill; `invoiceStatusBadgeClass('approved')` uses it, so

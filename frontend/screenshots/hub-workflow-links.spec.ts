@@ -102,7 +102,7 @@ for (const role of ['admin', 'manager', 'viewer'] as const) {
     const errors = await mockApi(page, { role, populated: true })
     await sourceApi(page)
     await page.goto('/tariffs?tariff=42%3ADynamic+tariff')
-    const pane = page.locator('.tariff-pane')
+    const pane = page.locator('.tariff-pane, .tariff-split[data-pane="closed"] .tariff-summary-row.is-expanded')
     await expect(pane).toBeVisible()
     // Where the source is fetched from and what it covers sit in a disclosure.
     await expect(pane).not.toContainText('7 tariffs · 3 ZEVs')
@@ -116,7 +116,7 @@ for (const role of ['admin', 'manager', 'viewer'] as const) {
     else await expect(operations).toHaveCount(0)
     // Admin/viewer cover the layout with and without maintenance controls.
     if (role !== 'manager') await checkWidths(page, `tariff-${role}`, name => testInfo.outputPath(name))
-    await pane.locator('.tariff-pane-back:visible, .tariff-pane-close:visible').click()
+    await page.locator('.tariff-table-open button').click()
     if (role === 'viewer') {
       await expect(page.getByRole('button', { name: 'New Tariff', exact: true })).toHaveCount(0)
     } else {
@@ -152,9 +152,10 @@ test('tariff links reach source activity and its filters survive reload and clea
   await sourceApi(page)
   const requests = await auditApi(page)
   await page.goto('/tariffs?tariff=42%3ADynamic+tariff')
-  await page.locator('.tariff-pane summary').filter({ hasText: 'Source details' }).click()
-  await page.locator('.tariff-pane').getByRole('link', { name: 'Manage source in platform admin' }).click()
+  await page.locator('.tariff-detail summary').filter({ hasText: 'Source details' }).click()
+  await page.locator('.tariff-pane, .tariff-split[data-pane="closed"] .tariff-summary-row.is-expanded').getByRole('link', { name: 'Manage source in platform admin' }).click()
   await expect(page).toHaveURL(/\/admin\/dynamic-sources\?source=s1$/)
+  await expect(page.getByRole('heading', { name: 'Overview', level: 1, exact: true })).toBeFocused()
   await page.locator('tbody tr').getByRole('button', { name: 'Actions', exact: true }).click()
   await page.getByRole('menuitem', { name: 'View fetch log', exact: true }).click()
   await page.getByRole('dialog').getByRole('link', { name: 'View source activity' }).click()

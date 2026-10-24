@@ -134,6 +134,12 @@ Menus and pickers belong to their owning surface. Overlay z-indices come from
 `lib/zLayers.ts` (`Z_MODAL` < `Z_POPOVER` < `Z_TOAST`); the in-flow pane needs
 no overlay layer.
 
+The tariff pilot now uses expandable full-width rows for inspection and the
+in-flow pane only for secondary editing/creation tasks. This is an explicit
+exception to the proposed viewing-pane defaults below; its current contract is
+[tariff details §§4–6](2026-10-tariff-split-view.md#4-overview). The default
+remains a proposal for other screens, not a description of tariff inspection.
+
 ## 5. Decision rule: where does it open?
 
 Take the first row that fits. These are defaults: use them unless there is a
@@ -201,9 +207,10 @@ Rules that cut across the table:
 ### 6.2 Detail pane
 
 The pane is the one pattern for a record opened from a list. The tariff screen
-is its first implementation and defines its details
-([tariff split view](2026-10-tariff-split-view.md)); the contract below is what
-every adopter shares.
+originally piloted this pattern; it now uses inline inspection and a task-only
+pane, as described in its feature spec
+([tariff details](2026-10-tariff-split-view.md)). The contract below remains the
+proposed default for other adopters; tariffs use it only for secondary tasks.
 
 - **In flow, not an overlay.** On a wide screen the pane sits beside the list and
   reserves its space: no dimming scrim, no scroll lock, no focus trap, and it

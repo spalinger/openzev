@@ -1194,7 +1194,8 @@ one.
 
 ### Frontend tariff workspace
 
-Tariffs, price bands and versions are managed in the detail pane. The canonical
+Tariff facts, price bands and versions are inspected in expandable table rows;
+creation and editing use a secondary task pane. Only one tariff stays expanded at a time. The canonical
 interaction contract is [Tariff split view, §§4–6](2026-10-tariff-split-view.md#4-overview),
 including overview prices, scheduling versus corrections, creation and draft guards.
 Static-energy creation accepts optional, write-only `initial_periods` on
@@ -1207,6 +1208,14 @@ a failure rolls back all of them. The response retains the normal `periods`
 array. Omitting `initial_periods` preserves existing API behavior, so older
 unpriced versions remain repairable. Percentage and dynamic creation are unchanged.
 This does not change billing/versioning semantics.
+
+New-version and duplicate forms allow editing the copied timed bands' start
+and end times, preserving labels, weekdays and months. Missing endpoints block
+submission with translated field errors; the same API error is translated by
+the shared tariff error formatter. For a new version before an existing
+successor, the calculated end date appears as read-only Valid to (the day
+before the successor starts). Gap repair seeds the missing start date and
+uses this same rule.
 
 Writes require the selected community and effective write capability. Scope,
 account or permission changes invalidate the editing session. Delayed completion

@@ -22,10 +22,10 @@ Each tariff has:
 Each tariff appears once, with the next scheduled price on the left and today’s
 price on the right. Select a scheduled price to inspect that version.
 
-With the detail open or the list narrowed, use **Validity periods** to inspect scheduled
-changes, or select the dated change link beside a tariff. Notes stay in the detail
-pane to keep the compact list short. Future-only tariffs still show their own price. **Ended tariffs** lists
-only tariffs with no current or future version.
+On a narrow list, use **Validity periods** in the expanded tariff to inspect
+scheduled changes. Notes stay in the expanded detail to keep compact summary
+rows short. Future-only tariffs still show their own price. **Ended tariffs**
+lists only tariffs with no current or future version.
 
 Each category is a rate card, set like the tariff overview PDF, with one row
 per tariff:
@@ -48,21 +48,35 @@ matching season (or the tariff's first band if no season matches).
 
 A red badge next to the name means warnings: a gap between
 versions or a failed price fetch. Rows in **Ended tariffs** are grey but readable.
-Click a row to open the tariff's detail pane beside the list. Its green header
-shows the tariff’s comment. The table below combines each date range with its
-prices. **Valid** contains that range’s edit/delete controls; **Price** contains
-its band edit/delete controls and **Add period** beneath the last band. Click
-a date or other non-action content in a row to inspect that version. The title’s
-pencil renames the tariff across all versions. On a desktop it appears when
-you hover the title or reach the pencil with the keyboard; on touch devices it
-stays visible. **Schedule price change** is below the table. A tariff opens on
-the version valid today (or its
-nearest future version if none is valid yet). Clicking the name again closes it when that version is already selected. The
-selected row’s left arrow always closes it. **X**, **Escape** and the browser’s
-**Back** button also close it.
-On a narrow screen (a phone, or a small window) the pane takes the whole area
-and the list is hidden until you use **← Tariffs**, **Escape** or the browser’s
-**Back** button. In an editor, **Back to tariff** returns to viewing.
+Click a tariff row, its name or the downward chevron to expand its details
+within the same table. Opening another tariff closes the previous one. The
+upward chevron or another click on the name/summary row collapses that tariff.
+
+The same row expands with its left identity column preserved. The tariff name
+appears once in the dark green bar above the energy type and warnings; the
+date-range, applicability, price and unit headings share that bar to the right.
+When the first tariff opens, the category heading merges into this bar instead
+of adding a second bar. On smaller screens the columns stack. Each version’s note appears
+below its own dates, so comparing versions does not change a note off to the side. The record menu beside
+its name in the category column appears only while expanded and contains **Rename tariff** and
+**Duplicate**. The white validity list has a dark green header, separate
+**Date range** on the left for the version, followed by its bands, **Price**
+and **Unit**. A version owns its price bands: for example, the 2026 version
+can contain its own HT and NT prices. Past periods are
+grey; a clock beside the dates marks a future period. Current/Ended labels
+are omitted. Hover a date range or its **Applies** text to reveal the same
+date-range pencil. Hover a price to reveal its own small edit pencil;
+keyboard focus reveals it too, and touch devices show it directly. The version
+menu holds **Add price band** and delete actions. Passive price/date-list
+content is not clickable; the date button selects a version for inspection. **Schedule price change** sits below the prices. Charts, warnings and
+dynamic-source information appear farther down inside the same row.
+A tariff initially selects today's version, or its nearest future version.
+
+Only choosing a task such as editing, adding a band or scheduling a change
+opens the side panel. **X**, **Cancel** and **Escape** close that task and return
+to the expanded tariff. On narrow screens, inspection still expands inline;
+only an editing task temporarily takes the content area. **Back to tariff**
+returns to the expanded list.
 
 The list waits for the selected community to load. If loading fails, use **Retry**;
 a failed community refresh keeps the loaded scope and your open draft available.
@@ -76,8 +90,8 @@ save in flight. **Keep editing** preserves the draft and the selected community.
 After a confirmed switch, or an account or permission change, the pane and its
 drafts, import dialog and pending delete confirmation are cleared.
 
-The forms for creating and changing tariffs open in the detail pane, in the
-place you were just looking at the tariff, and the list stays beside them.
+The forms for creating and changing tariffs open in a secondary task panel.
+The expanded list stays beside it when there is enough room.
 If you leave with unsaved input — **X**, **Cancel**, **Escape**, the browser's
 **Back** button, picking another tariff or version, or reloading the page —
 OpenZEV asks whether to discard it; choosing **Keep editing** leaves your input
@@ -127,7 +141,7 @@ Returning preserves your tariff inputs; you do not fill out two forms together.
    band. A flat band ignores weekday and time restrictions.
 
 Existing tariffs with no prices still show **No prices configured**.
-Use **+ Add prices** in the overview or the pane to open the price editor directly. A missing band window has a direct **Review time window** action.
+Use **+ Add prices** in the overview or expanded detail to open the price editor directly. A missing band window has a direct **Review time window** action.
 
 If hours fall between your price bands, the overview shows a red exclamation
 mark with an explanation below the tariff name. It names the fallback band and its price (or
@@ -135,8 +149,8 @@ percentage) for each affected season. Those hours are billed at that rate,
 which can differ from the rate you intended. Choose **Review time window** to
 adjust the schedule; the band editor shows the same explanation as you edit.
 
-On compact lists, descriptions stay in the pane. Open the tariff and select a
-scheduled version in its version table. The extra future-price column stays hidden.
+On compact lists, descriptions stay in the expanded detail. Open the tariff and select a
+scheduled validity period. The extra future-price column stays hidden.
 
 ## Importing Tariffs from Your Grid Operator
 
@@ -277,7 +291,7 @@ range can still contain gaps; check the price history for the period you need.
 Administrators can follow **Manage source in platform admin** to its operational
 row; managers create and reuse sources in the tariff form.
 
-![A dynamic tariff's detail pane with its source details](screenshots/07d-tariff-dynamic-source.png)
+![A dynamic tariff's expanded detail with its source details](screenshots/07d-tariff-dynamic-source.png)
 
 ### Reading a dynamic tariff's price
 
@@ -637,7 +651,7 @@ months applies to it unchanged. Each period has a type:
 
 To add one:
 
-1. Click the tariff to open its detail pane
+1. Expand the tariff row
 2. Click **Add Period** in the Tariff Periods section
 3. Enter:
    - **Period type** (see above) and, for a time band, a **Band name**
@@ -690,7 +704,7 @@ Local Energy                                    ← one tariff, three versions
 
 ### Adding a New Version
 
-1. Click the tariff to open its detail pane, then click **Schedule price change**
+1. Expand the tariff row, then click **Schedule price change**
 2. Choose the date beside **New prices apply from** (defaults to today)
 3. Adjust the prices below it (pre-filled from the current version)
 4. Click **Schedule price change**
@@ -705,6 +719,13 @@ if a later version exists, the new version's end date before saving.
 > a whole month can be given away. A gap is flagged on the tariff entry; use
 > **Fill gap** to configure prices for the missing dates.
 
+The gap action preselects the missing start date. **Valid to** shows the
+automatically calculated end date: the day before the next version starts.
+For a gap on 30 June followed by a version starting on 1 July, both dates
+are 30 June. Review the copied prices and time windows before saving. If an
+older timed band has missing times, enter both its start and end time in the
+form; saving stays unavailable until both are supplied.
+
 You can also insert a version *between* two existing ones; OpenZEV bounds it on
 both sides.
 
@@ -712,38 +733,37 @@ both sides.
 
 The Tariffs page shows **one entry per tariff**, using today’s version
 (or the nearest upcoming one if there is no current version). Click it to open
-the detail pane; the dated planned-price control opens the next scheduled version.
+the expanded detail; the dated planned-price control opens the next scheduled version.
 
-The selected row identifies the date range being inspected. **Valid** contains
-its **Edit version** pencil and delete button. **Price** contains a pencil and
-trash icon for each static band, with **Add period** beneath the bands. Fixed
-fees have a price-edit pencil; fetched dynamic prices remain read-only. A row’s
-actions always edit that row, even when another date range is selected. Saving
-a band keeps its owning date range in view.
+The selected date range uses stronger type. Past versions are grey; future
+versions have a clock beside their dates. The date range and its note are on the left because
+that version owns the price bands to its right. Use the date-range pencil to
+correct the version, or the pencil beside a band's price to edit that band.
+Fetched prices remain read-only. The version menu contains Add price band and
+delete actions. Saving a band retains its owning version as the selection.
 
-The table shows current, upcoming and earlier versions together, with each
+The expanded row shows current, upcoming and earlier versions together, with each
 version’s dates, bands, prices and units, newest first. Percentage tariffs
 include their percentage and derived price; dynamic tariffs show the average
-for their reference window. It shows up to five rows; scroll inside the list
-for more. Opening a tariff selects today’s version without moving it to the
+for their reference window. All versions and notes appear in the normal page flow. Opening a tariff selects today’s version without moving it to the
 top. A tariff with one version still shows its date range. The **Price history**
 chart appears below when prices actually change; on a short screen, scroll
-the pane. Charts are hidden when prices are missing or unchanged.
+the expanded detail. Charts are hidden when prices are missing or unchanged.
 
 Use **Schedule price change** below the table for a new dated price. The title’s
 **⋮ Actions** menu holds **Duplicate**. Delete actions ask for confirmation.
 Canceling an edit returns focus to the button that opened it.
 
-The pane stays open across a page reload or a shared link — the URL records
-which tariff and version you're looking at. **X** closes the pane. While editing, **Escape** and **Back to tariff** return
-to viewing; leaving with unsaved input asks whether to discard it.
+The most recently selected tariff and version are recorded in the URL, so a
+reload or shared link expands that tariff again. Only one tariff is expanded at a time. While editing, **X**, **Escape**, **Cancel** and
+**Back to tariff** return to the expanded tariff and protect unsaved changes.
 
 ![Tariff version history and price chart](screenshots/07b-tariff-versions.png)
 
 ### Price History
 
 When a tariff has changing prices, **Price history** charts them below the
-version table. Static tariffs use a stepped chart across their versions and
+version blocks. Static tariffs use a stepped chart across their versions and
 seasons. Dynamic tariffs show fetched interval prices for the selected version,
 with date filters; **Fetched interval prices** opens the underlying records.
 An empty price series shows one plain message instead of a graph or an empty
@@ -789,13 +809,13 @@ and **Time to** kept side by side.
 
 Renaming is done for the **whole tariff**, not per version — the name is what
 holds the versions together, so renaming just one would split it into two
-unrelated tariffs. Use the pencil beside the tariff title (**Rename tariff**).
-Its form explains how many versions will be renamed. A pencil in the table’s
-**Valid** column edits that row’s date range instead.
+unrelated tariffs. Choose **Rename tariff** in the menu beside the tariff name.
+Its form explains how many versions will be renamed. The pencil beside a
+version’s **Date range** edits that version’s dates instead.
 
 ### Duplicating
 
-Use **Actions → Duplicate** at the top of the detail pane to create a *different*
+Use **Actions → Duplicate** at the top of the expanded detail to create a *different*
 tariff starting from an existing one's numbers. It asks for a new name and leaves
 the original untouched. (Use **Schedule price change** instead when the prices of the
 *same* tariff have changed.)
@@ -878,8 +898,8 @@ the pricing. See [ZEV Export and Import](17-zev-transfer.md).
 
 Edit **future** tariffs freely:
 
-1. Click the tariff to open its detail pane
-2. Click **Edit version**
+1. Expand the tariff row
+2. Hover or focus its date range and choose the edit pencil (shown directly on touch devices)
 3. Change prices, periods, validity dates
 4. Click **Save correction**
 
@@ -887,7 +907,7 @@ Changes apply to **new invoices only**. Past invoices keep original tariffs.
 
 **Edit version** works on the selected **version**. Name, category, billing
 mode and energy type remain plain values because they identify the series.
-Use the pencil beside the tariff title to rename all versions. Create a separate
+Use **Rename tariff** in the tariff menu to rename all versions. Create a separate
 tariff to change category, billing mode or energy type.
 
 > **Prices changed from a certain date?** Use **Schedule price change** instead of editing.
@@ -900,8 +920,8 @@ tariff to change category, billing mode or energy type.
 
 Set **Valid To** to exclude from future invoices:
 
-1. Click the tariff to open its detail pane
-2. Click **Edit version**
+1. Expand the tariff row
+2. Hover or focus its date range and choose the edit pencil (shown directly on touch devices)
 3. Set **Valid To** to today or last usage date
 4. Click **Save correction**
 

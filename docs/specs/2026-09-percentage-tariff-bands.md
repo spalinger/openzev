@@ -232,7 +232,7 @@ returns one dict per band of the tariff, in `Meta.ordering`:
 the percentage input is shown **only when creating**, labelled "Initial
 percentage" with a hint that more bands can be added afterwards. It maps to
 `initial_percentage`. When editing, the field is hidden and the bands are
-managed in the detail pane. The zod schema requires it on create in percentage mode,
+managed through the secondary editing pane, opened from expanded tariff rows. The zod schema requires it on create in percentage mode,
 as today.
 
 **Band form (`TariffPeriodForm.tsx` + its form helpers)**, shown in the detail pane for the version it shows: takes the

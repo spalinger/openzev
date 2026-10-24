@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
 import { TariffOverview } from '../features/tariffs/TariffOverview'
-import { TariffDetailPane, TariffPaneFrame } from '../features/tariffs/TariffDetailPane'
+import { TariffDetail, TariffPaneFrame, TariffSeriesActions } from '../features/tariffs/TariffDetailPane'
 import { useTariffCrud } from '../features/tariffs/useTariffCrud'
 import { TariffEmptyState } from '../features/tariffs/TariffEmptyState'
 import { TariffForm } from '../features/tariffs/TariffForm'
@@ -30,7 +30,7 @@ import { useCommunityAccess, useScopeNote } from '../lib/communityAccess'
 import { PageSkeleton } from '../components/PageSkeleton'
 import { useTranslation } from 'react-i18next'
 import { useToast } from '../lib/toast'
-import type { Tariff, TariffPeriod, TariffSeries } from '../types/api'
+import type { Tariff, TariffSeries } from '../types/api'
 import { PageHeader } from '../components/PageHeader'
 import { Notice } from '../components/Notice'
 import { ScopeGuard } from '../components/ScopeGuard'
@@ -49,7 +49,7 @@ export function TariffsPage() {
     const scopeKey = `${selectedZevId ?? ''}|${readOnly}|${user?.id ?? ''}`
     const editing = useTariffEditor(scopeKey)
     const editor = editing.task?.kind ?? null
-    const pendingBand = useRef<{ versionId: string; period?: TariffPeriod } | null>(null)
+    const pendingTask = useRef<{ versionId: string; scopeKey: string; open: () => void } | null>(null)
     const [showImportModal, setShowImportModal] = useState(false)
     // Which group a tariff is in and what its row says both follow today's date.
     const today = todayBusinessIso()
@@ -76,21 +76,19 @@ export function TariffsPage() {
     const navigation = useTariffPaneNavigation({
         allSeries, today, scopeKey, editor,
         settled: seriesQuery.isSuccess && !seriesQuery.isFetching,
-        onSelectionChange: (series) => {
+        onSelectionChange: (versionId) => {
             editing.close()
-            if (pendingBand.current && series?.versions.some(version => version.id === pendingBand.current?.versionId)) {
-                const { versionId, period } = pendingBand.current
-                pendingBand.current = null
-                beginEditing(`repair-${versionId}`, () => period ? startPeriodEdit(period) : openCreatePeriod(versionId))
-            }
+            const task = pendingTask.current
+            pendingTask.current = null
+            if (task?.versionId === versionId && task.scopeKey === scopeKey) task.open()
         },
         onScopeChange: () => {
             setShowImportModal(false)
             handleCancel()
-            pendingBand.current = null
+            pendingTask.current = null
         },
     })
-    const { pageRef, splitRef, paneTitleRef, openSeries, shownVersionId, selected, paneOpen, listHidden, fitsTwoPanes, select, deselect } = navigation
+    const { pageRef, splitRef, paneTitleRef, openSeries, selected, paneOpen, listHidden, fitsTwoPanes, select, collapse } = navigation
 
     const periods = useMemo(
         () => allSeries.flatMap((series) => series.versions.flatMap((version) => version.periods)),
@@ -147,7 +145,6 @@ export function TariffsPage() {
         onPeriodSaved: (tariffId) => {
             const version = tariffs.find((tariff) => tariff.id === tariffId)
             if (version) select(version, tariffId)
-            navigation.focusTitle()
         },
     })
 
@@ -158,7 +155,7 @@ export function TariffsPage() {
         queryClient,
         pushToast,
         t,
-        // A new version, a copy or a new name: the pane shows what was saved.
+        // A new version, copy or name is selected in its expanded row.
         onSaved: (saved) => select(saved, saved.id),
     })
 
@@ -184,7 +181,7 @@ export function TariffsPage() {
         beginEditing('new-tariff', openCreateTariff)
     })
 
-    // Switching tariff or version, or leaving the pane, asks first when a form has unsaved input.
+    // Expansion and task selection share the URL, but only tasks open the side panel.
     const showVersion = (series: Pick<TariffSeries, 'zev' | 'name'>, versionId: string) => {
         if (navigation.isSelecting(series, versionId)) return
         if (selected?.seriesKey === seriesKeyOf(series) && selected.versionId === versionId) return
@@ -193,13 +190,42 @@ export function TariffsPage() {
             select(series, versionId)
         })
     }
-    const closePane = () => guard.run(() => {
+    const closeDetail = (series: TariffSeries) => guard.run(() => {
         resetEditing()
-        if (openSeries) deselect()
+        collapse(series)
     })
-    // Cancel, and Escape while a form is open: back to viewing.
     const cancelEditing = () => guard.run(resetEditing)
-    const escapePane = () => (editor ? cancelEditing() : closePane())
+
+    function editDetail(series: TariffSeries, versionId: string, actionKey: string, open: () => void) {
+        guard.run(() => {
+            resetEditing()
+            if (selected?.seriesKey === seriesKeyOf(series) && selected.versionId === versionId) beginEditing(actionKey, open)
+            else {
+                pendingTask.current = { versionId, scopeKey, open: () => beginEditing(actionKey, open) }
+                select(series, versionId)
+            }
+        })
+    }
+
+    // Tariff pilot exception to the proposed pane default: inspect inline, edit in a task pane.
+    function renderDetail(series: TariffSeries, versionId: string) {
+        return <TariffDetail
+            series={series}
+            allSeries={allSeries}
+            settings={settings}
+            shownVersionId={versionId}
+            onShowVersion={(id) => showVersion(series, id)}
+            deleteTariffDisabled={deleteTariffPending || dialogLoading}
+            deletePeriodDisabled={deletePeriodPending || dialogLoading}
+            onEditTariff={(version, key) => editDetail(series, version.id, key, () => startTariffEdit(version))}
+            onDeleteTariff={confirmDeleteTariff}
+            onOpenCreatePeriod={(id, key) => editDetail(series, id, key, () => openCreatePeriod(id))}
+            onEditPeriod={(period, key) => editDetail(series, period.tariff, key, () => startPeriodEdit(period))}
+            onDeletePeriod={confirmDeletePeriod}
+            onNewVersion={(owner, source, validFrom) => editDetail(owner, source.id, 'new-version', () => versions.openNewVersion(owner, source, validFrom))}
+            readOnly={readOnly}
+        />
+    }
 
     // The scope is chosen at the download, not by the list: the overview
     // groups series by validity, and "all" is what also adds every
@@ -231,12 +257,11 @@ export function TariffsPage() {
     )
 
     // The form for the task in hand, and what to call it under the tariff's name.
-    function renderEditor(): { label: string, content: ReactNode, versionId?: string } | null {
+    function renderEditor(): { label: string, content: ReactNode } | null {
         const task = versions.dialog
         if (task) {
             return {
                 label: t(`pages.tariffs.pane.task.${task.kind}` as Parameters<typeof t>[0]),
-                versionId: task.source.id,
                 content: (
                     <TariffVersionForm
                         key={`${task.kind}:${task.source.id}`}
@@ -256,7 +281,6 @@ export function TariffsPage() {
         if (tariffFormOpen) {
             return {
                 label: editingTariffId ? t('pages.tariffs.pane.task.edit') : '',
-                versionId: editingTariffId ?? undefined,
                 content: (
                     <TariffForm
                         key={editingTariffId ?? 'new'}
@@ -275,7 +299,6 @@ export function TariffsPage() {
         if (periodFormOpen) {
             return {
                 label: t(editingPeriodId ? 'pages.tariffs.editPeriodTitle' : 'pages.tariffs.createPeriodTitle'),
-                versionId: periodTariffId,
                 content: (
                     <TariffPeriodForm
                         key={editingPeriodId ?? 'new'}
@@ -330,54 +353,28 @@ export function TariffsPage() {
                             settings={settings}
                             selected={selected}
                             onOpenDetail={showVersion}
-                            onCloseDetail={closePane}
-                            onRepairBand={!readOnly ? (series, versionId, period) => guard.run(() => {
-                                resetEditing()
-                                if (selected?.versionId === versionId) beginEditing(`repair-${versionId}`, () => period ? startPeriodEdit(period) : openCreatePeriod(versionId))
-                                else {
-                                    pendingBand.current = { versionId, period }
-                                    select(series, versionId)
-                                }
-                            }) : undefined}
+                            expandedVersion={navigation.expandedVersion}
+                            renderDetail={renderDetail}
+                            renderActions={!readOnly ? (series, versionId) => <TariffSeriesActions series={series} versionId={versionId}
+                                onRename={source => editDetail(series, source.id, 'series-actions', () => versions.openRename(series, source))}
+                                onDuplicate={source => editDetail(series, source.id, 'series-actions', () => versions.openDuplicate(series, source))} /> : undefined}
+                            onCloseDetail={closeDetail}
+                            onRepairBand={!readOnly ? (series, versionId, period) => editDetail(series, versionId, `repair-${versionId}`,
+                                () => period ? startPeriodEdit(period) : openCreatePeriod(versionId)) : undefined}
                         />
                     )}
                 </div>
 
-                {editor === 'create' && editorPane ? (
+                {editorPane && (
                     <TariffPaneFrame
-                        title={t('pages.tariffs.createTitle')}
+                        title={editor === 'create' ? t('pages.tariffs.createTitle') : openSeries?.name ?? editorPane.label}
+                        subtitle={editor === 'create' ? undefined : editorPane.label}
                         backLabel={t(openSeries ? 'pages.tariffs.workspace.backToTariff' : 'pages.tariffs.workspace.back')}
-                        onClose={closePane}
-                        onBack={escapePane}
-                        onEscape={escapePane}
+                        onClose={cancelEditing}
                         titleRef={paneTitleRef}
                     >
                         <div className="tariff-pane-body page-stack">{editorPane.content}</div>
                     </TariffPaneFrame>
-                ) : openSeries && (
-                    <TariffDetailPane
-                        series={openSeries}
-                        allSeries={allSeries}
-                        settings={settings}
-                        shownVersionId={shownVersionId}
-                        onShowVersion={(versionId) => showVersion(openSeries, versionId)}
-                        deleteTariffDisabled={deleteTariffPending || dialogLoading}
-                        deletePeriodDisabled={deletePeriodPending || dialogLoading}
-                        onClose={closePane}
-                        onBack={escapePane}
-                        onEscape={escapePane}
-                        onEditTariff={(version, actionKey) => beginEditing(actionKey, () => startTariffEdit(version))}
-                        onDeleteTariff={confirmDeleteTariff}
-                        onOpenCreatePeriod={(versionId, actionKey) => beginEditing(actionKey, () => openCreatePeriod(versionId))}
-                        onEditPeriod={(period, actionKey) => beginEditing(actionKey, () => startPeriodEdit(period))}
-                        onDeletePeriod={confirmDeletePeriod}
-                        onNewVersion={(series, source, validFrom) => beginEditing('new-version', () => versions.openNewVersion(series, source, validFrom))}
-                        onRenameSeries={(series, source) => beginEditing('rename-series', () => versions.openRename(series, source))}
-                        onDuplicate={(series, source) => beginEditing('series-actions', () => versions.openDuplicate(series, source))}
-                        readOnly={readOnly}
-                        titleRef={paneTitleRef}
-                        editor={editorPane ?? undefined}
-                    />
                 )}
             </div>
 

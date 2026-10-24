@@ -509,7 +509,9 @@ Rules:
 - Route: `/tariffs`.
 - One scoped series query supplies nested versions and bands.
 - Header actions: import, overview PDF and New tariff; permitted write actions
-  and forms live in the detail pane. Price bands stay under their tariff.
+  open focused tasks in the secondary pane. Inspection expands within the
+  category table, with one tariff open at a time. Price bands stay under
+  their tariff.
 - The tariff-specific interaction contract is
   [Tariff split view, §§4–6](2026-10-tariff-split-view.md#4-overview).
 - Shared sidebar accessibility and community-switch draft guards are described

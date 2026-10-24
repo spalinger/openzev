@@ -319,7 +319,7 @@ test.describe('User Guide Screenshots', () => {
     const row = page.getByRole('button', { name: 'Grid Energy HT/NT', expanded: false }).first()
     await row.waitFor({ timeout: 10_000 })
     await row.click()
-    const pane = page.locator('.tariff-pane')
+    const pane = page.locator('.tariff-detail')
     // Waiting on the chart rather than the history: it renders only for a series
     // with more than one version, so it also asserts the seed still has them.
     await expect(pane.locator('.tariff-version-table')).toBeVisible()
@@ -337,7 +337,7 @@ test.describe('User Guide Screenshots', () => {
     const row = page.getByRole('button', { name: DEMO_DYNAMIC_TARIFF, expanded: false }).first()
     await row.waitFor({ timeout: 10_000 })
     await row.click()
-    const pane = page.locator('.tariff-pane')
+    const pane = page.locator('.tariff-detail')
     const details = pane.locator('.tariff-source-section .tariff-disclosure > summary').first()
     await details.click()
     await expect(pane.locator('.tariff-source-section .tariff-disclosure[open]'), `Dynamic source details missing — ${SEED_HINT}`).toBeVisible()
