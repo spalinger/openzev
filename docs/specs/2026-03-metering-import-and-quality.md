@@ -70,7 +70,7 @@ import and quality features from scratch.
 | `source_document_id` | `CharField(40)` | SDAT-CH `MeteringData/DocumentID` of the delivery that wrote the row |
 | `source_delivery_id` | `CharField(64)` | SDAT-CH outer `InstanceDocument/DocumentID` (delivery identity, distinct from the block identity) |
 | `business_reason` | `CharField(10)` | SDAT-CH `BusinessReasonType` of the delivery (`E88` billing) |
-| `condition` | `CharField(5)` | SDAT-CH observation `Condition` (`""` measured, `56` estimated) — estimated billable rows keep their quality for audit and quality reporting |
+| `condition` | `CharField(5)` | SDAT-CH observation `Condition` (`""` unflagged, `56` estimated) — estimated billable rows keep their quality for audit and quality reporting; returned as stored by the raw-data detail response and shown/filterable in `MeterReadingAdmin` (§5.3, §8.4) |
 | `source_product` | `CharField(32)` | SDAT-CH `Product/ID` code (ebIX/VSE, e.g. `8716867000030` active energy) |
 | `source_unit` | `CharField(10)` | SDAT-CH `MeasureUnit` (`KWH` on the supported profile) |
 | `source_meter_id` | `CharField(64)` | Meter identity as observed in the delivery (`VSENationalID`), before alias resolution |
@@ -355,7 +355,7 @@ the target ZEV; preview uses the same ZEV-scoped lookup. CSV uses canonical prim
 ### 4.2 SDAT-CH (ebIX XML) importer
 
 Parses the Swiss SDAT-CH `ValidatedMeteredData` (E66) format delivered by
-VNBs (SDAT-CH 2025: [metering processes V2](https://www.strom.ch/de/media/13628/download),
+VNBs (SDAT-CH 2025: [metering processes V2](https://www.strom.ch/system/files/media/documents/20251204-be-standardisierter-datenaustausch-ch-messdatenaustauschprozesse.pdf),
 [fundamentals](https://www.strom.ch/de/media/13633/download); reference schemas and
 examples in the [official archive](https://www.strom.ch/de/media/13704/download)).
 Reference checked 2026-10-19: *SDAT-CH Messdatenaustauschprozesse*, 2025 V2 (1 November 2025), and *Anhang 3/4*, 4 December 2025.
@@ -642,12 +642,16 @@ in transfer archives; backups carry them whole (Django serialization, so
 `result_counts`, `issues`, `reading_changes` and `source_delivery`
 survive restore without further work).
 
-**Inspection:** held rows are staging evidence; there is no direct read/release UI in this profile. Inspect the source file or whole-community archive. Promotion requires a validated delivery, not a manual release button.
+**Inspection:** operators can inspect current held rows through §5.3.1 from
+raw data or an import protocol (§8.4). Historical import counters do not
+constitute a retained list of every original observation.
 
 **Retention:** held observations and provenance fields have no timed
-expiry. They are removed only by explicit import-log deletion (§5.7),
-which deletes the log's billable and held rows together, or with the
-whole ZEV. The privacy retention sweep (`2026-10-privacy-retention-sweep.md`)
+expiry. Newer held deliveries update rows and their batch provenance in
+place. Validated deliveries can remove predecessors during promotion.
+Explicit import-log deletion (§5.7) removes the log's remaining billable and
+held rows; deleting the whole ZEV also removes them. The privacy retention
+sweep (`2026-10-privacy-retention-sweep.md`)
 does not touch `MeterReading`, `QuarantinedReading` or `ImportLog` —
 accounting and billing evidence is its documented out-of-scope floor, not
 a privacy ceiling. Backup retention follows the backup spec; any future
@@ -857,31 +861,118 @@ Europe/Zurich (`formatMeteringBucketLabel`), never from the string's date part
 
 | Method | URL | Permission | Query params |
 |---|---|---|---|
-| `GET` | `/readings/raw-data/` | `IsAuthenticated` | `metering_point` (required), `date_from`, `date_to` |
+| `GET` | `/readings/raw-data/` | `IsAuthenticated` | `metering_point` (required), `date` (detail mode), `date_from`, `date_to` |
 
 Both the daily summary and single-day detail (`date=YYYY-MM-DD`) apply the
 assignment-date visibility rule in §6.1. Unauthorized readings are omitted;
 a day with no visible readings returns an empty array with HTTP 200.
 
-**Response:** array of daily-grouped objects:
+**Detail response** (`date=YYYY-MM-DD`) adds the stored `condition` to every
+row: `""`, `56`, or whatever code the importer stored. The code is preserved
+verbatim — the frontend translates it, so an unknown future code still shows
+the raw value instead of being dropped.
+
+**Summary response** (no `date`) — one object per civil day:
 
 ```json
-{
-  "date": "2026-01-01",
-  "in_kwh": 12.5,
-  "out_kwh": 3.0,
-  "readings_count": 96,
-  "readings": [
-    {
-      "timestamp": "2026-01-01T00:00:00+00:00",
-      "direction": "in",
-      "energy_kwh": 0.125,
-      "resolution": "15min",
-      "import_source": "csv"
-    }
-  ]
-}
+[
+  {
+    "date": "2026-01-01",
+    "in_kwh": 12.5,
+    "out_kwh": 3.0,
+    "readings_count": 96
+  }
+]
 ```
+
+**Detail response** (`date=YYYY-MM-DD`) — a bare array of that day's readings:
+
+```json
+[
+  {
+    "timestamp": "2026-01-01T00:00:00+00:00",
+    "direction": "in",
+    "energy_kwh": 0.125,
+    "resolution": "15min",
+    "import_source": "csv",
+    "condition": ""
+  }
+]
+```
+
+`RawMeteringTable` expands a day into a quarter-hour/hour grid. `≈` marks
+condition `56`; `·N` identifies combined readings, including repeated autumn
+intervals. A cell button exposes its constituent count and expanded state;
+its detail lists each reading's value, quality/code and Swiss timestamp with
+UTC offset. Unflagged values are not labelled measured or validated.
+
+### 5.3.1 Held observations (read-only)
+
+| Method | URL | Permission | Query params |
+|---|---|---|---|
+| `GET` | `/held-readings/` | `IsAuthenticated` + `HasZevAccess` | `zev_id`, `metering_point`, `import_batch`, `date_from`, `date_to`, `page` |
+| `GET` | `/held-readings/{id}/` | same | — |
+
+`QuarantinedReadingViewSet` (`metering/views.py`) exposes current held rows,
+not immutable import history. A newer held delivery can update a slot and
+reassign its `import_batch`; promotion removes its held predecessor. Import
+log counters retain the outcome of the original import. `accepted_energy_kwh`
+is also computed at request time for the same meter, timestamp and direction.
+
+**Response fields** (`HeldMeteringReading` in `frontend/src/types/api.ts`):
+
+| Fields | Type / meaning |
+|---|---|
+| `id`, `metering_point` | UUID strings; observation and meter IDs |
+| `meter_id` | String; the meter's canonical identifier |
+| `timestamp`, `created_at` | ISO-8601 datetime strings; interval start and local record creation |
+| `direction` | `in` or `out` |
+| `resolution` | `15min`, `hourly` or `daily` |
+| `energy_kwh` | Decimal string, four decimal places; held energy |
+| `accepted_energy_kwh` | Current accepted energy as a four-place decimal string, or `null`; accepted zero is `"0.0000"` |
+| `condition` | Raw quality-code string, blank when unflagged |
+| `business_reason` | Raw delivery-purpose code, e.g. `E88` billing energy or `C38` information-only; not a derived hold reason |
+| `import_source` | `csv`, `sdatch` or `manual` |
+| `import_batch` | UUID string or `null`; current source batch |
+| `source_creation` | ISO-8601 datetime string or `null`; source delivery creation |
+| `source_document_id`, `source_delivery_id`, `source_product`, `source_unit`, `source_meter_id` | Stored provenance strings, blank when unavailable |
+
+Held values are excluded from accepted-energy totals and do not replace an
+accepted value for the same interval. The API is read-only: managers/admins
+receive 405 for `POST`, `PUT`, `PATCH` and `DELETE`; other accounts can be
+refused by permissions first. There is no manual release: promotion requires
+a validated delivery.
+
+**Filtering and ordering:** `metering_point` and `import_batch` must be valid
+UUIDs, `date_from`/`date_to` are `YYYY-MM-DD` civil dates applied through
+`period_start_dt`/`period_end_exclusive_dt` (Swiss midnight, ADR 0026), and a
+malformed value is a field-specific HTTP 400. Results are ordered
+`metering_point_id, timestamp, direction, id` so pagination is deterministic
+when observations share a timestamp. The list response (`HeldMeteringPage`)
+contains `count`, `next`, `previous`, `results`, and numeric `page_size`: the
+effective server page size, including on a short final page. The default is
+50; the UI derives its ranges and page count from this metadata.
+
+**Scope:** the queryset is scoped (`ZevScopedQuerySetMixin`, `zev_lookup =
+"metering_point__zev"`) before DRF counts or paginates, so `count`, `next`,
+`previous` and direct retrieval all follow the same rule. `participant_path =
+None`: this is an operator diagnostic and a participant link does not reveal
+it — an account with only participant links receives 403 from `HasZevAccess`.
+An account with a viewer/manager grant elsewhere sees only its grant-based
+communities, never held rows from a participant-only community. The
+`?zev_id=` filter can only narrow what the caller already sees. Provenance
+fields name only the caller's own observations; no import contents, meters or
+ZEVs outside the scope are reachable through them.
+
+**UI:** `HeldReadingsPanel` appears below raw-day pagination on management
+surfaces only. Opening it fetches server-configured pages for the selected meter
+and period; changing that scope remounts the panel. Columns show meter/interval
+start, direction, held kWh, quality/code, current accepted kWh, translated
+delivery purpose, source delivery/document IDs with source creation, and local
+record creation. Values have four decimal places; timestamps use Swiss time
+with UTC offsets. The source region supports keyboard scrolling. Loading,
+empty and error states are explicit; errors offer Retry, and failed/empty
+later pages offer a return to page 1. Protocol presentation is specified in §8.4.
 
 ### 5.4 Dashboard summary
 
@@ -1516,7 +1607,15 @@ interface RawMeteringDailyRow {
   in_kwh: number
   out_kwh: number
   readings_count: number
-  readings: RawMeteringReading[]
+}
+
+interface RawMeteringReading {
+  timestamp: string
+  direction: 'in' | 'out'
+  energy_kwh: number
+  resolution: string
+  import_source: string
+  condition: string      // stored SDAT-CH code: '' unflagged, '56' estimated
 }
 
 type DataQualitySeverity = 'green' | 'yellow' | 'red'
@@ -1553,6 +1652,11 @@ display-only detail for unmapped codes) plus structured params
 displayed at most, never parsed into state. Logs without `result_status`
 (CSV/legacy) keep the row-totals/notes/skipped-reasons rendering.
 
+When `result_counts.held > 0`, the protocol opens `HeldReadingsPanel` filtered
+to `log.batch_id`, without a disclosure toggle. It labels these as remaining
+held observations and distinguishes their current state (§5.3.1) from the
+historical import counters, including when no rows remain.
+
 Batch upload (`ImportsPage.handleUploadOutcomes`) treats a rejected 201 log
 like a thrown 413/429 failure: the file stays selected for retry while
 successful files are cleared, its protocol opens, and one rejected file does
@@ -1574,6 +1678,7 @@ preview or quarantine dashboard.
   import log for traceability.
 - **Scope enforcement:** reading visibility is enforced via queryset scoping;
   import endpoints require `HasZevAccess`.
+- **Quality and held diagnostics:** the read-only contracts are in §5.3–§5.3.1.
 - **Non-destructive defaults:** imports skip duplicates by default; overwrite
   must be explicitly opted into.
 - **Error isolation:** malformed rows in CSV generate per-row errors without
@@ -1626,6 +1731,8 @@ preview or quarantine dashboard.
 | `DashboardCivilDayBucketingTests` | §5.4: a 23:45 Swiss-time reading stays in its civil-day bucket (`+02:00`); 00:00 the next day is excluded |
 | `DashboardBucketParityTests` | §5.4 / ADR 0026: derived day/month and UTC-hour keys match the ORM at month/DST boundaries; bare truncators use Django's current timezone; unsupported truncators and local-hour buckets are rejected; the dashboard's hourly cache keeps both autumn instants |
 | `DashboardAggregationRegressionTests` | §5.4: one row per timestamp combines both directions; explicit zero readings still create buckets; production-only timestamps do not create participant timeline buckets |
+| `QualityVisibilityTests` (`metering/test_quality_visibility.py`) | §5.3/§5.3.1: detail rows carry the stored `condition` while the summary shape and totals stay unchanged; held observations list with provenance, accepted/held coexistence and zero-vs-missing accepted values; filters including Swiss midnight/DST boundaries, invalid-filter 400s, deterministic 50-row pagination, read-only methods (405), participant 403, positive admin/manager/viewer reads, viewer/participant relationship isolation including direct retrieval, and effective page-size metadata under a changed pagination setting |
+| `OutOfOrderPositionTests` (`metering/test_import_sdatch_strict.py`) | §4.2: the self-authored `test_fixtures/sdatch/e66_out_of_order_positions.xml` lists `Position 2` before `Position 1`; each value and condition stays on its own interval (00:15 and 00:00) |
 | `DataQualityStatusTests` | §5.5: owner sees gaps and severity; participant sees own meters; default range is the 30 days ending yesterday, and a lone `date_from` of today still yields a one-day window; fully assigned readings report no unassigned; holder-less meter flags every reading; assignment-gap readings flagged unassigned; overlapping windows flag only the corrupt meter (others still report) |
 
 ### Backend (`metering/test_disabled_zev.py`)
@@ -1669,7 +1776,9 @@ day/hour/month chart buckets:
 
 `metering/test_import_sdatch_strict.py::BatchedPersistenceTests` covers billable
 and held updates, promotion deletions across batches, distinct stored values,
-identity/provenance preservation and rollback after a later batch fails.
+identity/provenance preservation and rollback after a later batch fails. The
+held API follows batch reassignment and promotion while original log counters
+remain unchanged.
 `invoices/test_reading_impact.py::CorrectionImportTests` also verifies history
 rollback after promotion deletions and invoice-impact creation.
 
@@ -1729,6 +1838,17 @@ both streams stay locked until the transaction commits.
   warnings. Other files remain available in history. Both single and bulk
   deletion toasts pass the log count for held-value result pluralization.
   Protocol fields wrap long filenames and delivery identities, including at 400px.
+- Reading quality and held views (`RawMeteringTable`, `HeldReadingsPanel`,
+  §5.3–§5.3.1): `raw-metering-quality.test.ts` covers estimated/unknown quality,
+  distinct DST timestamps, zero versus missing accepted values, and retry/reset
+  after failed or invalid later pages, plus ranges on a short final page with a
+  non-default server page size. `metering-labels.test.ts` checks actual
+  translated quality codes; `import-protocol-sdat.test.ts` checks batch scoping,
+  meter identity and delivery/document provenance.
+  `screenshots/metering-quality.spec.ts` exercises desktop/400px interaction,
+  keyboard scrolling, pagination, held-only periods and remaining-row empty
+  states with mocked APIs. It captures screenshots for manual inspection and
+  checks console errors; it runs via `test:browser`, outside CI.
 - Types: `frontend/src/types/api.ts:ImportPreviewResult.missing_meter_ids: string[]` and preview `zevId` required payload in `frontend/src/lib/api/metering.ts:previewCsvImport`.
 - Wizard step 2 (CSV) is grouped into `form-section` blocks with the shared `form-section-header` style: **File format** (row format, delimiter, date/time format, header-row checkbox), **Column mapping** (meter ID, date/timestamp, energy column or first-interval column, then intervals per row and minutes per interval for daily profiles, and the optional direction column last so its long hint cannot stretch a row; it spans two columns in the standard layout via `.grid-span-2`, which only applies above 640 px), **Options** (overwrite, with a hint that it cannot be undone) and **Preview**. The target ZEV is a read-only line, not a disabled input. Locale keys: `pages.imports.wizard.targetZev`, `sections.*`, `overwriteExistingHint`.
 - Settings detection (frontend side of §4.3.1): entering step 2 of a CSV import calls `detectCsvSettings` (`frontend/src/lib/api/metering.ts`) for the first selected file — once per selection, tracked by a signature of the selection, so moving back and forth never overwrites manual edits; SDAT-CH skips it. A detected result is applied through `settingsFromDetection` (`importUtils.ts`): header, delimiter (a tab shown as the `\t` escape the field accepts), profile, timestamp format, interval, values count and the column map, where a field the backend left `null` keeps the default for the detected layout (direction and the unused energy field become empty) and the previews are cleared. `DetectionState` drives a notice above the settings: loading (Load Preview disabled), done (info; warning naming `undetected` fields via the existing field labels), or failed (defaults kept, preview not blocked), each with a **Detect again** button that re-runs and overwrites edits; with several files the notice says the settings apply to all of them. Locale keys: `pages.imports.detection.*`. Covered by `imports-wizard.test.ts` (`ImportsPage settings detection`) and `api-metering.test.ts`.

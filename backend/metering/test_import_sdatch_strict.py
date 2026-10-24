@@ -123,7 +123,10 @@ class BatchedPersistenceTests(StrictBase):
     def test_held_replacement_and_promotion_cross_batch_boundaries(self):
         original = build_block(CONS_ID, "".join(observation(s, str(s), "21") for s in range(1, 6)),
                                end="2025-06-02T23:15:00Z")
-        self.assertEqual(self._import(build_e66([original])).data["result_status"], "held")
+        initial = self._import(build_e66([original])).data
+        self.assertEqual(initial["result_status"], "held")
+        held_url = "/api/v1/metering/held-readings/"
+        self.assertEqual(self.client.get(held_url, {"import_batch": initial["batch_id"]}).data["count"], 5)
         before = {
             row.timestamp: (row.pk, row.created_at)
             for row in QuarantinedReading.objects.all()
@@ -143,6 +146,11 @@ class BatchedPersistenceTests(StrictBase):
             self.assertEqual(row.energy_kwh, Decimal(slot + 10))
             self.assertEqual(row.source_delivery_id, "HELD-REPLACEMENT")
             self.assertEqual(str(row.import_batch), response.data["batch_id"])
+        replacement_batch = response.data["batch_id"]
+        self.assertEqual(self.client.get(held_url, {"import_batch": initial["batch_id"]}).data["count"], 0)
+        remaining = self.client.get(held_url, {"import_batch": replacement_batch}).data
+        self.assertEqual(remaining["count"], 5)
+        self.assertEqual(remaining["results"][0]["source_delivery_id"], "HELD-REPLACEMENT")
 
         promoted = build_block(CONS_ID, "".join(observation(s, str(s + 20)) for s in range(1, 6)),
                                end="2025-06-02T23:15:00Z")
@@ -155,6 +163,9 @@ class BatchedPersistenceTests(StrictBase):
         self.assertEqual({pk for batch in delete_batches for pk in batch}, {pk for pk, _ in before.values()})
         self.assertEqual(response.data["result_counts"]["promoted"], 5)
         self.assertFalse(QuarantinedReading.objects.exists())
+        self.assertEqual(self.client.get(held_url, {"import_batch": replacement_batch}).data["count"], 0)
+        historical = self.client.get(f"/api/v1/metering/import-logs/{initial['id']}/").data
+        self.assertEqual(historical["result_counts"]["held"], 5)
         self.assertEqual(
             list(MeterReading.objects.order_by("timestamp").values_list("energy_kwh", flat=True)),
             [Decimal(s + 20) for s in range(1, 6)],
@@ -378,6 +389,42 @@ class StrictUnitTests(StrictBase):
         resp = self._import(build_e66([block]))
 
         self.assertRejected(resp, "schema_invalid")
+
+
+FIXTURE_OUT_OF_ORDER = os.path.join(
+    os.path.dirname(__file__), "test_fixtures", "sdatch", "e66_out_of_order_positions.xml"
+)
+
+
+class OutOfOrderPositionTests(StrictBase):
+    """Issue #956: XML order must not move a value to a neighbouring interval.
+
+    The fixture is self-authored for this regression: a two-slot block starting
+    at an explicit ``2026-03-01T00:00:00Z``, with Position 2 listed before
+    Position 1 and a distinct value and condition on each.
+    """
+
+    def test_derived_out_of_order_positions_keep_their_interval(self):
+        with open(FIXTURE_OUT_OF_ORDER, "rb") as fh:
+            resp = self._upload("out-of-order.xml", fh.read())
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["result_status"], "accepted")
+        self.assertEqual(resp.data["rows_imported"], 2)
+
+        readings = {
+            reading.timestamp: reading
+            for reading in MeterReading.objects.filter(metering_point=self.cons_mp)
+        }
+        first = readings[datetime(2026, 3, 1, 0, 0, tzinfo=timezone.utc)]
+        second = readings[datetime(2026, 3, 1, 0, 15, tzinfo=timezone.utc)]
+        # Position 1 sits at 00:00 and Position 2 at 00:15, whatever order the
+        # observations appear in.
+        self.assertEqual(first.energy_kwh, Decimal("1.25"))
+        self.assertEqual(first.condition, "56")
+        self.assertEqual(second.energy_kwh, Decimal("2.5"))
+        self.assertEqual(second.condition, "")
+        self.assertFalse(QuarantinedReading.objects.exists())
 
 
 class StrictPositionTests(StrictBase):

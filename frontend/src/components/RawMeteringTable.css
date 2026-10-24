@@ -193,3 +193,57 @@
   background: rgba(148, 163, 184, 0.06);
 }
 
+/* Reading quality: the marker never relies on colour alone. */
+
+.raw-metering-quality-marker {
+  margin-left: 0.1rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--text-body);
+}
+
+.raw-metering-cell-count {
+  margin-left: 0.1rem;
+  font-size: 0.6rem;
+  color: var(--muted);
+}
+
+.raw-metering-cell-button {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.raw-metering-cell-button:focus-visible {
+  outline: 2px solid var(--interactive);
+  outline-offset: 1px;
+}
+
+.raw-metering-quality-legend {
+  margin: 0.3rem 1rem 0.1rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.raw-metering-cell-detail {
+  margin: 0.35rem 0 0.25rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 0.78rem;
+}
+
+.raw-metering-cell-detail ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.raw-metering-cell-detail-time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}

@@ -90,6 +90,30 @@ export function formatMeteringBucketLabel(
     }
 }
 
+const offsetFormatter = new Intl.DateTimeFormat('en', {
+    timeZone: BUSINESS_TIME_ZONE,
+    timeZoneName: 'longOffset',
+})
+
+/** Include the Swiss UTC offset so the repeated autumn hour stays distinct. */
+export function formatMeteringTimestamp(value: string, settings: AppSettings): string {
+    const date = new Date(value)
+    if (isNaN(date.getTime())) return value
+    const offset = offsetFormatter.formatToParts(date).find((part) => part.type === 'timeZoneName')?.value
+    return `${formatBucketDateTime(value, settings)} ${offset}`
+}
+
+/** Translate stored quality codes; preserve unknown codes. */
+export function conditionLabel(
+    condition: string,
+    translate: (key: string, options?: Record<string, string>) => string,
+): string {
+    if (!condition) return translate('pages.meteringData.rawTable.conditionValid')
+    if (condition === '56') return `${translate('pages.meteringData.rawTable.conditionEstimated')} (56)`
+    if (condition === '21') return `${translate('pages.meteringData.rawTable.conditionTemporary')} (21)`
+    return translate('pages.meteringData.rawTable.conditionOther', { code: condition })
+}
+
 /**
  * Pick the i18n key for a meter's OUT-direction readings.
  *

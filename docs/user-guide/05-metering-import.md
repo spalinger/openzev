@@ -177,7 +177,7 @@ acknowledgements/error responses, LEG settlement and other market roles
 | Product / unit | Active energy (`8716867000030`) in kWh | Reactive energy, LEG products, other units |
 | Direction | Customer/producer consumption (`IN`) and production (`OUT`) | Grid-interconnection (exchange) points |
 | Resolution | 15-minute intervals | Hourly and other resolutions |
-| Quality | Measured and estimated (`56`) values bill; temporary (`21`) values are held | — |
+| Quality | Unflagged and estimated (`56`) values bill; temporary (`21`) values are held | — |
 | Transport | Manual file upload (XML, gzip) | Automated exchange, ACK/error messages |
 
 Unsupported message types, reasons, products and units reject the file;
@@ -221,11 +221,29 @@ remain available in history.
 
 ### Held (non-billable) values
 
-Estimated/information-only and temporary values that are not billable are
-**held in quarantine**, visible in the protocol but excluded from billing,
-charts and invoices. A file that only holds values is still a successful
-import (`held`, not a failure). When a later validated delivery covers a
-held slot, the held value is promoted into billing and counted as such.
+Values from information-only deliveries (`C38`) and temporary values (condition `21`) are
+**held in quarantine** and excluded from billing, charts and invoices. A file
+that only holds values is still a successful import (`held`, not a failure).
+A validated delivery can write billable data for a held slot when it is new
+enough, removing the eligible held predecessor. A newer held observation can
+remain.
+
+You can read the held values themselves:
+
+- **In the import protocol.** **Remaining held observations** lists current
+  rows associated with that import. Its counters describe the original import;
+  later deliveries may replace or promote held rows, so fewer rows—or none—may
+  remain. The accepted counterpart shown is also current, not an import-time
+  snapshot.
+- **On the raw readings table.** Open **Metering → Chart**, pick the meter and
+  period, and use **Held observations** below the raw readings table — see
+  [Reading Quality and Held Observations](06-metering-analysis.md#reading-quality).
+
+Held values never appear in accepted consumption, feed-in or billing totals,
+and a held value does not replace an accepted reading for the same interval.
+Held values cannot be managed from the UI: correcting one requires a
+validated replacement delivery from your grid operator. The list is read-only
+and available to admins, managers and viewers; participants do not see it.
 
 XML and gzip uploads are limited to 50 MB, with a 100 MB limit after
 decompression.

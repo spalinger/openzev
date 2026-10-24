@@ -4,12 +4,13 @@ from datetime import date as date_type, timedelta, timezone as dt_timezone
 
 from allocation.validity import business_tz, period_end_exclusive_dt, period_start_dt, period_window
 from django.db import transaction
-from django.db.models import Count, Exists, OuterRef, Q, Sum
+from django.db.models import Count, Exists, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import TruncDate, TruncDay, TruncHour, TruncMonth
 from django.utils.dateparse import parse_date
 from rest_framework import mixins, viewsets, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import SAFE_METHODS, IsAuthenticated
 from rest_framework.response import Response
@@ -26,7 +27,12 @@ from .deletion import (
 from zev import access
 from zev.scoping import ZevScopedQuerySetMixin, assert_zev_not_disabled
 from .locks import lock_billing_inputs, protect_billing_scope
-from .serializers import MeterReadingSerializer, ImportLogSerializer, ImportLogListSerializer
+from .serializers import (
+    ImportLogListSerializer,
+    ImportLogSerializer,
+    MeterReadingSerializer,
+    QuarantinedReadingSerializer,
+)
 from .importers.csv_detect import detect_csv_settings
 from .importers.csv_importer import ImportFileError, import_csv, preview_csv
 from .importers.sdatch_importer import import_sdatch
@@ -264,16 +270,14 @@ class MeterReadingViewSet(ZevScopedQuerySetMixin, viewsets.ReadOnlyModelViewSet)
         """
         Raw metering readings for one metering point, in one of two modes:
 
-          - summary (default): one aggregated row per UTC day
+          - summary (default): one aggregated row per Swiss civil day
             ({date, in_kwh, out_kwh, readings_count}), for a compact overview
             table. The individual readings are deliberately omitted so the
             payload stays small even over long periods.
           - detail (``date=YYYY-MM-DD``): the individual readings for that single
             day, fetched lazily when a day row is expanded.
 
-        Days are bucketed in UTC to match how the importer stores timestamps
-        (a naive CSV timestamp is stamped as UTC), so day boundaries here line up
-        with the times shown in the UI.
+        Both modes use Europe/Zurich day boundaries; stored timestamps are UTC.
         """
         mp_id = _validated_uuid(request.query_params.get("metering_point"), "metering_point")
         if not mp_id:
@@ -296,6 +300,7 @@ class MeterReadingViewSet(ZevScopedQuerySetMixin, viewsets.ReadOnlyModelViewSet)
                     "energy_kwh": float(reading.energy_kwh),
                     "resolution": reading.resolution,
                     "import_source": reading.import_source,
+                    "condition": reading.condition,
                 }
                 for reading in readings
             ])
@@ -484,6 +489,61 @@ class MeterReadingViewSet(ZevScopedQuerySetMixin, viewsets.ReadOnlyModelViewSet)
             "date_to": date_to.isoformat(),
             "metering_points": result,
         })
+
+
+class HeldReadingsPagination(PageNumberPagination):
+    def get_paginated_response(self, data):
+        response = super().get_paginated_response(data)
+        response.data["page_size"] = self.get_page_size(self.request)
+        return response
+
+    def get_paginated_response_schema(self, schema):
+        response = super().get_paginated_response_schema(schema)
+        response["properties"]["page_size"] = {"type": "integer", "minimum": 1}
+        response["required"].append("page_size")
+        return response
+
+
+class QuarantinedReadingViewSet(ZevScopedQuerySetMixin, viewsets.ReadOnlyModelViewSet):
+    """Read-only current held observations; participant links do not grant access."""
+
+    serializer_class = QuarantinedReadingSerializer
+    permission_classes = [IsAuthenticated, HasZevAccess]
+    pagination_class = HeldReadingsPagination
+    zev_lookup = "metering_point__zev"
+    participant_path = None
+
+    def get_queryset(self):
+        accepted = MeterReading.objects.filter(
+            metering_point_id=OuterRef("metering_point_id"),
+            timestamp=OuterRef("timestamp"),
+            direction=OuterRef("direction"),
+        )
+        qs = QuarantinedReading.objects.select_related("metering_point__zev").annotate(
+            accepted_energy_kwh=Subquery(accepted.values("energy_kwh")[:1]),
+        )
+        qs = self.scope_queryset(qs)
+
+        metering_point = _validated_uuid(
+            self.request.query_params.get("metering_point"), "metering_point"
+        )
+        if metering_point:
+            qs = qs.filter(metering_point_id=metering_point)
+
+        import_batch = _validated_uuid(
+            self.request.query_params.get("import_batch"), "import_batch"
+        )
+        if import_batch:
+            qs = qs.filter(import_batch=import_batch)
+
+        date_from = _validated_date(self.request.query_params.get("date_from"), "date_from")
+        date_to = _validated_date(self.request.query_params.get("date_to"), "date_to")
+        if date_from:
+            qs = qs.filter(timestamp__gte=period_start_dt(date_from))
+        if date_to:
+            qs = qs.filter(timestamp__lt=period_end_exclusive_dt(date_to))
+
+        return qs.order_by("metering_point_id", "timestamp", "direction", "id")
 
 
 class ImportLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.DestroyModelMixin, viewsets.GenericViewSet):

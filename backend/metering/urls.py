@@ -1,10 +1,11 @@
 from django.urls import path
 from rest_framework.routers import DefaultRouter
-from .views import MeterReadingViewSet, ImportLogViewSet, ImportView
+from .views import MeterReadingViewSet, QuarantinedReadingViewSet, ImportLogViewSet, ImportView
 from .supplementary.views import SupplementaryIngestView, SupplementarySourceViewSet
 
 router = DefaultRouter()
 router.register("readings", MeterReadingViewSet, basename="meterreading")
+router.register("held-readings", QuarantinedReadingViewSet, basename="quarantinedreading")
 router.register("import-logs", ImportLogViewSet, basename="importlog")
 router.register("import", ImportView, basename="import")
 router.register("supplementary/sources", SupplementarySourceViewSet, basename="supplementary-source")

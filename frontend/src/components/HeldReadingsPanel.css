@@ -1,0 +1,50 @@
+/* Held (quarantined) observations — shared panel */
+
+.held-readings {
+  padding: 0.4rem 1rem 1rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.held-readings h4 {
+  margin: 0;
+}
+
+.held-readings-status {
+  padding: 0.9rem 0;
+}
+
+.held-readings-note {
+  margin: 0.4rem 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.held-readings-scroll {
+  overflow-x: auto;
+}
+
+.held-readings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.held-readings-table th,
+.held-readings-table td {
+  padding: 0.3rem 0.4rem;
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
+  white-space: nowrap;
+}
+
+th.held-readings-num,
+td.held-readings-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+td.held-readings-source {
+  min-width: 16rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

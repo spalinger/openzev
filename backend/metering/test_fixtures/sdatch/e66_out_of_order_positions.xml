@@ -1,0 +1,42 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<rsm:ValidatedMeteredData_16 xmlns:rsm="http://www.strom.ch" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.strom.ch ValidatedMeteredData_1p6.xsd">
+	<rsm:ValidatedMeteredData_HeaderInformation>
+		<rsm:HeaderVersion>1.0</rsm:HeaderVersion>
+		<rsm:Sender>
+			<rsm:ID>
+				<rsm:EICID schemeAgencyID="305">12X-PARTY-A-000K</rsm:EICID>
+			</rsm:ID>
+			<rsm:Role>MDR</rsm:Role>
+		</rsm:Sender>
+		<rsm:Receiver>
+			<rsm:ID>
+				<rsm:EICID schemeAgencyID="305">12X-PARTY-C-0008</rsm:EICID>
+			</rsm:ID>
+			<rsm:Role>DEC</rsm:Role>
+		</rsm:Receiver>
+		<rsm:InstanceDocument>
+			<rsm:DictionaryAgencyID>260</rsm:DictionaryAgencyID>
+			<rsm:VersionID listAgencyID="260">2007B</rsm:VersionID>
+			<rsm:DocumentID>DERIVED-DOC</rsm:DocumentID>
+			<rsm:DocumentType listAgencyID="260">
+				<rsm:ebIXCode>E66</rsm:ebIXCode>
+			</rsm:DocumentType>
+			<rsm:Creation>2025-06-05T15:40:05Z</rsm:Creation>
+			<rsm:Status>9</rsm:Status>
+		</rsm:InstanceDocument>
+		<rsm:BusinessScopeProcess>
+			<rsm:BusinessReasonType codeListAgency="260">
+				<rsm:ebIXCode>E88</rsm:ebIXCode></rsm:BusinessReasonType>
+			<rsm:BusinessDomainType listAgencyID="260">E02</rsm:BusinessDomainType>
+			<rsm:BusinessSectorType>23</rsm:BusinessSectorType>
+			<rsm:ReportPeriod>
+				<rsm:StartDateTime>2026-03-01T00:00:00Z</rsm:StartDateTime>
+				<rsm:EndDateTime>2026-03-01T00:30:00Z</rsm:EndDateTime>
+			</rsm:ReportPeriod>
+			<rsm:BusinessService>
+				<rsm:ServiceTransaction isIntelligibleCheckRequired="true"/>
+			</rsm:BusinessService>
+		</rsm:BusinessScopeProcess>
+	</rsm:ValidatedMeteredData_HeaderInformation>
+	<rsm:MeteringData><rsm:DocumentID>OUT-OF-ORDER-2026-03-01</rsm:DocumentID><rsm:Interval><rsm:StartDateTime>2026-03-01T00:00:00Z</rsm:StartDateTime><rsm:EndDateTime>2026-03-01T00:30:00Z</rsm:EndDateTime></rsm:Interval><rsm:Resolution><rsm:Resolution>15</rsm:Resolution><rsm:Unit>MIN</rsm:Unit></rsm:Resolution><rsm:ConsumptionMeteringPoint><rsm:VSENationalID schemeID="VSE" schemeAgencyID="260">CH9999901234500000000000000000001</rsm:VSENationalID></rsm:ConsumptionMeteringPoint><rsm:Product><rsm:ID><rsm:ebIXCode schemeAgencyID="9">8716867000030</rsm:ebIXCode></rsm:ID><rsm:MeasureUnit>KWH</rsm:MeasureUnit></rsm:Product><rsm:Observation><rsm:Position><rsm:Sequence>2</rsm:Sequence></rsm:Position><rsm:Volume>2.5</rsm:Volume></rsm:Observation><rsm:Observation><rsm:Position><rsm:Sequence>1</rsm:Sequence></rsm:Position><rsm:Volume>1.25</rsm:Volume><rsm:Condition>56</rsm:Condition></rsm:Observation></rsm:MeteringData>
+	</rsm:ValidatedMeteredData_16>

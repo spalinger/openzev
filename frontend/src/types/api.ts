@@ -1899,6 +1899,37 @@ export interface RawMeteringReading {
     energy_kwh: number
     resolution: string
     import_source: string
+    /** SDAT-CH Condition: '' = unflagged, '56' = estimated. */
+    condition: string
+}
+
+/** A held (quarantined) observation, excluded from accepted-energy totals. */
+export interface HeldMeteringReading {
+    id: string
+    metering_point: string
+    meter_id: string
+    timestamp: string
+    direction: 'in' | 'out'
+    energy_kwh: string
+    resolution: string
+    /** SDAT-CH Condition: '21' = temporary, '56' = estimated, '' = unflagged. */
+    condition: string
+    business_reason: string
+    import_source: string
+    import_batch: string | null
+    source_document_id: string
+    source_delivery_id: string
+    source_creation: string | null
+    source_product: string
+    source_unit: string
+    source_meter_id: string
+    created_at: string
+    /** Current accepted energy for that interval; null when none exists. */
+    accepted_energy_kwh: string | null
+}
+
+export interface HeldMeteringPage extends PaginatedResponse<HeldMeteringReading> {
+    page_size: number
 }
 
 export interface RawMeteringDailyRow {

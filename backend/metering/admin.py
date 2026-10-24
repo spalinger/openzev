@@ -4,8 +4,16 @@ from .models import MeterReading, ImportLog
 
 @admin.register(MeterReading)
 class MeterReadingAdmin(admin.ModelAdmin):
-    list_display = ("metering_point", "timestamp", "direction", "energy_kwh", "resolution", "import_source")
-    list_filter = ("direction", "resolution", "import_source")
+    list_display = (
+        "metering_point",
+        "timestamp",
+        "direction",
+        "energy_kwh",
+        "resolution",
+        "condition",
+        "import_source",
+    )
+    list_filter = ("direction", "resolution", "condition", "import_source")
     search_fields = ("metering_point__meter_id",)
     date_hierarchy = "timestamp"
 

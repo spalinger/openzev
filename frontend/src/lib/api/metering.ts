@@ -2,6 +2,7 @@ import type {
   ChartDataPoint,
   CsvDetectResult,
   DataQualityStatusResponse,
+  HeldMeteringPage,
   HourlyProfileResponse,
   ImportDeletionResult,
   ImportLog,
@@ -223,6 +224,32 @@ export async function fetchRawMeteringDay(params: {
       date: params.date,
     },
   })
+  return data
+}
+
+/**
+ * One page of held (quarantined) observations, scoped to a meter and period or
+ * to a single import. Never part of an accepted-energy total.
+ */
+export async function fetchHeldMeteringReadings(params: {
+  meteringPoint?: string
+  dateFrom?: string
+  dateTo?: string
+  importBatch?: string
+  page?: number
+}): Promise<HeldMeteringPage> {
+  const { data } = await api.get<HeldMeteringPage>(
+    '/metering/held-readings/',
+    {
+      params: {
+        metering_point: params.meteringPoint,
+        date_from: params.dateFrom,
+        date_to: params.dateTo,
+        import_batch: params.importBatch,
+        page: params.page,
+      },
+    },
+  )
   return data
 }
 

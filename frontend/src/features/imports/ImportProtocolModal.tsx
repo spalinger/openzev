@@ -2,6 +2,7 @@ import { useMemo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { DataTable, type ColumnDef } from '../../components/DataTable'
 import { FormModal } from '../../components/FormModal'
+import { HeldReadingsPanel } from '../../components/HeldReadingsPanel'
 import { formatDateTime, useAppSettings } from '../../lib/appSettings'
 import type { ImportLog, SdatIssue } from '../../types/api'
 import {
@@ -148,7 +149,7 @@ export function ImportProtocolModal({ log, onClose }: { log: ImportLog | null; o
                                         {nonzeroCounts.map((key) => (
                                             <div key={key} style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem' }}>
                                                 <dt>{t(`pages.imports.protocol.counts.${key}`)}</dt>
-                                                <dd style={{ margin: 0, fontVariantNumeric: 'tabular-nums' }}>
+                                                <dd style={{ margin: 0, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
                                                     {counts?.[key]}
                                                 </dd>
                                             </div>
@@ -160,6 +161,10 @@ export function ImportProtocolModal({ log, onClose }: { log: ImportLog | null; o
                                         </p>
                                     )}
                                 </div>
+                            )}
+
+                            {(counts?.held ?? 0) > 0 && !!log.batch_id && (
+                                <HeldReadingsPanel key={log.batch_id} importBatch={log.batch_id} />
                             )}
 
                             {hasDelivery && (
