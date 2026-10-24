@@ -51,6 +51,11 @@ versions or a failed price fetch. Rows in **Ended tariffs** are grey but readabl
 Click a tariff row, its name or the downward chevron to expand its details
 within the same table. Opening another tariff closes the previous one. The
 upward chevron or another click on the name/summary row collapses that tariff.
+While a tariff is open, the other current tariffs have a soft grey background
+to keep attention on the white expanded row. Hovering or focusing another
+tariff brings it forward; ended tariffs retain their darker grey appearance.
+Category headings keep the same light green text whether a tariff is open
+or closed.
 
 The same row expands with its left identity column preserved. The tariff name
 appears once in the dark green bar above the energy type and warnings; the

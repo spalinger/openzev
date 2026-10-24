@@ -131,6 +131,12 @@ completion must not select or reopen anything (`useWriteScope`, reference spec Â
   the original column labels remain accessible and retain their column widths.
   There is no nested version table or framed detail card. Below 56rem of list
   width, the identity and pricing columns stack.
+  Category titles always use `--brand-accent`, matching the category label in
+  an expanded tariff's header, whether any tariff is open or closed.
+- While a tariff is expanded, the other current tariffs use a soft neutral
+  background across categories. Hover or keyboard focus restores their white
+  background. Ended tariffs retain their darker grey treatment. The expanded
+  tariff stays white, and collapsing it restores the normal overview colours.
 - `TariffDetail` (in `TariffDetailPane.tsx`) renders version blocks beneath that
   shared header, with scheduling, gap actions,
   charts and source information below. Each version's note appears below its own

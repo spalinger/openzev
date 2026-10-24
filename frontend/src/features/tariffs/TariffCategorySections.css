@@ -16,6 +16,7 @@
 
 .tariff-table > thead th:first-child {
   width: 26%;
+  color: var(--brand-accent);
 }
 
 .tariff-table .numeric {
@@ -596,6 +597,17 @@ td.tariff-table-valid {
   justify-content: flex-end;
   align-items: center;
   gap: 0.125rem;
+}
+
+/* Recede the other current tariffs while keeping ended tariffs' darker grey. */
+.tariff-overview:has(.is-expanded) .tariff-summary-row:not(.is-expanded, .is-ended),
+.tariff-overview:has(.is-expanded) .tariff-summary-row:not(.is-expanded, .is-ended) > td {
+  background: color-mix(in srgb, var(--status-neutral) 40%, var(--surface-card));
+}
+
+.tariff-overview:has(.is-expanded) .tariff-summary-row:not(.is-expanded, .is-ended):is(:hover, :focus-within),
+.tariff-overview:has(.is-expanded) .tariff-summary-row:not(.is-expanded, .is-ended):is(:hover, :focus-within) > td {
+  background: var(--surface-card);
 }
 
 /* Keep the open record on white paper; the header and chevron show its state. */
