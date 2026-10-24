@@ -108,6 +108,8 @@ export const en = {
                 generic: 'OAuth error: {{code}}',
                 email_not_verified:
                     "Your provider did not verify your email. Register or sign in first, then link the provider in Account.",
+                invalid_state:
+                    'This sign-in attempt is invalid or was superseded by a newer attempt. Please try again.',
                 missingCode: 'Missing authorisation code.',
                 exchangeFailed: 'Failed to complete sign-in. Please try again.',
                 initFailed: 'Failed to initiate OAuth login. Please try again.',

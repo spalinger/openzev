@@ -169,7 +169,11 @@ Configure external OAuth login providers in **Platform → Settings → OAuth**:
   provider, and leave the field blank when editing to keep the existing secret.
 - **Authorization / Token / Userinfo URLs** — Provider endpoint URLs
 - **Redirect URL** — The callback URL registered with the provider (e.g.
-  `https://app.example.com/api/v1/auth/oauth/callback/github/`)
+  `https://app.example.com/api/v1/auth/oauth/callback/github/`). The URL path
+  must use `/api/v1/auth/oauth/callback/<slug>/`: the browser binding cookie is
+  scoped to `/api/v1/auth/oauth/callback/`, so a path-rewriting reverse proxy
+  that alters this prefix prevents the cookie from being sent and causes sign-in
+  to fail with `invalid_state`.
 - **Scope** — Space-separated OIDC scopes (default `openid email profile`)
 - **Enabled** — Toggle to activate or deactivate the provider
 

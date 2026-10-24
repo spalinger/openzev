@@ -10,6 +10,9 @@ REFRESH_COOKIE = "openzev_refresh"
 ADMIN_ACCESS_COOKIE = "openzev_admin_access"
 ADMIN_REFRESH_COOKIE = "openzev_admin_refresh"
 
+OAUTH_BINDING_COOKIE = "openzev_oauth_binding"
+OAUTH_BINDING_PATH = "/api/v1/auth/oauth/callback/"
+
 
 def _cookie_kwargs() -> dict:
     """Shared kwargs for all auth cookies: httpOnly, Secure in prod, SameSite=Lax."""
@@ -46,3 +49,11 @@ def clear_auth_cookies(
 ) -> None:
     response.delete_cookie(access_cookie, path="/")
     response.delete_cookie(refresh_cookie, path="/")
+
+
+def set_oauth_binding_cookie(response, binding: str, *, max_age: int) -> None:
+    """Bind the browser; SameSite=Lax allows the provider's top-level GET redirect."""
+    # shortcut: pending callbacks share one slot; use per-state cookies for parallel initiation.
+    kwargs = _cookie_kwargs()
+    kwargs["path"] = OAUTH_BINDING_PATH
+    response.set_cookie(OAUTH_BINDING_COOKIE, binding, max_age=max_age, **kwargs)

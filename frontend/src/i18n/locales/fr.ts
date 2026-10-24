@@ -99,6 +99,8 @@ export const fr = {
                 generic: 'Erreur OAuth : {{code}}',
                 email_not_verified:
                     "Votre fournisseur n'a pas vérifié votre e-mail. Inscrivez-vous ou connectez-vous d'abord, puis liez le fournisseur dans Compte.",
+                invalid_state:
+                    "Cette tentative de connexion n'est pas valide ou a été remplacée par une nouvelle tentative. Veuillez réessayer.",
                 missingCode: 'Code d\'autorisation manquant.',
                 exchangeFailed: 'La connexion n\'a pas pu être complétée. Veuillez réessayer.',
                 initFailed: 'Impossible de lancer la connexion OAuth. Veuillez réessayer.',

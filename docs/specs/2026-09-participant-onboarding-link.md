@@ -236,6 +236,9 @@ codes alone do not qualify. Otherwise access creation uses an inactive-account
 invitation; direct promotion fails until an invitation exists. Verification
 establishes an independent session for fresh enrollment.
 
+OAuth linking also requires the initiating browser's binding cookie;
+see [account creation §5.7](2026-10-account-creation-and-sign-in.md#57-oauth).
+
 OAuth linking records `OAuthState.session_version` (`PositiveIntegerField`, nullable,
 non-editable) from the locked initiating account. Login states leave it null. After
 provider I/O, the callback locks the active account and requires the recorded version

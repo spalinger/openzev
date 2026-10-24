@@ -179,6 +179,28 @@ admin, admin MFA reset, and promotion. Reactivating an account does not revive o
 
 ### 5.7 OAuth
 
+- **Browser binding:** login and linking callbacks require the initiating browser's cookie
+  before provider I/O. The initiation endpoints mint a random per-attempt secret and store
+  only its SHA-256 hex digest in `OAuthState.binding` (`accounts.0031_oauthstate_browser_binding`).
+- **Cookie:** `openzev_oauth_binding` carries the raw secret: `HttpOnly`, `SameSite=Lax`,
+  `Secure` outside `DEBUG`, path `/api/v1/auth/oauth/callback/`, and a ten-minute expiry
+  matching `OAuthState.TTL`. Callbacks never clear it: an in-flight response could otherwise
+  erase a newer attempt's cookie. Starting another attempt replaces the binding for callbacks
+  not yet validated; an already accepted callback can still finish.
+- **Refusals:** missing or mismatched cookies and legacy rows with an empty binding return
+  `invalid_state`, audited as `state_binding_missing`, `state_not_bound`, or
+  `state_binding_unset`, respectively. Old in-flight logins fail closed at deployment;
+  users retry sign-in. The frontend translates `invalid_state` to inform users that their
+  sign-in attempt was invalid or superseded.
+- **State lifecycle:** expired and mismatched attempts are discarded. A valid callback must
+  delete its state before provider I/O; checking the affected-row count permits only one
+  concurrent callback to proceed. Provider errors and missing-code callbacks discard a state
+  only when the browser binding matches; uncorrelated errors leave pending states untouched.
+- **PKCE is deferred to a separate change.**
+
+Browser binding prevents login CSRF: a copied callback URL must not sign another browser
+into the attacker's account.
+
 - A new identity is matched to an existing account by email only when the provider asserts
   `email_verified: true`. A new account is provisioned only on the same condition, unless the
   provider has `trust_missing_email_verified` and omitted the claim.

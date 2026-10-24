@@ -29,7 +29,12 @@ from audit.models import AuditActionCategory, AuditEventStatus
 from audit.services import build_diff, record_audit_event
 
 from . import mfa
-from .cookies import set_auth_cookies
+from .api_keys import hash_secret, verify_secret
+from .cookies import (
+    OAUTH_BINDING_COOKIE,
+    set_auth_cookies,
+    set_oauth_binding_cookie,
+)
 from .jwt_utils import is_participant_link_session, make_jwt_for_user, record_login
 from .session_revocation import lock_current_session
 from .throttling import AuthOAuthExchangeThrottle, AuthOAuthInitiateThrottle
@@ -304,6 +309,18 @@ def oauth_providers_public(request):
 
 # ── initiate login / link ─────────────────────────────────────────────────────
 
+def _authorization_url(provider: OAuthProvider, state_token: str) -> str:
+    """Build the provider's authorize URL for a fresh state token."""
+    params = {
+        "client_id": provider.client_id,
+        "response_type": "code",
+        "redirect_uri": provider.redirect_url,
+        "scope": provider.scope,
+        "state": state_token,
+    }
+    return f"{provider.authorization_url}?{urlencode(params)}"
+
+
 @api_view(["POST"])
 @permission_classes([AllowAny])
 @throttle_classes([AuthOAuthInitiateThrottle])
@@ -311,16 +328,13 @@ def oauth_login_initiate(request, provider_slug: str):
     """Return the provider authorization URL for a login flow."""
     provider = get_object_or_404(OAuthProvider, name=provider_slug, enabled=True)
     state_token = secrets.token_urlsafe(32)
-    OAuthState.objects.create(state=state_token, provider=provider)
-    redirect_uri = provider.redirect_url
-    params = {
-        "client_id": provider.client_id,
-        "response_type": "code",
-        "redirect_uri": redirect_uri,
-        "scope": provider.scope,
-        "state": state_token,
-    }
-    return Response({"redirect_url": f"{provider.authorization_url}?{urlencode(params)}"})
+    binding = secrets.token_urlsafe(32)
+    OAuthState.objects.create(
+        state=state_token, provider=provider, binding=hash_secret(binding),
+    )
+    response = Response({"redirect_url": _authorization_url(provider, state_token)})
+    set_oauth_binding_cookie(response, binding, max_age=int(OAuthState.TTL.total_seconds()))
+    return response
 
 
 @api_view(["POST"])
@@ -330,21 +344,17 @@ def oauth_link_initiate(request, provider_slug: str):
     """Return the linking URL after locking and rechecking the requesting session."""
     provider = get_object_or_404(OAuthProvider, name=provider_slug, enabled=True)
     state_token = secrets.token_urlsafe(32)
+    binding = secrets.token_urlsafe(32)
     user = lock_current_session(request)
     OAuthState.objects.create(
         state=state_token, provider=provider, user=user,
         session_version=user.session_version,
         from_participant_link=is_participant_link_session(request.auth),
+        binding=hash_secret(binding),
     )
-    redirect_uri = provider.redirect_url
-    params = {
-        "client_id": provider.client_id,
-        "response_type": "code",
-        "redirect_uri": redirect_uri,
-        "scope": provider.scope,
-        "state": state_token,
-    }
-    return Response({"redirect_url": f"{provider.authorization_url}?{urlencode(params)}"})
+    response = Response({"redirect_url": _authorization_url(provider, state_token)})
+    set_oauth_binding_cookie(response, binding, max_age=int(OAuthState.TTL.total_seconds()))
+    return response
 
 
 # ── callback (browser-facing, redirects back to frontend) ────────────────────
@@ -358,32 +368,37 @@ def _provider_proves_account_email(user_info, account_email):
     )
 
 
-def oauth_callback(request, provider_slug: str):
-    """
-    Handle the redirect from an OAuth provider.
+def _binding_problem(request, state_obj: OAuthState) -> str | None:
+    """Return the binding refusal reason, or ``None`` when it matches."""
+    if not state_obj.binding:
+        return "state_binding_unset"
+    presented = request.COOKIES.get(OAUTH_BINDING_COOKIE, "")
+    if not presented:
+        return "state_binding_missing"
+    if not verify_secret(presented, state_obj.binding):
+        return "state_not_bound"
+    return None
 
-    This is a plain Django view (not DRF) because it returns an HTTP redirect
-    that the browser follows, not a JSON response.
-    """
+
+def oauth_callback(request, provider_slug: str):
+    """Plain Django view because the provider callback redirects to the frontend."""
     frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:5173").rstrip("/")
     error = request.GET.get("error")
-    if error:
-        # Never embed the provider-supplied error value in the redirect URL.
-        # Any error from the provider results in a fixed slug so there is no
-        # user-controlled content in the redirect target (CWE-601).
-        return HttpResponseRedirect(f"{frontend_url}/login?oauth_error=provider_error")
-
     code = request.GET.get("code")
     state_value = request.GET.get("state")
-    if not code or not state_value:
-        return HttpResponseRedirect(f"{frontend_url}/login?oauth_error=missing_params")
+    state_obj = None
+    if state_value:
+        state_obj = OAuthState.objects.select_related("provider", "user").filter(
+            state=state_value, provider__name=provider_slug,
+        ).first()
+    if error or not code or not state_value:
+        if state_obj is not None and _binding_problem(request, state_obj) is None:
+            state_obj.delete()
+        # Never reflect the provider-supplied error in the redirect (CWE-601).
+        slug = "provider_error" if error else "missing_params"
+        return HttpResponseRedirect(f"{frontend_url}/login?oauth_error={slug}")
 
-    # Validate state (CSRF protection)
-    try:
-        state_obj = OAuthState.objects.select_related("provider", "user").get(
-            state=state_value, provider__name=provider_slug
-        )
-    except OAuthState.DoesNotExist:
+    if state_obj is None:
         # No matching in-flight request: a replayed, forged or cross-provider
         # state. The clearest CSRF signal this flow produces.
         _record_login_failure(request, provider_slug, "invalid_state")
@@ -394,11 +409,21 @@ def oauth_callback(request, provider_slug: str):
         _record_login_failure(request, provider_slug, "state_expired")
         return HttpResponseRedirect(f"{frontend_url}/login?oauth_error=state_expired")
 
+    # Consume mismatched attempts before any provider I/O or account work.
+    binding_problem = _binding_problem(request, state_obj)
+    if binding_problem is not None:
+        state_obj.delete()
+        _record_login_failure(request, provider_slug, binding_problem)
+        return HttpResponseRedirect(f"{frontend_url}/login?oauth_error=invalid_state")
+
+    if not OAuthState.objects.filter(pk=state_obj.pk).delete()[0]:
+        _record_login_failure(request, provider_slug, "invalid_state")
+        return HttpResponseRedirect(f"{frontend_url}/login?oauth_error=invalid_state")
+
     linking_user = state_obj.user
     link_session_version = state_obj.session_version
     participant_link = state_obj.from_participant_link
     provider = state_obj.provider
-    state_obj.delete()
 
     # Exchange authorisation code for tokens and fetch user profile
     redirect_uri = provider.redirect_url

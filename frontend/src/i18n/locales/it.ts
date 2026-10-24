@@ -99,6 +99,8 @@ export const it = {
                 generic: 'Errore OAuth: {{code}}',
                 email_not_verified:
                     "Il tuo provider non ha verificato la tua e-mail. Registrati o accedi prima, poi collega il provider in Account.",
+                invalid_state:
+                    'Questo tentativo di accesso non è valido o è stato sostituito da un nuovo tentativo. Riprova.',
                 missingCode: 'Codice di autorizzazione mancante.',
                 exchangeFailed: 'Impossibile completare l\'accesso. Riprova.',
                 initFailed: 'Impossibile avviare l\'accesso OAuth. Riprova.',

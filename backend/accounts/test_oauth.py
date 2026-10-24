@@ -31,6 +31,8 @@ from rest_framework.test import APIClient
 from audit.models import AuditActionCategory, AuditEvent, AuditEventStatus
 from testing.helpers import authenticate as auth, make_user
 
+from .api_keys import hash_secret
+from .cookies import OAUTH_BINDING_COOKIE
 from .models import (
     OAuthExchangeCode,
     OAuthProvider,
@@ -183,13 +185,20 @@ class OAuthTestCase(TestCase):
         self.provider = make_provider()
 
     def callback(self, **params):
-        return self.client.get(f"/api/v1/auth/oauth/callback/{self.provider.name}/", params)
+        return self.client.get(self.callback_url(), params)
 
-    def start_state(self, state="state-token", *, user=None):
-        return OAuthState.objects.create(
+    def start_state(self, state="state-token", *, user=None, binding="browser-binding"):
+        """Create a state row and give this client its matching binding."""
+        row = OAuthState.objects.create(
             state=state, provider=self.provider, user=user,
             session_version=user.session_version if user else None,
+            binding=hash_secret(binding),
         )
+        self.client.cookies[OAUTH_BINDING_COOKIE] = binding
+        return row
+
+    def callback_url(self):
+        return f"/api/v1/auth/oauth/callback/{self.provider.name}/"
 
 
 class ProviderListingTests(OAuthTestCase):
@@ -231,6 +240,7 @@ class InitiateTests(OAuthTestCase):
         self.assertIsNone(state.user, "a login flow must not be bound to a user")
         self.assertIn(f"state={state.state}", resp.data["redirect_url"])
         self.assertTrue(resp.data["redirect_url"].startswith(self.provider.authorization_url))
+        self.assertIn(OAUTH_BINDING_COOKIE, resp.cookies)
 
     def test_link_initiate_binds_the_state_to_the_caller(self):
         user = make_user("linker", UserRole.USER)
@@ -251,6 +261,235 @@ class InitiateTests(OAuthTestCase):
 
         self.assertEqual(self.client.post("/api/v1/auth/oauth/login/nope/").status_code, 404)
         self.assertEqual(self.client.post("/api/v1/auth/oauth/login/switched-off/").status_code, 404)
+
+
+class OAuthStateBindingTests(OAuthTestCase):
+    """Callbacks must come from the browser that started the flow."""
+
+    PROFILE = {"sub": "uid-bound", "email": "bound@example.com", "email_verified": True}
+
+    def initiate(self, client=None):
+        return (client or self.client).post(f"/api/v1/auth/oauth/login/{self.provider.name}/")
+
+    def assert_refused(self, response):
+        self.assertEqual(response.url, f"{FRONTEND}/login?oauth_error=invalid_state")
+        self.assertNotIn("openzev_access", response.cookies)
+        self.assertNotIn("openzev_refresh", response.cookies)
+        self.assertFalse(OAuthExchangeCode.objects.exists(), "no session may be issued")
+        self.assertFalse(SocialAccount.objects.exists(), "no identity may be linked")
+        self.assertFalse(OAuthState.objects.exists(), "the attempt is consumed")
+
+    def test_binding_cookie_attributes(self):
+        for debug in (True, False):
+            with self.subTest(debug=debug), override_settings(DEBUG=debug):
+                cookie = self.initiate().cookies[OAUTH_BINDING_COOKIE]
+
+                self.assertTrue(cookie["httponly"])
+                self.assertEqual(cookie["samesite"], "Lax")
+                self.assertEqual(cookie["path"], "/api/v1/auth/oauth/callback/")
+                self.assertEqual(cookie["max-age"], 600)
+                self.assertEqual(bool(cookie.get("secure")), not debug)
+
+    def test_binding_is_stored_as_hash(self):
+        raw = self.initiate().cookies[OAUTH_BINDING_COOKIE].value
+        row = OAuthState.objects.get()
+
+        self.assertNotEqual(row.binding, raw)
+        self.assertEqual(row.binding, hash_secret(raw))
+
+    def test_the_initiating_browser_completes_the_flow(self):
+        self.initiate()
+        state = OAuthState.objects.get()
+
+        with fake_provider_http({"access_token": "at"}, self.PROFILE):
+            response = self.callback(code="c", state=state.state)
+
+        self.assertTrue(response.url.startswith(f"{FRONTEND}/oauth/callback?code="))
+        self.assertTrue(OAuthExchangeCode.objects.filter(user__email="bound@example.com").exists())
+        self.assertNotIn(OAUTH_BINDING_COOKIE, response.cookies)
+
+    def test_a_callback_from_another_client_is_refused(self):
+        attacker = APIClient()
+        self.initiate(attacker)
+        state = OAuthState.objects.get()
+        victim = APIClient()
+
+        with patch("accounts.views_oauth._exchange_code_for_tokens") as exchange:
+            response = victim.get(self.callback_url(), {"code": "c", "state": state.state})
+
+        self.assert_refused(response)
+        exchange.assert_not_called()
+
+    def test_a_binding_belonging_to_a_different_attempt_is_refused(self):
+        self.start_state("first", binding="first-binding")
+        self.start_state("second", binding="second-binding")
+        # Present an older attempt's binding against the newer state.
+        self.client.cookies[OAUTH_BINDING_COOKIE] = "first-binding"
+
+        with patch("accounts.views_oauth._exchange_code_for_tokens") as exchange:
+            response = self.callback(code="c", state="second")
+
+        self.assertEqual(response.url, f"{FRONTEND}/login?oauth_error=invalid_state")
+        exchange.assert_not_called()
+        self.assertFalse(OAuthState.objects.filter(state="second").exists())
+        self.assertTrue(OAuthState.objects.filter(state="first").exists(),
+                        "only the presented attempt is consumed")
+        self.assertFalse(OAuthExchangeCode.objects.exists())
+        self.assertFalse(SocialAccount.objects.exists())
+
+    def test_an_older_callback_preserves_the_latest_attempt(self):
+        user = make_user("latest_oauth_attempt", UserRole.USER)
+        auth(self.client, user)
+        for flow in ("login", "link"):
+            with self.subTest(flow=flow):
+                url = f"/api/v1/auth/oauth/{flow}/{self.provider.name}/"
+                self.assertEqual(self.client.post(url).status_code, 200)
+                older = OAuthState.objects.get()
+                self.assertEqual(self.client.post(url).status_code, 200)
+                latest = OAuthState.objects.exclude(pk=older.pk).get()
+
+                refused = self.callback(code="old-code", state=older.state)
+
+                self.assertEqual(refused.url, f"{FRONTEND}/login?oauth_error=invalid_state")
+                self.assertNotIn(OAUTH_BINDING_COOKIE, refused.cookies)
+                self.assertFalse(OAuthState.objects.filter(pk=older.pk).exists())
+                with fake_provider_http({"access_token": "at"}, {**self.PROFILE, "email": user.email}):
+                    response = self.callback(code="current-code", state=latest.state)
+                if flow == "login":
+                    self.assertTrue(response.url.startswith(f"{FRONTEND}/oauth/callback?code="))
+                else:
+                    self.assertEqual(response.url, f"{FRONTEND}/account?oauth_linked=true")
+
+    def test_unrelated_callbacks_preserve_the_current_attempt(self):
+        for params in ({"error": "access_denied"}, {}, {"code": "c", "state": "unknown"}):
+            with self.subTest(params=params):
+                self.initiate()
+                state = OAuthState.objects.get()
+
+                unrelated = self.callback(**params)
+
+                self.assertNotIn(OAUTH_BINDING_COOKIE, unrelated.cookies)
+                with fake_provider_http({"access_token": "at"}, self.PROFILE):
+                    response = self.callback(code="c", state=state.state)
+                self.assertTrue(response.url.startswith(f"{FRONTEND}/oauth/callback?code="))
+
+    def test_inflight_callback_preserves_a_new_login(self):
+        self.initiate()
+        older = OAuthState.objects.get()
+        newer = []
+
+        def exchange(*args):
+            self.initiate()
+            newer.append(OAuthState.objects.get())
+            return {"access_token": "at"}
+
+        with patch("accounts.views_oauth._exchange_code_for_tokens", side_effect=exchange), patch(
+            "accounts.views_oauth._fetch_user_info", return_value=self.PROFILE,
+        ):
+            completed = self.callback(code="old-code", state=older.state)
+
+        self.assertTrue(completed.url.startswith(f"{FRONTEND}/oauth/callback?code="))
+        self.assertNotIn(OAUTH_BINDING_COOKIE, completed.cookies)
+        self.assertEqual(newer[0].binding, hash_secret(self.client.cookies[OAUTH_BINDING_COOKIE].value))
+        with fake_provider_http({"access_token": "at"}, self.PROFILE):
+            response = self.callback(code="new-code", state=newer[0].state)
+        self.assertTrue(response.url.startswith(f"{FRONTEND}/oauth/callback?code="))
+
+    def test_a_racing_callback_cannot_consume_the_same_state_twice(self):
+        user = make_user("state_race", UserRole.USER)
+        SocialAccount.objects.create(provider=self.provider, uid=self.PROFILE["sub"], user=user)
+        state = self.start_state()
+        other = APIClient()
+        other.cookies[OAUTH_BINDING_COOKIE] = "browser-binding"
+        responses = []
+        is_valid = OAuthState.is_valid
+
+        with patch.object(OAuthState, "is_valid", autospec=True) as check, patch(
+            "accounts.views_oauth._exchange_code_for_tokens", return_value={"access_token": "at"},
+        ) as exchange, patch("accounts.views_oauth._fetch_user_info", return_value=self.PROFILE):
+            def race(snapshot):
+                check.side_effect = is_valid
+                responses.append(other.get(self.callback_url(), {"code": "other", "state": state.state}))
+                return is_valid(snapshot)
+            check.side_effect = race
+            refused = self.callback(code="c", state=state.state)
+
+        self.assertTrue(responses[0].url.startswith(f"{FRONTEND}/oauth/callback?code="))
+        self.assertEqual(refused.url, f"{FRONTEND}/login?oauth_error=invalid_state")
+        exchange.assert_called_once()
+        self.assertEqual(OAuthExchangeCode.objects.count(), 1)
+
+    def test_refusals_name_the_binding_problem_for_triage(self):
+        """Each refusal reason is distinguishable in the audit trail."""
+        for binding, present, expected in (
+            ("browser-binding", None, "state_binding_missing"),
+            ("browser-binding", "wrong", "state_not_bound"),
+            ("", "browser-binding", "state_binding_unset"),
+        ):
+            with self.subTest(expected=expected):
+                if binding:
+                    self.start_state("bound", binding=binding)
+                else:
+                    OAuthState.objects.create(state="bound", provider=self.provider)
+                if present is None:
+                    del self.client.cookies[OAUTH_BINDING_COOKIE]
+                else:
+                    self.client.cookies[OAUTH_BINDING_COOKIE] = present
+
+                with patch("accounts.views_oauth._exchange_code_for_tokens") as exchange:
+                    response = self.callback(code="c", state="bound")
+
+                self.assert_refused(response)
+                exchange.assert_not_called()
+                event = AuditEvent.objects.get(
+                    action_type="oauth.login_failed", metadata_json__reason=expected,
+                )
+                self.assertEqual(event.status, AuditEventStatus.FAILED)
+                self.assertEqual(event.metadata_json["provider"], self.provider.name)
+
+    def test_terminal_errors_consume_only_the_bound_state(self):
+        for params, slug in (({"error": "access_denied"}, "provider_error"), ({}, "missing_params")):
+            for present in ("browser-binding", "wrong", None):
+                with self.subTest(slug=slug, present=present):
+                    state = self.start_state(f"{slug}-{present}")
+                    if present is None:
+                        del self.client.cookies[OAUTH_BINDING_COOKIE]
+                    else:
+                        self.client.cookies[OAUTH_BINDING_COOKIE] = present
+                    with patch("accounts.views_oauth._exchange_code_for_tokens") as exchange:
+                        response = self.callback(state=state.state, **params)
+
+                    self.assertEqual(response.url, f"{FRONTEND}/login?oauth_error={slug}")
+                    self.assertEqual(OAuthState.objects.filter(pk=state.pk).exists(), present != "browser-binding")
+                    self.assertNotIn(OAUTH_BINDING_COOKIE, response.cookies)
+                    exchange.assert_not_called()
+
+    def test_the_link_flow_is_refused_from_another_client(self):
+        user = make_user("binding_link_owner", UserRole.USER)
+        auth(self.client, user)
+        self.assertEqual(
+            self.client.post(f"/api/v1/auth/oauth/link/{self.provider.name}/").status_code, 200,
+        )
+        state = OAuthState.objects.get()
+        victim = APIClient()
+
+        response = victim.get(self.callback_url(), {"code": "c", "state": state.state})
+
+        self.assertEqual(response.url, f"{FRONTEND}/login?oauth_error=invalid_state")
+        self.assertFalse(SocialAccount.objects.exists(), "no link may be created")
+        self.assertFalse(OAuthState.objects.exists())
+
+    def test_the_link_flow_completes_in_the_initiating_browser(self):
+        user = make_user("binding_link_same_browser", UserRole.USER)
+        auth(self.client, user)
+        self.client.post(f"/api/v1/auth/oauth/link/{self.provider.name}/")
+        state = OAuthState.objects.get()
+
+        with fake_provider_http({"access_token": "at"}, {"sub": "uid-linked", "email": user.email}):
+            response = self.callback(code="c", state=state.state)
+
+        self.assertEqual(response.url, f"{FRONTEND}/account?oauth_linked=true")
+        self.assertEqual(SocialAccount.objects.get(uid="uid-linked").user, user)
 
 
 class CallbackGuardTests(OAuthTestCase):
@@ -342,6 +581,7 @@ class CallbackGuardTests(OAuthTestCase):
 
         self.assertEqual(resp.url, f"{FRONTEND}/login?oauth_error=state_expired")
         self.assertFalse(OAuthState.objects.filter(pk=state.pk).exists())
+        self.assertNotIn(OAUTH_BINDING_COOKIE, resp.cookies)
 
     def test_state_is_single_use(self):
         self.start_state("once")
@@ -1271,6 +1511,7 @@ class OAuthLinkConcurrencyTests(TransactionTestCase):
         users = [make_user(f"concurrent_link_{index}") for index in range(2)]
         states = [OAuthState.objects.create(
             state=user.username, provider=provider, user=user, session_version=user.session_version,
+            binding=hash_secret(f"binding-{user.username}"),
         ) for user in users]
         original = SocialAccount.objects.get_or_create
         inserts = Barrier(2)
@@ -1280,7 +1521,9 @@ class OAuthLinkConcurrencyTests(TransactionTestCase):
             return original(**kwargs)
 
         def callback(state):
-            response = APIClient().get(f"/api/v1/auth/oauth/callback/{provider.name}/", {
+            client = APIClient()
+            client.cookies[OAUTH_BINDING_COOKIE] = f"binding-{state.state}"
+            response = client.get(f"/api/v1/auth/oauth/callback/{provider.name}/", {
                 "code": "provider-code", "state": state.state,
             })
             return state.user_id, response.url
