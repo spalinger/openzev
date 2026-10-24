@@ -9,8 +9,9 @@ request/response layer.
 from datetime import date as date_type
 
 from django.db.models import Count, OuterRef, Prefetch, Subquery
+from django.db.models.functions import TruncDate
 
-from allocation.validity import active_during, civil_date, period_window
+from allocation.validity import active_during, business_tz, period_window
 from zev.models import Participant, MeteringPointAssignment
 from metering.models import MeterReading
 from .models import EmailLog, Invoice, InvoiceReadingImpact, InvoiceStatus
@@ -120,12 +121,19 @@ def compute_period_overview(*, zev, period_start: date_type, period_end: date_ty
         for a in assignments
     }
     readings_by_metering_point: dict[int, set] = {}
-    for metering_point_id, timestamp in MeterReading.objects.filter(
-        metering_point_id__in=all_mp_ids,
-        timestamp__gte=period_start_dt,
-        timestamp__lt=period_end_exclusive_dt,
-    ).values_list("metering_point_id", "timestamp"):
-        readings_by_metering_point.setdefault(metering_point_id, set()).add(civil_date(timestamp))
+    reading_days = (
+        MeterReading.objects.filter(
+            metering_point_id__in=all_mp_ids,
+            timestamp__gte=period_start_dt,
+            timestamp__lt=period_end_exclusive_dt,
+        )
+        .annotate(day=TruncDate("timestamp", tzinfo=business_tz()))
+        .values_list("metering_point_id", "day")
+        .distinct()
+        .order_by()
+    )
+    for metering_point_id, day in reading_days:
+        readings_by_metering_point.setdefault(metering_point_id, set()).add(day)
 
     for participant in participants:
         assignments = assignments_by_participant[participant.id]

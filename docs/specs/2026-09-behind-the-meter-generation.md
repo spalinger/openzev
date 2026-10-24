@@ -318,7 +318,7 @@ has_behind_meter_generation: boolean
 | Risk | Impact | Mitigation |
 |---|---|---|
 | Owner forgets to set the flag | Medium | Checkbox with help text in the form; the user guide explains when to tick it |
-| Extra queries slow the dashboard / annual report | Low | Short-circuit when the ZEV has no flagged meter; resolve holders only for flagged meters |
+| Extra queries slow the dashboard | Low | Short-circuit when the ZEV has no flagged meter; resolve holders only for flagged meters. The annual report computes the flag in its aggregation query |
 | Users expect the rates to change | Low | Rates are deliberately unchanged; the ZEV note explains their meaning |
 | Suppressing a partially-held participant's rate | Low | Documented rule (§4.2): any personal holding in the window suppresses it |
 

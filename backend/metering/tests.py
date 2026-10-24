@@ -1,14 +1,19 @@
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from functools import partial
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from django.db import connection
+from django.db.models.functions import TruncDay, TruncHour, TruncMonth, TruncWeek
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
+from django.utils.timezone import override as override_timezone
 from rest_framework.test import APIClient
 
 from accounts.models import UserRole
+from allocation.validity import business_tz
+from metering.analytics import _bucket_bounds
 from metering.models import MeterReading, ReadingDirection, ReadingResolution
 from zev.models import AllocationMode, Participant, MeteringPoint, MeteringPointAssignment, MeteringPointType
 
@@ -229,6 +234,203 @@ class DashboardCivilDayBucketingTests(TestCase):
 		bucket = resp.data["timeline"][0]
 		self.assertEqual(bucket["bucket"], "2026-08-31T00:00:00+02:00")
 		self.assertAlmostEqual(bucket["consumed_kwh"], 2.0, places=6)
+
+
+class DashboardBucketParityTests(TestCase):
+	"""The Python bucket key matches the ORM truncation for every bucket."""
+
+	def setUp(self):
+		self.owner = make_user("parity_owner", UserRole.USER)
+		self.zev = create_managed_zev(name="Parity ZEV", owner=self.owner, zev_type="vzev", invoice_prefix="P")
+		self.mp = MeteringPoint.objects.create(
+			zev=self.zev, meter_id="CH-PARITY-1", meter_type=MeteringPointType.CONSUMPTION,
+		)
+
+	def test_bucket_key_matches_orm_across_month_and_dst_boundaries(self):
+		timestamps = (
+			datetime(2026, 1, 31, 23, 45, tzinfo=ZURICH),
+			datetime(2026, 3, 29, 0, 30, tzinfo=timezone.utc),
+			datetime(2026, 3, 29, 1, 30, tzinfo=timezone.utc),
+			datetime(2026, 10, 25, 0, 30, tzinfo=timezone.utc),
+			datetime(2026, 10, 25, 1, 30, tzinfo=timezone.utc),
+		)
+		truncations = (
+			("day", partial(TruncDay, tzinfo=business_tz())),
+			("month", partial(TruncMonth, tzinfo=business_tz())),
+			("hour", partial(TruncHour, tzinfo=timezone.utc)),
+		)
+		for name, trunc in truncations:
+			for ts in timestamps:
+				with self.subTest(bucket=name, timestamp=ts.isoformat()):
+					reading = MeterReading.objects.create(
+						metering_point=self.mp, timestamp=ts,
+						energy_kwh=Decimal("1.0000"), direction=ReadingDirection.IN,
+						resolution=ReadingResolution.FIFTEEN_MIN,
+					)
+					expected = (
+						MeterReading.objects.filter(pk=reading.pk)
+						.annotate(bucket=trunc("timestamp"))
+						.values_list("bucket", flat=True)
+						.get()
+					)
+					actual, next_start = _bucket_bounds(ts, trunc)
+					self.assertEqual(actual, expected.isoformat())
+					self.assertGreater(next_start, ts)
+					reading.delete()
+
+	def test_bare_truncations_use_the_current_django_timezone(self):
+		ts = datetime(2026, 2, 1, 0, 30, tzinfo=ZURICH)
+		reading = MeterReading.objects.create(
+			metering_point=self.mp, timestamp=ts, energy_kwh=Decimal("1"),
+		)
+		with override_timezone(timezone.utc):
+			for trunc in (TruncDay, TruncMonth, TruncHour):
+				with self.subTest(truncation=trunc.__name__):
+					expected = (
+						MeterReading.objects.filter(pk=reading.pk)
+						.annotate(bucket=trunc("timestamp"))
+						.values_list("bucket", flat=True).get()
+					)
+					self.assertEqual(_bucket_bounds(ts, trunc)[0], expected.isoformat())
+
+	def test_unsupported_truncations_and_local_hours_are_rejected(self):
+		ts = datetime(2026, 10, 25, 1, 30, tzinfo=timezone.utc)
+		for trunc in (TruncWeek, partial(TruncHour, tzinfo=ZURICH)):
+			with self.subTest(truncation=trunc), self.assertRaises(ValueError):
+				_bucket_bounds(ts, trunc)
+
+	def test_dashboard_hour_cache_keeps_both_autumn_instants(self):
+		participant = Participant.objects.create(
+			zev=self.zev, first_name="Alice", last_name="Fold", valid_from=date(2026, 1, 1),
+		)
+		MeteringPointAssignment.objects.create(
+			metering_point=self.mp, participant=participant, valid_from=date(2026, 1, 1),
+		)
+		for hour, energy in ((0, "2"), (1, "3")):
+			MeterReading.objects.create(
+				metering_point=self.mp, timestamp=datetime(2026, 10, 25, hour, 15, tzinfo=timezone.utc),
+				energy_kwh=Decimal(energy),
+			)
+		client = APIClient()
+		auth(client, self.owner)
+		response = client.get(
+			"/api/v1/metering/readings/dashboard-summary/",
+			{"zev_id": str(self.zev.pk), "date_from": "2026-10-25", "date_to": "2026-10-25", "bucket": "hour"},
+		)
+		self.assertEqual(response.status_code, 200)
+		self.assertEqual(
+			[(row["bucket"], row["consumed_kwh"]) for row in response.data["timeline"]],
+			[("2026-10-25T00:00:00+00:00", 2.0), ("2026-10-25T01:00:00+00:00", 3.0)],
+		)
+
+
+class DashboardAggregationRegressionTests(TestCase):
+	"""Per-direction presence, zero readings and short buckets survive the
+	SQL-grouped dashboard path."""
+
+	def setUp(self):
+		self.client = APIClient()
+		self.owner = make_user("agg_owner", UserRole.USER)
+		self.alice_user = make_user("agg_alice", UserRole.USER)
+		self.bob_user = make_user("agg_bob", UserRole.USER)
+		self.zev = create_managed_zev(name="Aggregation ZEV", owner=self.owner, zev_type="vzev", invoice_prefix="A")
+		self.alice = Participant.objects.create(
+			zev=self.zev, user=self.alice_user, first_name="Alice", last_name="A",
+			email="agg.alice@example.com", valid_from=date(2026, 1, 1),
+		)
+		self.bob = Participant.objects.create(
+			zev=self.zev, user=self.bob_user, first_name="Bob", last_name="B",
+			email="agg.bob@example.com", valid_from=date(2026, 1, 1),
+		)
+		self.alice_cons = MeteringPoint.objects.create(
+			zev=self.zev, meter_id="CH-AGG-AC", meter_type=MeteringPointType.CONSUMPTION,
+		)
+		self.bob_cons = MeteringPoint.objects.create(
+			zev=self.zev, meter_id="CH-AGG-BC", meter_type=MeteringPointType.CONSUMPTION,
+		)
+		self.alice_prod = MeteringPoint.objects.create(
+			zev=self.zev, meter_id="CH-AGG-AP", meter_type=MeteringPointType.PRODUCTION,
+		)
+		MeteringPointAssignment.objects.create(
+			metering_point=self.alice_cons, participant=self.alice, valid_from=date(2026, 1, 1),
+		)
+		MeteringPointAssignment.objects.create(
+			metering_point=self.bob_cons, participant=self.bob, valid_from=date(2026, 1, 1),
+		)
+		MeteringPointAssignment.objects.create(
+			metering_point=self.alice_prod, participant=self.alice, valid_from=date(2026, 1, 1),
+		)
+
+		# Pool at 00:00: 8 consumed, 4 produced -> 4 imported.
+		self._read(self.alice_cons, datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc), "3", ReadingDirection.IN)
+		self._read(self.bob_cons, datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc), "5", ReadingDirection.IN)
+		self._read(self.alice_prod, datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc), "4", ReadingDirection.OUT)
+		# Pool at 00:15: no consumption, 2 produced -> 2 exported.
+		self._read(self.alice_cons, datetime(2026, 1, 1, 0, 15, tzinfo=timezone.utc), "0", ReadingDirection.IN)
+		self._read(self.alice_prod, datetime(2026, 1, 1, 0, 15, tzinfo=timezone.utc), "2", ReadingDirection.OUT)
+		# Production-only day: must not create a zero consumption bucket on
+		# Alice's participant timeline.
+		self._read(self.alice_prod, datetime(2026, 1, 2, 12, 0, tzinfo=timezone.utc), "6", ReadingDirection.OUT)
+		# Explicit zero on another day: must create a zero timeline bucket.
+		self._read(self.alice_cons, datetime(2026, 1, 3, 0, 0, tzinfo=timezone.utc), "0", ReadingDirection.IN)
+
+	def _read(self, mp, ts, kwh, direction):
+		MeterReading.objects.create(
+			metering_point=mp, timestamp=ts, energy_kwh=Decimal(kwh),
+			direction=direction, resolution=ReadingResolution.FIFTEEN_MIN,
+		)
+
+	def _get(self, user):
+		auth(self.client, user)
+		return self.client.get(
+			"/api/v1/metering/readings/dashboard-summary/",
+			{
+				"zev_id": str(self.zev.id),
+				"date_from": "2026-01-01",
+				"date_to": "2026-01-03",
+				"bucket": "day",
+			},
+		)
+
+	def test_owner_timeline_sums_both_directions_per_timestamp(self):
+		resp = self._get(self.owner)
+		self.assertEqual(resp.status_code, 200)
+		timeline = {row["bucket"]: row for row in resp.data["timeline"]}
+		jan1 = timeline["2026-01-01T00:00:00+01:00"]
+		self.assertAlmostEqual(jan1["consumed_kwh"], 8.0, places=6)
+		self.assertAlmostEqual(jan1["produced_kwh"], 6.0, places=6)
+		self.assertAlmostEqual(jan1["imported_kwh"], 4.0, places=6)
+		self.assertAlmostEqual(jan1["exported_kwh"], 2.0, places=6)
+		jan2 = timeline["2026-01-02T00:00:00+01:00"]
+		self.assertAlmostEqual(jan2["consumed_kwh"], 0.0, places=6)
+		self.assertAlmostEqual(jan2["produced_kwh"], 6.0, places=6)
+		self.assertAlmostEqual(jan2["exported_kwh"], 6.0, places=6)
+		jan3 = timeline["2026-01-03T00:00:00+01:00"]
+		self.assertAlmostEqual(jan3["consumed_kwh"], 0.0, places=6)
+		self.assertAlmostEqual(jan3["produced_kwh"], 0.0, places=6)
+
+		stats = {row["participant_id"]: row for row in resp.data["participant_stats"]}
+		self.assertAlmostEqual(stats[str(self.alice.id)]["total_consumed_kwh"], 3.0, places=6)
+		self.assertAlmostEqual(stats[str(self.alice.id)]["from_zev_kwh"], 1.5, places=6)
+		self.assertAlmostEqual(stats[str(self.alice.id)]["from_grid_kwh"], 1.5, places=6)
+		self.assertAlmostEqual(stats[str(self.alice.id)]["total_produced_kwh"], 12.0, places=6)
+		self.assertAlmostEqual(stats[str(self.bob.id)]["total_consumed_kwh"], 5.0, places=6)
+		self.assertAlmostEqual(stats[str(self.bob.id)]["from_zev_kwh"], 2.5, places=6)
+		self.assertAlmostEqual(stats[str(self.bob.id)]["from_grid_kwh"], 2.5, places=6)
+
+	def test_participant_timeline_keeps_zero_readings_but_drops_production_only_days(self):
+		resp = self._get(self.alice_user)
+		self.assertEqual(resp.status_code, 200)
+		self.assertAlmostEqual(resp.data["totals"]["total_consumed_kwh"], 3.0, places=6)
+		self.assertAlmostEqual(resp.data["totals"]["consumed_from_zev_kwh"], 1.5, places=6)
+		self.assertAlmostEqual(resp.data["totals"]["imported_from_grid_kwh"], 1.5, places=6)
+		buckets = {row["bucket"]: row for row in resp.data["timeline"]}
+		self.assertEqual(
+			set(buckets),
+			{"2026-01-01T00:00:00+01:00", "2026-01-03T00:00:00+01:00"},
+		)
+		self.assertAlmostEqual(buckets["2026-01-01T00:00:00+01:00"]["total_consumed_kwh"], 3.0, places=6)
+		self.assertAlmostEqual(buckets["2026-01-03T00:00:00+01:00"]["total_consumed_kwh"], 0.0, places=6)
 
 
 class DashboardMidPeriodTransferTests(TestCase):

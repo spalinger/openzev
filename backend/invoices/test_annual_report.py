@@ -10,17 +10,19 @@ June 2025 has 10 kWh produced against 5 consumed at the same instant: 50 % and
 from datetime import date, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
+from uuid import UUID
 
 from django.test import TestCase
 from rest_framework.test import APIClient
 
 from accounts.models import UserRole
+from allocation.errors import InvalidAllocationInputError
 from metering.models import MeterReading, ReadingDirection, ReadingResolution
 from testing.helpers import authenticate as auth, make_user
 from tariffs.models import TariffCategory
-from zev.models import MeteringPoint, MeteringPointAssignment, MeteringPointType
+from zev.models import MeteringPoint, MeteringPointAssignment, MeteringPointType, Participant
 
-from .annual_report import compute_producer_uplift
+from .annual_report import build_annual_report, compute_producer_uplift
 from .annual_statement import compute_savings
 from .models import InvoiceItem, InvoiceStatus
 from .test_helpers import make_invoice, make_participant, make_zev
@@ -168,6 +170,23 @@ class AnnualReportContentTests(AnnualReportTestCase):
         self.assertEqual(producer["produced_kwh"], 10.0)
         self.assertIsNone(producer["self_sufficiency_rate"])
 
+    def test_participant_from_another_zev_keeps_their_name(self):
+        # Historical/direct-DB assignments may reference a participant outside
+        # the ZEV; the report still resolves the name.
+        outsider = make_participant(self.other_zev, first="Zoe", last="Fremd")
+        mp = MeteringPoint.objects.create(
+            zev=self.zev, meter_id="CH-AR-CROSS", meter_type=MeteringPointType.CONSUMPTION,
+        )
+        MeteringPointAssignment.objects.create(
+            metering_point=mp, participant=outsider, valid_from=date(2026, 1, 1),
+        )
+        self._reading(mp, datetime(2026, 6, 15, 22, 0, tzinfo=ZURICH), "1", ReadingDirection.IN)
+
+        rows = {row["participant_id"]: row for row in self._report()["participants"]}
+
+        self.assertEqual(rows[str(outsider.pk)]["participant_name"], "Zoe Fremd")
+        self.assertEqual(rows[str(outsider.pk)]["consumed_kwh"], 1.0)
+
     def test_net_metered_participant_has_null_rate_and_flag(self):
         """SPEC-2026-behind-the-meter-generation §5.4: a participant who
         personally holds a flagged (net/surplus-metered) meter loses their
@@ -217,6 +236,19 @@ class AnnualReportContentTests(AnnualReportTestCase):
         names = [row["participant_name"] for row in self._report()["participants"]]
 
         self.assertEqual(names, ["Paul Produzent", "Pia Muster"])
+
+    def test_equal_names_are_sorted_by_participant_id(self):
+        savings_only = Participant.objects.create(
+            id=UUID(int=1), zev=self.zev, first_name="Pia", last_name="Muster",
+            valid_from=date(2025, 1, 1),
+        )
+        self._invoice(savings_only, (date(2026, 1, 1), date(2026, 1, 31)), ("1", "0.10"), ("1", "0.20"))
+
+        tied_ids = [
+            row["participant_id"] for row in self._report()["participants"]
+            if row["participant_name"] == "Pia Muster"
+        ]
+        self.assertEqual(tied_ids, [str(savings_only.pk), str(self.consumer.pk)])
 
     def test_savings_match_the_annual_statement(self):
         invoice = self._invoice(self.consumer, (date(2026, 6, 1), date(2026, 6, 30)), ("4", "0.80"), ("6", "1.80"))
@@ -334,6 +366,35 @@ class AnnualReportContentTests(AnnualReportTestCase):
         self.assertIsNone(report["totals"]["self_consumption_rate"])
         self.assertEqual(report["participants"], [])
         self.assertEqual(len(report["months"]), 12)
+
+
+class AnnualReportValidationTests(AnnualReportTestCase):
+    def test_negative_readings_are_rejected_even_when_timestamp_totals_are_positive(self):
+        bad_mp = self._metering_point("CH-AR-BAD", MeteringPointType.CONSUMPTION, self.consumer)
+        for year in (2025, 2026):
+            for direction in (ReadingDirection.IN, ReadingDirection.OUT):
+                with self.subTest(year=year, direction=direction):
+                    ts = datetime(year, 6, 16, 12, 0, tzinfo=ZURICH)
+                    self._reading(self.consumption_mp, ts, "2", direction)
+                    self._reading(bad_mp, ts, "-1", direction)
+                    with self.assertRaisesRegex(InvalidAllocationInputError, "non-negative"):
+                        build_annual_report(self.zev, 2026)
+                    bad_mp.readings.all().delete()
+
+    def test_negative_readings_outside_the_zev_and_report_years_are_ignored(self):
+        other_mp = MeteringPoint.objects.create(
+            zev=self.other_zev, meter_id="CH-AR-OTHER", meter_type=MeteringPointType.CONSUMPTION,
+        )
+        for mp, ts in (
+            (other_mp, datetime(2026, 6, 15, 12, 0, tzinfo=ZURICH)),
+            (self.consumption_mp, datetime(2024, 12, 31, 23, 45, tzinfo=ZURICH)),
+            (self.consumption_mp, datetime(2027, 1, 1, 0, 0, tzinfo=ZURICH)),
+        ):
+            self._reading(mp, ts, "-1", ReadingDirection.IN)
+
+        report = build_annual_report(self.zev, 2026)
+        self.assertEqual(report["totals"]["consumed_kwh"], 10.0)
+        self.assertIsNone(report["previous_totals"])
 
 
 class AnnualReportAccessTests(AnnualReportTestCase):

@@ -2161,6 +2161,33 @@ class MeteringPointCascadeInfoTests(TestCase):
 		json_row = {r["id"]: r for r in resp.json()["results"]}[str(self.metering_point.id)]
 		self.assertEqual(json_row["first_reading_at"][:10], "2026-01-10")
 
+	def test_list_counts_are_not_inflated_by_crossed_relations(self):
+		"""Readings and assignments are independent reverse relations; a join
+		over both yields readings × assignments rows. Each count must still
+		describe only its own relation, and the reading span must stay put."""
+		second_participant = Participant.objects.create(
+			zev=self.zev,
+			first_name="Beat",
+			last_name="Consumer",
+			valid_from=date(2025, 1, 1),
+			valid_to=date(2025, 12, 31),
+		)
+		MeteringPointAssignment.objects.create(
+			metering_point=self.metering_point,
+			participant=second_participant,
+			valid_from=date(2025, 1, 1),
+			valid_to=date(2025, 12, 31),
+		)
+
+		resp = self.admin_client.get("/api/v1/zev/metering-points/")
+		self.assertEqual(resp.status_code, 200)
+
+		row = {r["id"]: r for r in resp.data["results"]}[str(self.metering_point.id)]
+		self.assertEqual(row["reading_count"], 2)
+		self.assertEqual(row["assignment_count"], 2)
+		self.assertEqual(row["first_reading_at"].date().isoformat(), "2026-01-10")
+		self.assertEqual(row["last_reading_at"].date().isoformat(), "2026-03-20")
+
 	def test_retrieve_reports_cascade_counts(self):
 		resp = self.admin_client.get(f"/api/v1/zev/metering-points/{self.metering_point.id}/")
 		self.assertEqual(resp.status_code, 200)
