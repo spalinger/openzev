@@ -133,6 +133,12 @@ end-dated last version, are simply periods the series does not cover.
 Custom version, duplicate, and rename writes obey the
 [disabled-ZEV rules](2026-03-community-and-access.md#45-write-scoping-zevscopedquerysetmixin).
 
+Duplication starts a separate series on the requested start date (the UI defaults
+to today). It retains the source's end date only when that end is on or after
+the new start; an ended source copied from today becomes open-ended. Omitting
+the start keeps the source window. Model validation errors return field-level
+HTTP 400 responses; the source timeline is unchanged.
+
 OpenZEV rejects overlapping validity windows for two tariffs of the same
 `(zev, name)` — regardless of billing mode.
 
@@ -204,6 +210,15 @@ value has to be refused at entry rather than discovered at invoice time.
 `CheckConstraint` (`tariffperiod_exactly_one_price`) in addition to
 `TariffPeriod.clean()` — see SPEC-2026-percentage-tariff-bands §4.1.
 
+`TariffPeriodSerializer` requires both `time_from` and `time_to` for `high`,
+`low` and `band` on creation and update, returning field errors for missing
+endpoints. Partial updates validate the merged stored/submitted window. The
+same check applies to nested `initial_periods` and explicitly supplied bands
+when scheduling or duplicating a version; `flat`
+continues to allow null endpoints. Existing incomplete rows remain readable.
+`backend/tariffs/test_period_windows.py` covers rejection without writes,
+overnight windows, price-only partial updates and flat bands without times.
+
 **Ordering** is `["period_type", F("time_from").asc(nulls_first=True), "id"]`,
 so a tariff's bands read down the day. The null placement is stated rather than
 inherited: `time_from` is null for flat bands, SQLite and Postgres disagree on
@@ -241,9 +256,10 @@ on the spring day there is no 02:xx reading.
    The number of such periods is irrelevant — a band is matched by its window,
    never by its name, so three or five resolve exactly as two do.
 4. **Fallback:** when no period matches the hour, the day's **first band in this
-   season** — `periods[0]` under the ordering above, which is the earliest
-   window. Preferring an in-season band matters once seasons exist: billing a
-   January night at the summer rate would be the worse guess.
+   season** — the first in-season row under the ordering above. If no band
+   applies in that month, use the tariff's first band overall. Preferring an
+   in-season band matters once seasons exist: billing a January night at the
+   summer rate would be the worse guess.
 
 The month check comes **first, before the flat short-circuit**. A winter-only
 flat band that short-circuited on `period_type` would bill its winter price in
@@ -307,6 +323,11 @@ fallback above is deterministic and stated rather than accidental, and the
 importer warns when a document leaves hours unpriced — but a hand-entered
 tariff can still have a hole. Enforcing coverage would make a half-entered
 tariff invalid mid-edit, the same reason month coverage is not enforced either.
+The frontend coverage preview uses the model's `period_type`, `time_from`
+(null first), then `id` ordering, preferring the first in-season band and
+otherwise the first overall. Collapsed rows show a general warning; the
+[frontend workspace](#frontend-tariff-workspace) describes expanded explanations
+and repair actions.
 
 ### 3.2b Seasonal bands
 
@@ -1174,22 +1195,41 @@ one.
 
 ---
 
-### Frontend write dialogs
+### Frontend tariff workspace and creation API
 
-Tariff create/edit, price-band, version/duplicate/rename and import dialogs reset
-when account, selected community or effective write capability changes. Pending
-delete confirmations are cancelled and recheck current scope before dispatch.
-CRUD and version completions invalidate the submitting community's series; an
-obsolete completion does not close replacement dialogs or show a toast. The
-validity filter and badges use the business date calculated on each render.
-Tariff and price-band submissions both require a selected community as well as
-effective write capability, including for admins.
+See the [tariff workspace spec](2026-10-tariff-split-view.md) for inspection,
+editing, navigation, responsive behavior and coverage explanations.
 
-The tariff series query waits for a matching selected community record. ScopeGuard
-keeps the header visible during scope loading/failure/empty states and retains
-usable cached scope after refresh failures. Missing selection never means all
-communities in the management series filter. Retained tariff/period/version submit
-callbacks and each mutation's API dispatch check the current scope token.
+Static-energy creation accepts optional, write-only `initial_periods` on
+`POST /api/v1/tariffs/tariffs/`. Entries accept `period_type`, `label`,
+`price_chf_per_kwh`, `percentage`, `time_from`, `time_to`, `weekdays` and
+`months`; the server supplies `tariff` and `id`. The list must be nonempty
+and is accepted only on creation of a static `energy` tariff. Dynamic,
+percentage and fixed-fee modes reject it; updates reject it too.
+
+Nested entries deserialize once and use normal field and timed-window validation.
+Before any write, parent-dependent rules and seasonal flat/timed conflicts are
+checked against the unsaved parent and preceding input bands. All errors from
+this parent-dependent pass retain their indexes in `initial_periods`, with empty
+objects for valid positions. Creation of the tariff and bands then runs inside
+`transaction.atomic()`; a storage failure rolls back every row. The response
+uses the normal read-only `periods` array. Omitting `initial_periods` preserves
+creation without bands. Percentage creation retains `initial_percentage`.
+
+Both demo communities use the same explicit grid schedule: HT Mon–Fri
+07:00–21:00, NT daily 21:00–07:00, and NT Sat–Sun 07:00–21:00. Historical
+versions retain that schedule at their dated prices. This corrects the demo's
+windowless NT band; it does not migrate existing tariffs.
+
+Successful initial bands receive the same `tariff_period.create` audit events
+and actor/parent context as bands created through `/periods/`, alongside the
+parent's `tariff.create`. Failed creation records neither creation event.
+
+Tariff error presentation translates known validation messages, retains nested
+band numbers and unknown diagnostics, and deduplicates repeated endpoint errors.
+Dates follow application settings; flat/timed conflicts retain the affected
+months. English-message compatibility mapping is temporary pending a serialized
+code/field/parameters contract; changing server wording requires contract tests.
 
 ## 7. Invoice line-item construction
 
@@ -1475,6 +1515,19 @@ The description renders as: `"Surcharge 50% (50% von CHF 0.32/kWh)"` (German).
 
 ## 13. Test plan
 
+### Backend creation and timed bands
+
+- `tariffs/test_atomic_creation.py`: atomic six-band creation, band audit events,
+  all parent-dependent errors before writes, storage rollback without audit events,
+  create-only/nonempty input,
+  incompatible modes, dynamic-source rejection, injected parent/id isolation,
+  and nested missing-time rollback. New validation messages are pinned.
+- `tariffs/test_period_windows.py`: `high`/`low`/`band` require both endpoints
+  on create/PATCH; partial price edits merge stored times; flat bands need none.
+- Demo tariff version tests verify the dated prices and retained version chain.
+  Complete weekday, overnight and weekend bands price every demo quarter hour;
+  incomplete-band fixtures retain coverage-warning examples.
+
 ### Backend (`invoices/test_engine.py`)
 
 | Test case | Validates |
@@ -1592,7 +1645,7 @@ community energy to a single participant.
 | New version copies HT/NT bands including times; can set new prices in one call; fixed-fee amount overridable | §6.1a |
 | New version and duplicate preserve `split_key` (`weight` and `equal`) | §3.1.1 |
 | Mid-chain insert is capped against its successor | §3.1.1 |
-| Duplicate starts a separate series without touching the source; refuses a blank or identical name | §6.1a |
+| Duplicate starts a separate series without touching the source; retains only a source end on or after the chosen start; returns model errors as HTTP 400; refuses a blank or identical name | §6.1a |
 | Rename renames every version; refuses a name already in use; identical name is a no-op | §6.1a |
 | A version cannot change the series' category/billing mode/energy type | §3.1.1 |
 

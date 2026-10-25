@@ -228,24 +228,26 @@ returns one dict per band of the tariff, in `Meta.ordering`:
 - `TariffPeriodInput`: `price_chf_per_kwh?: string | null`, `percentage?: string | null`.
 - `Tariff.percentage` and `TariffVersionInput.percentage` removed. `TariffInput.percentage` is replaced by `initial_percentage?: string | null`.
 
-**Tariff form (`TariffFormModal.tsx`, `useTariffForms.ts`)**: in percentage mode
+**Tariff form (`TariffForm.tsx`, `useTariffForms.ts`)**: in percentage mode
 the percentage input is shown **only when creating**, labelled "Initial
 percentage" with a hint that more bands can be added afterwards. It maps to
 `initial_percentage`. When editing, the field is hidden and the bands are
-managed in the drawer. The zod schema requires it on create in percentage mode,
+managed through the secondary editing pane, opened from expanded tariff rows. The zod schema requires it on create in percentage mode,
 as today.
 
-**Band modal (`TariffPeriodFormModal.tsx` + its form helpers)**: takes the
+**Band form (`TariffPeriodForm.tsx` + its form helpers)**, shown in the detail pane for the version it shows: takes the
 tariff's billing mode. Percentage mode shows a `%` input (`step=0.01`, `min=0`)
 instead of CHF/kWh and maps it to `percentage` (with `price_chf_per_kwh: null`).
 Energy mode does the reverse. Everything else (period type, label, window,
 weekday/month chips) is shared.
 
-**Drawer (`TariffDetailDrawer.tsx`)**: the band section is shown when
-`billing_mode === 'energy' && !isDynamic` **or** `billing_mode === 'percentage_of_energy'`.
-A percentage band row shows `"{pct} %"`, plus `"≈ CHF {pct × base}/kWh"` when
-`percentage_base_summary.price_chf_per_kwh` is known. The existing single
-percentage summary is replaced by this list.
+**Pane (`TariffDetailPane.tsx`)**: each validity row includes its bands in the
+price column when `billing_mode === 'energy' && !version.dynamic_source` **or**
+`billing_mode === 'percentage_of_energy'`. The shared `rateLines` formatter
+shows each percentage and its effective price when the base price is known.
+Band edit/delete controls and the add-period action sit in that price column;
+version edit/delete controls sit in the validity column. There is no separate
+band section below the table.
 
 **Series summary (`useTariffDisplay.ts`)**: the percentage label is the single
 percentage when all bands share one, otherwise `"{min}–{max} %"`. The effective
@@ -260,7 +262,7 @@ per band, using the same band keys and the same seasonal segmentation as
 energy tariffs. Each value is `base × band.percentage / 100`, and the note is
 `"{pct}% × {base}"`.
 
-**Version modal (`TariffVersionModal.tsx`)**: percentage tariffs use the same
+**Version form (`TariffVersionForm.tsx`)**: percentage tariffs use the same
 per-band rows as energy tariffs (`usesPeriods` true for both), editing
 `percentage` instead of `price_chf_per_kwh`. The single percentage input and
 `payload.percentage` are removed.

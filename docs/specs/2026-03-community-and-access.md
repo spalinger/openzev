@@ -1952,6 +1952,24 @@ hook still rejects a missing provider. Details: SPEC-2026-10-zev-access-grants Â
 
 ---
 
+### Navigation accessibility and tariff drafts
+
+Collapsed `SidebarLink` entries retain their accessible names and show Mantine
+tooltips on hover and keyboard focus (300ms hover delay), without duplicate native titles.
+The desktop collapse preference remains in local storage. The mobile drawer uses
+`useFocusTrap`/`useMergedRef`; its links are inert while closed, and the content
+column is inert while the drawer is open. An internal close button and Escape
+close it, restoring focus to the menu trigger when navigation has not already
+moved focus elsewhere. Route changes close the drawer. Shell/sidebar/navigation
+transitions honor reduced motion.
+
+`PageHeader.onCommunitySwitch` forwards a page-owned guard to
+`CommunitySwitcher.onSwitch`. The tariff page runs its existing dirty/saving
+confirmation before changing the selection or saving the account preference.
+Keep editing preserves both community and draft. Pages without that guard retain
+the existing settings-draft confirmation. Forced account or access changes still
+clear tariff drafts immediately; drafts are never carried to another community.
+
 ## 10. API endpoint summary
 
 ### 10.1 Auth endpoints (`/api/v1/auth/`)

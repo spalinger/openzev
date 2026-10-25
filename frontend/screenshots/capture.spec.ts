@@ -312,38 +312,36 @@ test.describe('User Guide Screenshots', () => {
     await screenshotFull(page, '07-tariffs')
   })
 
-  // 07b — A tariff's version history and price chart, both in its detail
-  // drawer (opened from the list row, but rendered as a page-level sibling).
+  // 07b — A tariff's version history and price chart in its expanded inline detail.
   test('07b-tariff-versions', async ({ page }) => {
     await navigateTo(page, '/tariffs')
-    const row = page.getByRole('button', { name: 'Grid Energy HT/NT', expanded: false })
+    const row = page.getByRole('button', { name: 'Grid Energy HT/NT', exact: true, expanded: false })
     await row.waitFor({ timeout: 10_000 })
     await row.click()
-    const drawer = page.locator('.tariff-drawer')
+    const pane = page.locator('.tariff-detail')
     // Waiting on the chart rather than the history: it renders only for a series
     // with more than one version, so it also asserts the seed still has them.
-    await drawer.locator('.tariff-price-history').waitFor({ timeout: 10_000 })
+    await expect(pane.locator('.tariff-version-table')).toBeVisible()
+    await pane.locator('.tariff-price-history').waitFor({ timeout: 10_000 })
     await page.waitForTimeout(1000)  // let Recharts finish laying out
     await screenshotFull(page, '07b-tariff-versions')
   })
 
-  // 07d — A dynamic tariff's detail drawer, showing its source and locally
-  // seeded price history (stats, chart and point table render inline).
+  // 07d — Dynamic history, fetched records and source facts stay visible inline.
   test('07d-tariff-dynamic-source', async ({ page }) => {
     await requireDemoDynamicSource(page)
     await navigateTo(page, '/tariffs')
-    const row = page.getByRole('button', { name: DEMO_DYNAMIC_TARIFF, expanded: false })
+    const row = page.getByRole('button', { name: DEMO_DYNAMIC_TARIFF, exact: true, expanded: false })
     await row.waitFor({ timeout: 10_000 })
     await row.click()
-    const drawer = page.locator('.tariff-drawer')
-    await expect(drawer.locator('.recharts-surface'), `Dynamic price chart missing — ${SEED_HINT}`).toBeVisible()
-    await expect(drawer.locator('tbody tr').first()).toBeVisible()
+    const pane = page.locator('.tariff-detail')
+    await expect(pane.locator('.tariff-source-section .tariff-source-facts'), `Dynamic source details missing — ${SEED_HINT}`).toBeVisible()
     await screenshotFull(page, '07d-tariff-dynamic-source')
   })
 
   // 07e was the fetched-price history modal opened from a dynamic tariff's
   // card: chart, stats, coverage. That modal is gone — the same content now
-  // renders inline in the drawer 07d already captures — so there is nothing
+  // renders in the expanded detail 07d already captures — so there is nothing
   // left for a separate shot to show. Removed along with
   // 07e-dynamic-price-history.png.
 

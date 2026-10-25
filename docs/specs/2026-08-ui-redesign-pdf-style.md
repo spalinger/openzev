@@ -252,7 +252,7 @@ The PDF language is an excellent print system and a mediocre spec for a dense bi
 - Page title + description; toolbar = filters left, primary action right, no second card wrapper.
 - Sidebar: deep forest (`var(--sidebar-bg)`), sage text; active item = pale row (`--sidebar-active`, `--brand-deep`, 600) (§15).
 - Page header ends in the documents' rule (hairline + short `--accent-rule` segment) unless the page has tabs, whose strip carries it; sheet titles are plain forest headings (no dot).
-- Focus: `2px solid var(--focus-ring)` / `2px` offset, everywhere — including Mantine widgets (`DatePickerInput`, `Menu`, `Switch`) via global `:focus-visible` + Mantine `focusRing`. Exception: programmatic focus targets that are not tab stops (the shell's `main` and the page `h1`, focused by the skip link and after navigation) show no outline.
+- Focus: buttons, links and other controls use `2px solid var(--focus-ring)` / `2px` offset via global `:focus-visible`. Text, numeric, select and textarea fields use a thin green border instead of a second outer ring; Mantine inputs, including date and time pickers, retain their own focused/error border. The active time segment uses `--brand-pale` with `--brand-deep` text instead of a solid dark fill. Programmatic focus targets that are not tab stops (the shell's `main` and the page `h1`, focused by the skip link and after navigation) show no outline.
 - Readability > "premium": for a Swiss billing tool, clear > ornamental.
 
 ---
@@ -341,7 +341,7 @@ Re-skin in place; no new UI library; one token sweep. Existing contracts from `2
   - `.card/.table-card/.stat-card` `rgba(255,255,255,0.9)` + `rgba(148,163,184,0.2)` → `var(--surface-card)` + `var(--border-default)`; collapse double border+shadow on section cards.
   - `.badge-*` remap (`index.css:979-1019` `#e2e8f0`/`#e0f2fe`/`#dcfce7`/`#fee2e2`/`#fef9c3` families) → `--brand-pale`/`--status-*` semantics (filled desaturated, `font-weight:700`, never gold-on-white).
   - `.page-stack th` / `.raw-metering-*` header treatments → `var(--surface-card)` / `var(--border-default)` / `--brand-deep` dark-header variant only for document-like tables.
-  - Global `:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px }` (covers Mantine + MUI).
+  - Global `:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px }`; form fields use the thin focused-border exception described above.
   - Inputs/selects `border #cbd5e1` / `background #fff` → `var(--border-default)` / `var(--surface-card)`; errors stay `#fee2e2/#991b1b` but derived via semantics.
 
 A `rg --pcre2 '#[0-9a-fA-F]{3,8}\b' frontend/src` inventory is committed as a Phase 0 grep table in this spec's PR description, mapping each hex → semantic (not as a repo file). `stylelint` (next) prevents new hexes from Phase 1 onward.
@@ -931,6 +931,9 @@ contracts are unchanged.
 
 ### 15.1 Tokens and type
 
+Native `.field-error` text and Mantine `InputWrapper` error text use
+`--danger-700`, matching the red exclamation icons in tariff warnings.
+
 - `design/tokens.json`: primitive `--line-strong`; semantics
   `--text-heading`, `--border-strong`, `--surface-sunken`, `--accent-rule`,
   `--sidebar-text`, `--sidebar-hover`, `--sidebar-line` (§4.1); field tokens
@@ -1089,12 +1092,10 @@ contracts are unchanged.
   A nonempty attention tab is never hidden. Health details remain in the expanded measurement card.
   The view is stored in the `view` query param (an unknown value reads as
   All); the type keeps `type`. Filters derive from the URL on every render, including
-  same-page and back/forward navigation. Tariffs: Valid (default) · Upcoming · All,
-  counting tariff series with a version in force today, series with a
-  version that starts after today (`distinct`: its rows show each series'
-  next version, so it differs from Valid even at the same count), and all
-  series; the tariff overview PDF's scope (valid or all) is chosen at its
-  download instead (SPEC-2026-09-tariff-overview-pdf §11).
+  same-page and back/forward navigation. Tariffs have no tabs: the list is
+  grouped as current/upcoming prices together, then Ended tariffs, without counts (§15.3 below,
+  SPEC-2026-10-tariff-split-view §4); the tariff overview PDF's scope (valid or
+  all) is chosen at its download (SPEC-2026-09-tariff-overview-pdf §11).
 - Participant list (`ParticipantCardsSection`): the billing period's row
   table, reusing its classes (`.table-card.invoice-rows.participant-rows`);
   the legend sits below the sheet, so the sheet's bottom padding is 0.5rem.
@@ -1133,12 +1134,9 @@ contracts are unchanged.
     actions each take a full line.
 - Metering point list: one-line rows inside one sheet per building that open in
   place to their assignments (§15.4); Assign is `button-outline`.
-- Tariff list (`TariffCategorySections`): a rate card like the tariff overview PDF.
-  - List contents: one sheet with a `.tariff-table` per category; the header shows the category. One row per series with its name, energy type, note first line, applicability, CHF price, unit, and validity. One line per band. No version count.
-  - Pricing and coverage: `buildRateLines` in `rateLines.ts` (tested in `tariff-rate-lines.test.ts`); per-kWh prices carry at least three decimals, fees two. Applies names the band, weekdays (`formatWeekdays`), window and season; a dynamic average reads "Dynamic, average" or "Dynamic, incomplete average"; a percentage names its share and base with the approximate price; fees name their basis. Applies lines carry their full text as tooltip; the price column carries the pricing explanation; a shown (non-upcoming) validity keeps the full range as tooltip.
-  - Band windows: an unnamed `band` uses its window as its name and prints that window once. Non-flat bands without both time bounds say "time window not configured", preserving any weekday/season text, for energy and percentage rates alike. Sibling count never implies complementary coverage; billing retains its first-band fallback (§3.2 of the billing-engine spec).
-  - Interaction and permissions: the name button owns the open action (`aria-expanded`, row click stays for the row); the open row is `.is-selected`. The row has no write actions: Edit and version actions live in the drawer. Warnings beside the name only (gap count, "Price fetch failed"). Ended rows read greyed (`.is-ended`).
-  - Responsive: below 56rem a row is a small card with one block per band, each with its own CHF, so wrapping cannot detach a price from its hours; validity last. The drawer header shows the name, one muted facts line and only the fetch-failure pill.
+- Tariffs use light B category sections with plain nonwrapping headings, quiet row separators, unboxed summary rows and an up/down chevron beside the name. Details unfold below the summary; only editing opens the secondary pane. Its overview, version
+  actions, visible source facts and editing behavior are specified once in
+  [Tariff split view, §§4–6](2026-10-tariff-split-view.md#4-overview).
 - Buttons: the primary `.button` is flat `--brand-deep` with a small forest
   drop shadow, no gradient or inner highlight; hover lightens it to
   `--brand`.
@@ -1150,7 +1148,7 @@ contracts are unchanged.
 - Status pills: fill + hairline of the next tone, sentence case. Colour is reserved for state; attributes (meter type, roles, counts)
   are outlined `.badge-tag`s (white, `--border-strong` hairline,
   `--text-body`), so a row shows one coloured pill — its state — among quiet
-  tags. The tariff list and drawer header set their attributes as a muted
+  tags. The tariff list and expanded detail header set their attributes as a muted
   text line instead (see the tariff list above). Tariff validity `scheduled` is info (the blue of
   "upcoming" elsewhere); an inactive metering point is neutral, not danger. `.badge-brand` (brand-pale, brand-glow border, brand-mid text) is the
   invoice document's pill; `invoiceStatusBadgeClass('approved')` uses it, so

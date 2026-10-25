@@ -198,6 +198,12 @@ surface and stored values must match these values.
 | `template` | Email/PDF template changes |
 | `system` | Security-sensitive system actions without a business domain |
 
+Atomic tariff creation with `initial_periods` emits `tariff.create` for the
+parent and `tariff_period.create` for each initial band, with the same actor,
+request and tariff-parent context as standalone band creation. Validation failure
+rolls back all records and emits neither creation event. See the
+[tariff creation contract](2026-03-tariffs-and-billing-engine.md#frontend-tariff-workspace-and-creation-api).
+
 **Status values:**
 
 | Value | Meaning |

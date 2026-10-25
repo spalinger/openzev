@@ -19,71 +19,72 @@ Each tariff has:
 
 ![Tariffs page](screenshots/07-tariffs.png)
 
-The tabs above the list count the tariffs: **Valid** (the default) shows the
-tariffs with a version in force today; **Upcoming** shows the tariffs with a
-version that starts later, each with that version's prices (for example next
-year's grid tariff, once imported); **All** adds the ones with none in force
-(only superseded or future versions). The tabs show only when there are such
-tariffs.
+Each tariff appears once, grouped by category. The summary compares today's
+price with the next scheduled change. Select the future price or schedule-change
+message to inspect that version. On narrow screens, a green clock opens a
+summary of the planned date and prices on hover, focus or touch. Expand the
+tariff to compare its versions. **Ended tariffs** lists tariffs with no current or future version.
 
-Each category is a rate card, set like the tariff overview PDF, with one row
-per tariff:
+The overview shows:
 
-- **Tariff** — the name, its energy type and the first line of its note
-- **Applies** — when each band applies (for example *High (HT) Mon–Fri,
-  07:00–21:00*, one line per band), the percentage and the grid price used as
-  its base (with “incomplete base average” when dynamic coverage is partial),
-  or a fee’s allocation basis
-- **Price (CHF)** and **Unit** — the displayed version’s rate, per kWh, per
-  month or per year
-- **Valid** — the version's validity: since when it applies (*since 01.07.2026*),
-  until when (*until …*), from when it will (*starts 01.01.2027*, with the year
-  in bold, and the month too when it starts this year), or when it ended
+- **Tariff** — the name and energy type. Select the energy type for an explanation.
+- **Applies** — each band's schedule, a percentage tariff's grid-price base, or
+  a shared fee's allocation basis. An incomplete dynamic base is marked.
+- **Price** and **Unit** — each rate includes its currency and basis:
+  CHF/kWh, CHF/month or CHF/year (translated with the interface).
+- **Valid** — when the displayed version starts, ends or became effective.
 
-An unnamed band shows its time window once. A non-flat band without a complete
-time window says **time window not configured**; it does not automatically cover
-the other bands' remaining hours. Uncovered hours use the first band in the
-matching season (or the tariff's first band if no season matches).
+An unnamed band shows its time window. A timed band without both endpoints says
+**time window not configured**; it does not automatically cover the remaining
+hours. A collapsed tariff shows a general warning with an exclamation icon beneath its
+bands, beside the schedule that needs attention.
+Expand it to see the uncovered months, weekdays and hours. For
+example, **Sat–Sun, 07:00–21:00** identifies a weekend daytime gap. Uncovered
+hours use the first band in the matching season, or the tariff's
+first band if no season matches. In the expanded tariff, **Review time window**
+opens the affected band's
+editor. Viewers see the explanation without the edit action. Historical warnings
+remain when finalized billing cannot be established for that version.
 
-A red badge next to the name means warnings: a gap between
-versions or a failed price fetch. A tariff whose last version has ended sits on
-a grey row. Click a row to open the tariff's detail panel, where **Edit** and
-the other actions are; from **Upcoming** it opens on the upcoming version.
+Expand a tariff using its name, row or chevron to see its versions, prices and
+notes. Opening another tariff closes the previous one. Select an editable date,
+applicability, price or note to make a correction. Use **Schedule price change** for a
+new dated version. Each version's menu also offers its edit actions and Add
+price band, followed by deletions. **Rename tariff** and **Duplicate** are in the
+ellipsis menu beside **Schedule price change**. **Edit band** changes its price,
+hours, weekdays and months.
 
-The list waits for the selected community to load. If loading fails, use **Retry**;
-a failed community refresh keeps the loaded scope and your open draft available.
+Each version owns its price bands: the 2026 version can have different HT and NT
+prices from the 2027 version. The initial selection is today's version, or the
+nearest future version. Warnings identify gaps between versions and failed price
+fetches.
+
+Notes shared by every version appear once as plain text under the tariff name.
+Different notes stay with their versions. Use the version menu to edit notes.
+
+Creating or editing opens a task panel beside the overview, or replaces it on
+phones. Leaving changed input asks for confirmation; **Keep editing** preserves it.
 
 ## Creating a Tariff
 
 **Managers** create tariffs in **Tariffs**.
 
-Switching community or losing write access closes open tariff, version and import dialogs, including delete confirmations. Save your draft before switching.
-
-1. Click **New Tariff**
-2. Enter details:
-   - **Name** — Tariff identifier, printed on invoice lines (e.g., "Local solar")
-   - **Category**, **Billing mode** and — for per-kWh tariffs — **Energy type**
-     (see above)
-   - **Notes** (optional)
-
-3. Set **Validity Period**:
-   - **Valid From** — Start date
-   - **Valid To** — End date (leave blank for ongoing)
-
-   > **Tip:** Leave **Valid To** blank. When the price later changes, use **New
-   > version** rather than editing or creating a second tariff — see
-   > [Tariff Versions](#tariff-versions).
-
-4. Configure pricing: the fixed amount for a fee, the **initial percentage**
-   for a percentage tariff (the tariff starts with one flat band at that
-   percentage — you can split it into time-of-use bands afterwards, see
-   [Percentage of Energy Tariff](#percentage-of-energy-tariff)), or — for a
-   per-kWh tariff — a [dynamic price source](#dynamic-tariffs) if it has one
-
-5. Click **Save Tariff**
-
-6. For a per-kWh or percentage tariff with fixed bands, add its prices as
-   [Tariff Periods](#tariff-periods) — a tariff without a band prices nothing
+1. Click **New Tariff** and enter **Name**, **Category** and **Billing mode**.
+   The name appears on invoice lines.
+2. Configure pricing: a fee amount, an **initial percentage**, or an energy type
+   and optional [dynamic source](#dynamic-tariffs). Percentage tariffs start
+   with one flat band; you can split it afterwards. **Create a new dynamic
+   source** opens that task and preserves the tariff inputs when you return.
+3. For static energy, choose **Single rate**, **HT/NT**, or **Custom bands**.
+   The HT/NT preset applies daily at 07:00–21:00 and 21:00–07:00. Adjust times,
+   weekdays and months to match your operator; changing its schedule switches to
+   Custom. Replacing configured bands with a preset asks first.
+4. Set **Valid From**, optional **Valid To**, and optional **Notes**.
+   Leave Valid To blank for an ongoing tariff. For later prices, use
+   [Schedule price change](#tariff-versions).
+5. Review coverage and click **Create Tariff**. The tariff and its initial bands
+   save together. Uncovered hours use the billing fallback; overlaps use the
+   first matching band. Flat bands ignore weekday/time restrictions.
 
 ## Importing Tariffs from Your Grid Operator
 
@@ -217,12 +218,14 @@ moment, negative prices included.
 
 Managers can choose an existing shared source or create a new source from
 the energy-tariff form. Viewers can inspect linked sources and price history.
-Click a dynamic tariff to see its source label, endpoint,
-protocol, product, fetch status, last successful fetch and stored coverage.
-Usage counts cover the whole platform. A stored date range can
-still contain gaps; check the price history for the period you need.
+Click a dynamic tariff to see its source name, fetch status and last
+successful fetch. **Source details** shows the endpoint, protocol, product,
+stored coverage and usage. Usage counts cover the whole platform. A stored date
+range can still contain gaps; check the price history for the period you need.
 Administrators can follow **Manage source in platform admin** to its operational
 row; managers create and reuse sources in the tariff form.
+
+![A dynamic tariff's expanded detail with its source details](screenshots/07d-tariff-dynamic-source.png)
 
 ### Reading a dynamic tariff's price
 
@@ -447,12 +450,12 @@ Instead of setting a price, you set a **percentage** (0–100%). During billing,
 
 Saving creates the tariff with one flat percentage band. Like a per-kWh
 tariff, a percentage tariff can be split into several **time-of-use bands** —
-open its entry and use **Add Period** to add a High/Low or named band, this
+open its entry and choose **Add price band** from the version menu to add a High/Low or named band, this
 time entering a **percentage** instead of a CHF/kWh price. A local-energy
 surcharge that is cheaper at midday and dearer in the morning and evening, for
 example, can be modelled as three bands (00:00–10:00 at 90%, 10:00–16:00 at
 60%, 16:00–00:00 at 90%) instead of a single flat percentage — see
-[Tariff Periods](#tariff-periods) for how bands, weekdays and months combine;
+[Price bands](#price-bands) for how bands, weekdays and months combine;
 everything there applies to a percentage tariff's bands exactly as it does to
 a per-kWh tariff's.
 
@@ -476,7 +479,10 @@ Percentage Tariff "Local Solar Surcharge"
 ```
 
 > **Cover the whole day.** Every band needs its own time window, and the
-> windows should together cover all 24 hours. A band without a window
+> windows should together cover all 24 hours. When saving a high, low or named
+> band, both **Time From** and **Time To** are required. Missing times are
+> highlighted in the price editor; complete them before saving. Flat bands
+> need no time window. An existing band without a window
 > ("the rest of the day") never matches: an hour no band covers is billed at
 > the tariff's first band instead, which is usually not what you meant.
 
@@ -562,16 +568,17 @@ they have a participant record in the ZEV. An issuer that is not a participant
 **Credits:** enter a negative amount to distribute a community-wide *rebate*
 across the participants. It appears on invoices as a credit line.
 
-## Tariff Periods
+<span id="tariff-periods"></span>
 
-**Tariff periods** hold a per-kWh tariff's prices. There are no default
-periods: a new per-kWh tariff has none until you add one. A [percentage
-tariff](#percentage-of-energy-tariff) uses the same periods and the same
-**Add Period** dialog, entering a **percentage** instead of a **CHF/kWh**
-price — everything below about period types, time windows, weekdays and
-months applies to it unchanged. Each period has a type:
+## Price bands
 
-| Period type | Use for |
+**Price bands** hold a tariff version's per-kWh prices or percentages. You can
+configure bands while creating a static energy tariff. An existing version
+without bands offers **Add prices**. A [percentage
+tariff](#percentage-of-energy-tariff) uses the same band editor, entering a
+**percentage** instead of a **CHF/kWh** price. Each band has a **Band type**:
+
+| Band type | Use for |
 | --- | --- |
 | **Flat** | One price around the clock |
 | **High (HT)** / **Low (NT)** | The usual two-rate tariff, e.g. HT 06:00–22:00 and NT for the rest |
@@ -579,23 +586,24 @@ months applies to it unchanged. Each period has a type:
 
 To add one:
 
-1. Click the tariff to open its detail panel
-2. Click **Add Period** in the Tariff Periods section
+1. Expand the tariff row
+2. Open the desired version's actions menu and choose **Add price band**
+   (or choose **Add prices** directly if that version has no bands)
 3. Enter:
-   - **Period type** (see above) and, for a time band, a **Band name**
+   - **Band type** (see above) and, for a time band, a **Band name**
    - **Time from** / **Time to** — HH:MM (24-hour format), in Swiss time
      (CET/CEST): 06:00 means 06:00 on the clock in Switzerland in winter and
      summer alike, whatever format the readings were imported in
-   - **Weekdays** and **Months** the period applies to (all selected means
-     every day / all year)
+   - **Weekdays** and **Months** the band applies to (all selected means
+     every day / all year); flat bands use months but ignore weekdays and times
    - **CHF/kWh** (per-kWh tariff), or **Percentage** (percentage tariff)
-4. Click **Save Tariff Period**
+4. Click **Save band**
 
 > **Crossing midnight:** If the end time is not after the start time, the
-> period wraps past midnight: 22:00–06:00 covers the night, and an end time of
+> band wraps past midnight: 22:00–06:00 covers the night, and an end time of
 > 00:00 means the end of the day (16:00–00:00 is the evening). The weekdays
 > you select refer to the day of each hour itself, so a Monday–Friday
-> 22:00–06:00 period covers Friday night up to midnight and the early hours of
+> 22:00–06:00 band covers Friday night up to midnight and the early hours of
 > Monday to Friday, but not Saturday morning.
 
 ## Multi-Tariff Configuration
@@ -632,52 +640,88 @@ Local Energy                                    ← one tariff, three versions
 
 ### Adding a New Version
 
-1. Click the tariff to open its detail panel, then click **New version**
-2. Enter the date the new prices take effect (defaults to today)
-3. Adjust the prices (pre-filled from the current version)
-4. Click **Create**
+1. Expand the tariff row, then click **Schedule price change**
+2. Choose the date beside **New prices apply from** (defaults to today)
+3. Adjust the copied prices, times, weekdays and months.
+4. Click **Schedule price change**
 
-OpenZEV **closes the previous version automatically** on the day before, so the
-timeline stays continuous. You never set an end date by hand — the dialog names
-the closing date it will use as you pick the start date.
+OpenZEV closes an open preceding version on the day before the new version
+starts. An already-closed version keeps its end date; existing gaps remain
+until you fill them. The form previews the preceding version's end date and,
+if a later version exists, the new version's end date before saving.
 
 > **Why this matters:** if a day falls between two versions, OpenZEV has no price
 > for it. The energy still appears on the invoice but is **charged at nothing** —
-> a whole month can be given away without any warning. Letting OpenZEV compute
-> the end date removes the off-by-one that causes this. Any series that already
-> has a gap is flagged on the tariff entry.
+> a whole month can be given away. A gap is flagged on the tariff entry; use
+> **Fill gap** to configure prices for the missing dates.
+
+The gap action preselects the missing start date. **Valid to** shows the
+automatically calculated end date: the day before the next version starts.
+For a gap on 30 June followed by a version starting on 1 July, both dates
+are 30 June. Review the copied prices and time windows before saving. If an
+older timed band has missing times, enter both its start and end time in the
+form; saving stays unavailable until both are supplied.
 
 You can also insert a version *between* two existing ones; OpenZEV bounds it on
 both sides.
 
 ### Comparing Versions
 
-The Tariffs page shows **one entry per tariff**, using the version selected by
-the current list view rather than listing every version separately. Click it
-to open a panel on the right with
-everything else:
-version history, the price chart, price bands, and notes.
+The Tariffs page shows **one entry per tariff**, using today’s version
+(or the nearest upcoming one if there is no current version). Click it to open
+the expanded detail; the dated planned-price control opens the next scheduled version.
 
-**Version history** lists every version with its window and price. Click one
-to make the *panel* show that version — its price bands switch to the ones in
-force then, and a **Viewing an older version** (or, for one that has not
-started yet, **Viewing an upcoming version**) badge appears so you can't
-mistake it for the current rate. Switching versions in the detail panel does
-not change the version shown by the selected list view. Click the active version
-to go back.
+**Schedule price change** copies the current version, or the nearest future
+version when none is current. Inspecting or cancelling a historical correction
+does not change those copied prices. Gap repair instead copies the preceding
+version. **Duplicate** copies the version you selected into a separate tariff.
+It defaults to starting today; an end date already in the past is cleared.
+Review **Valid to** before saving.
 
-Each row has its own edit and delete buttons, because correcting a superseded
-version's end date is a normal follow-up to adding a new one.
-
-The panel stays open across a page reload or a shared link — the URL records
-which tariff and version you're looking at.
+For tariffs containing dynamic versions, **Price history · Date range** selects
+the version used for history and source information. Shared links and reload
+restore the tariff/version in the URL. Charts appear below when prices change.
 
 ![Tariff version history and price chart](screenshots/07b-tariff-versions.png)
 
 ### Price History
 
-Once a tariff has **more than one version**, its detail panel also charts how
-its price moved over time.
+When a tariff has changing prices, **Price history** charts them below the
+version blocks. Static tariffs use a stepped chart across their versions and
+seasons. Dynamic tariffs show fetched interval prices for the selected version,
+with date filters and the underlying **Fetched interval prices** table.
+An empty price series shows one plain message instead of a graph or an empty
+records table. A future tariff whose prices are not available yet shows a normal
+message. A future tariff’s history is limited to its first validity day; platform
+admins can inspect later stored prices from the source administration page.
+Gap warnings concern elapsed intervals; unpublished future intervals
+are not reported as missing data. Missing historical prices still show a warning,
+even when the price series is empty. **Missing prices** lists the affected dates
+beside a red info icon below the date filters, with each affected day listed
+once. **Exact missing intervals** lists the timestamps directly. If history cannot
+be loaded, use **Retry**. A start date after the end date shows a range error;
+correct it before loading history.
+
+Dynamic details first show the average, its reference dates when available, and
+whether that average is partial or unavailable. A successful fetch alone does
+not establish complete coverage. In the overview, **Price data incomplete**
+appears beside a red exclamation icon below the prices, with the same
+alignment as schedule warnings. Open the tariff using its name, row or chevron.
+
+Below **Price source**, the source name and a plain status line show
+**Fetch successful** with its timestamp. A disabled source explicitly states
+that automatic fetching is disabled; its stored prices remain available.
+Version rows appear first, followed by source facts and price history. The fetched
+interval table stays visible, with 12 rows per page and controls for later rows.
+Missing stored
+prices are listed above the chart with readable dates and exact timestamps.
+Shaded gaps break the chart line. Missing dynamic prices needed for an invoice
+stop generation; they are not billed at zero.
+
+If a later fetch fails, the error and last successful fetch remain visible.
+**Source details** labels the endpoint, format, price component, product, stored
+prices, covered period and platform usage. The link below these facts opens
+source management in platform admin.
 
 - The line is **stepped**, not sloped — a price holds for its whole window and
   then jumps. A sloped line would suggest it drifted between two Januaries.
@@ -695,14 +739,16 @@ its price moved over time.
 
 Renaming is done for the **whole tariff**, not per version — the name is what
 holds the versions together, so renaming just one would split it into two
-unrelated tariffs. **Rename** sits at the top of the detail panel, and tells
-you how many versions it will affect.
+unrelated tariffs. Choose **Rename tariff** from the ellipsis menu beside
+**Schedule price change**.
+Its form explains how many versions will be renamed. The pencil beside a
+version’s **Date range** edits that version’s dates instead.
 
 ### Duplicating
 
-Use **Duplicate** (also at the top of the detail panel) to create a *different*
+Use **Duplicate** in the tariff’s ellipsis menu to create a *different*
 tariff starting from an existing one's numbers. It asks for a new name and leaves
-the original untouched. (Use **New version** instead when the prices of the
+the original untouched. (Use **Schedule price change** instead when the prices of the
 *same* tariff have changed.)
 
 ### Which Version Gets Billed
@@ -725,6 +771,8 @@ When saving a tariff, OpenZEV checks:
 | **Mandatory fields** | Name, type, validity period, prices |
 
 If validation fails, you'll see a clear error message. Fix and retry.
+Combining a flat rate with timed bands in the same months shows an explanation
+in your selected language: use separate months or only timed bands.
 
 ### Several Tariffs at Once Is Normal
 
@@ -758,7 +806,7 @@ means two prices claim the same day:
   Local Energy   2026-04-01 → (open)
 ```
 
-Use **New version** and you never hit this: OpenZEV closes the old window for
+Use **Schedule price change** and you never hit this: OpenZEV closes the old window for
 you. You only see this error when editing validity dates by hand. If two tariffs
 really are meant to apply together, give them different names — which you would
 want anyway, since the name is what appears on the invoice line.
@@ -781,20 +829,21 @@ the pricing. See [ZEV Export and Import](17-zev-transfer.md).
 
 Edit **future** tariffs freely:
 
-1. Click the tariff to open its detail panel
-2. Click **Edit**
-3. Change prices, periods, validity dates
-4. Click **Save**
+1. Expand the tariff row
+2. Hover or focus its date range and choose the edit pencil (shown directly on touch devices)
+3. Correct the validity dates, notes or version-level fee fields
+4. Click **Save correction**
 
 Changes apply to **new invoices only**. Past invoices keep original tariffs.
 
-**Edit** works on one **version**. The four fields that identify the tariff —
-name, category, billing mode, energy type — are therefore shown as values rather
-than inputs: they are shared by every version, so changing them on one alone
-would break the series. Use **Rename** for the name; for a different category,
-billing mode or energy type, create a separate tariff.
+**Correct this version** works on the selected **version**. To correct a price
+band instead, click its amount or **Applies** text. Name, category, billing
+mode and energy type identify the series; category, mode and energy type
+are shown below the correction fields.
+Use **Rename tariff** in the tariff’s ellipsis menu to rename all versions. Create a separate
+tariff to change category, billing mode or energy type.
 
-> **Prices changed from a certain date?** Use **New version** instead of editing.
+> **Prices changed from a certain date?** Use **Schedule price change** instead of editing.
 > Editing rewrites what the *current* version has always charged; a new version
 > records the change, keeps the old prices on the record, and lets invoices
 > spanning the switch bill each part correctly. See
@@ -804,14 +853,14 @@ billing mode or energy type, create a separate tariff.
 
 Set **Valid To** to exclude from future invoices:
 
-1. Click the tariff to open its detail panel
-2. Click **Edit**
+1. Expand the tariff row
+2. Hover or focus its date range and choose the edit pencil (shown directly on touch devices)
 3. Set **Valid To** to today or last usage date
-4. Click **Save**
+4. Click **Save correction**
 
-> **Important:** Never delete a tariff—always set Valid To instead. This preserves invoice audit trail.
+> **Important:** Prefer ending a tariff used in billing by setting Valid To. This preserves its historical configuration.
 
-This applies to the delete button on a **version** row too. Deleting a version
+This applies to **Delete this version** in the version's actions menu too. Deleting a version
 removes the prices that applied in its window, which leaves a gap: energy in
 those days is then billed at nothing. Reserve it for a version created by
 mistake — one you have not billed against.
@@ -840,7 +889,7 @@ When OpenZEV generates an invoice:
 
 ## Printing a Tariff Overview
 
-Click **Tariff overview (PDF)** on the Tariffs page toolbar and choose
+Click **Tariff overview (PDF)** in the Tariffs page header and choose
 **Valid tariffs** to download every tariff in force today, grouped by category (Energy, Grid Fees, Levies,
 Metering) — the same grouping and order as an invoice's line items.
 

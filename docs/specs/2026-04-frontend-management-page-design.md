@@ -90,7 +90,7 @@ defined by shared frontend primitives and CSS contracts.
 
 | File | Export | Contract |
 |---|---|---|
-| `frontend/src/components/ActionMenu.tsx` | `ActionMenu` | Overflow action trigger for lower-priority row/card actions. Uses labelled menu items, optional icons, section headers, and danger styling. Default button class: `button button-secondary button-compact`. Passing an icon retains visible text by default; `iconOnly` explicitly opts in to an accessible icon-only trigger. |
+| `frontend/src/components/ActionMenu.tsx` | `ActionMenu` | Overflow action trigger for lower-priority row/card actions. Uses labelled menu items, optional icons, section headers, and danger styling. Mantine sizes the dropdown to available space; long menus scroll vertically. Default button class: `button button-secondary button-compact`. Passing an icon retains visible text by default; `iconOnly` explicitly opts in to an accessible icon-only trigger. |
 | `frontend/src/components/ConfirmDialog.tsx` | `useConfirmDialog`, `ConfirmDialog` | Required wrapper for destructive or high-impact actions. Supports `title`, `message`, `isDangerous`, `confirmDisabled`, optional children, and async confirm handlers. `confirmText` and `cancelText` default to `common.confirm` / `common.cancel`. Uses the [dialog behavior](#dialog-behavior) below. |
 | `frontend/src/components/FormModal.tsx` | `FormModal` | Generic modal shell for CRUD forms and small workflow dialogs. Props: `isOpen`, `title`, `children`, `onClose`, optional `maxWidth` (default `600px`) and `returnFocusRef` (`RefObject<HTMLElement \| null>`). Uses the shared [dialog behavior](#dialog-behavior). |
 | `frontend/src/components/EmailLogsModal.tsx` | `EmailLogsModal` | Uses `FormModal` for delivery history with retry actions and semantic status badges. |
@@ -229,7 +229,7 @@ render `PageHeader` plus the same body. These bodies have no header-hiding
 
 **Where CSS goes.** Pick the layer by what the rule is: a later layer beats an earlier one whatever the selector specificity, and within a layer specificity and then import order decide as usual. So a page override needs no `:where()`, doubled class or `:not()` trick — put it in the `pages` layer; a media-query override of a component or page goes in `layout/responsive.css`. A page rule that names a bare class shared with a styled element (a `th` that the table band owns) must be scoped to the element it means (`td.x`), since it now beats the band. Third-party CSS (Mantine, Leaflet) is imported into `vendor` from `index.css`; never import a stylesheet bare from a component, because unlayered CSS beats every layer. Native element defaults that a Mantine class must win over go in `native-controls.css` (layer `native`, below `vendor`).
 
-**Where the file lives.** CSS used by exactly one page or component sits next to it, named after it (`features/tariffs/TariffDetailDrawer.css`, `pages/LoginPage.css`); rules shared by a component and the one page that renders it go in the page's file. `styles/pages/` holds only page-level rules shared by several pages (the sign-in shell, `.form-grid`, the invoice rows of the billing period and the participant list), and `styles/components/` the shared primitives (sheet, table, buttons, badges, dialogs, stat tiles). A co-located file keeps the global class names — no CSS Modules, except `*.module.css` for a new, genuinely local component — and is imported from `styles/index.css` into the `pages` layer, never from the component: routes are lazy, so a component import would load its CSS with the route chunk, and the order inside the layer would then depend on navigation. A component's stylesheet is deleted with it, and the build fails on the leftover `@import` until that goes too, so no orphaned rules stay behind.
+**Where the file lives.** CSS used by exactly one page or component sits next to it, named after it (`features/tariffs/TariffDetailPane.css`, `pages/LoginPage.css`); rules shared by a component and the one page that renders it go in the page's file. `styles/pages/` holds only page-level rules shared by several pages (the sign-in shell, `.form-grid`, the invoice rows of the billing period and the participant list), and `styles/components/` the shared primitives (sheet, table, buttons, badges, dialogs, stat tiles). A co-located file keeps the global class names — no CSS Modules, except `*.module.css` for a new, genuinely local component — and is imported from `styles/index.css` into the `pages` layer, never from the component: routes are lazy, so a component import would load its CSS with the route chunk, and the order inside the layer would then depend on navigation. A component's stylesheet is deleted with it, and the build fails on the leftover `@import` until that goes too, so no orphaned rules stay behind.
 
 The following utility and shared classes define the current management-page
 language and should be reused instead of ad hoc page-local CSS when possible:
@@ -426,8 +426,9 @@ their current state. The title is not reset on unmount; `index.html` keeps
 #### A. When to use tables (DataTable)
 
 Use a `DataTable` when records are flat and users scan across repeated dense
-columns. Pages hold a fixed 100 rows (`PAGE_SIZE`; no rows-per-page
-choice). The `DataTable` footer (range label, prev/next buttons) renders only
+columns. Pages default to 100 rows (`PAGE_SIZE`; no rows-per-page choice).
+Embedded histories can set `initialPageSize` to keep surrounding facts reachable;
+the inline tariff history uses 12. The `DataTable` footer (range label, prev/next buttons) renders only
 when the rows span more than one page (`table.getPageCount() > 1`);
 single-page tables hide it entirely instead of showing permanently disabled
 pagination buttons.
@@ -463,7 +464,7 @@ Current application:
   and collapsed completed history. Each card owns its readiness and invoice
   alerts; no separate cockpit or open-invoices list repeats them. Period-card
   actions use text labels without decorative arrows.
-- `TariffsPage` uses category sections for `energy`, `grid_fees`, `levies`, and `metering`.
+- `TariffsPage` uses category sections for `energy`, `grid_fees`, `levies`, and `metering`: headings left of rounded tables on wide overviews and above on narrow lists or while editing, quiet row separators and unboxed rows. The up/down chevron beside the name unfolds inspection below the summary; only an editing task opens the secondary pane.
 - `MeteringChartPage` uses routed Chart, Quality and Import history tabs sharing one page instance (`/metering/chart`, `/metering/quality`, `/metering/imports`). Chart and Quality share the period selection; Imports hides these controls and does not request chart data. See `2026-03-community-and-access.md` §9.2.
 - The Templates hub renders all seven template editors as one standard tab strip with two labelled rows: PDF on one line, Email on the next, both left-bound via a fixed tag column — with no icons and no nested category/document tab bars. The active tab identifies the document; the editor does not repeat it as a heading.
 - Template editors use a shared source/status presentation. The persisted source badge and local unsaved cue are separate; platform resets require confirmation and ZEV email inheritance changes wait for the settings save.
@@ -506,16 +507,16 @@ Rules:
 
 **File:** `frontend/src/pages/TariffsPage.tsx`
 
-- Route: `/tariffs`
-- Query keys: `queryKeys.tariffs.series(selectedZevId)` and `queryKeys.tariffs.dynamicSources()`; versions and periods are nested in the series response.
-- Structure:
-  - summary toolbar at top
-  - one sheet with a table per category, in the order `energy`, `grid_fees`, `levies`, `metering`, the category named in the table's band
-  - a rate card like the tariff overview PDF: one row per tariff series with the name, energy type and note, a line per price band (applicability, price and unit) and its validity; narrow cards repeat each band as one unit with its own CHF; pricing explanations remain on the narrow bands, and partial percentage bases visibly say “incomplete base average”; the combined band column has a visually hidden header associated through `headers`; the row opens the detail drawer on its displayed version
-  - tariff periods, versions and actions (Edit included) in the detail drawer
-- Badges beside a tariff name are reserved for warnings (a gap, a failed price fetch); validity is plain text in the Valid column, and a row whose version has ended sits on a grey ground. An Upcoming tab lists the series with a version still to start, each showing the nearest upcoming version. `listedVersion` consumes the API’s newest-first order, choosing the current version, otherwise the nearest upcoming version, otherwise the newest expired version; the drawer uses the same default when the URL has no explicit version. A tariff's billing mode is told by its Applies and Unit cells rather than named (SPEC-2026-08 §15.3).
-- Tariff periods remain nested under the parent tariff rather than in a separate global table.
-- Tariff periods are shown only as an active workflow for energy tariffs. Fixed-fee tariffs show a hint instead of a period list CTA.
+- Route: `/tariffs`.
+- One scoped series query supplies nested versions and bands.
+- Header actions: import, overview PDF and New tariff; permitted write actions
+  open focused tasks in the secondary pane. Inspection expands within the
+  category table, with one tariff open at a time. Price bands stay under
+  their tariff.
+- The tariff-specific interaction contract is
+  [Tariff split view, §§4–6](2026-10-tariff-split-view.md#4-overview).
+- Shared sidebar accessibility and community-switch draft guards are described
+  in [Community and access](2026-03-community-and-access.md#navigation-accessibility-and-tariff-drafts).
 
 ### 7.5 Shared page references
 
@@ -657,7 +658,7 @@ These pages define the current management-page reference set.
 - [x] Management pages use a documented default shell: header, summary/actions, filters when needed, main content, modals.
 - [x] Visible CRUD actions use icon + text buttons with consistent semantics.
 - [x] The tariff page uses category sections instead of tabs for the four tariff categories.
-- [x] The tariff list is a rate card: a line per price band with when it applies, a bare price under a "Price (CHF)" header and its unit; badges beside the name mark only problems.
+- [x] The tariff list is a rate card: a line per price band with when it applies, an amount with its full currency unit (CHF/kWh, CHF/month or CHF/year); schedule warnings stay with the bands. The tariff pilot uses rounded category tables and a dark opened title row.
 - [x] New page work can reference this spec to choose between sections, tabs, tables, and cards without inventing a new pattern.
 - [x] Shared management-page shells keep one `PageHeader` title across data and scope states; embedded views inherit the host title. Authentication gates and route suspense are outside this contract.
 - [x] Migrated state UI reuses `PageSkeleton`, `Notice`, `EmptyState`, and the `ScopeGuard` contract.
