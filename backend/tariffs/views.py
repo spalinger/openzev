@@ -2,6 +2,7 @@ from functools import partial
 from datetime import timedelta
 import logging
 from uuid import uuid4
+from django.core.exceptions import ValidationError as DjangoValidationError
 
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -55,6 +56,19 @@ from audit.services import record_audit_event
 # Every audit event in this module is a tariff event; bind the category once.
 _record_tariff_event = partial(record_audit_event, action_category=AuditActionCategory.TARIFF)
 logger = logging.getLogger(__name__)
+
+
+def _record_period_created(request, period):
+    _record_tariff_event(
+        request=request,
+        action_type="tariff_period.create",
+        target_type="tariffs.TariffPeriod",
+        target=period,
+        target_id=str(period.pk),
+        target_display=period.period_type,
+        summary=f"Created tariff period {period.period_type} for tariff {period.tariff.name}.",
+        metadata={"tariff_id": str(period.tariff_id)},
+    )
 
 DEFAULT_MAX_PRICE_HISTORY_DAYS = 31
 # A BFE reference-price point covers a whole quarter or month, not a
@@ -174,6 +188,9 @@ class TariffViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.ModelVi
             summary=f"Created tariff {tariff.name}.",
             metadata={"zev_id": str(tariff.zev_id), "category": tariff.category},
         )
+        if serializer.validated_data.get("initial_periods"):
+            for period in tariff.periods.all():
+                _record_period_created(self.request, period)
 
     def perform_destroy(self, instance):
         # Fully overrides ZevScopedQuerySetMixin.perform_destroy (calls
@@ -367,11 +384,14 @@ class TariffViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.ModelVi
                 fixed_price_chf=source.fixed_price_chf,
                 notes=source.notes,
                 valid_from=valid_from,
-                valid_to=source.valid_to,
+                valid_to=source.valid_to if source.valid_to is None or source.valid_to >= valid_from else None,
                 dynamic_source=source.dynamic_source,
             )
             _apply_price_overrides(copy, request.data)
-            copy.save()
+            try:
+                copy.save()
+            except DjangoValidationError as exc:
+                raise DRFValidationError(exc.message_dict if hasattr(exc, 'message_dict') else exc.messages) from exc
             _copy_or_replace_periods(source, copy, request.data.get('periods'))
 
         _record_tariff_event(
@@ -464,16 +484,7 @@ class TariffPeriodViewSet(AuditedUpdateMixin, ZevScopedQuerySetMixin, viewsets.M
 
     def perform_create(self, serializer):
         period = super().perform_create(serializer)
-        _record_tariff_event(
-            request=self.request,
-            action_type="tariff_period.create",
-            target_type="tariffs.TariffPeriod",
-            target=period,
-            target_id=str(period.pk),
-            target_display=period.period_type,
-            summary=f"Created tariff period {period.period_type} for tariff {period.tariff.name}.",
-            metadata={"tariff_id": str(period.tariff_id)},
-        )
+        _record_period_created(self.request, period)
 
     def perform_destroy(self, instance):
         # Same as TariffViewSet.perform_destroy above: this fully overrides

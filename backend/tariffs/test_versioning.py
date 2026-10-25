@@ -383,6 +383,31 @@ def test_duplicate_requires_a_name(owner_client):
     assert "name" in response.data
 
 
+@pytest.mark.parametrize("start,expected_end", [
+    ("2024-06-01", "2024-12-31"),
+    ("2026-10-27", None),
+])
+def test_duplicate_keeps_only_an_end_date_that_follows_its_start(owner_client, start, expected_end):
+    client, zev = owner_client
+    original = energy_version(zev, valid_from="2024-01-01", valid_to="2024-12-31")
+    response = client.post(url(original, "duplicate"), {"name": "Copy", "valid_from": start}, format="json")
+    assert response.status_code == 201, response.data
+    assert response.data["valid_from"] == start
+    assert response.data["valid_to"] == expected_end
+    assert len(response.data["periods"]) == 1
+    original.refresh_from_db()
+    assert original.valid_to == date(2024, 12, 31)
+
+
+def test_duplicate_model_errors_are_reported_as_validation_errors(owner_client):
+    client, zev = owner_client
+    original = energy_version(zev, name="Original", valid_from="2026-01-01")
+    energy_version(zev, name="Existing", valid_from="2026-01-01")
+    response = client.post(url(original, "duplicate"), {"name": "Existing", "valid_from": "2026-02-01"}, format="json")
+    assert response.status_code == 400
+    assert Tariff.objects.filter(zev=zev, name="Existing").count() == 1
+
+
 def test_duplicate_refuses_the_source_name(owner_client):
     """That request means "another version", which has its own endpoint and very
     different timeline semantics."""
