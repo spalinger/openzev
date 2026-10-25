@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { act } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MantineProvider } from '@mantine/core'
 import { Layout } from '../src/components/Layout'
 import { fetchFeasibilityCalculatorEnabled } from '../src/lib/api/feasibility'
 
@@ -106,7 +107,7 @@ async function renderLayout() {
             createElement(
                 MemoryRouter,
                 null,
-                createElement(QueryClientProvider, { client }, createElement(Layout)),
+                createElement(QueryClientProvider, { client }, createElement(MantineProvider, null, createElement(Layout))),
             ),
         )
     })
@@ -134,7 +135,7 @@ async function renderLayoutAt(path: string) {
         createElement(
             MemoryRouter,
             { initialEntries: [path] },
-            createElement(QueryClientProvider, { client }, createElement(Layout)),
+            createElement(QueryClientProvider, { client }, createElement(MantineProvider, null, createElement(Layout))),
         ),
     )
     await act(async () => {
@@ -327,7 +328,7 @@ describe('role navigation (see docs/specs/2026-03-community-and-access.md §9.3)
             expect(links).toHaveLength(1)
             expect(links[0].getAttribute('href')).toBe('/me/invoices')
             expect(links[0].getAttribute('aria-label') ?? links[0].textContent).toBe('nav.myInvoices')
-            expect(links[0].getAttribute('title')).toBe(collapsed ? 'nav.myInvoices' : null)
+            expect(links[0].getAttribute('title')).toBeNull()
         } finally {
             page.unmount()
         }
@@ -362,7 +363,7 @@ describe('role navigation (see docs/specs/2026-03-community-and-access.md §9.3)
                     const name = scoped ? link.getAttribute('aria-label') : link.textContent
                     expect(name).toBeTruthy()
                     expect(link.getAttribute('aria-label')).toBe(scoped || shown ? name : null)
-                    expect(link.getAttribute('title')).toBe(shown ? name : null)
+                    expect(link.getAttribute('title')).toBeNull()
                 }
             }
             expectTooltips(collapsed)

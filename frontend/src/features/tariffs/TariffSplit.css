@@ -1,0 +1,21 @@
+/* The list stays full-width for inspection. Only an editing task adds a
+   side column, or temporarily replaces the list when two columns cannot fit. */
+
+.tariff-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.tariff-split[data-layout='wide'][data-pane='open'] {
+  grid-template-columns: minmax(0, 1fr) minmax(28rem, 34rem);
+}
+
+.tariff-split-list {
+  min-width: 0;
+}
+
+.tariff-split-list[hidden] {
+  display: none;
+}

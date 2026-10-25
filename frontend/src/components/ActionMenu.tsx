@@ -1,4 +1,4 @@
-import { Fragment, useMemo, type ReactNode } from 'react'
+import { Fragment, useMemo, useRef, type ReactNode } from 'react'
 import { Menu } from '@mantine/core'
 import { closePopupOnEscape } from '../lib/popupKeyboard'
 
@@ -19,9 +19,12 @@ interface ActionMenuProps {
     iconOnly?: boolean
     /** Row-level size by default; `false` for a page toolbar, beside full-size buttons. */
     compact?: boolean
+    /** Lets the caller find the trigger again, to return focus once a form it opened closes. */
+    actionKey?: string
 }
 
-export function ActionMenu({ label, items, icon, iconOnly = false, compact = true }: ActionMenuProps) {
+export function ActionMenu({ label, items, icon, iconOnly = false, compact = true, actionKey }: ActionMenuProps) {
+    const triggerRef = useRef<HTMLButtonElement>(null)
     const availableItems = useMemo(() => items.filter((item) => !item.disabled), [items])
     const renderedItems = useMemo(() => {
         return items.map((item, index) => {
@@ -45,10 +48,12 @@ export function ActionMenu({ label, items, icon, iconOnly = false, compact = tru
         >
             <Menu.Target>
                 <button
+                    ref={triggerRef}
                     type="button"
                     className={`button button-secondary${compact ? ' button-compact' : ''}`}
                     disabled={availableItems.length === 0}
                     aria-haspopup="menu"
+                    data-action-key={actionKey}
                     onKeyDown={closePopupOnEscape}
                     aria-label={iconOnly ? label : undefined}
                     title={iconOnly ? label : undefined}
@@ -66,7 +71,11 @@ export function ActionMenu({ label, items, icon, iconOnly = false, compact = tru
                             disabled={item.disabled}
                             leftSection={item.icon ? <span className="menu-item-icon" aria-hidden="true">{item.icon}</span> : undefined}
                             className={item.danger ? 'action-menu-item-danger' : undefined}
-                            onClick={item.onClick}
+                            onClick={() => {
+                                // A dialog opened by the action must return to the persistent trigger.
+                                triggerRef.current?.focus()
+                                item.onClick()
+                            }}
                         >
                             {item.label}
                         </Menu.Item>
