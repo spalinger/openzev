@@ -1,122 +1,96 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useEffectEvent, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { faCircleInfo } from '@fortawesome/free-solid-svg-icons'
 import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
-import { TariffCategorySections } from '../features/tariffs/TariffCategorySections'
-import { TariffDetailDrawer } from '../features/tariffs/TariffDetailDrawer'
+import { TariffOverview } from '../features/tariffs/TariffOverview'
+import { TariffDetail, TariffPaneFrame, TariffSeriesActions } from '../features/tariffs/TariffDetailPane'
 import { useTariffCrud } from '../features/tariffs/useTariffCrud'
 import { TariffEmptyState } from '../features/tariffs/TariffEmptyState'
-import { TariffFormModal } from '../features/tariffs/TariffFormModal'
+import { TariffForm } from '../features/tariffs/TariffForm'
 import { VseTariffImportModal } from '../features/tariffs/VseTariffImportModal'
-import { TariffPeriodFormModal } from '../features/tariffs/TariffPeriodFormModal'
-import { TariffToolbar, type TariffListView, type TariffValidityFilter } from '../features/tariffs/TariffToolbar'
-import { TariffVersionModal } from '../features/tariffs/TariffVersionModal'
+import { TariffPeriodForm } from '../features/tariffs/TariffPeriodForm'
+import { TariffActions } from '../features/tariffs/TariffActions'
+import { TariffVersionForm } from '../features/tariffs/TariffVersionForm'
 import { useTariffVersions } from '../features/tariffs/useTariffVersions'
-import { hasUpcomingVersion, isTariffCurrentlyValid } from '../features/tariffs/validity'
-import { seriesKeyOf } from '../features/tariffs/useTariffDisplay'
-import { tariffOverviewFilename, tariffOverviewParams } from '../features/tariffs/tariffOverview'
+import { useTariffEditor } from '../features/tariffs/useTariffEditor'
+import { useTariffPaneNavigation } from '../features/tariffs/useTariffPaneNavigation'
+import { useDraftGuard } from '../features/tariffs/useDraftGuard'
+import { tariffOverview } from '../features/tariffs/validity'
+import { seriesKeyOf } from '../features/tariffs/selection'
+import { tariffOverviewFilename, tariffOverviewParams, type TariffValidityFilter } from '../features/tariffs/tariffOverview'
 import { fetchTariffSeries } from '../lib/api/tariffs'
 import { downloadTariffOverview } from '../lib/api/invoices'
 import { formatApiError } from '../lib/api/errors'
 import { queryKeys } from '../lib/api/queryKeys'
 import { todayBusinessIso } from '../lib/dates'
 import { downloadBlob } from '../lib/downloadBlob'
-import { useAppSettings } from '../lib/appSettings'
+import { formatShortDate, useAppSettings } from '../lib/appSettings'
 import { useAuth } from '../lib/auth'
 import { useManagedZev } from '../lib/managedZev'
 import { useCommunityAccess, useScopeNote } from '../lib/communityAccess'
 import { PageSkeleton } from '../components/PageSkeleton'
 import { useTranslation } from 'react-i18next'
 import { useToast } from '../lib/toast'
-import type { Tariff, TariffSeries } from '../types/api'
+import type { TariffSeries, TariffVersion } from '../types/api'
 import { PageHeader } from '../components/PageHeader'
 import { Notice } from '../components/Notice'
 import { ScopeGuard } from '../components/ScopeGuard'
-
-const TARIFF_PARAM = 'tariff'
-const VERSION_PARAM = 'version'
-
-const tariffCategoryOrder: Tariff['category'][] = ['energy', 'grid_fees', 'levies', 'metering']
 
 export function TariffsPage() {
     const queryClient = useQueryClient()
     const { pushToast } = useToast()
     const { dialog, confirm, handleConfirm, handleCancel, isLoading: dialogLoading } = useConfirmDialog()
     const { user } = useAuth()
-    const cancelConfirmation = useEffectEvent(handleCancel)
     const { settings } = useAppSettings()
     const { selectedZevId, selectedZev } = useManagedZev()
     const { t } = useTranslation()
     const scopeNote = useScopeNote()
     const { isZevScope, canWriteSelectedCommunity } = useCommunityAccess()
-    const isManagedScope = isZevScope
     const readOnly = !canWriteSelectedCommunity
-    const [validityFilter, setValidityFilter] = useState<TariffListView>('valid')
+    const scopeKey = `${selectedZevId ?? ''}|${readOnly}|${user?.id ?? ''}`
+    const editing = useTariffEditor(scopeKey)
+    const editor = editing.task?.kind ?? null
+    const pendingTask = useRef<{ versionId: string; scopeKey: string; open: () => void } | null>(null)
     const [showImportModal, setShowImportModal] = useState(false)
-    const [searchParams, setSearchParams] = useSearchParams()
-    // Shared with the validity badge on each row, so the filter and the badge
-    // can never disagree about whether a tariff is in force.
+    // Which group a tariff is in and what its row says both follow today's date.
     const today = todayBusinessIso()
 
-    // One query, not three: the series endpoint already groups versions, names
-    // the active one, detects gaps, and nests each version's price bands. The
-    // flat lists below are derived from it so nothing can drift out of step
-    // after a mutation.
+    // Versions and bands derive from one scoped series query.
     const seriesQuery = useQuery({
         queryKey: queryKeys.tariffs.series(selectedZevId || undefined),
-        queryFn: () => fetchTariffSeries(isManagedScope ? selectedZevId || undefined : undefined),
+        queryFn: () => fetchTariffSeries(isZevScope ? selectedZevId || undefined : undefined),
         enabled: !!selectedZevId && selectedZev?.id === selectedZevId,
     })
 
     const allSeries = useMemo(
         () => (seriesQuery.data ?? []).filter(
-            (series) => !isManagedScope || series.zev === selectedZevId,
+            (series) => !isZevScope || series.zev === selectedZevId,
         ),
-        [seriesQuery.data, isManagedScope, selectedZevId],
+        [seriesQuery.data, isZevScope, selectedZevId],
     )
 
-    const tariffs = useMemo<Tariff[]>(
+    const tariffs = useMemo<TariffVersion[]>(
         () => allSeries.flatMap((series) => series.versions),
         [allSeries],
     )
 
-    // The detail drawer's open tariff (and, within it, which version) lives in
-    // the URL rather than component state: a reload, the back button, or a
-    // shared link all reopen the same view instead of dropping back to the
-    // bare list (#728).
-    const openSeries = useMemo<TariffSeries | null>(() => {
-        const key = searchParams.get(TARIFF_PARAM)
-        if (!key) return null
-        return allSeries.find((series) => seriesKeyOf(series) === key) ?? null
-    }, [allSeries, searchParams])
-    const shownVersionId = searchParams.get(VERSION_PARAM)
-
-    // Keep the drawer on the exact version the user clicked.
-    function openDetail(series: TariffSeries, versionId: string) {
-        setSearchParams((previous) => {
-            const next = new URLSearchParams(previous)
-            next.set(TARIFF_PARAM, seriesKeyOf(series))
-            next.set(VERSION_PARAM, versionId)
-            return next
-        }, { replace: true })
-    }
-
-    function closeDetail() {
-        setSearchParams((previous) => {
-            const next = new URLSearchParams(previous)
-            next.delete(TARIFF_PARAM)
-            next.delete(VERSION_PARAM)
-            return next
-        }, { replace: true })
-    }
-
-    function showVersion(versionId: string) {
-        setSearchParams((previous) => {
-            const next = new URLSearchParams(previous)
-            next.set(VERSION_PARAM, versionId)
-            return next
-        }, { replace: true })
-    }
+    const navigation = useTariffPaneNavigation({
+        allSeries, today, scopeKey, editor,
+        settled: seriesQuery.isSuccess && !seriesQuery.isFetching,
+        onSelectionChange: (versionId) => {
+            editing.close()
+            const task = pendingTask.current
+            pendingTask.current = null
+            if (task?.versionId === versionId && task.scopeKey === scopeKey) task.open()
+        },
+        onScopeChange: () => {
+            setShowImportModal(false)
+            handleCancel()
+            pendingTask.current = null
+        },
+    })
+    const { pageRef, splitRef, paneTitleRef, openSeries, selected, paneOpen, listHidden, fitsTwoPanes, select, collapse } = navigation
 
     const periods = useMemo(
         () => allSeries.flatMap((series) => series.versions.flatMap((version) => version.periods)),
@@ -124,53 +98,26 @@ export function TariffsPage() {
     )
 
     const tariffNameById = useMemo(() => {
-        return new Map((tariffs || []).map((tariff) => [tariff.id, tariff.name]))
+        return new Map(tariffs.map((tariff) => [tariff.id, tariff.name]))
     }, [tariffs])
 
     // Energy and percentage-of-energy tariffs are the two modes that take
-    // bands (§4.1); the period modal's tariff picker and its "nothing to add
-    // a band to yet" fallback both need the broader list.
+    // bands (§4.1); the band form's owner lookup needs the broader list.
     const bandableTariffs = useMemo(() => {
         return tariffs.filter((tariff) => tariff.billing_mode === 'energy' || tariff.billing_mode === 'percentage_of_energy')
     }, [tariffs])
 
-    // "Valid only" now hides whole series that have no version in force, which is
-    // what collapses a pile of superseded tariffs down to what is current.
-    // Resolved client-side with the same helper the validity badge uses, so the
-    // filter and the badge cannot disagree.
-    const validSeries = useMemo(
-        () => allSeries.filter((series) => series.versions.some(
-            (version) => isTariffCurrentlyValid(version, today),
-        )),
-        [allSeries, today],
-    )
-    const upcomingSeries = useMemo(
-        () => allSeries.filter((series) => hasUpcomingVersion(series.versions, today)),
-        [allSeries, today],
-    )
-    const visibleSeries = validityFilter === 'all'
-        ? allSeries
-        : validityFilter === 'upcoming' ? upcomingSeries : validSeries
-
-    const tariffSections = useMemo(
-        () =>
-            tariffCategoryOrder
-                .map((category) => ({
-                    category,
-                    series: visibleSeries.filter((series) => series.category === category),
-                }))
-                .filter((section) => section.series.length > 0),
-        [visibleSeries],
-    )
+    const overview = useMemo(() => tariffOverview(allSeries, today), [allSeries, today])
 
     const {
-        showTariffModal,
-        showPeriodModal,
+        tariffFormOpen,
+        periodFormOpen,
         editingTariffId,
         editingPeriodId,
-        periodModalTariffId,
+        periodTariffId,
         editingTariff,
         editingPeriod,
+        saveError: crudSaveError,
         tariffPending,
         periodPending,
         deleteTariffPending,
@@ -179,35 +126,113 @@ export function TariffsPage() {
         submitPeriod,
         startTariffEdit,
         startPeriodEdit,
-        openCreateTariffModal,
-        closeTariffModal,
-        openCreatePeriodModal,
-        closePeriodModal,
+        openCreateTariff,
+        openCreatePeriod,
         confirmDeleteTariff,
         confirmDeletePeriod,
     } = useTariffCrud({
+        editing,
+        settings,
         selectedZevId,
         canWrite: !readOnly,
         tariffs,
         periods,
-        bandableTariffs,
         tariffNameById,
         queryClient,
         pushToast,
         confirm,
         t,
+        // A new tariff is a new selection; a changed version stays in view.
+        onTariffSaved: (saved) => select(saved, saved.id),
+        onPeriodSaved: (tariffId) => {
+            const version = tariffs.find((tariff) => tariff.id === tariffId)
+            if (version) select(version, tariffId)
+        },
     })
 
-    const versions = useTariffVersions({ selectedZevId, canWrite: !readOnly, queryClient, pushToast, t })
+    const versions = useTariffVersions({
+        editing,
+        settings,
+        selectedZevId,
+        canWrite: !readOnly,
+        queryClient,
+        pushToast,
+        t,
+        // A new version, copy or name is selected in its expanded row.
+        onSaved: (saved) => select(saved, saved.id),
+    })
 
-    useEffect(() => {
-        setShowImportModal(false)
-        cancelConfirmation()
-    }, [readOnly, selectedZevId, user?.id])
+    const [formDirty, setFormDirty] = useState(false)
+    const [sourcePending, setSourcePending] = useState(false)
+    const saving = editor !== null && (tariffPending || periodPending || versions.isPending || sourcePending)
+    const guard = useDraftGuard({
+        dirty: editor !== null && formDirty,
+        saving,
+        confirm,
+        bypass: navigation.bypassGuard,
+    })
 
-    // The scope is chosen at the download, not by the list's tabs: those
-    // filter whole series, so "All" often changes nothing in the list while
-    // it would still add every superseded version to the PDF.
+    const resetEditing = editing.close
+    function beginEditing(actionKey: string, open: () => void) {
+        navigation.editingFrom(actionKey)
+        open()
+    }
+
+    // Creating from the header, over whatever is shown: the selection waits behind it.
+    const createTariff = () => guard.run(() => {
+        resetEditing()
+        beginEditing('new-tariff', openCreateTariff)
+    })
+
+    // Expansion and task selection share the URL, but only tasks open the side panel.
+    const showVersion = (series: Pick<TariffSeries, 'zev' | 'name'>, versionId: string) => {
+        if (navigation.isSelecting(series, versionId)) return
+        if (selected?.seriesKey === seriesKeyOf(series) && selected.versionId === versionId) return
+        guard.run(() => {
+            resetEditing()
+            select(series, versionId)
+        })
+    }
+    const closeDetail = (series: TariffSeries) => guard.run(() => {
+        resetEditing()
+        collapse(series)
+    })
+    const cancelEditing = () => guard.run(resetEditing)
+
+    function editDetail(series: TariffSeries, versionId: string, actionKey: string, open: () => void) {
+        guard.run(() => {
+            resetEditing()
+            if (selected?.seriesKey === seriesKeyOf(series) && selected.versionId === versionId) beginEditing(actionKey, open)
+            else {
+                pendingTask.current = { versionId, scopeKey, open: () => beginEditing(actionKey, open) }
+                select(series, versionId)
+            }
+        })
+    }
+
+    // Tariff pilot exception to the proposed pane default: inspect inline, edit in a task pane.
+    function renderDetail(series: TariffSeries, versionId: string) {
+        return <TariffDetail
+            series={series}
+            allSeries={allSeries}
+            settings={settings}
+            shownVersionId={versionId}
+            onShowVersion={(id) => showVersion(series, id)}
+            deleteTariffDisabled={deleteTariffPending || dialogLoading}
+            deletePeriodDisabled={deletePeriodPending || dialogLoading}
+            onEditTariff={(version, key, field) => editDetail(series, version.id, key, () => startTariffEdit(version, field))}
+            onDeleteTariff={tariff => guard.run(() => confirmDeleteTariff(tariff))}
+            onOpenCreatePeriod={(id, key) => editDetail(series, id, key, () => openCreatePeriod(id))}
+            onEditPeriod={(period, key, field) => editDetail(series, period.tariff, key, () => startPeriodEdit(period, field))}
+            onDeletePeriod={period => guard.run(() => confirmDeletePeriod(period))}
+            onNewVersion={(owner, source, validFrom) => editDetail(owner, source.id, 'new-version', () => versions.openNewVersion(owner, source, validFrom))}
+            readOnly={readOnly}
+        />
+    }
+
+    // The scope is chosen at the download, not by the list: the overview
+    // groups series by validity, and "all" is what also adds every
+    // superseded version to the PDF.
     const overviewMutation = useMutation({
         mutationFn: (scope: TariffValidityFilter) => downloadTariffOverview(tariffOverviewParams(selectedZevId ?? '', scope)),
         onSuccess: (blob) => downloadBlob(blob, tariffOverviewFilename(today)),
@@ -218,34 +243,101 @@ export function TariffsPage() {
         <PageHeader
             eyebrow={selectedZev?.name}
             communitySwitch
+            onCommunitySwitch={guard.run}
             scopeNote={scopeNote}
             title={t('pages.tariffs.title')}
-            description={t('pages.tariffs.description')}
+            description={listHidden ? undefined : t('pages.tariffs.description')}
+            actions={!listHidden && selectedZevId && seriesQuery.data !== undefined ? (
+                <TariffActions
+                    onOpenCreateTariff={createTariff}
+                    onOpenImportModal={!readOnly ? () => guard.run(() => { resetEditing(); setShowImportModal(true) }) : undefined}
+                    readOnly={readOnly}
+                    onDownloadOverview={(scope) => overviewMutation.mutate(scope)}
+                    overviewBusy={overviewMutation.isPending}
+                />
+            ) : undefined}
         />
     )
 
+    // The form for the task in hand, and what to call it under the tariff's name.
+    function renderEditor(): { label: string, content: ReactNode } | null {
+        const task = versions.dialog
+        if (task) {
+            return {
+                label: t(`pages.tariffs.pane.task.${task.kind}` as Parameters<typeof t>[0]),
+                content: (
+                    <TariffVersionForm
+                        key={`${task.kind}:${task.source.id}:${editing.task?.sessionId}`}
+                        dialog={task}
+                        settings={settings}
+                        isPending={versions.isPending}
+                        error={versions.saveError}
+                        onCancel={cancelEditing}
+                        onDirtyChange={setFormDirty}
+                        onSubmitNewVersion={versions.submitNewVersion}
+                        onSubmitDuplicate={versions.submitDuplicate}
+                        onSubmitRename={versions.submitRename}
+                    />
+                ),
+            }
+        }
+        if (tariffFormOpen) {
+            return {
+                label: t(editingTariffId ? 'pages.tariffs.pane.task.edit' : 'pages.tariffs.createTitle'),
+                content: (
+                    <TariffForm
+                        key={`${editingTariffId ?? 'new'}:${editing.task?.sessionId}`}
+                        initialTariff={editingTariff}
+                        initialFocus={editing.task?.kind === 'edit' ? editing.task.initialFocus : undefined}
+                        selectedZevId={selectedZevId || ''}
+                        isPending={tariffPending}
+                        error={crudSaveError}
+                        onSubmit={submitTariff}
+                        onCancel={cancelEditing}
+                        onDirtyChange={setFormDirty}
+                        onSourcePendingChange={setSourcePending}
+                    />
+                ),
+            }
+        }
+        if (periodFormOpen) {
+            return {
+                label: t(editingPeriodId ? 'pages.tariffs.editPeriodTitle' : 'pages.tariffs.createPeriodTitle'),
+                content: (
+                    <TariffPeriodForm
+                        key={`${editingPeriodId ?? 'new'}:${editing.task?.sessionId}`}
+                        initialPeriod={editingPeriod}
+                        initialFocus={editing.task?.kind === 'period' ? editing.task.initialFocus : undefined}
+                        defaultTariffId={periodTariffId}
+                        tariffs={bandableTariffs}
+                        isPending={periodPending}
+                        error={crudSaveError}
+                        onSubmit={submitPeriod}
+                        onCancel={cancelEditing}
+                        onDirtyChange={setFormDirty}
+                    />
+                ),
+            }
+        }
+        return null
+    }
+    const editorPane = renderEditor()
+    const editorVersion = versions.dialog?.source ?? editingTariff ?? tariffs.find(tariff => tariff.id === periodTariffId)
+    const editorContext = editor !== 'create' && editorVersion ? <>
+        <span>{openSeries?.name ?? editorVersion.name}</span>
+        <span className="tariff-pane-dates">{formatShortDate(editorVersion.valid_from, settings)} – {editorVersion.valid_to ? formatShortDate(editorVersion.valid_to, settings) : t('pages.tariffs.openEnded')}</span>
+    </> : undefined
+
     return (
-        <div className="page-stack">
+        <div ref={pageRef} className="page-stack">
             {header}
             <ScopeGuard skeleton="table">
-            {seriesQuery.isLoading ? <PageSkeleton variant="table" /> : seriesQuery.isError ? (
+            {seriesQuery.isError && (
                 <Notice tone="error" onRetry={() => void seriesQuery.refetch()} isRetrying={seriesQuery.isFetching}>{t('common.error')}</Notice>
-            ) : <>
-            <TariffToolbar
-                validCount={validSeries.length}
-                upcomingCount={upcomingSeries.length}
-                totalCount={allSeries.length}
-                validityFilter={validityFilter}
-                onValidityFilterChange={setValidityFilter}
-                onOpenCreateTariffModal={openCreateTariffModal}
-                onOpenImportModal={selectedZevId && !readOnly ? () => setShowImportModal(true) : undefined}
-                readOnly={readOnly}
-                onDownloadOverview={selectedZevId ? (scope) => overviewMutation.mutate(scope) : undefined}
-                overviewBusy={overviewMutation.isPending}
-            />
-
+            )}
+            {seriesQuery.isLoading ? <PageSkeleton variant="table" /> : seriesQuery.data !== undefined && <>
             {selectedZev?.vat_mode === 'inclusive' && (
-                <div className="info-banner">{t('pages.tariffs.vatInclusiveNotice')}</div>
+                <p className="tariff-vat-notice muted"><FontAwesomeIcon icon={faCircleInfo} fixedWidth aria-hidden="true" /><span>{t('pages.tariffs.vatInclusiveNotice')}</span></p>
             )}
 
             {selectedZevId && (
@@ -257,84 +349,49 @@ export function TariffsPage() {
                 />
             )}
 
-            <TariffFormModal
-                isOpen={showTariffModal}
-                title={editingTariffId ? t('pages.tariffs.editTitle') : t('pages.tariffs.createTitle')}
-                onClose={closeTariffModal}
-                onSubmit={submitTariff}
-                initialTariff={editingTariff}
-                selectedZevId={selectedZevId || ''}
-                isPending={tariffPending}
-            />
+            <div
+                ref={splitRef}
+                className="tariff-split"
+                data-layout={fitsTwoPanes ? 'wide' : 'narrow'}
+                data-pane={paneOpen ? 'open' : 'closed'}
+            >
+                <div className="tariff-split-list" hidden={listHidden}>
+                    {tariffs.length === 0 ? (
+                        <TariffEmptyState onOpenCreateTariff={createTariff} readOnly={readOnly} />
+                    ) : (
+                        <TariffOverview
+                            groups={overview}
+                            settings={settings}
+                            onOpenDetail={showVersion}
+                            expandedVersion={navigation.expandedVersion}
+                            renderDetail={renderDetail}
+                            renderActions={!readOnly ? (series, versionId) => <TariffSeriesActions series={series} versionId={versionId}
+                                onRename={source => editDetail(series, source.id, 'series-actions', () => versions.openRename(series, source))}
+                                onNewVersion={source => editDetail(series, source.id, 'new-version', () => versions.openNewVersion(series, source))}
+                                onDuplicate={source => editDetail(series, source.id, 'series-actions', () => versions.openDuplicate(series, source))} /> : undefined}
+                            onCloseDetail={closeDetail}
+                        />
+                    )}
+                </div>
 
-            <TariffVersionModal
-                settings={settings}
-                dialog={versions.dialog}
-                isPending={versions.isPending}
-                onClose={versions.closeDialog}
-                onSubmitNewVersion={versions.submitNewVersion}
-                onSubmitDuplicate={versions.submitDuplicate}
-                onSubmitRename={versions.submitRename}
-            />
+                {editorPane && (
+                    <TariffPaneFrame
+                        title={editorPane.label}
+                        subtitle={editorContext}
+                        backLabel={t(openSeries ? 'pages.tariffs.workspace.backToTariff' : 'pages.tariffs.workspace.back')}
+                        onClose={cancelEditing}
+                        titleRef={paneTitleRef}
+                    >
+                        <div className="tariff-pane-body page-stack">{editorPane.content}</div>
+                    </TariffPaneFrame>
+                )}
+            </div>
 
-            <TariffPeriodFormModal
-                isOpen={showPeriodModal}
-                title={editingPeriodId ? t('pages.tariffs.editPeriodTitle') : t('pages.tariffs.createPeriodTitle')}
-                onClose={closePeriodModal}
-                onSubmit={submitPeriod}
-                initialPeriod={editingPeriod}
-                defaultTariffId={periodModalTariffId}
-                tariffs={bandableTariffs}
-                isPending={periodPending}
-            />
-
-            {tariffs.length === 0 ? (
-                <TariffEmptyState onOpenCreateTariffModal={openCreateTariffModal} readOnly={readOnly} />
-            ) : visibleSeries.length === 0 ? (
-                <section className="card" style={{ display: 'grid', gap: '0.75rem' }}>
-                    <h3 style={{ margin: 0 }}>{t('pages.tariffs.noResults.title')}</h3>
-                    <p className="muted" style={{ margin: 0 }}>{t('pages.tariffs.noResults.description')}</p>
-                    <div>
-                        <button className="button button-secondary" type="button" onClick={() => setValidityFilter('all')}>
-                            {t('pages.tariffs.filters.clear')}
-                        </button>
-                    </div>
-                </section>
-            ) : (
-                <TariffCategorySections
-                    settings={settings}
-                    tariffSections={tariffSections}
-                    openSeriesKey={openSeries ? seriesKeyOf(openSeries) : null}
-                    upcoming={validityFilter === 'upcoming'}
-                    onOpenDetail={openDetail}
-                />
-            )}
-
-            <TariffDetailDrawer
-                series={openSeries}
-                allSeries={allSeries}
-                settings={settings}
-                shownVersionId={shownVersionId}
-                onShowVersion={showVersion}
-                deleteTariffDisabled={deleteTariffPending || dialogLoading}
-                deletePeriodDisabled={deletePeriodPending || dialogLoading}
-                onClose={closeDetail}
-                onEditTariff={startTariffEdit}
-                onDeleteTariff={confirmDeleteTariff}
-                onOpenCreatePeriodModal={openCreatePeriodModal}
-                onEditPeriod={startPeriodEdit}
-                onDeletePeriod={confirmDeletePeriod}
-                onNewVersion={versions.openNewVersion}
-                onDuplicate={versions.openDuplicate}
-                onRenameSeries={versions.openRename}
-                readOnly={readOnly}
-            />
-
+            </>}
+            </ScopeGuard>
             {dialog && (
                 <ConfirmDialog {...dialog} isLoading={dialogLoading} onConfirm={handleConfirm} onCancel={handleCancel} />
             )}
-            </>}
-            </ScopeGuard>
         </div>
     )
 }

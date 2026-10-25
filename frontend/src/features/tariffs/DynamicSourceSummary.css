@@ -1,0 +1,67 @@
+.tariff-source-summary {
+  display: grid;
+  gap: 0.375rem;
+}
+
+.tariff-source-details h4 {
+  margin: 0 0 0.75rem;
+  font-size: 0.875rem;
+}
+
+.tariff-source-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.875rem 1rem;
+  margin: 0 0 0.75rem;
+}
+
+.tariff-source-fact-wide {
+  grid-column: 1 / -1;
+}
+
+.tariff-source-facts dt {
+  margin-bottom: 0.125rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.tariff-source-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.875rem;
+  color: var(--ink);
+}
+
+.tariff-source-facts .tariff-source-address,
+.tariff-source-hint {
+  font-size: 0.8125rem;
+}
+
+.tariff-source-hint {
+  margin: 0.25rem 0 0;
+}
+
+.tariff-source-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.tariff-source-statuses {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.8125rem;
+}
+
+.tariff-source-status {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.tariff-source-status[data-status='ok'] {
+  color: var(--success-700);
+}

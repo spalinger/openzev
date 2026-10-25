@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { todayBusinessIso } from '../../lib/dates'
+import { missingBandTimes } from './bandDrafts'
 import type { Tariff, TariffInput, TariffPeriod, TariffPeriodInput } from '../../types/api'
 
 export type TariffFormValues = {
@@ -38,7 +39,7 @@ export type TariffPeriodFormValues = {
 
 export const tariffFormSchema = z
   .object({
-    name: z.string().trim().min(1),
+    name: z.string().trim().min(1, 'required'),
     category: z.enum(['energy', 'grid_fees', 'levies', 'metering']),
     billing_mode: z.enum([
       'energy',
@@ -54,7 +55,7 @@ export const tariffFormSchema = z
     fixed_price_chf: z.string(),
     initial_percentage: z.string(),
     split_key: z.enum(['equal', 'weight']),
-    valid_from: z.string().trim().min(1),
+    valid_from: z.string().trim().min(1, 'required'),
     valid_to: z.string(),
     notes: z.string(),
     dynamic_source: z.string(),
@@ -71,7 +72,7 @@ export const tariffFormSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['minimum_price_chf_per_kwh'],
-        message: 'Minimum price must be a number.',
+        message: 'number',
       })
     }
 
@@ -79,26 +80,26 @@ export const tariffFormSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['energy_type'],
-        message: 'Energy type is required.',
+        message: 'required',
       })
     }
 
     // The initial percentage only exists on create (§5.5): once the tariff
     // exists, its bands — including the first one — are managed from the
-    // drawer, and this field is hidden and irrelevant.
+    // band editor, and this field is hidden and irrelevant.
     if (values.billing_mode === 'percentage_of_energy' && values.is_new) {
       if (!values.initial_percentage) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['initial_percentage'],
-          message: 'Percentage is required.',
+          message: 'required',
         })
       }
       if (values.initial_percentage && Number.isNaN(Number(values.initial_percentage))) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['initial_percentage'],
-          message: 'Percentage must be a number.',
+          message: 'number',
         })
       }
     }
@@ -108,14 +109,14 @@ export const tariffFormSchema = z
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['fixed_price_chf'],
-          message: 'Fixed price is required.',
+          message: 'required',
         })
       }
       if (values.fixed_price_chf && Number.isNaN(Number(values.fixed_price_chf))) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['fixed_price_chf'],
-          message: 'Fixed price must be a number.',
+          message: 'number',
         })
       }
     }
@@ -144,6 +145,9 @@ export const tariffPeriodFormSchema = z
     months: z.string(),
   })
   .superRefine((values, ctx) => {
+    for (const field of missingBandTimes(values)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: [field], message: 'required' })
+    }
     // A band carries a price or a percentage, never both — the same §4.1
     // rule the backend enforces, checked here too so the field can be
     // required without the server round trip.
@@ -152,14 +156,14 @@ export const tariffPeriodFormSchema = z
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['percentage'],
-          message: 'Percentage is required.',
+          message: 'required',
         })
       }
     } else if (!values.price_chf_per_kwh.trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['price_chf_per_kwh'],
-        message: 'Price is required.',
+        message: 'required',
       })
     }
   })
@@ -201,7 +205,7 @@ export function mapTariffToFormValues(tariff: Tariff): TariffFormValues {
     energy_type: tariff.energy_type || 'local',
     fixed_price_chf: tariff.fixed_price_chf ? String(tariff.fixed_price_chf) : '',
     // Write-only and create-only: an existing tariff never carries it back,
-    // and editing one never sends it (bands are managed from the drawer).
+    // and editing one never sends it (bands have their own editor).
     initial_percentage: '',
     split_key: tariff.split_key || 'equal',
     valid_from: tariff.valid_from,

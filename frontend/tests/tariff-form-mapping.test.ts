@@ -6,10 +6,28 @@ import {
   mapTariffPeriodFormValuesToInput,
   mapTariffPeriodToFormValues,
   mapTariffToFormValues,
+  tariffPeriodFormSchema,
 } from '../src/features/tariffs/useTariffForms'
 import type { Tariff, TariffPeriod } from '../src/types/api'
 
 describe('tariff form mapping', () => {
+  it.each(['high', 'low', 'band'] as const)('requires both time endpoints for a %s band', (period_type) => {
+    const values = { ...defaultTariffPeriodFormValues, tariff: 't-1', period_type, price_chf_per_kwh: '0.20' }
+    for (const times of [{ time_from: '', time_to: '' }, { time_from: '21:00', time_to: '' }, { time_from: '', time_to: '07:00' }]) {
+      const result = tariffPeriodFormSchema.safeParse({ ...values, ...times })
+      expect(result.success).toBe(false)
+      if (!result.success) expect(result.error.issues.map(issue => issue.path[0])).toEqual(
+        (['time_from', 'time_to'] as const).filter(field => !times[field]),
+      )
+    }
+    expect(tariffPeriodFormSchema.safeParse({ ...values, time_from: '21:00', time_to: '07:00' }).success).toBe(true)
+    expect(tariffPeriodFormSchema.safeParse({ ...values, time_from: '00:00', time_to: '00:00' }).success).toBe(true)
+  })
+
+  it('allows a flat price without a time window', () => {
+    expect(tariffPeriodFormSchema.safeParse({ ...defaultTariffPeriodFormValues, tariff: 't-1', price_chf_per_kwh: '0.20' }).success).toBe(true)
+  })
+
   it('maps tariff api model into form values', () => {
     const tariff = {
       id: 't-1',

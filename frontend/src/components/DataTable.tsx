@@ -15,8 +15,7 @@ export type { ColumnDef, ColumnFiltersState }
  *  explicit width when the caller hasn't set one. */
 const TANSTACK_DEFAULT_SIZE = 150
 
-/** One fixed page size: long enough that most lists fit on one page, so the
- *  footer offers only prev/next, never a rows-per-page choice. */
+/** Most lists fit on one page; embedded histories can choose a shorter page. */
 const PAGE_SIZE = 100
 
 interface DataTableProps<T> {
@@ -24,6 +23,7 @@ interface DataTableProps<T> {
     columns: ColumnDef<T, unknown>[]
     getRowId?: (row: T) => string
     initialSorting?: SortingState
+    initialPageSize?: number
     /** External filter controls (search boxes, selects) set this state. */
     columnFilters?: ColumnFiltersState
     onColumnFiltersChange?: (updater: ColumnFiltersState) => void
@@ -37,6 +37,7 @@ export function DataTable<T>({
     columns,
     getRowId,
     initialSorting = [],
+    initialPageSize = PAGE_SIZE,
     columnFilters,
     onColumnFiltersChange,
     enableSorting = true,
@@ -46,7 +47,7 @@ export function DataTable<T>({
     const { t } = useTranslation()
     const [sorting, setSorting] = useState<SortingState>(initialSorting)
     const [internalFilters, setInternalFilters] = useState<ColumnFiltersState>([])
-    const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: PAGE_SIZE })
+    const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: initialPageSize })
 
     // TanStack Table returns unmemoizable functions, so React Compiler skips
     // this component — safe, the table state lives in the hook itself.

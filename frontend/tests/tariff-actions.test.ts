@@ -5,7 +5,7 @@ import { MantineProvider } from '@mantine/core'
 import { TariffActions } from '../src/features/tariffs/TariffActions'
 import { waitForCondition } from './helpers/waitForCondition'
 
-// The list is grouped (Current, Upcoming, History) rather than filtered; the overview PDF's
+// The list groups current/upcoming and entirely ended tariffs; the overview PDF's
 // scope is chosen at the download (SPEC-2026-10-tariff-split-view §4, SPEC-2026-09-tariff-overview-pdf §11).
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))

@@ -1,5 +1,5 @@
 import { useMutation, type QueryClient } from '@tanstack/react-query'
-import { useLayoutEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
   createTariff,
   createTariffPeriod,
@@ -10,9 +10,10 @@ import {
 } from '../../lib/api/tariffs'
 import { useAuth } from '../../lib/auth'
 import { useWriteScope } from '../../lib/useWriteScope'
-import { formatApiError } from '../../lib/api/errors'
+import { formatTariffError } from './errors'
 import { invalidateTariffQueries } from './invalidate'
-import type { Tariff, TariffInput, TariffPeriod, TariffPeriodInput } from '../../types/api'
+import type { TariffEditing, TariffEditField, TariffPeriodEditField } from './useTariffEditor'
+import type { AppSettings, Tariff, TariffInput, TariffPeriod, TariffPeriodInput, TariffVersion } from '../../types/api'
 
 type ConfirmOptions = {
   title: string
@@ -23,49 +24,48 @@ type ConfirmOptions = {
 }
 
 type TariffCrudParams = {
+  editing: TariffEditing
+  settings?: AppSettings
   selectedZevId?: string
   canWrite?: boolean
-  tariffs: Tariff[]
+  tariffs: TariffVersion[]
   periods: TariffPeriod[]
-  bandableTariffs: Tariff[]
   tariffNameById: Map<string, string>
   queryClient: QueryClient
   pushToast: (message: string, tone?: 'success' | 'error') => void
   confirm: (options: ConfirmOptions) => void
   t: (key: string, options?: Record<string, unknown>) => string
+  /** A tariff was created or changed and its form closed: select what was saved. */
+  onTariffSaved?: (saved: Tariff, kind: 'created' | 'updated') => void
+  /** A band was saved and its form closed. */
+  onPeriodSaved?: (tariffId: string) => void
 }
 
-export function resolvePeriodModalTariffId(bandableTariffs: Tariff[], tariffId?: string): string | undefined {
-  return tariffId ?? bandableTariffs[0]?.id
-}
-
+/** Tariff/band writes complete only for the submitting scope and task. */
 export function useTariffCrud({
+  editing,
+  settings,
   selectedZevId,
   canWrite = true,
   tariffs,
   periods,
-  bandableTariffs,
   tariffNameById,
   queryClient,
   pushToast,
   confirm,
   t,
+  onTariffSaved,
+  onPeriodSaved,
 }: TariffCrudParams) {
   const { user } = useAuth()
   const { scope, isCurrent, assertWritable } = useWriteScope({ selectedZevId, canWrite, accountId: user?.id }, t('common.error'))
-  const [editingTariffId, setEditingTariffId] = useState<string | null>(null)
-  const [editingPeriodId, setEditingPeriodId] = useState<string | null>(null)
-  const [periodModalTariffId, setPeriodModalTariffId] = useState<string | undefined>(undefined)
-  const [showTariffModal, setShowTariffModal] = useState(false)
-  const [showPeriodModal, setShowPeriodModal] = useState(false)
-
-  useLayoutEffect(() => {
-    setShowTariffModal(false)
-    setShowPeriodModal(false)
-    setEditingTariffId(null)
-    setEditingPeriodId(null)
-    setPeriodModalTariffId(undefined)
-  }, [scope])
+  const { task, id: session, setError: setSaveError, error: saveError } = editing
+  const taskSession = task?.sessionId
+  const tariffFormOpen = task?.kind === 'create' || task?.kind === 'edit'
+  const periodFormOpen = task?.kind === 'period'
+  const editingTariffId = task?.kind === 'edit' ? task.tariffId : null
+  const editingPeriodId = task?.kind === 'period' ? task.periodId ?? null : null
+  const periodTariffId = task?.kind === 'period' ? task.tariffId : undefined
 
   const editingTariff = useMemo(
     () => tariffs.find((tariff) => tariff.id === editingTariffId),
@@ -78,25 +78,29 @@ export function useTariffCrud({
   )
 
   const tariffMutation = useMutation({
-    mutationFn: ({ id, payload, scope: submittingScope }: { id?: string; payload: TariffInput; scope: typeof scope }) => {
+    mutationFn: ({ id, payload, scope: submittingScope, session: submittingSession }: { id?: string; payload: TariffInput; scope: typeof scope; session: number }) => {
       assertWritable(submittingScope)
+      if (!editing.isCurrent(submittingSession)) throw new Error(t('common.error'))
       if (id) {
         return updateTariff(id, payload)
       }
       return createTariff(payload)
     },
-    onSuccess: (_, variables) => {
-      invalidateTariffQueries(queryClient, variables.scope.selectedZevId)
-      if (!isCurrent(variables.scope)) return
-      setEditingTariffId(null)
-      setShowTariffModal(false)
+    onSuccess: async (saved, variables) => {
+      // Refresh before selection; retain the saved URL if refresh fails.
+      await invalidateTariffQueries(queryClient, variables.scope.selectedZevId)
+      if (!isCurrent(variables.scope) || variables.session !== session.current) return
       pushToast(
-        variables.id ? t('pages.tariffs.messages.updated') : t('pages.tariffs.messages.created'),
+        t(variables.id ? 'pages.tariffs.messages.updated' : 'pages.tariffs.messages.created'),
         'success',
       )
+      editing.close()
+      onTariffSaved?.(saved, variables.id ? 'updated' : 'created')
     },
     onError: (error, variables) => {
-      if (isCurrent(variables.scope)) pushToast(formatApiError(error, t('pages.tariffs.messages.saveFailed')), 'error')
+      if (isCurrent(variables.scope) && variables.session === session.current) {
+        setSaveError(formatTariffError(error, t('pages.tariffs.messages.saveFailed'), t, settings))
+      }
     },
   })
 
@@ -106,36 +110,38 @@ export function useTariffCrud({
       return deleteTariff(id)
     },
     onSuccess: (_, variables) => {
-      invalidateTariffQueries(queryClient, variables.scope.selectedZevId)
+      void invalidateTariffQueries(queryClient, variables.scope.selectedZevId)
       if (!isCurrent(variables.scope)) return
       pushToast(t('pages.tariffs.messages.deleted'), 'success')
     },
     onError: (error, variables) => {
-      if (isCurrent(variables.scope)) pushToast(formatApiError(error, t('pages.tariffs.messages.deleteFailed')), 'error')
+      if (isCurrent(variables.scope)) pushToast(formatTariffError(error, t('pages.tariffs.messages.deleteFailed'), t, settings), 'error')
     },
   })
 
   const periodMutation = useMutation({
-    mutationFn: ({ id, payload, scope: submittingScope }: { id?: string; payload: TariffPeriodInput; scope: typeof scope }) => {
+    mutationFn: ({ id, payload, scope: submittingScope, session: submittingSession }: { id?: string; payload: TariffPeriodInput; scope: typeof scope; session: number }) => {
       assertWritable(submittingScope)
+      if (!editing.isCurrent(submittingSession)) throw new Error(t('common.error'))
       if (id) {
         return updateTariffPeriod(id, payload)
       }
       return createTariffPeriod(payload)
     },
-    onSuccess: (_, variables) => {
-      invalidateTariffQueries(queryClient, variables.scope.selectedZevId)
-      if (!isCurrent(variables.scope)) return
-      setEditingPeriodId(null)
-      setPeriodModalTariffId(undefined)
-      setShowPeriodModal(false)
+    onSuccess: async (_, variables) => {
+      await invalidateTariffQueries(queryClient, variables.scope.selectedZevId)
+      if (!isCurrent(variables.scope) || variables.session !== session.current) return
       pushToast(
         variables.id ? t('pages.tariffs.messages.periodUpdated') : t('pages.tariffs.messages.periodCreated'),
         'success',
       )
+      editing.close()
+      onPeriodSaved?.(variables.payload.tariff)
     },
     onError: (error, variables) => {
-      if (isCurrent(variables.scope)) pushToast(formatApiError(error, t('pages.tariffs.messages.periodSaveFailed')), 'error')
+      if (isCurrent(variables.scope) && variables.session === session.current) {
+        setSaveError(formatTariffError(error, t('pages.tariffs.messages.periodSaveFailed'), t, settings))
+      }
     },
   })
 
@@ -145,74 +151,53 @@ export function useTariffCrud({
       return deleteTariffPeriod(id)
     },
     onSuccess: (_, variables) => {
-      invalidateTariffQueries(queryClient, variables.scope.selectedZevId)
+      void invalidateTariffQueries(queryClient, variables.scope.selectedZevId)
       if (!isCurrent(variables.scope)) return
       pushToast(t('pages.tariffs.messages.periodDeleted'), 'success')
     },
     onError: (error, variables) => {
-      if (isCurrent(variables.scope)) pushToast(formatApiError(error, t('pages.tariffs.messages.periodDeleteFailed')), 'error')
+      if (isCurrent(variables.scope)) pushToast(formatTariffError(error, t('pages.tariffs.messages.periodDeleteFailed'), t, settings), 'error')
     },
   })
 
   function submitTariff(payload: TariffInput) {
-    if (!isCurrent(scope)) return
+    if (!tariffFormOpen || taskSession === undefined || !editing.isCurrent(taskSession) || !isCurrent(scope)) return
     if (!selectedZevId || !canWrite) {
       pushToast(t('pages.tariffs.messages.selectZevBeforeSave'), 'error')
       return
     }
-    tariffMutation.mutate({ id: editingTariffId || undefined, payload: { ...payload, zev: selectedZevId }, scope })
+    setSaveError(null)
+    tariffMutation.mutate({ id: editingTariffId || undefined, payload: { ...payload, zev: selectedZevId }, scope, session: taskSession })
   }
 
   function submitPeriod(payload: TariffPeriodInput) {
-    if (!isCurrent(scope)) return
+    if (!periodFormOpen || taskSession === undefined || !editing.isCurrent(taskSession) || !isCurrent(scope)) return
     if (!selectedZevId || !canWrite) {
       pushToast(t('pages.tariffs.messages.periodSaveFailed'), 'error')
       return
     }
-    periodMutation.mutate({ id: editingPeriodId || undefined, payload, scope })
+    setSaveError(null)
+    periodMutation.mutate({ id: editingPeriodId || undefined, payload, scope, session: taskSession })
   }
 
-  function startTariffEdit(tariff: Tariff) {
-    setEditingTariffId(tariff.id)
-    setShowTariffModal(true)
-  }
-
-  function startPeriodEdit(period: TariffPeriod) {
-    setEditingPeriodId(period.id)
-    setPeriodModalTariffId(period.tariff)
-    setShowPeriodModal(true)
-  }
-
-  function openCreateTariffModal() {
+  function openCreateTariff() {
     if (!selectedZevId) {
       pushToast(t('pages.tariffs.messages.selectZevBeforeCreate'), 'error')
       return
     }
-    setEditingTariffId(null)
-    setShowTariffModal(true)
+    editing.open({ kind: 'create' })
   }
 
-  function closeTariffModal() {
-    setShowTariffModal(false)
-    setEditingTariffId(null)
-  }
-
-  function openCreatePeriodModal(tariffId?: string) {
-    const defaultTariffId = resolvePeriodModalTariffId(bandableTariffs, tariffId)
-
-    if (!defaultTariffId) {
+  function openCreatePeriod(tariffId: string) {
+    if (!tariffs.some(tariff => tariff.id === tariffId)) {
       pushToast(t('pages.tariffs.messages.createEnergyTariffFirst'), 'error')
       return
     }
-    setEditingPeriodId(null)
-    setPeriodModalTariffId(defaultTariffId)
-    setShowPeriodModal(true)
+    editing.open({ kind: 'period', tariffId })
   }
 
-  function closePeriodModal() {
-    setShowPeriodModal(false)
-    setEditingPeriodId(null)
-    setPeriodModalTariffId(undefined)
+  function closeDeletedOwner(tariffId: string) {
+    if (task && (('tariffId' in task && task.tariffId === tariffId) || ('source' in task && task.source.id === tariffId))) editing.close()
   }
 
   function confirmDeleteTariff(tariff: Tariff) {
@@ -222,7 +207,10 @@ export function useTariffCrud({
       confirmText: t('pages.tariffs.deleteConfirm'),
       isDangerous: true,
       onConfirm: () => {
-        if (scope.canWrite && isCurrent(scope)) deleteTariffMutation.mutate({ id: tariff.id, scope })
+        if (scope.canWrite && isCurrent(scope)) {
+          closeDeletedOwner(tariff.id)
+          deleteTariffMutation.mutate({ id: tariff.id, scope })
+        }
       },
     })
   }
@@ -234,31 +222,34 @@ export function useTariffCrud({
       confirmText: t('pages.tariffs.deletePeriodConfirm'),
       isDangerous: true,
       onConfirm: () => {
-        if (scope.canWrite && isCurrent(scope)) deletePeriodMutation.mutate({ id: period.id, scope })
+        if (scope.canWrite && isCurrent(scope)) {
+          closeDeletedOwner(period.tariff)
+          deletePeriodMutation.mutate({ id: period.id, scope })
+        }
       },
     })
   }
 
   return {
-    showTariffModal,
-    showPeriodModal,
+    tariffFormOpen,
+    periodFormOpen,
     editingTariffId,
     editingPeriodId,
-    periodModalTariffId,
+    periodTariffId,
     editingTariff,
     editingPeriod,
-    tariffPending: tariffMutation.isPending,
-    periodPending: periodMutation.isPending,
+    saveError,
+    tariffPending: tariffMutation.isPending && tariffMutation.variables?.session === taskSession,
+    periodPending: periodMutation.isPending && periodMutation.variables?.session === taskSession,
     deleteTariffPending: deleteTariffMutation.isPending,
     deletePeriodPending: deletePeriodMutation.isPending,
     submitTariff,
     submitPeriod,
-    startTariffEdit,
-    startPeriodEdit,
-    openCreateTariffModal,
-    closeTariffModal,
-    openCreatePeriodModal,
-    closePeriodModal,
+    startTariffEdit: (tariff: Tariff, field?: TariffEditField) => editing.open({ kind: 'edit', tariffId: tariff.id, initialFocus: field ? { field } : undefined }),
+    startPeriodEdit: (period: TariffPeriod, field?: TariffPeriodEditField) => editing.open({ kind: 'period', tariffId: period.tariff, periodId: period.id, initialFocus: field ? { field } : undefined }),
+    openCreateTariff,
+    closeTariffForm: editing.close,
+    openCreatePeriod,
     confirmDeleteTariff,
     confirmDeletePeriod,
   }

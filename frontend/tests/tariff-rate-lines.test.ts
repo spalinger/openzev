@@ -2,8 +2,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { buildRateLines, type RateLineTranslate } from '../src/features/tariffs/rateLines'
+import { MantineProvider } from '@mantine/core'
+import { buildRateLines, sameBandSchedule, type RateLineTranslate } from '../src/features/tariffs/rateLines'
 import type { TariffSeries, TariffVersion } from '../src/types/api'
+
+it('matches equivalent recurrence masks and time precision while respecting seasonal and flat semantics', () => {
+    const band: TariffVersion['periods'][number] = { id: 'one', tariff: 'tariff', period_type: 'high', time_from: '07:00', time_to: '21:00', weekdays: '', months: '' }
+    expect(sameBandSchedule(band, { ...band, label: 'Renamed', period_type: 'band', price_chf_per_kwh: '0.4', time_from: '07:00:00', weekdays: '6,5,4,3,2,1,0', months: '12,11,10,9,8,7,6,5,4,3,2,1' })).toBe(true)
+    expect(sameBandSchedule(band, { ...band, months: '1,2,3' })).toBe(false)
+    expect(sameBandSchedule({ ...band, period_type: 'flat' }, { ...band, period_type: 'flat', time_from: null, weekdays: '0' })).toBe(true)
+})
 
 vi.mock('react-i18next', () => ({
     useTranslation: () => ({ t: mockT }),
@@ -14,9 +22,9 @@ vi.mock('../src/lib/api/tariffs', () => ({
 }))
 
 function mockT(key: string, opts?: Record<string, unknown>): string {
-    if (key === 'pages.tariffs.rateCard.perKwh') return 'per kWh'
-    if (key === 'pages.tariffs.rateCard.perMonth') return 'per month'
-    if (key === 'pages.tariffs.rateCard.perYear') return 'per year'
+    if (key === 'pages.tariffs.rateCard.perKwh') return 'CHF/kWh'
+    if (key === 'pages.tariffs.rateCard.perMonth') return 'CHF/month'
+    if (key === 'pages.tariffs.rateCard.perYear') return 'CHF/year'
     if (key === 'pages.tariffs.rateCard.perParticipant') return 'per participant'
     if (key === 'pages.tariffs.rateCard.perMeteringPoint') return 'per metering point'
     if (key === 'pages.tariffs.rateCard.shared') return 'shared by the participants'
@@ -79,6 +87,13 @@ function period(id: string, overrides: Record<string, unknown> = {}) {
 const formatDate = (isoDate: string) => isoDate.split('-').reverse().join('.')
 
 describe('buildRateLines', () => {
+    it.each(['', '1,2,3'])('ignores legacy weekday/time restrictions on flat bands but keeps seasons (%s)', months => {
+        const version = energyVersion([period('flat', {
+            price_chf_per_kwh: '0.25', weekdays: '0,1,2,3,4', time_from: '07:00', time_to: '21:00', months,
+        })])
+        expect(buildRateLines(energySeries(), version, t, DAY_NAMES, MONTH_NAMES, formatDate)[0].applies)
+            .toBe(months ? 'Flat Jan–Mar' : 'All hours')
+    })
     it.each(['energy', 'percentage_of_energy'] as const)('identifies untimed non-flat bands without claiming complementary coverage (%s)', (billing_mode) => {
         const series = energySeries({ billing_mode })
         const high = period('ht', { period_type: 'high', price_chf_per_kwh: '0.295', percentage: '80', time_from: '07:00', time_to: '21:00', weekdays: '0,1,2,3,4' })
@@ -123,7 +138,7 @@ describe('buildRateLines', () => {
         expect(line.applies).toContain('07:00–21:00')
         expect(line.applies).toContain('60% of the grid tariff (0.295)')
         expect(line.price).toBe('≈ 0.177')
-        expect(line.unit).toBe('per kWh')
+        expect(line.unit).toBe('CHF/kWh')
     })
 
     it('names an unrestricted single percentage band honestly instead of dropping it', () => {
@@ -158,10 +173,10 @@ describe('buildRateLines', () => {
         expect(lines).toHaveLength(2)
         expect(lines[0].applies).toContain('High (HT)')
         expect(lines[0].price).toBe('0.280')
-        expect(lines[0].unit).toBe('per kWh')
+        expect(lines[0].unit).toBe('CHF/kWh')
         expect(lines[1].applies).toContain('Low (NT)')
         expect(lines[1].price).toBe('0.180')
-        expect(lines[1].unit).toBe('per kWh')
+        expect(lines[1].unit).toBe('CHF/kWh')
     })
 
     it('reads a decimal zero price as a price, not as missing', () => {
@@ -186,7 +201,7 @@ describe('buildRateLines', () => {
             dynamic_price_summary: { status: 'unavailable', average_chf_per_kwh: null, reference_from: null, reference_to: null },
         })
         expect(buildRateLines(series, complete, t, DAY_NAMES, MONTH_NAMES, formatDate)[0]).toMatchObject({
-            applies: 'Dynamic, average 15.09.2026 – 14.10.2026', price: '0.123', unit: 'per kWh',
+            applies: 'Dynamic, average 15.09.2026 – 14.10.2026', price: '0.123', unit: 'CHF/kWh',
         })
         expect(buildRateLines(series, partial, t, DAY_NAMES, MONTH_NAMES, formatDate)[0]).toMatchObject({
             applies: 'Dynamic, incomplete average 15.09.2026 – 14.10.2026', price: '0.123',
@@ -214,14 +229,16 @@ describe('buildRateLines', () => {
         const perPoint = energySeries({ billing_mode: 'per_metering_point_monthly_fee' })
         const monthlyVersion = energyVersion([], { fixed_price_chf: '50.00' })
         const sharedVersion = energyVersion([], { fixed_price_chf: '90.00' })
+        expect(buildRateLines(monthly, energyVersion([], { fixed_price_chf: null }), t, DAY_NAMES, MONTH_NAMES, formatDate)[0].price).toBe('—')
+        expect(buildRateLines(monthly, energyVersion([], { fixed_price_chf: '0.00' }), t, DAY_NAMES, MONTH_NAMES, formatDate)[0].price).toBe('0.00')
         expect(buildRateLines(monthly, monthlyVersion, t, DAY_NAMES, MONTH_NAMES, formatDate)[0]).toMatchObject({
-            applies: 'per participant', price: '50.00', unit: 'per month',
+            applies: 'per participant', price: '50.00', unit: 'CHF/month',
         })
         expect(buildRateLines(sharedYearly, sharedVersion, t, DAY_NAMES, MONTH_NAMES, formatDate)[0]).toMatchObject({
-            applies: 'shared by the participants', price: '90.00', unit: 'per year',
+            applies: 'shared by the participants', price: '90.00', unit: 'CHF/year',
         })
         expect(buildRateLines(perPoint, monthlyVersion, t, DAY_NAMES, MONTH_NAMES, formatDate)[0]).toMatchObject({
-            applies: 'per metering point', unit: 'per month',
+            applies: 'per metering point', unit: 'CHF/month',
         })
     })
 
@@ -234,8 +251,7 @@ describe('buildRateLines', () => {
     })
 })
 
-// The stacked narrow card renders each band as one unit with its own CHF,
-// so the hidden desktop Price (CHF) header cannot take the currency with it.
+// Currency stays beside every price, independently of the hidden column headings.
 describe('tariff list narrow markup', () => {
     let container: HTMLDivElement
     let root: ReturnType<typeof createRoot>
@@ -271,12 +287,15 @@ describe('tariff list narrow markup', () => {
             root.render(createElement(
                 QueryClientProvider,
                 { client },
-                createElement(TariffCategorySections, {
-                    tariffSections: [{ category: 'energy', series: [series] }],
+                createElement(MantineProvider, null, createElement(TariffCategorySections, {
+                    rows: [{ series, version }],
+                    kind: 'current',
                     settings,
-                    openSeriesKey: null,
+                    expandedVersion: () => null,
+                    renderDetail: () => null,
                     onOpenDetail,
-                }),
+                    onCloseDetail: vi.fn(),
+                })),
             ))
         })
     }
@@ -287,7 +306,7 @@ describe('tariff list narrow markup', () => {
         expect(bands.length).toBe(2)
         expect(bands[0].textContent).toContain('0.280')
         expect(bands[0].textContent).toContain('CHF')
-        expect(bands[0].textContent).toContain('per kWh')
+        expect(bands[0].textContent).toContain('CHF/kWh')
         const valid = container.querySelector('.tariff-table-valid span[title]')
         expect(valid?.getAttribute('title')).toContain('01.01.2020')
     })
@@ -320,7 +339,8 @@ describe('tariff list narrow markup', () => {
         expect(band.getAttribute('title')).toContain('60% of CHF 0.295/kWh = CHF 0.177/kWh')
         expect(band.getAttribute('title')).toContain('only the intervals available')
         const cell = band.closest('td')!
-        expect(container.querySelector(`#${cell.getAttribute('headers')}`)?.textContent).toContain('pages.tariffs.rateCard.price')
+        const headers = cell.getAttribute('headers')!.split(' ').map(id => container.querySelector(`#${id}`)?.textContent)
+        expect(headers).toContain('pages.tariffs.rateCard.price')
     })
 
     it('does not mark a complete percentage base as incomplete', async () => {

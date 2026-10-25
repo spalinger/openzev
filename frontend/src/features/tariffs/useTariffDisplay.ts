@@ -4,19 +4,10 @@ import { fetchDynamicTariffSources } from '../../lib/api/tariffs'
 import { queryKeys } from '../../lib/api/queryKeys'
 import { formatShortDate } from '../../lib/appSettings'
 import type { AppSettings, DynamicTariffSource, Tariff, TariffSeries, TariffVersion } from '../../types/api'
-import { validityState, type ValidityState } from './validity'
 import { MONTH_KEYS, WEEKDAY_KEYS } from './recurrence'
 import { buildRateLines, kwhPrice, type RateLine } from './rateLines'
 
 export type { RateLine }
-
-// Validity is a state, so it keeps the status colours — scheduled is the blue
-// of "upcoming" everywhere else.
-const VALIDITY_BADGE_CLASS: Record<ValidityState, string> = {
-    active: 'badge badge-success',
-    scheduled: 'badge badge-info',
-    expired: 'badge badge-neutral',
-}
 
 /** The band percentages of a percentage-of-energy version, as numbers. */
 export function percentageValues(version: TariffVersion): number[] {
@@ -39,11 +30,11 @@ export function percentageRangeLabel(values: number[]): string | null {
 }
 
 /**
- * Shared tariff formatting and dynamic-source lookup for the list and drawer.
+ * Shared tariff formatting and dynamic-source lookup for the overview and inline detail.
  * Also owns the dynamic-sources lookup both need — they share its query key,
  * so mounting both costs one request, not two.
  */
-export function useTariffDisplay(settings: AppSettings, today: string) {
+export function useTariffDisplay(settings: AppSettings) {
     const { t } = useTranslation()
     const monthNames = MONTH_KEYS.map((key) => t(`pages.tariffs.monthsShort.${key}` as Parameters<typeof t>[0]))
     const dayNames = WEEKDAY_KEYS.map((key) => t(`pages.tariffs.weekdaysShort.${key}` as Parameters<typeof t>[0]))
@@ -55,20 +46,13 @@ export function useTariffDisplay(settings: AppSettings, today: string) {
     })
     const sourceById = new Map((sourcesQuery.data ?? []).map((source) => [source.id, source]))
 
-    function validityBadge(version: Tariff) {
-        const state = validityState(version, today)
+    function currentValidity(version: Tariff) {
         const validFrom = formatShortDate(version.valid_from, settings)
         const validTo = version.valid_to ? formatShortDate(version.valid_to, settings) : null
-        const label = state === 'scheduled'
-            ? t('pages.tariffs.validity.starts', { date: validFrom })
-            : state === 'expired'
-                ? t('pages.tariffs.validity.ended', { date: validTo })
-                : validTo
-                    ? t('pages.tariffs.validity.until', { date: validTo })
-                    : t('pages.tariffs.validity.since', { date: validFrom })
         return {
-            className: VALIDITY_BADGE_CLASS[state],
-            label,
+            label: validTo
+                ? t('pages.tariffs.validity.until', { date: validTo })
+                : t('pages.tariffs.validity.since', { date: validFrom }),
             tooltip: `${validFrom} - ${validTo ?? t('pages.tariffs.openEnded')}`,
         }
     }
@@ -153,11 +137,5 @@ export function useTariffDisplay(settings: AppSettings, today: string) {
         return undefined
     }
 
-    return { sourceById, validityBadge, priceSummary, rateLines, pricingTooltipFor }
-}
-
-/** Stable identity for a series, independent of any one version — used to key
- * UI state and the `?tariff=` URL parameter. */
-export function seriesKeyOf(series: Pick<TariffSeries, 'zev' | 'name'>): string {
-    return `${series.zev}:${series.name}`
+    return { sourcesQuery, sourceById, currentValidity, priceSummary, rateLines, pricingTooltipFor }
 }

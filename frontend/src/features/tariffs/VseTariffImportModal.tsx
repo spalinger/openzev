@@ -8,6 +8,7 @@ import { applyVseTariffImport, previewVseTariffImport } from '../../lib/api/tari
 import { useToast } from '../../lib/toast'
 import { invalidateTariffQueries } from './invalidate'
 import { bandName } from './bands'
+import { formatTariffError } from './errors'
 import { MONTH_KEYS, formatSeason } from './recurrence'
 import {
     candidateYears,
@@ -45,11 +46,6 @@ const STATUS_BADGE: Record<VseTariffCandidateStatus, string> = {
     unsupported: 'badge-danger',
 }
 
-function errorDetail(error: unknown, fallback: string): string {
-    const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-    return typeof detail === 'string' && detail ? detail : fallback
-}
-
 export function VseTariffImportModal({ isOpen, onClose, zevId, initialUrl }: VseTariffImportModalProps) {
     const { t } = useTranslation()
     const { pushToast } = useToast()
@@ -76,7 +72,7 @@ export function VseTariffImportModal({ isOpen, onClose, zevId, initialUrl }: Vse
             setYear(null)
         },
         onError: (error) =>
-            pushToast(errorDetail(error, t('pages.tariffs.import.errors.previewFailed')), 'error'),
+            pushToast(formatTariffError(error, t('pages.tariffs.import.errors.previewFailed'), t), 'error'),
     })
 
     const applyMutation = useMutation({
@@ -89,7 +85,7 @@ export function VseTariffImportModal({ isOpen, onClose, zevId, initialUrl }: Vse
             }
         },
         onError: (error) =>
-            pushToast(errorDetail(error, t('pages.tariffs.import.errors.applyFailed')), 'error'),
+            pushToast(formatTariffError(error, t('pages.tariffs.import.errors.applyFailed'), t), 'error'),
     })
 
     const years = useMemo(() => candidateYears(preview?.candidates ?? []), [preview])

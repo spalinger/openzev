@@ -25,7 +25,7 @@ function hhmm(value: string): string {
 }
 
 export function bandWindow(period: BandLike): string | null {
-    return period.time_from && period.time_to
+    return period.period_type !== 'flat' && period.time_from && period.time_to
         ? `${hhmm(period.time_from)}–${hhmm(period.time_to)}`
         : null
 }

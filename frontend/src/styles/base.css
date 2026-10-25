@@ -84,6 +84,26 @@ select:where(:not([multiple]):not([class*='mantine-'])) {
   line-height: var(--field-line-height);
 }
 
+/* Field borders carry focus; buttons and other controls retain the outer ring. */
+:is(input, select, textarea):not([class*='mantine-']):not(:where([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'], [type='button'], [type='submit'], [type='reset'], [type='image'])):focus {
+  outline: 2px solid transparent;
+  border-color: var(--focus-ring);
+}
+
+.mantine-Input-input:focus-visible {
+  outline: 2px solid transparent;
+}
+
+.mantine-TimePicker-field:focus {
+  outline: 2px solid transparent;
+  background-color: var(--brand-pale);
+  color: var(--brand-deep);
+}
+
+.mantine-TimePicker-field:focus::placeholder {
+  color: inherit;
+}
+
 /* Shared ZEV editors use the field tokens in the settings page and edit modal. */
 
 .zev-general-settings-fields textarea,

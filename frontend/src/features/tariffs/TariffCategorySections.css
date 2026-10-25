@@ -1,267 +1,472 @@
-/* One row per series; details and write actions live in the drawer. */
-
+/* Light category sections; inspection unfolds below, editing uses a task pane. */
 .tariff-list {
+  --tariff-row-inset: 1.25rem;
+  --tariff-action-width: 2rem;
+  --tariff-unit-width: 5rem;
   container-type: inline-size;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 1.5rem 1.25rem;
 }
 
-/* Fixed columns, so every category's table lines up under the one above. */
-
-.tariff-table {
-  table-layout: fixed;
+.tariff-category {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: start;
+  min-width: 0;
+  gap: 1.25rem;
 }
 
-.tariff-table td {
-  vertical-align: baseline;
+.tariff-category + .tariff-category {
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border-default);
 }
 
-.tariff-table .tariff-table-applies {
-  width: 26%;
+.tariff-category-title {
+  margin: 0.75rem 0 0;
+  font-size: 1rem;
+  line-height: 1.5;
+  white-space: nowrap;
 }
 
-.tariff-table .numeric {
-  width: 7.5rem;
+.tariff-category-body {
+  min-width: 0;
+  container-type: inline-size;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
 }
 
-.tariff-table .tariff-table-unit {
-  width: 6.5rem;
+.tariff-category-body:has(.tariff-detail-row) { border-color: transparent; }
+
+.tariff-category-body:has(.tariff-detail-row) :is(.tariff-summary-row:not(.is-selected), .tariff-detail-row) {
+  border-inline: 1px solid var(--border-default);
 }
 
-.tariff-table .tariff-table-valid {
-  width: 10.5rem;
+.tariff-category-body:has(.tariff-detail-row) .tariff-summary-row:first-child:not(.is-selected),
+.tariff-detail-row + .tariff-summary-row {
+  border-top: 1px solid var(--border-default);
 }
 
-.tariff-table th.numeric {
-  text-align: right;
+@container (max-width: 62rem) {
+  .tariff-category { grid-template-columns: minmax(0, 1fr); gap: 0.75rem; }
+  .tariff-category-title { margin: 0; }
 }
 
-.tariff-table tbody tr {
+.tariff-split[data-pane='open'] .tariff-category { grid-template-columns: minmax(0, 1fr); gap: 0.75rem; }
+.tariff-split[data-pane='open'] .tariff-category-title { margin: 0; }
+
+.tariff-table,
+.tariff-table > tbody {
+  display: block;
+  width: 100%;
+}
+
+.tariff-table > tbody > tr[data-series-key] {
+  position: relative;
+  display: grid;
+  grid-template:
+    'tariff bands' auto
+    'valid bands' auto / minmax(0, 1fr) minmax(0, 2fr);
+  align-items: start;
+  gap: 0.5rem 1.5rem;
+  height: auto;
+  padding: 1.15rem calc(var(--tariff-row-inset) + var(--tariff-action-width) + 0.5rem) 1.15rem var(--tariff-row-inset);
+  border-bottom: 1px solid var(--border-default);
+  background: var(--surface-card);
   cursor: pointer;
 }
 
-.tariff-table tbody tr.is-selected > td,
-.tariff-table tbody tr:has(:focus-visible) > td {
-  background: var(--surface);
-}
-
-/* The series whose drawer is open — so it stays identifiable once you've
-   scrolled or the list re-sorts under you. */
-
-.tariff-table tbody tr.is-selected > td:first-child {
-  box-shadow: inset 3px 0 0 var(--brand-mid);
-}
-
-/* An ended version: the whole row a step greyer, ground and text alike, in
-   the neutral of the "ended" pill (the sunken surface reads green). The
-   text stays above 4.5:1 on that ground, where the muted grey would not; a
-   problem pill keeps its own tone. */
-
-.tariff-table tbody tr.is-ended > td,
-.tariff-list .tariff-table tbody tr.is-ended {
-  background: color-mix(in srgb, var(--status-neutral) 60%, var(--surface-card));
-}
-
-.tariff-table tbody tr.is-ended :is(.tariff-select, td, .tariff-table-meta, .tariff-table-notes) {
-  color: color-mix(in srgb, var(--text-body) 50%, var(--text-muted));
-}
-
-.tariff-table-name {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem 0.5rem;
-  flex-wrap: wrap;
-}
-
-.tariff-select {
+.tariff-table > tbody > tr[data-series-key] > td {
+  min-width: 0;
   padding: 0;
   border: 0;
   background: transparent;
-  font: inherit;
-  font-weight: 650;
-  color: var(--ink);
-  text-align: left;
-  cursor: pointer;
 }
 
-.tariff-table-meta,
-.tariff-table-notes {
-  margin-top: 0.125rem;
-  font-size: 0.8125rem;
-  color: var(--text-muted);
+.tariff-table > tbody > tr.is-ended {
+  background: color-mix(in srgb, var(--status-neutral) 60%, var(--surface-card));
 }
 
-/* One line, as on the PDF; the full note is its tooltip and in the drawer. */
-
-.tariff-table-notes {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-style: italic;
+.tariff-table > tbody > tr.is-ended :is(.tariff-select, td, .tariff-table-meta) {
+  color: color-mix(in srgb, var(--text-body) 50%, var(--text-muted));
 }
 
-/* Desktop: each band's hours, price and unit share one baseline. */
+.tariff-table-tariff { grid-area: tariff; }
+.tariff-table-bands { grid-area: bands; display: grid; grid-template-columns: minmax(0, 1fr) 5.25rem var(--tariff-unit-width, 5rem); column-gap: 0.5rem; }
+.tariff-table-bands[data-future-only='true'] { grid-template-columns: minmax(0, 1fr) max-content var(--tariff-unit-width, 5rem); }
+.tariff-table-valid { grid-area: valid; color: var(--text-muted); font-size: 0.8125rem; }
+.tariff-table-valid:empty { display: none; }
+.tariff-table-valid strong { font-weight: 650; color: var(--text-body); }
+.tariff-table-open { position: absolute; top: 1.15rem; right: var(--tariff-row-inset); display: inline-flex; align-items: center; height: 1.5rem; }
+.tariff-table-open > button { width: var(--tariff-action-width); min-height: var(--tariff-action-width); padding: 0; }
 
-.tariff-table-lines > div {
-  overflow: hidden;
-  line-height: 1.5rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.tariff-table-name { display: flex; align-items: baseline; gap: 0.25rem 0.5rem; flex-wrap: wrap; }
+.tariff-table-name .badge { border-radius: var(--radius-xs); }
+.tariff-select { flex: 0 1 auto; min-width: 0; padding: 0; border: 0; background: transparent; font: inherit; font-weight: 650; color: var(--ink); text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.tariff-table-meta { padding: 0; border: 0; background: transparent; font: inherit; font-size: 0.8125rem; color: var(--text-muted); white-space: nowrap; cursor: pointer; }
+
+.tariff-table > tbody > .tariff-detail-row { display: block; height: auto; margin-bottom: 1rem; border-bottom: 1px solid var(--border-default); border-radius: 0 0 var(--radius-lg) var(--radius-lg); overflow: hidden; }
+.tariff-table > tbody > .tariff-detail-row > td { display: block; padding: 0; border: 0; background: var(--surface-card); }
+.tariff-table > tbody > .tariff-detail-row:last-child { margin-bottom: 0; }
+.tariff-table > tbody > tr[data-series-key]:has(+ tr.is-selected) { border-end-start-radius: var(--radius-lg); border-end-end-radius: var(--radius-lg); }
+.tariff-detail-row + tr[data-series-key] { border-start-start-radius: var(--radius-lg); border-start-end-radius: var(--radius-lg); }
+
+.tariff-split[data-pane='open'] .tariff-list {
+  --tariff-comparison-tracks: 5.25rem;
+  --tariff-planned-display: none;
+  --tariff-compact-planned-display: inline-flex;
 }
 
-.tariff-table-bands {
-  display: none;
-}
-
-.tariff-table td.numeric {
-  font-weight: 600;
-  color: var(--ink);
-}
-
-td.tariff-table-unit,
-td.tariff-table-valid {
-  color: var(--text-muted);
-}
-
-.tariff-table-unit,
-.tariff-table-valid {
-  white-space: nowrap;
-}
-
-.tariff-table-valid strong {
-  font-weight: 650;
-  color: var(--text-body);
-}
-
-.tariff-table .tariff-table-open {
-  width: 3.75rem;
-  color: var(--text-muted);
+.tariff-price-comparison {
+  display: grid;
+  grid-column: 1 / -2;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  column-gap: inherit;
   text-align: right;
 }
 
-.tariff-table td.tariff-table-open {
-  vertical-align: middle;
+.tariff-list .tariff-table-bands[data-comparison='true'] {
+  grid-template-columns: minmax(0, 1fr) var(--tariff-comparison-tracks, max-content max-content) var(--tariff-unit-width, 5rem);
 }
+
+.tariff-price-comparison[data-comparison='true'] > .tariff-price-current {
+  grid-column: -2 / -1;
+}
+
+/* A future-only tariff keeps its sole price; hide only the extra comparison. */
+.tariff-price-comparison[data-comparison='true'] > :is(.tariff-upcoming-price, .tariff-price-planned-heading) {
+  display: var(--tariff-planned-display, block);
+}
+
+.tariff-price-current {
+  font-weight: 700;
+}
+
+.tariff-upcoming-price {
+  padding: 0 0.25rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--brand-pale);
+  color: var(--brand-deep);
+  font: inherit;
+  text-align: right;
+  cursor: pointer;
+}
+
+.tariff-upcoming-price strong {
+  font-weight: 500;
+}
+
+.tariff-upcoming-price:hover {
+  background: var(--surface-sunken);
+}
+
+.tariff-list .tariff-price-headings {
+  margin-bottom: 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  line-height: 1.4;
+}
+
+.tariff-price-headings .tariff-table-band-price {
+  font-size: inherit;
+  font-weight: 400;
+  color: inherit;
+  white-space: normal;
+}
+
+.tariff-planned-summary {
+  grid-column: 1 / -1;
+  display: var(--tariff-planned-display, grid);
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: 0.375rem 0.75rem;
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  text-align: left;
+}
+
+.tariff-schedule-change {
+  grid-column: 1 / -1;
+  font-size: 0.8125rem;
+}
+
+.tariff-planned-rate {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  gap: inherit;
+}
+
+.tariff-current-group,
+.tariff-current-rates { display: contents; }
+
+.tariff-planned-rates {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  gap: 0.125rem 0.75rem;
+  align-content: start;
+  line-height: 1.5rem;
+}
+
+.tariff-planned-rate > span:last-child {
+  text-align: right;
+  white-space: nowrap;
+}
+
+@container (min-width: 56.001rem) {
+  .tariff-split[data-pane='closed'] .tariff-table-bands[data-schedule-change] {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) max-content var(--tariff-unit-width, 5rem);
+    gap: 0.25rem 0.75rem;
+  }
+
+  .tariff-split[data-pane='closed'] [data-schedule-change] .tariff-current-group {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+    grid-template-rows: subgrid;
+    column-gap: 0.5rem;
+  }
+
+  .tariff-split[data-pane='closed'] [data-schedule-change] .tariff-current-rates {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-row: 2 / -1;
+    grid-template-columns: subgrid;
+    grid-template-rows: subgrid;
+  }
+
+  .tariff-split[data-pane='closed'] [data-schedule-change] .tariff-table-band-price {
+    grid-column: 3 / -1;
+  }
+
+  .tariff-split[data-pane='closed'] [data-schedule-change] .tariff-price-headings {
+    align-self: end;
+    margin: 0;
+  }
+
+  .tariff-split[data-pane='closed'] .tariff-planned-summary {
+    grid-column: 2;
+    grid-template-rows: subgrid;
+    margin: 0;
+    padding: 0;
+    border-radius: var(--radius-sm);
+  }
+
+  .tariff-split[data-pane='closed'] .tariff-planned-rates {
+    grid-row: 2 / -1;
+    grid-template-rows: subgrid;
+  }
+
+  .tariff-split[data-pane='closed'] .tariff-schedule-change {
+    align-self: end;
+    font-size: 0.6875rem;
+    line-height: 1.4;
+  }
+}
+
+.tariff-price-headings .tariff-price-comparison {
+  align-items: end;
+}
+
+.tariff-price-current-heading {
+  display: flex;
+  align-items: center;
+  justify-content: end;
+  gap: 0.25rem;
+}
+
+.tariff-price-planned-heading {
+  padding-inline: 0.25rem;
+  border-radius: var(--radius-sm);
+  background: var(--brand-pale);
+  color: var(--brand-deep);
+  white-space: nowrap;
+}
+
+/* Join the dated heading and its prices into one continuous planned column. */
+.tariff-list .tariff-table-bands:is([data-comparison], [data-future-only]) .tariff-price-headings {
+  margin-bottom: 0;
+}
+
+.tariff-table-bands:is([data-comparison], [data-future-only]) .tariff-table-band-price,
+.tariff-table-bands:is([data-comparison], [data-future-only]) .tariff-price-comparison {
+  align-self: stretch;
+  align-items: stretch;
+}
+
+.tariff-table-bands:is([data-comparison], [data-future-only]) .tariff-price-planned-heading {
+  padding-bottom: 0.25rem;
+  border-end-start-radius: 0;
+  border-end-end-radius: 0;
+}
+
+.tariff-table-bands:is([data-comparison], [data-future-only]) .tariff-upcoming-price {
+  border-radius: 0;
+}
+
+.tariff-table-bands:is([data-comparison], [data-future-only]) .tariff-table-band:not(:has(~ .tariff-table-band)) .tariff-upcoming-price {
+  border-end-start-radius: var(--radius-sm);
+  border-end-end-radius: var(--radius-sm);
+}
+
+.tariff-planned-compact {
+  display: var(--tariff-compact-planned-display, none);
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--brand-deep);
+  font: inherit;
+  cursor: pointer;
+}
+
+.tariff-planned-tooltip { white-space: pre-line; }
+
+/* Labels and prices share the same column widths at every text size. */
+.tariff-table-band {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  row-gap: 0.125rem;
+  column-gap: inherit;
+  min-width: 0;
+  line-height: 1.5rem;
+}
+
+.tariff-table-band-applies {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.tariff-price-warning {
+  grid-column: 1 / -1;
+  min-width: 0;
+  width: 100%;
+}
+
+.tariff-table-band-price {
+  display: grid;
+  grid-column: 2 / -1;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  column-gap: inherit;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.tariff-table-band-unit {
+  grid-column: -2 / -1;
+  display: inline-block;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+
 
 @container (max-width: 56rem) {
-  /* Small card: tariff on top, one block per band, validity last. */
-  .tariff-table,
-  .tariff-table thead,
-  .tariff-table thead tr,
-  .tariff-table tbody {
-    display: block;
-  }
-
-  .tariff-table thead th:first-child {
-    display: block;
-  }
-
-  /* Out of sight, not out of the accessibility tree. */
-  .tariff-table thead th:not(:first-child) {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-
-  .tariff-table thead th.tariff-table-bands {
-    display: table-cell;
-  }
-
-  .tariff-list .tariff-table tbody tr {
-    display: grid;
-    grid-template:
-      'tariff tariff open' auto
-      'bands bands open' auto
-      'valid valid open' auto / minmax(0, 1fr) auto auto;
-    gap: 0.25rem 0.625rem;
-    height: auto;
-    padding: 0.75rem var(--sheet-pad-inline);
-    border-bottom: 1px solid var(--border-default);
-  }
-
-  .tariff-list .tariff-table tbody tr:last-child {
-    border-bottom: 0;
-  }
-
-  .tariff-list .tariff-table tbody td,
-  .tariff-list .tariff-table tbody tr.is-selected > td:first-child {
-    width: auto;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    box-shadow: none;
-  }
-
-  .tariff-list .tariff-table tbody tr:hover > td {
-    background: var(--surface);
-  }
-
-  .tariff-list .tariff-table tbody tr.is-selected,
-  .tariff-list .tariff-table tbody tr:has(:focus-visible) {
-    background: var(--surface);
-  }
-
-  .tariff-list .tariff-table tbody tr.is-selected {
-    box-shadow: inset 3px 0 0 var(--brand-mid);
-  }
-
-  .tariff-table-tariff {
-    grid-area: tariff;
-  }
-
-  /* Desktop's three parallel columns become one block per band, so a long
-     applicability line can wrap without losing its price. */
-  .tariff-table td.tariff-table-applies,
-  .tariff-table td.numeric,
-  .tariff-table td.tariff-table-unit {
-    display: none;
-  }
-
-  td.tariff-table-bands {
-    display: grid;
-    grid-area: bands;
-    gap: 0.375rem;
-    min-width: 0;
-    width: auto;
-    padding: 0;
-    border: 0;
-    background: transparent;
-  }
-
-  .tariff-table-band {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 0.125rem 0.625rem;
-    min-width: 0;
-  }
-
-  .tariff-table-band-applies {
-    flex: 1 1 12rem;
-    min-width: 0;
-    overflow-wrap: anywhere;
-  }
-
-  .tariff-table-band-price {
-    font-weight: 600;
-    color: var(--ink);
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .tariff-table-valid {
-    grid-area: valid;
-  }
-
-  .tariff-table td.tariff-table-valid {
-    font-size: 0.8125rem;
-  }
-
-  .tariff-table td.tariff-table-open {
-    grid-area: open;
-    align-self: center;
-    width: auto;
-  }
+  .tariff-table { --tariff-comparison-tracks: 5.25rem; --tariff-planned-display: none; --tariff-compact-planned-display: inline-flex; }
+  .tariff-table > tbody > tr[data-series-key] { gap: 0.5rem 1rem; }
 }
 
+
+@container (max-width: 35rem) {
+  .tariff-table {
+    --tariff-row-inset: 1rem;
+    --tariff-action-width: 2.75rem;
+  }
+
+  .tariff-table > tbody > tr[data-series-key] {
+    grid-template:
+      'tariff' auto
+      'bands' auto
+      'valid' auto / minmax(0, 1fr);
+    padding-block: 1rem;
+  }
+  .tariff-table-bands { margin-inline-end: calc(-1 * (var(--tariff-action-width) + 0.5rem)); }
+  .tariff-table-open { top: 1rem; }
+}
+
+/* Keep the latest detail's full validity list as the single price presentation. */
+.tariff-table > tbody > tr.is-selected { grid-template: 'tariff' auto / minmax(0, 1fr); margin-top: 1rem; padding-inline-end: var(--tariff-row-inset); border-bottom: 0; border-radius: var(--radius-lg) var(--radius-lg) 0 0; background: var(--brand-deep); color: var(--white); }
+.tariff-table > tbody > tr.is-selected:first-child { margin-top: 0; }
+.tariff-table > tbody > tr.is-selected > :is(.tariff-table-bands, .tariff-table-valid) { display: none; }
+.tariff-title-actions { display: contents; }
+.is-selected .tariff-title-actions { display: inline-flex; flex: 1 1 auto; align-items: center; gap: 0.125rem; min-width: 0; }
+.is-selected .tariff-table-open { position: static; flex-shrink: 0; height: auto; }
+.tariff-expanded-content { min-width: 0; cursor: default; }
+.tariff-series-actions { display: inline-flex; flex: 1 1 auto; min-width: 0; align-items: center; gap: 0.125rem; }
+.tariff-schedule-action { margin-left: auto; max-width: 100%; white-space: normal; }
+.tariff-table-notes { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.8125rem; font-style: italic; color: var(--text-muted); }
+.tariff-future-icon { flex-shrink: 0; color: var(--brand-mid); font-size: 0.8125rem; }
+
+@container (max-width: 56rem) {
+  .tariff-table-notes { display: none; }
+}
+
+.tariff-summary-row:hover .tariff-table-open > button,
+.tariff-summary-row:focus-within .tariff-table-open > button {
+  background: var(--brand-pale);
+  color: var(--brand-deep);
+}
+
+.tariff-table > tbody > tr.is-selected :is(.tariff-select, .tariff-table-meta, .tariff-table-open > button) {
+  color: var(--white);
+}
+
+.tariff-table > tbody > tr.is-selected .tariff-series-actions > .button {
+  background: transparent;
+  border-color: var(--brand-accent);
+  color: var(--white);
+}
+
+.tariff-table > tbody > tr.is-selected .tariff-series-actions > .button[aria-haspopup] {
+  border-color: transparent;
+}
+
+.tariff-table > tbody > tr.is-selected .tariff-series-actions > .button:hover,
+.tariff-table > tbody > tr.is-selected:hover .tariff-table-open > button,
+.tariff-table > tbody > tr.is-selected:focus-within .tariff-table-open > button {
+  background: var(--brand-mid);
+  color: var(--white);
+}
+
+.tariff-table-notes.tariff-shared-notes {
+  display: block;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.tariff-table > tbody > tr.is-selected .tariff-shared-notes {
+  color: var(--brand-accent);
+}
+
+@container (max-width: 35rem) {
+  .is-selected .tariff-title-actions { flex-basis: 100%; }
+  .tariff-table-band { grid-template-columns: minmax(0, 1fr) max-content; }
+  .tariff-table-band-applies { grid-column: 1 / -1; }
+  .tariff-table-band-price { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) max-content; }
+}
+
+.tariff-rate-name,
+.tariff-rate-schedule { display: none; }
+
+@container (max-width: 35rem) {
+  .tariff-table-band[data-band-label] { grid-template-columns: minmax(0, 1fr) max-content; }
+  .tariff-table-band[data-band-label] .tariff-table-band-applies { display: none; }
+  .tariff-table-band[data-band-label] .tariff-rate-name { display: block; grid-column: 1; grid-row: 1; }
+  .tariff-table-band[data-band-label] .tariff-rate-schedule { display: block; grid-column: 1 / -1; grid-row: 2; color: var(--text-muted); }
+  .tariff-table-band[data-band-label] .tariff-table-band-price { display: flex; grid-column: 2; grid-row: 1; gap: 0.375rem; }
+}

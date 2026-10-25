@@ -40,6 +40,7 @@ export function useTariffPaneNavigation({ allSeries, today, scopeKey, settled, e
   const pendingSelection = useRef<string | null>(null)
   const returnAction = useRef<string | null>(null)
   const listScroll = useRef<number | null>(null)
+  const visibleListScroll = useRef(0)
   const paneOpen = editor !== null
   const listHidden = paneOpen && !fitsTwoPanes
 
@@ -90,7 +91,8 @@ export function useTariffPaneNavigation({ allSeries, today, scopeKey, settled, e
   useLayoutEffect(() => {
     const previous = previousScope.current
     previousScope.current = scopeKey
-    if (previous === scopeKey || previous.startsWith('|')) return
+    const wasWaitingForCommunity = previous.startsWith('|')
+    if (previous === scopeKey || wasWaitingForCommunity) return
     resetScope()
     clearSelection()
   }, [scopeKey])
@@ -106,7 +108,6 @@ export function useTariffPaneNavigation({ allSeries, today, scopeKey, settled, e
     const wasEditing = previousEditor.current !== null
     previousEditor.current = editor
     if (editor !== null && !wasEditing) {
-      if (!fitsTwoPanes) listScroll.current = window.scrollY
       // Forms with their own field focus keep it; the heading is the fallback.
       if (!pageRef.current?.querySelector('.tariff-pane')?.contains(document.activeElement)) paneTitleRef.current?.focus()
     } else if (editor === null && wasEditing) {
@@ -114,19 +115,31 @@ export function useTariffPaneNavigation({ allSeries, today, scopeKey, settled, e
       const key = returnAction.current
       const action = key && (detail?.querySelector<HTMLElement>(`[data-action-key="${CSS.escape(key)}"]`) || pageRef.current?.querySelector<HTMLElement>(`[data-action-key="${CSS.escape(key)}"]`))
       returnAction.current = null
-      ;(action || detail?.querySelector<HTMLElement>('.tariff-select') || pageRef.current?.querySelector<HTMLElement>('#tariff-overview-current'))?.focus()
+      ;(action || detail?.querySelector<HTMLElement>('.tariff-select') || pageRef.current?.querySelector<HTMLElement>('#tariff-overview-current'))?.focus({ preventScroll: listScroll.current !== null })
     }
   }, [editor, fitsTwoPanes, selected])
 
+  const previousListHidden = useRef(false)
   useLayoutEffect(() => {
-    if (!listHidden && listScroll.current !== null) {
+    // Hiding the list can clamp scrollY before layout effects run.
+    if (listHidden && !previousListHidden.current) listScroll.current = visibleListScroll.current
+    if (!listHidden && previousListHidden.current && listScroll.current !== null) {
       window.scrollTo(0, listScroll.current)
       listScroll.current = null
     }
+    previousListHidden.current = listHidden
+  }, [listHidden])
+
+  useLayoutEffect(() => {
+    if (listHidden) return
+    const remember = () => { visibleListScroll.current = window.scrollY }
+    remember()
+    window.addEventListener('scroll', remember, { passive: true })
+    return () => window.removeEventListener('scroll', remember)
   }, [listHidden])
 
   return {
-    pageRef, splitRef, paneTitleRef, bypassGuard, openSeries, shownVersionId, selected, paneOpen, listHidden, fitsTwoPanes,
+    pageRef, splitRef, paneTitleRef, bypassGuard, openSeries, selected, paneOpen, listHidden, fitsTwoPanes,
     select, collapse,
     expandedVersion: (series: TariffSeries) => selected?.seriesKey === seriesKeyOf(series) ? selected.versionId : null,
     isSelecting: (series: Pick<TariffSeries, 'zev' | 'name'>, id: string) => pendingSelection.current === `${seriesKeyOf(series)}:${id}`,

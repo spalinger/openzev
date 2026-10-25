@@ -27,7 +27,7 @@ import order within a layer is still part of the behaviour. Add a new file by im
 into its layer, where it belongs in that layer.
 
 Because layers rank before specificity, **write a page rule for the element it means**:
-`td.tariff-table-unit`, not `.tariff-table-unit`, when the same class sits on a `th` that
+`td.numeric`, not `.numeric`, when the same class sits on a `th` that
 a component styles as the table band. A bare class used to lose to the band on
 specificity; now it wins. When a page rule is meant to beat a component rule, that is the
 whole point; when it is not, scope it.
@@ -50,7 +50,7 @@ props) are unlayered and win; they only set what the component was asked to set.
 ## Where a rule lives
 
 CSS used by exactly one page or component sits **next to it**, named after it:
-`features/tariffs/TariffDetailDrawer.css`, `pages/LoginPage.css`,
+`features/tariffs/TariffDetailPane.css`, `pages/LoginPage.css`,
 `components/PeriodSelector.css`. A rule shared by a component and the one page that
 renders it goes in the page's file. Only what several pages share stays here:
 shared primitives (sheet, table, buttons, badges, dialogs, stat tiles) in `components/`,

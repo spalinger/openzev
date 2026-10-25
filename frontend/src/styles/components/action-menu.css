@@ -1,3 +1,8 @@
+.action-menu-dropdown {
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+}
+
 .menu-item-icon {
   display: inline-flex;
   align-items: center;

@@ -19,13 +19,13 @@ interface ActionMenuProps {
     iconOnly?: boolean
     /** Row-level size by default; `false` for a page toolbar, beside full-size buttons. */
     compact?: boolean
-    /** Lets the caller find the trigger again, to return focus once a form it opened closes. */
+    /** Stable key for restoring trigger focus. */
     actionKey?: string
 }
 
 export function ActionMenu({ label, items, icon, iconOnly = false, compact = true, actionKey }: ActionMenuProps) {
     const triggerRef = useRef<HTMLButtonElement>(null)
-    const availableItems = useMemo(() => items.filter((item) => !item.disabled), [items])
+    const hasEnabledItem = items.some(item => !item.disabled)
     const renderedItems = useMemo(() => {
         return items.map((item, index) => {
             const previousSection = index > 0 ? items[index - 1]?.section : undefined
@@ -44,6 +44,7 @@ export function ActionMenu({ label, items, icon, iconOnly = false, compact = tru
             position="bottom-end"
             withinPortal
             shadow="md"
+            middlewares={{ size: true }}
             transitionProps={{ transition: 'pop-top-right' }}
         >
             <Menu.Target>
@@ -51,7 +52,7 @@ export function ActionMenu({ label, items, icon, iconOnly = false, compact = tru
                     ref={triggerRef}
                     type="button"
                     className={`button button-secondary${compact ? ' button-compact' : ''}`}
-                    disabled={availableItems.length === 0}
+                    disabled={!hasEnabledItem}
                     aria-haspopup="menu"
                     data-action-key={actionKey}
                     onKeyDown={closePopupOnEscape}
@@ -62,7 +63,7 @@ export function ActionMenu({ label, items, icon, iconOnly = false, compact = tru
                     {iconOnly ? null : label}
                 </button>
             </Menu.Target>
-            <Menu.Dropdown>
+            <Menu.Dropdown className="action-menu-dropdown">
                 {renderedItems.map(({ item, showSection, showDivider }) => (
                     <Fragment key={item.key}>
                         {showDivider && <Menu.Divider />}

@@ -1,0 +1,23 @@
+.tariff-version-effective-date {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 10rem);
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.tariff-version-effective-date > small {
+  grid-column: 1 / -1;
+}
+
+.tariff-version-band {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.tariff-version-price-list {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+

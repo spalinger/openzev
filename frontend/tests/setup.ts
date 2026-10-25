@@ -9,6 +9,11 @@ vi.mock('tabbable', async importOriginal => {
 // Enable React's act() environment; provide Mantine's missing matchMedia.
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
+// Mantine's autosizing textarea listens for loaded fonts; jsdom has no FontFaceSet.
+if (typeof document !== 'undefined') {
+    Object.defineProperty(document, 'fonts', { value: new EventTarget(), configurable: true })
+}
+
 // jsdom has no ResizeObserver; Mantine (ScrollArea inside Autocomplete/Select)
 // needs one. A no-op observer is enough for tests — nothing asserts on it.
 if (typeof window !== 'undefined' && !('ResizeObserver' in window)) {

@@ -1,0 +1,20 @@
+/* One sheet for current/upcoming tariffs, another for entirely ended ones. */
+
+.tariff-overview {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.tariff-overview-title {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.tariff-vat-notice {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}

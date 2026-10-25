@@ -1,102 +1,106 @@
 import { useMutation, type QueryClient } from '@tanstack/react-query'
-import { useLayoutEffect, useState } from 'react'
 import { createTariffVersion, duplicateTariff, renameTariffSeries } from '../../lib/api/tariffs'
 import { useAuth } from '../../lib/auth'
 import { useWriteScope } from '../../lib/useWriteScope'
-import { formatApiError } from '../../lib/api/errors'
+import { formatTariffError } from './errors'
 import { invalidateTariffQueries } from './invalidate'
-import type { TariffSeries, TariffVersion, TariffVersionInput } from '../../types/api'
+import type { AppSettings, Tariff, TariffSeries, TariffVersion, TariffVersionInput } from '../../types/api'
 
-/** Which dialog the versioning flow currently has open, and against what. */
-export type VersionDialog =
-  | { kind: 'new-version', series: TariffSeries, source: TariffVersion }
-  | { kind: 'duplicate', series: TariffSeries, source: TariffVersion }
-  | { kind: 'rename', series: TariffSeries, source: TariffVersion }
-  | null
+import type { TariffEditing, VersionTask } from './useTariffEditor'
+
+export type VersionDialog = VersionTask | null
 
 type Params = {
+  editing: TariffEditing
+  settings?: AppSettings
   selectedZevId?: string
   canWrite?: boolean
   queryClient: QueryClient
   pushToast: (message: string, tone?: 'success' | 'error') => void
   t: (key: string, options?: Record<string, unknown>) => string
+  /** Called after a successful task. */
+  onSaved?: (saved: Tariff, kind: 'new-version' | 'duplicate' | 'rename') => void
 }
 
-export function useTariffVersions({ selectedZevId, canWrite = true, queryClient, pushToast, t }: Params) {
+export function useTariffVersions({ editing, settings, selectedZevId, canWrite = true, queryClient, pushToast, t, onSaved }: Params) {
   const { user } = useAuth()
   const { scope, isCurrent, assertWritable } = useWriteScope({ selectedZevId, canWrite, accountId: user?.id }, t('common.error'))
-  const [dialog, setDialog] = useState<VersionDialog>(null)
+  const { task, id: session, setError: setSaveError, error: saveError } = editing
+  const dialog = task?.kind === 'new-version' || task?.kind === 'duplicate' || task?.kind === 'rename' ? task : null
+  const taskSession = dialog?.sessionId
 
-  useLayoutEffect(() => {
-    setDialog(null)
-  }, [scope])
+  type Submitted = { scope: typeof scope; session: number }
+
+  async function complete(kind: 'new-version' | 'duplicate' | 'rename', message: string, saved: Tariff, variables: Submitted) {
+    // Refresh before selection; retain the saved URL if refresh fails.
+    await invalidateTariffQueries(queryClient, variables.scope.selectedZevId)
+    if (!isCurrent(variables.scope) || variables.session !== session.current) return
+    pushToast(message, 'success')
+    editing.close()
+    onSaved?.(saved, kind)
+  }
+
+  function failed(message: string, error: unknown, variables: Submitted) {
+    if (isCurrent(variables.scope) && variables.session === session.current) {
+      setSaveError(formatTariffError(error, message, t, settings))
+    }
+  }
 
   const newVersionMutation = useMutation({
-    mutationFn: ({ id, payload, scope: submittingScope }: { id: string, payload: TariffVersionInput; scope: typeof scope }) => {
+    mutationFn: ({ id, payload, scope: submittingScope, session: submittingSession }: { id: string, payload: TariffVersionInput; scope: typeof scope; session: number }) => {
       assertWritable(submittingScope)
+      if (!editing.isCurrent(submittingSession)) throw new Error(t('common.error'))
       return createTariffVersion(id, payload)
     },
-    onSuccess: (_, variables) => {
-      invalidateTariffQueries(queryClient, variables.scope.selectedZevId)
-      if (!isCurrent(variables.scope)) return
-      setDialog(null)
-      pushToast(t('pages.tariffs.messages.versionCreated'), 'success')
-    },
-    onError: (error, variables) => {
-      if (isCurrent(variables.scope)) pushToast(formatApiError(error, t('pages.tariffs.messages.versionFailed')), 'error')
-    },
+    onSuccess: (saved, variables) => complete('new-version', t('pages.tariffs.messages.versionCreated'), saved, variables),
+    onError: (error, variables) => failed(t('pages.tariffs.messages.versionFailed'), error, variables),
   })
 
   const duplicateMutation = useMutation({
-    mutationFn: ({ id, payload, scope: submittingScope }: { id: string, payload: TariffVersionInput & { name: string }; scope: typeof scope }) => {
+    mutationFn: ({ id, payload, scope: submittingScope, session: submittingSession }: { id: string, payload: TariffVersionInput & { name: string }; scope: typeof scope; session: number }) => {
       assertWritable(submittingScope)
+      if (!editing.isCurrent(submittingSession)) throw new Error(t('common.error'))
       return duplicateTariff(id, payload)
     },
-    onSuccess: (_, variables) => {
-      invalidateTariffQueries(queryClient, variables.scope.selectedZevId)
-      if (!isCurrent(variables.scope)) return
-      setDialog(null)
-      pushToast(t('pages.tariffs.messages.duplicated'), 'success')
-    },
-    onError: (error, variables) => {
-      if (isCurrent(variables.scope)) pushToast(formatApiError(error, t('pages.tariffs.messages.duplicateFailed')), 'error')
-    },
+    onSuccess: (saved, variables) => complete('duplicate', t('pages.tariffs.messages.duplicated'), saved, variables),
+    onError: (error, variables) => failed(t('pages.tariffs.messages.duplicateFailed'), error, variables),
   })
 
   const renameMutation = useMutation({
-    mutationFn: ({ id, name, scope: submittingScope }: { id: string, name: string; scope: typeof scope }) => {
+    mutationFn: ({ id, name, scope: submittingScope, session: submittingSession }: { id: string, name: string; scope: typeof scope; session: number }) => {
       assertWritable(submittingScope)
+      if (!editing.isCurrent(submittingSession)) throw new Error(t('common.error'))
       return renameTariffSeries(id, name)
     },
-    onSuccess: (_, variables) => {
-      invalidateTariffQueries(queryClient, variables.scope.selectedZevId)
-      if (!isCurrent(variables.scope)) return
-      setDialog(null)
-      pushToast(t('pages.tariffs.messages.renamed'), 'success')
-    },
-    onError: (error, variables) => {
-      if (isCurrent(variables.scope)) pushToast(formatApiError(error, t('pages.tariffs.messages.renameFailed')), 'error')
-    },
+    onSuccess: (saved, variables) => complete('rename', t('pages.tariffs.messages.renamed'), saved, variables),
+    onError: (error, variables) => failed(t('pages.tariffs.messages.renameFailed'), error, variables),
   })
 
   return {
     dialog,
-    closeDialog: () => setDialog(null),
-    openNewVersion: (series: TariffSeries, source: TariffVersion) =>
-      setDialog({ kind: 'new-version', series, source }),
-    openDuplicate: (series: TariffSeries, source: TariffVersion) =>
-      setDialog({ kind: 'duplicate', series, source }),
-    openRename: (series: TariffSeries, source: TariffVersion) =>
-      setDialog({ kind: 'rename', series, source }),
+    saveError,
+    closeDialog: editing.close,
+    openNewVersion: (series: TariffSeries, source: TariffVersion, validFrom?: string) => editing.open({ kind: 'new-version', series, source, validFrom }),
+    openDuplicate: (series: TariffSeries, source: TariffVersion) => editing.open({ kind: 'duplicate', series, source }),
+    openRename: (series: TariffSeries, source: TariffVersion) => editing.open({ kind: 'rename', series, source }),
     submitNewVersion: (id: string, payload: TariffVersionInput) => {
-      if (canWrite && selectedZevId && isCurrent(scope)) newVersionMutation.mutate({ id, payload, scope })
+      if (dialog?.kind === 'new-version' && taskSession !== undefined && editing.isCurrent(taskSession) && canWrite && selectedZevId && isCurrent(scope)) {
+        setSaveError(null)
+        newVersionMutation.mutate({ id, payload, scope, session: taskSession })
+      }
     },
     submitDuplicate: (id: string, payload: TariffVersionInput & { name: string }) => {
-      if (canWrite && selectedZevId && isCurrent(scope)) duplicateMutation.mutate({ id, payload, scope })
+      if (dialog?.kind === 'duplicate' && taskSession !== undefined && editing.isCurrent(taskSession) && canWrite && selectedZevId && isCurrent(scope)) {
+        setSaveError(null)
+        duplicateMutation.mutate({ id, payload, scope, session: taskSession })
+      }
     },
     submitRename: (id: string, name: string) => {
-      if (canWrite && selectedZevId && isCurrent(scope)) renameMutation.mutate({ id, name, scope })
+      if (dialog?.kind === 'rename' && taskSession !== undefined && editing.isCurrent(taskSession) && canWrite && selectedZevId && isCurrent(scope)) {
+        setSaveError(null)
+        renameMutation.mutate({ id, name, scope, session: taskSession })
+      }
     },
-    isPending: newVersionMutation.isPending || duplicateMutation.isPending || renameMutation.isPending,
+    isPending: [newVersionMutation, duplicateMutation, renameMutation].some(mutation => mutation.isPending && mutation.variables?.session === taskSession),
   }
 }

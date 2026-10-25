@@ -976,8 +976,8 @@ export interface TariffInput {
     fixed_price_chf?: string | null
     /**
      * Create-only, percentage-of-energy mode only: creates one flat band in
-     * the same request. Ignored (and rejected) on update — bands are managed
-     * from the tariff's own drawer once it exists.
+     * the same request. Rejected on update — bands are managed
+     * from the tariff's band editor once it exists.
      */
     initial_percentage?: string | null
     /** Create-only: save a static energy tariff and its initial bands atomically. */
