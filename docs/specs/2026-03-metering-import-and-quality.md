@@ -435,7 +435,8 @@ invoices, review state and billing eligibility stay unchanged. Rejected
 **Proposed decision:** retain rejection of `Status=1` for the E66 importer.
 Cancellation tombstones and automatic billing blocks remain out of scope.
 Maintainer approval and a decision comment on #956 are pending.
-This proposal does not resolve #956.
+The [issue-comment draft](2026-10-sdatch-cancellation-issue-956-draft.md) is local;
+this proposal does not resolve #956.
 
 The applicable edition is SDAT-CH 2025, E66 1p6, effective 24 March 2026
 (*Grundlagen* §1.5(1), *Anhang 4* §4; 1p5 expired 23 March).
@@ -1750,6 +1751,7 @@ rollback after promotion deletions and invoice-impact creation.
 | `StrictHeaderTests.test_derived_e66_schema_permits_original_and_replace_but_not_cancellation` | §4.2: the same self-authored message validates directly against E66 1p6 with Status 9/5 and fails with Status 1, independently of the importer's pre-check |
 | [StrictHeaderTests](../../backend/metering/test_import_sdatch_strict.py) — header detection | §4.2: nested and foreign-namespace Status 1 precede the real Status 9 without triggering cancellation handling; malformed XML and unsupported roots reject before the status check |
 | `StrictHeaderTests.test_derived_multiple_instances_reject_without_observation_writes` | §4.2: both mixed-status instance orders reject with a persisted log, zero observation writes and empty change evidence |
+| [CorrectionImportTests](../../backend/invoices/test_reading_impact.py) — cancellation preservation | §4.2: repeated header-only uploads preserve invoice documents, open/resolved review flags and readiness; uploads with listed data preserve the unbilled period overview, including eligibility and completeness |
 
 ### Backend (`metering/test_generate_metering_data.py`)
 

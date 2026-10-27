@@ -583,6 +583,52 @@ class CorrectionImportTests(SdatImportBase):
             self.assertFalse(InvoiceReadingImpact.objects.exists())
             self.assertEqual(compute_readiness(self.zev, *JUNE), readiness)
 
+    def test_rejected_cancellation_preserves_open_and_resolved_review_flags(self):
+        self.assertEqual(self._original().data["result_status"], "accepted")
+        invoice = self._invoice(inv_status=InvoiceStatus.SENT)
+        self.assertEqual(self._correction().data["result_status"], "accepted")
+        impact = InvoiceReadingImpact.objects.get(invoice=invoice)
+        self.assertIsNone(impact.resolved_at)
+        cancellation = build_e66([], status="1", creation="2025-06-07T10:00:00Z")
+
+        for resolved in (False, True):
+            with self.subTest(resolved=resolved):
+                if resolved:
+                    cancel_invoice(invoice)
+                    impact.refresh_from_db()
+                    self.assertIsNotNone(impact.resolved_at)
+                    self.assertEqual(impact.resolution, "cancelled")
+                impacts = list(InvoiceReadingImpact.objects.values())
+                readiness = compute_readiness(self.zev, *JUNE)
+
+                for _ in range(2):
+                    response = self._upload(cancellation)
+
+                    self.assertEqual(response.data["result_status"], "rejected")
+                    self.assertEqual(response.data["issues"][0]["code"], "cancellation_rejected")
+                    self.assertEqual(list(InvoiceReadingImpact.objects.values()), impacts)
+                    self.assertEqual(compute_readiness(self.zev, *JUNE), readiness)
+
+    def test_rejected_cancellation_keeps_unbilled_period_eligible(self):
+        self.assertEqual(self._original().data["result_status"], "accepted")
+        params = {"zev_id": str(self.zev.id), "period_start": JUNE[0], "period_end": JUNE[1]}
+        before = self.client.get(INVOICES + "period-overview/", params)
+        self.assertEqual(before.status_code, 200)
+        self.assertEqual(before.data["rows"][0]["generation_eligibility"]["state"], "eligible")
+        cancellation = build_e66(
+            [quarter_block(CONS_ID, "2025-06-02T22:00:00Z", 4)],
+            status="1", creation="2025-06-07T10:00:00Z",
+        )
+
+        for _ in range(2):
+            response = self._upload(cancellation)
+
+            self.assertEqual(response.data["result_status"], "rejected")
+            self.assertEqual(response.data["issues"][0]["code"], "cancellation_rejected")
+            after = self.client.get(INVOICES + "period-overview/", params)
+            self.assertEqual(after.status_code, 200)
+            self.assertEqual(after.data, before.data)
+
 
 class DraftRegenerationTests(ImpactBase):
     def setUp(self):
