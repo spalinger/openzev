@@ -1,5 +1,7 @@
+import { createInstance } from 'i18next'
+import { en } from '../src/i18n/locales/en'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { formatMeteringBucketLabel, meteringPointOptionLabel, outReadingLabelKey } from '../src/lib/meteringLabels'
+import { conditionLabel, formatMeteringBucketLabel, meteringPointOptionLabel, outReadingLabelKey } from '../src/lib/meteringLabels'
 import type { AppSettings } from '../src/types/api'
 
 const SAVED_TZ = process.env.TZ
@@ -89,5 +91,16 @@ describe('meteringPointOptionLabel', () => {
     expect(meteringPointOptionLabel(mp, undefined, translate)).toBe(
       'CH-DEMO-0003 · pages.meteringPoints.meterTypes.bidirectional',
     )
+  })
+})
+
+describe('conditionLabel', () => {
+  it('labels unflagged values and includes each stored code once', async () => {
+    const i18n = createInstance()
+    await i18n.init({ lng: 'en', resources: { en: { translation: en } } })
+    expect(conditionLabel('', i18n.t)).toBe('Unflagged')
+    expect(conditionLabel('56', i18n.t)).toBe('Estimated (56)')
+    expect(conditionLabel('21', i18n.t)).toBe('Temporary (21)')
+    expect(conditionLabel('99', i18n.t)).toBe('Condition 99')
   })
 })

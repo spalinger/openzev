@@ -110,6 +110,48 @@ for billing periods and tariffs. The day on which clocks go forward has 92
 quarter-hours and the day they go back has 100; in the grid, that day's two
 02:00 hours add up in one cell.
 
+### Reading Quality
+
+Each quarter-hour cell exposes its stored quality in interval detail.
+Estimated intervals are marked individually, including within mixed-quality hours:
+
+| Marker | Meaning |
+| --- | --- |
+| *(no ≈ marker)* | No estimated-value marker; inspect interval detail for the stored quality |
+| **≈** | The reading is an estimated replacement value (SDAT-CH condition `56`); it still counts toward billing |
+| **·2** | The cell holds more than one reading for that Swiss hour — on the day the clocks go back, the repeated 02:00 hour — and shows their sum |
+
+Click a cell to open its **interval detail**. It lists every constituent
+reading with its Swiss timestamp and UTC offset, value, translated quality
+(**Unflagged**, **Estimated**, **Temporary**, or **Condition `<code>`** for an unrecognised
+code) and the stored code itself. Nothing on this table changes what billing
+uses: it shows the stored quality, it does not reinterpret it.
+
+### Held Observations
+
+Some SDAT-CH values are not billable — temporary (`21`) or information-only
+observations. They are **held** rather than stored as readings. Below the raw
+data table, **Held observations** opens a lazily loaded, paginated list for the
+selected meter and period:
+
+| Column | Meaning |
+| --- | --- |
+| **Interval start** | The meter and Swiss timestamp with UTC offset, so repeated autumn intervals stay distinct |
+| **Direction** | Consumption (IN) or production / feed-in (OUT) |
+| **Held (kWh)** | The value that was held back |
+| **Quality** | The stored condition and its meaning |
+| **Current accepted reading** | The current accepted value for the same interval, or **No accepted reading**. An accepted `0.0000` is shown as zero, not as missing |
+| **Delivery purpose** | Billing energy (`E88`) or information-only delivery (`C38`); quality is shown separately |
+| **Source** | Delivery and document identities, where available, and when the delivery was created |
+| **Recorded** | When OpenZEV created the held record; retained when a later delivery updates it |
+
+Held values never count toward the accepted consumption, feed-in or billing
+totals, and a held value does not replace an accepted reading for the same
+interval: when both exist, both are shown. Later deliveries may replace or
+promote held rows. The import protocol shows only those remaining from its
+batch, alongside historical counters — see
+[Held (non-billable) values](05-metering-import.md#held-non-billable-values).
+
 ## Data Quality View
 
 Use the **Data Quality** tab to assess completeness and health of metering

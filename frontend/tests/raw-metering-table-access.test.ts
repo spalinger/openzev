@@ -43,7 +43,7 @@ async function renderTable(canReadAssignments: boolean) {
     const root = createRoot(container)
     await act(async () => {
         root.render(createElement(MantineProvider, null, createElement(QueryClientProvider, { client },
-            createElement(RawMeteringTable, { meteringPointId: 'mp1', dateFrom: '2026-01-01', dateTo: '2026-01-31', hasOut: false, canReadAssignments }))))
+            createElement(RawMeteringTable, { meteringPointId: 'mp1', dateFrom: '2026-01-01', dateTo: '2026-01-31', hasOut: false, canReadAssignments, canReadHeld: false }))))
     })
     await vi.waitFor(() => expect(container.textContent).toContain('2026-01-02'))
     unmounts.push(() => { act(() => root.unmount()); container.remove() })

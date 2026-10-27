@@ -89,6 +89,14 @@ export const queryKeys = {
       ['metering', 'raw-data', meteringPointId, dateFrom, dateTo] as const,
     rawDay: (meteringPointId: string, date: string) =>
       ['metering', 'raw-day', meteringPointId, date] as const,
+    heldReadings: (
+      meteringPointId: string,
+      dateFrom: string,
+      dateTo: string,
+      importBatch: string,
+      page: number,
+    ) =>
+      ['metering', 'held-readings', meteringPointId, dateFrom, dateTo, importBatch, page] as const,
     dashboardSummary: (params: Record<string, string | undefined>) => ['metering', 'dashboard-summary', params] as const,
     qualityStatus: (dateFrom: string, dateTo: string, zevId?: string, meteringPointId?: string) =>
       ['metering', 'quality-status', dateFrom, dateTo, zevId ?? 'all', meteringPointId ?? 'all'] as const,

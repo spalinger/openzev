@@ -59,6 +59,7 @@ describe('readingAnomalies', () => {
     energy_kwh: 1.5,
     resolution: 'fifteen_min',
     import_source: 'csv',
+    condition: '',
     ...overrides,
   })
 

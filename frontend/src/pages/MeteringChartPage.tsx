@@ -787,6 +787,7 @@ export function MeteringChartPage({ tab }: { tab: 'chart' | 'quality' | 'imports
                                         hasOut={hasOut}
                                         meterType={selectedMp?.meter_type}
                                         canReadAssignments={isManagedScope}
+                                        canReadHeld={isManagedScope}
                                     />
                                 )}
                             </>

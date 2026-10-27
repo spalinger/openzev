@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ImportLog } from '../src/types/api'
 
 import { en } from '../src/i18n/locales/en'
@@ -23,6 +24,10 @@ vi.mock('react-i18next', () => ({
                 ? vars.defaultValue as string
                 : key,
     }),
+}))
+const heldApi = vi.hoisted(() => ({ fetchHeldMeteringReadings: vi.fn() }))
+vi.mock('../src/lib/api/metering', () => ({
+    fetchHeldMeteringReadings: heldApi.fetchHeldMeteringReadings,
 }))
 vi.mock('../src/lib/appSettings', async (importOriginal) => {
     const actual = await importOriginal<typeof import('../src/lib/appSettings')>()
@@ -60,11 +65,15 @@ function baseLog(overrides: Partial<ImportLog> = {}): ImportLog {
 describe('ImportProtocolModal structured SDAT-CH rendering', () => {
     let container: HTMLDivElement
     let root: ReturnType<typeof createRoot>
+    let queryClient: QueryClient
 
     beforeEach(() => {
         container = document.createElement('div')
         document.body.appendChild(container)
         root = createRoot(container)
+        queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        heldApi.fetchHeldMeteringReadings.mockReset()
+        heldApi.fetchHeldMeteringReadings.mockResolvedValue({ count: 0, page_size: 50, next: null, previous: null, results: [] })
     })
 
     afterEach(() => {
@@ -74,7 +83,25 @@ describe('ImportProtocolModal structured SDAT-CH rendering', () => {
 
     function render(log: ImportLog) {
         act(() => {
-            root.render(createElement(ImportProtocolModal, { log, onClose: () => undefined }))
+            root.render(
+                createElement(
+                    QueryClientProvider,
+                    { client: queryClient },
+                    createElement(ImportProtocolModal, { log, onClose: () => undefined }),
+                ),
+            )
+        })
+    }
+
+    async function renderAndSettle(log: ImportLog) {
+        await act(async () => {
+            root.render(
+                createElement(
+                    QueryClientProvider,
+                    { client: queryClient },
+                    createElement(ImportProtocolModal, { log, onClose: () => undefined }),
+                ),
+            )
         })
     }
 
@@ -105,6 +132,40 @@ describe('ImportProtocolModal structured SDAT-CH rendering', () => {
         expect(text).toContain('pages.imports.protocol.issueParam.block_id')
         // Legacy CSV totals stay out of the structured view.
         expect(text).not.toContain('pages.imports.protocol.totalRows')
+    })
+
+    it('opens the held observations of this import, filtered to its batch', async () => {
+        heldApi.fetchHeldMeteringReadings.mockResolvedValue({
+            count: 2, page_size: 50, next: null, previous: null,
+            results: ['METER-A', 'METER-B'].map((meter_id, index) => ({
+                id: meter_id, meter_id,
+                timestamp: `2026-10-25T0${index}:00:00Z`, direction: 'in', energy_kwh: '1.0000',
+                condition: '21', accepted_energy_kwh: null, business_reason: 'E88',
+                source_delivery_id: 'DELIVERY', source_document_id: `DOCUMENT-${index}`,
+                source_creation: null, created_at: '2026-10-26T00:00:00Z',
+            })),
+        })
+        await renderAndSettle(baseLog({
+            result_status: 'accepted',
+            batch_id: 'batch-42',
+            result_counts: {
+                created: 90, overwritten: 0, held: 4, promoted: 0, duplicate: 0,
+                stale: 0, excluded: 0, rejected: 0, quarantine_overwritten: 0,
+            },
+            issues: [],
+        }))
+        const text = container.textContent ?? ''
+        expect(text).toContain('pages.imports.protocol.heldTitle')
+        expect(heldApi.fetchHeldMeteringReadings).toHaveBeenCalledWith(
+            expect.objectContaining({ importBatch: 'batch-42' }),
+        )
+        await vi.waitFor(() => expect(container.textContent).toContain('METER-B'))
+        expect(container.textContent).toContain('METER-A')
+        expect(container.textContent).toContain('DELIVERY')
+        expect(container.textContent).toContain('DOCUMENT-0')
+        expect(container.textContent).toContain('DOCUMENT-1')
+        expect(container.textContent).toContain('GMT+02:00')
+        expect(container.textContent).toContain('GMT+01:00')
     })
 
     it('keeps a held-only accepted result distinct from a rejection', () => {

@@ -10,9 +10,15 @@ import { fetchMeteringPointAssignments } from '../lib/api/zev'
 import { queryKeys } from '../lib/api/queryKeys'
 import { formatShortDate, useAppSettings } from '../lib/appSettings'
 import { zonedParts } from '../lib/dates'
-import { outReadingLabelKey } from '../lib/meteringLabels'
+import { conditionLabel, formatMeteringTimestamp, outReadingLabelKey } from '../lib/meteringLabels'
+import { HeldReadingsPanel } from './HeldReadingsPanel'
 import { PageSkeleton } from './PageSkeleton'
-import type { MeteringPoint, MeteringPointAssignment, RawMeteringDailyRow, RawMeteringReading } from '../types/api'
+import type {
+    MeteringPoint,
+    MeteringPointAssignment,
+    RawMeteringDailyRow,
+    RawMeteringReading,
+} from '../types/api'
 
 // ── Anomaly detection (#652) ──────────────────────────────────────────────────
 //
@@ -121,13 +127,21 @@ const DAYS_PER_PAGE = 31
 const SLOT_MINUTES = [0, 15, 30, 45]
 const HOURS = Array.from({ length: 24 }, (_, h) => h)
 
+interface GridCell {
+    total: number | null
+    readings: RawMeteringReading[]
+}
+
 /**
  * Arrange one direction's readings into a [slot][hour] matrix of kWh values,
  * by Swiss hour. The autumn DST day's two 02:00 hours add up in one cell; the
- * spring day has no 02:00 hour at all.
+ * spring day has no 02:00 hour at all. Each cell keeps its constituent
+ * readings so a mixed-quality hour cannot appear entirely unflagged.
  */
-function buildHourGrid(readings: RawMeteringReading[], direction: 'in' | 'out'): (number | null)[][] {
-    const grid: (number | null)[][] = SLOT_MINUTES.map(() => Array<number | null>(24).fill(null))
+function buildHourGrid(readings: RawMeteringReading[], direction: 'in' | 'out'): GridCell[][] {
+    const grid: GridCell[][] = SLOT_MINUTES.map(() =>
+        HOURS.map(() => ({ total: null, readings: [] })),
+    )
     for (const r of readings) {
         if (r.direction !== direction) continue
         const d = new Date(r.timestamp)
@@ -135,7 +149,9 @@ function buildHourGrid(readings: RawMeteringReading[], direction: 'in' | 'out'):
         const { hours: hour, minutes } = zonedParts(d)
         const slot = SLOT_MINUTES.indexOf(minutes)
         if (slot >= 0 && hour >= 0 && hour < 24) {
-            grid[slot][hour] = (grid[slot][hour] ?? 0) + r.energy_kwh
+            const cell = grid[slot][hour]
+            cell.total = (cell.total ?? 0) + r.energy_kwh
+            cell.readings.push(r)
         }
     }
     return grid
@@ -151,7 +167,12 @@ function HourGrid({
     direction: 'in' | 'out'
     caption?: string
 }) {
+    const { t } = useTranslation()
+    const { settings } = useAppSettings()
     const grid = buildHourGrid(readings, direction)
+    const [selected, setSelected] = useState<{ slot: number; hour: number } | null>(null)
+    const selectedCell = selected ? grid[selected.slot][selected.hour] : null
+
     return (
         <div className="raw-metering-grid-wrap">
             {caption && <p className="raw-metering-grid-caption">{caption}</p>}
@@ -170,14 +191,48 @@ function HourGrid({
                             <tr key={minute}>
                                 <th scope="row">:{String(minute).padStart(2, '0')}</th>
                                 {HOURS.map((h) => {
-                                    const value = grid[slot][h]
+                                    const cell = grid[slot][h]
                                     // A negative reading is corrupt data, not just unusual —
                                     // flagged in place rather than requiring the viewer to
                                     // eyeball every cell (#652).
-                                    const isNegative = value !== null && value < 0
+                                    const isNegative = cell.total !== null && cell.total < 0
+                                    const isSelected = selected?.slot === slot && selected?.hour === h
+                                    const estimated = cell.readings.some((reading) => reading.condition === '56')
                                     return (
-                                        <td key={h} style={isNegative ? { color: 'var(--danger-700)', fontWeight: 700 } : undefined}>
-                                            {kwh(value)}
+                                        <td
+                                            key={h}
+                                            style={isNegative ? { color: 'var(--danger-700)', fontWeight: 700 } : undefined}
+                                        >
+                                            {cell.readings.length === 0 ? (
+                                                '–'
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    className="raw-metering-cell-button"
+                                                    aria-expanded={isSelected}
+                                                    aria-label={t('pages.meteringData.rawTable.cellAria', {
+                                                        time: `${String(h).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
+                                                        value: kwh(cell.total),
+                                                        quality: [...new Set(cell.readings.map((reading) => conditionLabel(reading.condition, t)))].join(', '),
+                                                        count: cell.readings.length,
+                                                    })}
+                                                    onClick={() =>
+                                                        setSelected(isSelected ? null : { slot, hour: h })
+                                                    }
+                                                >
+                                                    {kwh(cell.total)}
+                                                    {estimated && (
+                                                        <span className="raw-metering-quality-marker" aria-hidden>
+                                                            ≈
+                                                        </span>
+                                                    )}
+                                                    {cell.readings.length > 1 && (
+                                                        <span className="raw-metering-cell-count" aria-hidden>
+                                                            ·{cell.readings.length}
+                                                        </span>
+                                                    )}
+                                                </button>
+                                            )}
                                         </td>
                                     )
                                 })}
@@ -186,6 +241,23 @@ function HourGrid({
                     </tbody>
                 </table>
             </div>
+            {selectedCell && selected && (
+                <div
+                    className="raw-metering-cell-detail"
+                    role="region"
+                    aria-label={t('pages.meteringData.rawTable.cellDetailTitle')}
+                >
+                    <strong>{t('pages.meteringData.rawTable.cellDetailTitle')}</strong>
+                    <ul>
+                        {selectedCell.readings.map((reading) => (
+                            <li key={reading.timestamp}>
+                                <span className="raw-metering-cell-detail-time">{formatMeteringTimestamp(reading.timestamp, settings)}</span>{' '}
+                                {kwh(reading.energy_kwh)} kWh · {conditionLabel(reading.condition, t)}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
         </div>
     )
 }
@@ -330,6 +402,13 @@ function RawDayDetail({
                             </div>
                         )}
                         <DaySparkline intervals={intervals} hasIn={dayHasIn} hasOut={dayHasOut} meterType={meterType} />
+                        <p className="raw-metering-quality-legend">
+                            {t('pages.meteringData.rawTable.qualityEstimatedLegend')}
+                            {' · '}
+                            {t('pages.meteringData.rawTable.qualityDetailLegend')}
+                            {' · '}
+                            {t('pages.meteringData.rawTable.qualityAggregatedLegend')}
+                        </p>
                         {dayHasIn && (
                             <HourGrid
                                 readings={readings}
@@ -360,6 +439,7 @@ export function RawMeteringTable({
     hasOut,
     meterType,
     canReadAssignments,
+    canReadHeld,
 }: {
     meteringPointId: string
     dateFrom: string
@@ -368,6 +448,8 @@ export function RawMeteringTable({
     meterType?: MeteringPoint['meter_type']
     /** Assignments are management data; participants cannot read them. */
     canReadAssignments: boolean
+    /** Held observations require management access. */
+    canReadHeld: boolean
 }) {
     const { t } = useTranslation()
     const { settings } = useAppSettings()
@@ -529,6 +611,15 @@ export function RawMeteringTable({
                         ›
                     </button>
                 </div>
+            )}
+
+            {canReadHeld && (
+                <HeldReadingsPanel
+                    key={`${meteringPointId}:${dateFrom}:${dateTo}`}
+                    meteringPointId={meteringPointId}
+                    dateFrom={dateFrom}
+                    dateTo={dateTo}
+                />
             )}
         </div>
     )

@@ -90,7 +90,7 @@ class MeterReading(models.Model):
         max_length=5,
         blank=True,
         default="",
-        help_text="SDAT-CH observation Condition (empty = measured, 56 = estimated).",
+        help_text="SDAT-CH observation Condition (empty = unflagged, 56 = estimated).",
     )
     source_product = models.CharField(
         max_length=32,
