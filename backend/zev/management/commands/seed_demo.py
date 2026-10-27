@@ -158,6 +158,16 @@ SECOND_DEMO_ADDITIONAL_CONTRACT_NOTES = (
     "three months' written notice to the end of a calendar quarter."
 )
 
+# Both communities use the same complete weekday/weekend schedule.
+DEMO_GRID_BANDS = [
+    {"period_type": PeriodType.HIGH, "price_chf_per_kwh": Decimal("0.29500"),
+     "time_from": time(7, 0), "time_to": time(21, 0), "weekdays": "0,1,2,3,4"},
+    {"period_type": PeriodType.LOW, "price_chf_per_kwh": Decimal("0.22500"),
+     "time_from": time(21, 0), "time_to": time(7, 0)},
+    {"period_type": PeriodType.LOW, "price_chf_per_kwh": Decimal("0.22500"),
+     "time_from": time(7, 0), "time_to": time(21, 0), "weekdays": "5,6"},
+]
+
 # The second community's tariff set: energy and feed-in tariffs, a percentage
 # levy, a shared connection fee the engine splits across active participants,
 # and a fee per metering point. ``itemize_tariff_bands`` is enabled on that
@@ -184,19 +194,7 @@ SECOND_DEMO_TARIFF_SPECS = [
         "billing_mode": BillingMode.ENERGY,
         "energy_type": EnergyType.GRID,
         "notes": "High and low tariff for imported grid energy.",
-        "periods": [
-            {
-                "period_type": PeriodType.HIGH,
-                "price_chf_per_kwh": Decimal("0.29500"),
-                "time_from": time(7, 0),
-                "time_to": time(21, 0),
-                "weekdays": "0,1,2,3,4",
-            },
-            {
-                "period_type": PeriodType.LOW,
-                "price_chf_per_kwh": Decimal("0.22500"),
-            },
-        ],
+        "periods": DEMO_GRID_BANDS,
     },
     {
         "name": "Feed-in Credit",
@@ -2081,25 +2079,13 @@ class Command(BaseCommand):
                 "billing_mode": BillingMode.ENERGY,
                 "energy_type": EnergyType.GRID,
                 "notes": "Sample high and low tariff for imported grid energy.",
-                "periods": [
-                    {
-                        "period_type": PeriodType.HIGH,
-                        "price_chf_per_kwh": Decimal("0.29500"),
-                        "time_from": time(7, 0),
-                        "time_to": time(21, 0),
-                        "weekdays": "0,1,2,3,4",
-                    },
-                    {
-                        "period_type": PeriodType.LOW,
-                        "price_chf_per_kwh": Decimal("0.22500"),
-                    },
-                ],
+                "periods": DEMO_GRID_BANDS,
                 # HT and NT both rise, but HT faster, so the chart shows the
                 # spread widening (0.050 -> 0.060 -> 0.070) rather than two
                 # parallel lines that could just as well be one.
                 "price_history": [
-                    {"prices": [Decimal("0.24500"), Decimal("0.19500")]},
-                    {"prices": [Decimal("0.27000"), Decimal("0.21000")]},
+                    {"prices": [Decimal("0.24500"), Decimal("0.19500"), Decimal("0.19500")]},
+                    {"prices": [Decimal("0.27000"), Decimal("0.21000"), Decimal("0.21000")]},
                 ],
             },
             {

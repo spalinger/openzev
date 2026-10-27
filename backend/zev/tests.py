@@ -32,6 +32,7 @@ from metering.models import ImportLog, MeterReading, QuarantinedReading, Reading
 from tariffs.dynamic.models import DynamicPricePoint, DynamicTariffSource
 from tariffs.models import BillingMode, PeriodType, Tariff
 from tariffs.series import active_version, find_gaps
+from tariffs.periods import resolve_band
 from zev.models import (
 	AllocationMode,
 	BillingInterval,
@@ -2419,6 +2420,28 @@ class SeedDemoTariffVersionTests(TestCase):
 		# The HT window itself does not change when its price does.
 		self.assertEqual(bands[PeriodType.HIGH].weekdays, "0,1,2,3,4")
 		self.assertEqual(bands[PeriodType.HIGH].time_from, time(7, 0))
+
+	def test_grid_demo_bands_price_every_quarter_hour_at_the_intended_rate(self):
+		self._seed()
+		for version in self._versions("Grid Energy HT/NT"):
+			bands = list(version.periods.all())
+			self.assertEqual(len(bands), 3)
+			prices = {band.period_type: band.price_chf_per_kwh for band in bands}
+			for quarter in range(7 * 24 * 4):
+				ts = datetime(2026, 4, 6) + timedelta(minutes=quarter * 15)
+				expected = PeriodType.HIGH if ts.weekday() < 5 and 7 <= ts.hour < 21 else PeriodType.LOW
+				with self.subTest(version=version.valid_from, timestamp=ts):
+					band = resolve_band(bands, ts)
+					self.assertEqual(band.period_type, expected)
+					self.assertEqual(band.price_chf_per_kwh, prices[expected])
+
+	def test_seeded_nt_accepts_a_price_only_correction(self):
+		self._seed()
+		band = self._versions("Grid Energy HT/NT")[-1].periods.filter(period_type=PeriodType.LOW).first()
+		client = APIClient()
+		client.force_authenticate(self.owner)
+		response = client.patch(f"/api/v1/tariffs/periods/{band.pk}/", {"price_chf_per_kwh": "0.22"}, format="json")
+		self.assertEqual(response.status_code, 200, response.data)
 
 	def test_a_percentage_tariff_versions_its_percentage(self):
 		self._seed()
