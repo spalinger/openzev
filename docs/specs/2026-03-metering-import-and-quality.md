@@ -1113,6 +1113,12 @@ These are aggregated per bucket for the timeline. They are physical pool
 totals over every reading in the range — gap readings are included here even
 though no participant is charged for them.
 
+**Owner/admin computation:** summaries process readings by timestamp, including
+unassigned meters in the physical pool. Assignment distributions are reused
+within each Swiss civil day. All participants receive totals and flow stats;
+only the selected participant needs a participant timeline. Participant stats
+sort by descending consumption, then participant ID. No response cache is introduced.
+
 **ZEV selection logic:**
 - If `zev_id` provided → validate ownership for non-admin users.
 - If omitted and user owns exactly 1 ZEV → auto-select.
@@ -1726,6 +1732,8 @@ preview or quarantine dashboard.
 | Test class | Validates |
 |---|---|
 | `DashboardSummaryAlignmentTests` | §5.4: timestamp-level local/grid split; owner participant filtering; malformed dashboard query parameters for participant, manager and admin accounts |
+| `DashboardAggregationRegressionTests.test_owner_participant_ties_are_sorted_by_id` | Equal-consumption and production-only rows sort by participant ID regardless of reading order |
+| `DashboardAggregationRegressionTests.test_owner_selection_keeps_exports_zero_buckets_and_global_totals` | Selected totals, grid exports, explicit-zero buckets and unchanged global statistics |
 | `DashboardMidPeriodTransferTests` | §5.4: readings attributed per assignment timestamp for owner stats, participant totals/timeline, ZEV-wide stats, and the hourly profile; post-transfer readings excluded |
 | `SharedMeteringDashboardTests` | §5.4: personal/community reconciliation; multi-record accounts; separate ZEV pools; membership and assignment boundaries; Swiss period boundaries; disabled membership scopes; weighted hourly profile |
 | `ParticipantImportRestrictionTests` | §6.2: participant cannot list import logs, preview CSV, or upload CSV (all 403) |

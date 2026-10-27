@@ -8,6 +8,7 @@ lives here, which makes the calculations independently unit-testable.
 from collections import defaultdict
 from datetime import date as date_type, datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal, ROUND_HALF_UP
+from itertools import groupby
 
 from django.db.models import Count, Max, Min, Q, Sum
 from django.db.models.functions import TruncDate, TruncDay, TruncHour, TruncMonth
@@ -332,110 +333,97 @@ def owner_dashboard_summary(qs, trunc_fn, selected_participant_id):
             consumed_kwh=Sum("energy_kwh", filter=Q(direction="in")),
             produced_kwh=Sum("energy_kwh", filter=Q(direction="out")),
         )
-        .order_by("metering_point_id", "timestamp")
+        .order_by("timestamp", "metering_point_id")  # groupby needs consecutive timestamps.
     )
 
-    # The per-meter rows already contain every reading, so derive the ZEV-wide
-    # per-timestamp pivot from them instead of scanning the readings again.
-    participant_rows = list(participant_rows)
+    # Stream the whole physical pool one timestamp at a time, including
+    # unassigned meters; retain timestamp totals for the global timeline.
     ts_pivot = {}
-    current_metering_point_id = None
+    participant_map = {}
+    selected_timeline = {}
+    pid_cache = {}
+    day_end = None
+    distributions_by_mp = {}
     bucket_key = None
     bucket_end = None
-    for metering_point_id, ts, consumed_kwh, produced_kwh in participant_rows:
-        if metering_point_id != current_metering_point_id:
-            current_metering_point_id = metering_point_id
-            bucket_key = None
+    for ts, rows in groupby(participant_rows.iterator(chunk_size=2000), key=lambda row: row[1]):
+        rows = list(rows)
+        total_consumed = sum((row[2] for row in rows if row[2] is not None), Decimal("0"))
+        total_produced = sum((row[3] for row in rows if row[3] is not None), Decimal("0"))
         if bucket_key is None or ts >= bucket_end:
             bucket_key, bucket_end = _bucket_bounds(ts, trunc_fn)
-        data = ts_pivot.get(ts)
-        if data is None:
-            data = ts_pivot[ts] = {
-                "bucket": bucket_key,
-                "consumed_kwh": Decimal("0"),
-                "produced_kwh": Decimal("0"),
-            }
-        if consumed_kwh is not None:
-            data["consumed_kwh"] += consumed_kwh
-        if produced_kwh is not None:
-            data["produced_kwh"] += produced_kwh
-    timeline, totals = _timeline_and_totals(ts_pivot)
+        ts_pivot[ts] = {
+            "bucket": bucket_key,
+            "consumed_kwh": total_consumed,
+            "produced_kwh": total_produced,
+        }
+        if day_end is None or ts >= day_end:
+            day_end = period_end_exclusive_dt(civil_date(ts))
+            distributions_by_mp = {}
 
-    participant_map = {}
-    pid_cache = {}
-    current_metering_point_id = None
-    day = None
-    day_end = None
-    distributions = ()
-    for metering_point_id, ts, consumed_kwh, produced_kwh in participant_rows:
-        # Rows arrive ordered by meter and timestamp. Assignment validity is
-        # date-granular, so resolve it once per meter/day instead of once per
-        # 15-minute reading.
-        if metering_point_id != current_metering_point_id:
-            current_metering_point_id = metering_point_id
-            day = None
-        if day is None or ts >= day_end:
-            day = civil_date(ts)
-            day_end = period_end_exclusive_dt(day)
-            distributions = tuple(_distribute_reading(
-                windows, mp_to_zev, shares_by_zev, metering_point_id, ts,
-            ))
+        for metering_point_id, _, consumed_kwh, produced_kwh in rows:
+            if metering_point_id not in distributions_by_mp:
+                distributions_by_mp[metering_point_id] = tuple(_distribute_reading(
+                    windows, mp_to_zev, shares_by_zev, metering_point_id, ts,
+                ))
+            distributions = distributions_by_mp[metering_point_id]
 
-        has_consumption = consumed_kwh is not None
-        has_production = produced_kwh is not None
-        consumed = consumed_kwh or Decimal("0")
-        produced = produced_kwh or Decimal("0")
+            has_consumption = consumed_kwh is not None
+            has_production = produced_kwh is not None
+            consumed = consumed_kwh or Decimal("0")
+            produced = produced_kwh or Decimal("0")
 
-        zev_at_ts = ts_pivot[ts]
-        bucket_key = zev_at_ts["bucket"]
-        total_consumed = zev_at_ts["consumed_kwh"]
-        total_produced = zev_at_ts["produced_kwh"]
-        from_zev = from_grid = exported = Decimal("0")
-        if has_consumption:
-            from_zev, from_grid = split_consumption(consumed, total_consumed, total_produced)
-        if has_production:
-            # Exported per timestamp = the producer's share of what the ZEV
-            # could not consume locally — mirrors what the engine bills as
-            # feed-in (ADR 0013), so the chart reconciles with the invoice.
-            _, exported = split_production(produced, total_produced, total_consumed)
-
-        for raw_pid, share in distributions:
-            try:
-                pid = pid_cache[raw_pid]
-            except KeyError:
-                pid = pid_cache[raw_pid] = str(raw_pid)
-            if pid not in participant_map:
-                participant_map[pid] = {
-                    "participant_id": pid,
-                    "total_consumed_kwh": Decimal("0"),
-                    "total_produced_kwh": Decimal("0"),
-                    "from_zev_kwh": Decimal("0"),
-                    "from_grid_kwh": Decimal("0"),
-                    "total_exported_kwh": Decimal("0"),
-                    "timeline_map": {},
-                }
-            item = participant_map[pid]
-            participant_timeline = item["timeline_map"]
-            if bucket_key not in participant_timeline:
-                participant_timeline[bucket_key] = {
-                    "bucket": bucket_key,
-                    "consumed_kwh": Decimal("0"),
-                    "produced_kwh": Decimal("0"),
-                    "imported_kwh": Decimal("0"),
-                    "exported_kwh": Decimal("0"),
-                }
-            bucket = participant_timeline[bucket_key]
+            from_zev = from_grid = exported = Decimal("0")
             if has_consumption:
-                item["total_consumed_kwh"] += consumed * share
-                item["from_zev_kwh"] += from_zev * share
-                item["from_grid_kwh"] += from_grid * share
-                bucket["consumed_kwh"] += consumed * share
-                bucket["imported_kwh"] += from_grid * share
+                from_zev, from_grid = split_consumption(consumed, total_consumed, total_produced)
             if has_production:
-                item["total_produced_kwh"] += produced * share
-                item["total_exported_kwh"] += exported * share
-                bucket["produced_kwh"] += produced * share
-                bucket["exported_kwh"] += exported * share
+                # Exported per timestamp = the producer's share of what the ZEV
+                # could not consume locally — mirrors what the engine bills as
+                # feed-in (ADR 0013), so the chart reconciles with the invoice.
+                _, exported = split_production(produced, total_produced, total_consumed)
+
+            for raw_pid, share in distributions:
+                try:
+                    pid = pid_cache[raw_pid]
+                except KeyError:
+                    pid = pid_cache[raw_pid] = str(raw_pid)
+                if pid not in participant_map:
+                    participant_map[pid] = {
+                        "participant_id": pid,
+                        "total_consumed_kwh": Decimal("0"),
+                        "total_produced_kwh": Decimal("0"),
+                        "from_zev_kwh": Decimal("0"),
+                        "from_grid_kwh": Decimal("0"),
+                        "total_exported_kwh": Decimal("0"),
+                    }
+                item = participant_map[pid]
+                if has_consumption:
+                    item["total_consumed_kwh"] += consumed * share
+                    item["from_zev_kwh"] += from_zev * share
+                    item["from_grid_kwh"] += from_grid * share
+                if has_production:
+                    item["total_produced_kwh"] += produced * share
+                    item["total_exported_kwh"] += exported * share
+
+                # Only the selected participant's timeline is returned.
+                if pid == selected_participant_id:
+                    if bucket_key not in selected_timeline:
+                        selected_timeline[bucket_key] = {
+                            "bucket": bucket_key,
+                            "consumed_kwh": Decimal("0"),
+                            "produced_kwh": Decimal("0"),
+                            "imported_kwh": Decimal("0"),
+                            "exported_kwh": Decimal("0"),
+                        }
+                    bucket = selected_timeline[bucket_key]
+                    if has_consumption:
+                        bucket["consumed_kwh"] += consumed * share
+                        bucket["imported_kwh"] += from_grid * share
+                    if has_production:
+                        bucket["produced_kwh"] += produced * share
+                        bucket["exported_kwh"] += exported * share
+
+    timeline, totals = _timeline_and_totals(ts_pivot)
 
     names = _participant_names(participant_map)
     for pid, item in participant_map.items():
@@ -454,8 +442,7 @@ def owner_dashboard_summary(qs, trunc_fn, selected_participant_id):
             }
             for item in participant_map.values()
         ],
-        key=lambda x: x["total_consumed_kwh"],
-        reverse=True,
+        key=lambda item: (-item["total_consumed_kwh"], item["participant_id"]),
     )
 
     response_totals = {k: float(v) for k, v in totals.items()}
@@ -480,7 +467,7 @@ def owner_dashboard_summary(qs, trunc_fn, selected_participant_id):
                 "imported_kwh": float(item["imported_kwh"]),
                 "exported_kwh": float(item["exported_kwh"]),
             }
-            for _, item in sorted(selected["timeline_map"].items(), key=lambda entry: entry[0])
+            for _, item in sorted(selected_timeline.items(), key=lambda entry: entry[0])
         ]
 
     return {

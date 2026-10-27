@@ -3,6 +3,7 @@ from decimal import Decimal
 from functools import partial
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
+from uuid import UUID
 
 from django.db import connection
 from django.db.models.functions import TruncDay, TruncHour, TruncMonth, TruncWeek
@@ -417,6 +418,64 @@ class DashboardAggregationRegressionTests(TestCase):
 		self.assertAlmostEqual(stats[str(self.bob.id)]["total_consumed_kwh"], 5.0, places=6)
 		self.assertAlmostEqual(stats[str(self.bob.id)]["from_zev_kwh"], 2.5, places=6)
 		self.assertAlmostEqual(stats[str(self.bob.id)]["from_grid_kwh"], 2.5, places=6)
+
+	def test_owner_participant_ties_are_sorted_by_id(self):
+		pairs = []
+		for n in (1, 2):
+			participant = Participant.objects.create(
+				id=UUID(int=n), zev=self.zev, first_name=f"Tie {n}",
+				last_name="Example", valid_from=date(2026, 1, 1),
+			)
+			meter = MeteringPoint.objects.create(
+				id=UUID(int=n), zev=self.zev, meter_id=f"CH-TIE-{n}",
+				meter_type=MeteringPointType.BIDIRECTIONAL,
+			)
+			MeteringPointAssignment.objects.create(
+				metering_point=meter, participant=participant, valid_from=date(2026, 1, 1),
+			)
+			pairs.append((meter, participant))
+		for direction in (ReadingDirection.IN, ReadingDirection.OUT):
+			with self.subTest(direction=direction):
+				MeterReading.objects.all().delete()
+				# The larger ID appears first in timestamp order, for both
+				# equal consumers and production-only rows with zero consumption.
+				for (meter, _), day in zip(pairs, (2, 1)):
+					self._read(meter, datetime(2026, 1, day, 12, tzinfo=ZURICH), "1", direction)
+				response = self._get(self.owner)
+				self.assertEqual(response.status_code, 200)
+				self.assertEqual(
+					[row["participant_id"] for row in response.data["participant_stats"]],
+					[str(participant.pk) for _, participant in pairs],
+				)
+
+	def test_owner_selection_keeps_exports_zero_buckets_and_global_totals(self):
+		auth(self.client, self.owner)
+		params = {
+			"zev_id": str(self.zev.pk), "date_from": "2026-01-01",
+			"date_to": "2026-01-03", "bucket": "day",
+		}
+		url = "/api/v1/metering/readings/dashboard-summary/"
+		global_summary = self.client.get(url, params).data
+		for participant, consumed, produced, imported, exported in (
+			(self.alice, 3.0, 12.0, 1.5, 8.0),
+			(self.bob, 5.0, 0.0, 2.5, 0.0),
+		):
+			with self.subTest(participant=participant.pk):
+				response = self.client.get(url, {**params, "participant_id": str(participant.pk)})
+				self.assertEqual(response.status_code, 200)
+				summary = response.data
+				self.assertEqual(summary["participant_stats"], global_summary["participant_stats"])
+				self.assertEqual(summary["zev_totals"], global_summary["totals"])
+				self.assertEqual(summary["totals"], {
+					"consumed_kwh": consumed, "produced_kwh": produced,
+					"imported_kwh": imported, "exported_kwh": exported,
+				})
+				for key, total in summary["totals"].items():
+					self.assertEqual(sum(row[key] for row in summary["timeline"]), total)
+				if participant == self.alice:
+					self.assertEqual(len(summary["timeline"]), 3)
+					self.assertEqual(summary["timeline"][1]["exported_kwh"], 6.0)
+					self.assertEqual(summary["timeline"][2]["consumed_kwh"], 0.0)
 
 	def test_participant_timeline_keeps_zero_readings_but_drops_production_only_days(self):
 		resp = self._get(self.alice_user)

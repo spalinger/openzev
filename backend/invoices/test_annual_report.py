@@ -20,7 +20,7 @@ from allocation.errors import InvalidAllocationInputError
 from metering.models import MeterReading, ReadingDirection, ReadingResolution
 from testing.helpers import authenticate as auth, make_user
 from tariffs.models import TariffCategory
-from zev.models import MeteringPoint, MeteringPointAssignment, MeteringPointType, Participant
+from zev.models import AllocationMode, MeteringPoint, MeteringPointAssignment, MeteringPointType, Participant
 
 from .annual_report import build_annual_report, compute_producer_uplift
 from .annual_statement import compute_savings
@@ -102,6 +102,17 @@ class AnnualReportTestCase(TestCase):
 
 
 class AnnualReportContentTests(AnnualReportTestCase):
+    def test_community_shares_follow_participant_weights(self):
+        self.consumption_mp.assignments.update(allocation_mode=AllocationMode.COMMUNITY)
+        self.consumer.allocation_weight = Decimal("3")
+        self.consumer.save(update_fields=["allocation_weight"])
+        self._reading(self.consumption_mp, datetime(2026, 6, 16, 12, tzinfo=ZURICH), "8", ReadingDirection.IN)
+
+        report = self._report()
+        rows = {row["participant_id"]: row for row in report["participants"]}
+        self.assertEqual(rows[str(self.consumer.pk)]["consumed_kwh"], 13.5)
+        self.assertEqual(rows[str(self.producer.pk)]["consumed_kwh"], 4.5)
+
     def test_totals_carry_the_balance_and_both_rates(self):
         totals = self._report()["totals"]
 

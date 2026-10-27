@@ -104,7 +104,8 @@ community_days AS (
     WHERE allocation_mode = 'community'
     GROUP BY day, direction
 ),
-shares AS (
+-- Keep PostgreSQL from rescanning the window calculation per community day.
+shares AS {materialized}(
     SELECT cd.day, pa.id AS participant_id,
            -- Participant.allocation_weight is validated >= 0.0001, so the
            -- divisor is positive for valid data.
@@ -197,7 +198,10 @@ def year_energy(zev, year: int, *, with_participants: bool = False) -> YearEnerg
         day_sql, day_params = connection.ops.datetime_cast_date_sql(
             "mr.timestamp", [], tz,
         )
-        sql = _WITH_PARTICIPANTS_SQL.format(month_sql=month_sql, day_sql=day_sql)
+        sql = _WITH_PARTICIPANTS_SQL.format(
+            month_sql=month_sql, day_sql=day_sql,
+            materialized="MATERIALIZED " if connection.vendor == "postgresql" else "",
+        )
         # Placeholder order: zmp.zev_id, physical start/end, monthly tz,
         # weighted day tz, weighted start/end, shares zev_id.
         params = [zev_id, start, end, *month_params, *day_params, start, end, zev_id]

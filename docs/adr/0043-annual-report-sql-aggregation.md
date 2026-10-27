@@ -37,6 +37,19 @@ The query depends on persisted table/choice names and Django's backend SQL
 hooks. Run the annual-report tests on SQLite and PostgreSQL when upgrading
 Django or changing allocation/schema rules. The Django version is pinned.
 
+## Uncached endpoint optimization (2026-10-27)
+
+At `9dd30aca`, PostgreSQL inlined the single-use `shares` CTE and rescanned
+its window calculation per community day. Use `AS MATERIALIZED` on PostgreSQL;
+omit the hint on SQLite to retain Django's supported SQLite 3.31+ range.
+
+On the warm Sonnenhof database, a pre-review comparison against `9dd30aca`
+reduced the 2025 annual-report median from 1,056 to 316 ms (61,320 yearly
+readings). Eight authenticated HTTP requests per version/path alternated order;
+no participant was selected and JSON payloads matched. These measure uncached
+API work, not cold storage or browser loading. Dashboard day-bucket gains were
+small; hourly buckets benefit more from avoiding unused participant timelines.
+
 ## Alternatives considered
 
 - Keep the Python pass: simpler ownership of the rules, but slower on yearly reads.

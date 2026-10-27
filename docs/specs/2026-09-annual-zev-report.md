@@ -214,6 +214,7 @@ timestamp, then summed, in both the dashboard and the annual report.
   in the year.
 
 The query uses Django's backend month/date SQL hooks for PostgreSQL and SQLite.
+The community-share CTE is materialized on PostgreSQL to avoid repeated window evaluation; see ADR 0043.
 `AssignmentWindows` rejects overlapping assignments before they can duplicate
 energy in the join. [ADR 0043](../adr/0043-annual-report-sql-aggregation.md)
 records the separate SQL implementation and its validation requirements.
@@ -387,10 +388,11 @@ Behind-the-meter generation reuses the shared top-level namespace
 
 ### Backend — `backend/invoices/test_annual_report.py`
 
-**`AnnualReportContentTests`** (21 tests; producer uplift cases are covered below):
+**`AnnualReportContentTests`** (22 tests; producer uplift cases are covered below):
 
 | Test | Asserts |
 |---|---|
+| `test_community_shares_follow_participant_weights` | Community consumption follows participant weights across reading days |
 | `test_totals_carry_the_balance_and_both_rates` | kWh totals, `self_consumed_kwh`, 40 %/40 % rates |
 | `test_months_are_always_twelve_with_null_rates_where_there_is_no_data` | 12 months; June rates; January zeros and `null` rates |
 | `test_previous_year_supplies_the_comparison_rates` | previous June rates, `previous_totals` |
