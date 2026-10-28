@@ -120,6 +120,7 @@ when the capability changes; do not treat them as baselines:
 | Grid-operator tariff import (VSE/AES) | `2026-09-vse-tariff-import.md` |
 | Tariff overview PDF | `2026-09-tariff-overview-pdf.md` |
 | Passwordless participant invoice access (QR + magic link) | `2026-09-participant-invoice-access.md` |
+| Feasibility prefill history and physical local-pool aggregation | [2026-10-feasibility-prefill-aggregation.md](2026-10-feasibility-prefill-aggregation.md) |
 
 ## Drafts
 
