@@ -74,6 +74,30 @@ Cookie sessions need the frontend and API to share an origin or a host. The
 `CSRF_TRUSTED_ORIGINS`; two different hostnames do not (JavaScript cannot read a
 cross-origin `csrftoken` cookie), so use a same-origin reverse proxy there.
 
+### SDAT capacity benchmark
+
+Use Linux and a fresh `sdat_benchmark_*` PostgreSQL database on an isolated
+server, with an unprivileged role using that prefix. Connect directly to
+PostgreSQL. [Setup SQL and measurement contract](docs/specs/2026-10-sdat-capacity-benchmark.md)
+describe the guards, budgets and report fields.
+
+From `backend/` with the venv active and `DATABASE_URL` pointing to that database:
+
+```bash
+python manage.py migrate --noinput
+python manage.py benchmark_sdatch --confirm-disposable sdat_benchmark_example \
+  --meters 10 --days 30 --output /tmp/sdat-benchmark-example
+```
+
+Ordinary trials have no SQL wrapper or competing thread. Add `--diagnostic` on
+another fresh database to collect SQL batches and confirm billing-lock contention;
+its duration is reported separately as `instrumented_import_seconds`.
+`--memory-mib` is a worker address-space guard (default 1024 MiB), not an RSS
+limit. `--timeout` bounds the whole worker, including verification after commit.
+Also bound the parent/worker group and PostgreSQL externally for stress trials.
+Reports stay outside the repository; command-level trials do not certify
+production capacity.
+
 ## Checks before you open a pull request
 
 Run what CI runs for the side you touched.
