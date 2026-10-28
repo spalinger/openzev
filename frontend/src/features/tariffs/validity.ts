@@ -1,4 +1,4 @@
-import type { Tariff } from '../../types/api'
+import type { Tariff, TariffSeries, TariffVersion } from '../../types/api'
 
 export type ValidityState = 'active' | 'scheduled' | 'expired'
 
@@ -40,4 +40,38 @@ export function listedVersion<T extends Tariff>(versions: T[], today: string, up
     return versions.find((version) => validityState(version, today) === 'active')
         ?? next
         ?? versions[0]
+}
+
+/**
+ * A list row: the series, and the one version the row stands for. A row in
+ * force also carries the version that follows it, so what changes and when
+ * is read from the row rather than from a second one.
+ */
+export type TariffOverviewRow = { series: TariffSeries, version: TariffVersion, upcomingVersion?: TariffVersion }
+
+export type TariffOverview = {
+    current: TariffOverviewRow[]
+    upcoming: TariffOverviewRow[]
+    history: TariffOverviewRow[]
+}
+
+/**
+ * The overview's three groups, one row per tariff series: in force (with its
+ * next version, the nearest to start — `versions` are newest first, so the
+ * last scheduled one); not in force yet (the nearest to start); and, in
+ * History, ended with nothing in force or coming (the most recently ended
+ * version). The older ended versions of a tariff are reached from the detail's
+ * version history, not as rows of their own.
+ */
+export function tariffOverview(series: TariffSeries[], today: string): TariffOverview {
+    const overview: TariffOverview = { current: [], upcoming: [], history: [] }
+    for (const entry of series) {
+        const active = entry.versions.find((version) => validityState(version, today) === 'active')
+        const next = entry.versions.findLast((version) => validityState(version, today) === 'scheduled')
+        const ended = entry.versions.find((version) => validityState(version, today) === 'expired')
+        if (active) overview.current.push({ series: entry, version: active, upcomingVersion: next })
+        else if (next) overview.upcoming.push({ series: entry, version: next })
+        else if (ended) overview.history.push({ series: entry, version: ended })
+    }
+    return overview
 }

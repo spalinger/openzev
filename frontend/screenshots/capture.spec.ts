@@ -312,40 +312,54 @@ test.describe('User Guide Screenshots', () => {
     await screenshotFull(page, '07-tariffs')
   })
 
-  // 07b — A tariff's version history and price chart, both in its detail
-  // drawer (opened from the list row, but rendered as a page-level sibling).
+  // 07b — A tariff's detail pane: the version in force, the scheduled change opened
+  // beside it and the history with its price chart (capture.setup.ts schedules the
+  // change).
   test('07b-tariff-versions', async ({ page }) => {
     await navigateTo(page, '/tariffs')
-    const row = page.getByRole('button', { name: 'Grid Energy HT/NT', expanded: false })
+    const row = page.getByRole('button', { name: 'Grid Energy HT/NT', expanded: false }).first()
     await row.waitFor({ timeout: 10_000 })
     await row.click()
-    const drawer = page.locator('.tariff-drawer')
+    const pane = page.locator('.tariff-pane')
+    await pane.locator('.tariff-version-toggle').click()
     // Waiting on the chart rather than the history: it renders only for a series
     // with more than one version, so it also asserts the seed still has them.
-    await drawer.locator('.tariff-price-history').waitFor({ timeout: 10_000 })
+    await pane.locator('.tariff-disclosure > summary').last().click()
+    await pane.locator('.tariff-price-history').waitFor({ timeout: 10_000 })
     await page.waitForTimeout(1000)  // let Recharts finish laying out
     await screenshotFull(page, '07b-tariff-versions')
   })
 
-  // 07d — A dynamic tariff's detail drawer, showing its source and locally
-  // seeded price history (stats, chart and point table render inline).
+  // 07e — The same tariff with the scheduled change folded to its line, the way the
+  // pane opens from the list's current row.
+  test('07e-tariff-scheduled-change', async ({ page }) => {
+    await navigateTo(page, '/tariffs')
+    const row = page.getByRole('button', { name: 'Grid Energy HT/NT', expanded: false }).first()
+    await row.waitFor({ timeout: 10_000 })
+    await row.click()
+    const pane = page.locator('.tariff-pane')
+    await expect(pane.locator('.tariff-version-toggle[aria-expanded="false"]'), `Scheduled change missing — ${SEED_HINT}`).toBeVisible()
+    await screenshotFull(page, '07e-tariff-scheduled-change')
+  })
+
+  // 07d — A dynamic tariff's detail pane: its source with the details
+  // disclosure opened. The fetched prices sit in a second disclosure whose
+  // point table would make the capture several screens tall, so it stays shut.
   test('07d-tariff-dynamic-source', async ({ page }) => {
     await requireDemoDynamicSource(page)
     await navigateTo(page, '/tariffs')
-    const row = page.getByRole('button', { name: DEMO_DYNAMIC_TARIFF, expanded: false })
+    const row = page.getByRole('button', { name: DEMO_DYNAMIC_TARIFF, expanded: false }).first()
     await row.waitFor({ timeout: 10_000 })
     await row.click()
-    const drawer = page.locator('.tariff-drawer')
-    await expect(drawer.locator('.recharts-surface'), `Dynamic price chart missing — ${SEED_HINT}`).toBeVisible()
-    await expect(drawer.locator('tbody tr').first()).toBeVisible()
+    const pane = page.locator('.tariff-pane')
+    const details = pane.locator('.tariff-period-section .tariff-disclosure > summary').first()
+    await details.click()
+    await expect(pane.locator('.tariff-period-section .tariff-disclosure[open]'), `Dynamic source details missing — ${SEED_HINT}`).toBeVisible()
     await screenshotFull(page, '07d-tariff-dynamic-source')
   })
 
-  // 07e was the fetched-price history modal opened from a dynamic tariff's
-  // card: chart, stats, coverage. That modal is gone — the same content now
-  // renders inline in the drawer 07d already captures — so there is nothing
-  // left for a separate shot to show. Removed along with
-  // 07e-dynamic-price-history.png.
+  // The fetched-price history modal that once had its own shot is gone: the same
+  // content renders inline in the pane 07d already captures.
 
   // 08 — Invoices (period overview)
   test('08-invoices', async ({ page }) => {

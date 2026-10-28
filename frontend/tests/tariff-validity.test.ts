@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { hasUpcomingVersion, listedVersion } from '../src/features/tariffs/validity'
+import { hasUpcomingVersion, listedVersion, tariffOverview } from '../src/features/tariffs/validity'
 import { emphasizedDate } from '../src/features/tariffs/datePresentation'
-import type { Tariff } from '../src/types/api'
+import type { Tariff, TariffSeries } from '../src/types/api'
 
 const TODAY = '2026-10-12'
 const version = (id: string, valid_from: string, valid_to: string | null) => ({ id, valid_from, valid_to }) as Tariff
@@ -54,5 +54,47 @@ describe('the emphasis on an upcoming start date', () => {
 
     it('leaves a date it cannot match to the pattern as it is', () => {
         expect(bold(emphasizedDate('—', 'dd.MM.yyyy', true))).toBe('—')
+    })
+})
+
+describe('the overview groups', () => {
+    const series = (name: string, ...versions: Tariff[]) => ({ name, versions }) as unknown as TariffSeries
+    const ids = (rows: { series: TariffSeries, version: { id: string } }[]) => rows.map((row) => `${row.series.name}:${row.version.id}`)
+
+    it('gives a series one row, in force with the version that follows it', () => {
+        const groups = tariffOverview([series('Energy', next, current, ended)], TODAY)
+        expect(ids(groups.current)).toEqual(['Energy:current'])
+        expect(groups.current[0].upcomingVersion?.id).toBe('next')
+        expect(groups.upcoming).toEqual([])
+        expect(groups.history).toEqual([])
+    })
+
+    it('follows with the nearest upcoming version, not a later one', () => {
+        const later = version('later', '2028-01-01', null)
+        const older = version('older', '2024-01-01', '2024-12-31')
+        const groups = tariffOverview([series('Energy', later, next, current, ended, older)], TODAY)
+        expect(groups.current[0].upcomingVersion?.id).toBe('next')
+    })
+
+    it('lists a series that has nothing in force yet under Upcoming, with the nearest version', () => {
+        const later = version('later', '2028-01-01', null)
+        const groups = tariffOverview([series('Energy', later, next, ended)], TODAY)
+        expect(groups.current).toEqual([])
+        expect(ids(groups.upcoming)).toEqual(['Energy:next'])
+        expect(groups.upcoming[0].upcomingVersion).toBeUndefined()
+        expect(groups.history).toEqual([])
+    })
+
+    it('keeps a series with only past versions reachable, in History alone, with the most recently ended', () => {
+        const groups = tariffOverview([series('Old', ended)], TODAY)
+        expect(groups.current).toEqual([])
+        expect(groups.upcoming).toEqual([])
+        expect(ids(groups.history)).toEqual(['Old:ended'])
+    })
+
+    it('treats a window that opens or closes today as current', () => {
+        const opens = version('opens', TODAY, null)
+        const closes = version('closes', '2026-01-01', TODAY)
+        expect(ids(tariffOverview([series('A', opens), series('B', closes)], TODAY).current)).toEqual(['A:opens', 'B:closes'])
     })
 })
