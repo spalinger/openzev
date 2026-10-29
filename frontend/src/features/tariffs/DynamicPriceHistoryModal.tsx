@@ -13,8 +13,24 @@ import { AXIS_COLOR, CHART_GRIDLINE, CONS_COLORS, NEGATIVE_COLOR } from '../../l
 import { CHART_TOOLTIP_STYLE } from '../../lib/chartTheme'
 import { formatBusinessIsoDate, formatIsoDate, todayBusinessIso } from '../../lib/dates'
 import { queryKeys } from '../../lib/api/queryKeys'
-import type { DynamicPriceHistory, DynamicPricePoint, DynamicTariffSource, Tariff } from '../../types/api'
+import type { AppSettings, DynamicPriceHistory, DynamicPricePoint, DynamicTariffSource, Tariff } from '../../types/api'
 import { dynamicChartData, elapsedPriceGaps, missingPriceDates, missingRangeLabel, windowBounds } from './dynamicPriceGaps'
+
+/** Interval rows per page in the compact (pane) table: it is for checking a value, the chart is the overview. */
+const COMPACT_PAGE_SIZE = 12
+
+/**
+ * One interval as "from – to". The end drops its date when it falls on the
+ * start's day, so a quarter-hour reads `01.10.2026 00:00 – 00:15`.
+ */
+export function intervalLabel(validFrom: string, validTo: string, settings: AppSettings): string {
+  const from = formatDateTime(validFrom, settings)
+  const to = formatDateTime(validTo, settings)
+  // Every date-time pattern is "<date> <HH:mm>", the date without spaces.
+  const [fromDate] = from.split(' ')
+  const [toDate, toTime] = to.split(' ')
+  return toTime !== undefined && fromDate === toDate ? `${from} – ${toTime}` : `${from} – ${to}`
+}
 
 /** What the history view needs from the tariff it was opened for, if any. */
 export type TariffValidityContext = Pick<Tariff, 'valid_from' | 'valid_to' | 'minimum_price_chf_per_kwh'>
@@ -194,14 +210,11 @@ export function DynamicPriceHistoryPanel({ source, tariff, compact = false }: Pa
 
   const columns = useMemo<ColumnDef<DynamicPricePoint, unknown>[]>(() => [
     {
+      // Sorts by its start; the end is part of the same cell.
+      id: 'validity',
       accessorKey: 'valid_from',
-      header: t('pages.dynamicSources.history.from'),
-      cell: ({ row }) => formatDateTime(row.original.valid_from, settings),
-    },
-    {
-      accessorKey: 'valid_to',
-      header: t('pages.dynamicSources.history.to'),
-      cell: ({ row }) => formatDateTime(row.original.valid_to, settings),
+      header: t('pages.dynamicSources.history.validity'),
+      cell: ({ row }) => intervalLabel(row.original.valid_from, row.original.valid_to, settings),
     },
     {
       accessorKey: 'price_chf_per_kwh',
@@ -219,7 +232,7 @@ export function DynamicPriceHistoryPanel({ source, tariff, compact = false }: Pa
   const validityMax = tariff ? validityUpperBound(tariff, today) : undefined
 
   const statCards = stats && (
-    <div className="kpi-row">
+    <div className="kpi-row kpi-row--fit">
       <StatCard label={t('pages.dynamicSources.history.points')} value={stats.point_count} flat />
       <StatCard
         label={t('pages.dynamicSources.history.average')}
@@ -231,6 +244,7 @@ export function DynamicPriceHistoryPanel({ source, tariff, compact = false }: Pa
         label={t('pages.dynamicSources.history.gaps')}
         value={stats.gap_count}
         tone={stats.gap_count > 0 ? 'warning' : 'success'}
+        flat
       />
     </div>
   )
@@ -241,6 +255,7 @@ export function DynamicPriceHistoryPanel({ source, tariff, compact = false }: Pa
       getRowId={(point) => point.valid_from}
       loading={historyQuery.isLoading}
       emptyMessage={t('pages.dynamicSources.history.empty')}
+      pageSize={compact ? COMPACT_PAGE_SIZE : undefined}
     />
   )
   // The chart is a picture; this is its text equivalent, gaps included.

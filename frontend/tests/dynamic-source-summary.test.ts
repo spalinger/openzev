@@ -69,21 +69,19 @@ describe('DynamicSourceSummary', () => {
     })
 
     it('says nothing about prices when none are missing', () => {
-        expect(render()).not.toContain('pages.dynamicSources.history.missingTitle')
+        expect(render()).not.toContain('pages.dynamicSources.history.missingEffect')
     })
 
-    it('names the missing dates up front and keeps the exact intervals on demand', () => {
+    it('names the missing dates, without a list of exact intervals', () => {
         const html = render({}, true, missing)
-        expect(html).toContain('pages.dynamicSources.history.missingTitle')
         expect(html).toContain('pages.dynamicSources.history.missingDates')
         expect(html).toContain('pages.dynamicSources.history.missingEffect')
-        expect(html).toContain('pages.dynamicSources.history.exactIntervals')
         expect(html).not.toContain('2026-10-02T22:00:00Z')
     })
 
     it('keeps the failed-fetch error visible next to the missing-price notice', () => {
         const html = render({ last_fetch_status: 'failed', last_fetch_error: 'upstream 503' }, true, missing)
         expect(html).toContain('upstream 503')
-        expect(html).toContain('pages.dynamicSources.history.missingTitle')
+        expect(html).toContain('pages.dynamicSources.history.missingEffect')
     })
 })

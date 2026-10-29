@@ -683,10 +683,10 @@ hint; zero points show “No stored prices yet.” Last success is shown only wh
 its timestamp is present. The history panel is scoped to the shown tariff's validity.
 When the stored series has no price for time that has already passed, the summary
 also shows a warning notice (`missing` prop, fed by `useElapsedPriceGaps` through
-`DynamicSourceSection`): the merged missing date ranges in the business timezone
-(“No prices for 03.10.2026 – 05.10.2026”), a line saying invoice generation stops
-for a period that needs a missing price (§9), and an “Exact missing intervals”
-disclosure with the timestamps. `dynamicPriceGaps.ts` holds the pure helpers:
+`DynamicSourceSection`): the merged missing date ranges in the business timezone, in
+bold, as the notice's heading (“No prices for 03.10.2026 – 05.10.2026”; there is no separate title), a line saying invoice generation stops
+for a period that needs a missing price (§9); the exact timestamps are not listed.
+`dynamicPriceGaps.ts` holds the pure helpers:
 `elapsedPriceGaps` cuts each gap off at now (a gap wholly in the future is dropped,
 since prices may not be published yet), `missingPriceDates` merges adjacent or
 overlapping gaps into inclusive date ranges. The notice reads the window the chart
@@ -775,7 +775,16 @@ positive coverage and maintenance-link permissions.
   chart is visible without opening anything, with elapsed gaps shaded
   (`ReferenceArea`) and an `aria-label` giving the window, the price range and the
   missing dates; the statistics and the interval table sit in a lazy disclosure
-  “Fetched interval prices”, and the gap list is left to the source summary.
+  “Fetched interval prices”, and the gap list is left to the source summary. The
+  pane's table pages 12 rows at a time (`DataTable`'s `pageSize` prop, default 100)
+  with the shared range label and previous/next buttons; paging keeps the date
+  range, and a new range returns to the first page. The modal keeps the default
+  page size (`tests/dynamic-price-history-paging.test.ts`).
+  The statistics are four flat `StatCard`s in a `.kpi-row.kpi-row--fit` (as many
+  columns as fit, 9.5rem minimum), so the pane shows them two by two.
+  The interval table has one "Validity" column (`intervalLabel`, sorted by its
+  start): `01.10.2026 00:00 – 00:15`, with the end's date repeated only when it
+  falls on another day than the start.
 - **`AdminDynamicSourcesPanel`** — routed as `/admin/dynamic-sources` in the
   Admin Overview hub. It displays global source/point/reuse/failure KPIs and a
   `DataTable` with current fetch state, last error/time and reuse counts. Its
