@@ -1,54 +1,28 @@
-"""Best-effort prefill of feasibility calculator inputs from a real ZEV.
+"""Best-effort feasibility inputs from a ZEV's readings and active tariffs.
 
-Not authoritative — a starting point to review and adjust, not a substitute
-for entering real numbers. Three independent approximations:
+Participant energy uses all assigned-meter history, extrapolated to 365 days.
+Participants with neither eligible production nor consumption use default
+consumption. Self-consumption is measured per timestamp across all ZEV meters.
 
-1. Per-participant production/consumption: sums each participant's assigned
-   metering points' readings and extrapolates whatever history exists
-   (however short) to a full year. Participants with no readings at all yet
-   (a brand-new ZEV) fall back to a generic default and are flagged via
-   ``has_metering_data=False`` so the frontend can call that out.
-2. Self-consumption rate: measured from the actual metering time series, not
-   guessed. It is the single biggest driver of the whole result, and for a
-   ZEV that already has readings we can compute it exactly instead of asking
-   the user for a number — using the same per-timestamp local-pool logic as
-   the dashboard (``metering.analytics``) and real invoices
-   (``allocation.split.local_pool_kwh``):
-   self-consumed energy is ``Σ min(production_ts, consumption_ts)`` and the
-   rate is ``self-consumed / produced``. Returns None when there isn't enough
-   data to measure it (no production, or no consumption).
-3. Tariff prices, from the currently-active tariffs:
-   - Retail is the full *all-in* price a consumer pays for grid energy —
-     energy + grid fees (Netznutzung) + levies (Abgaben) — mirroring the
-     invoice engine (``invoices.engine``): the sum of every flat
-     (billing_mode=ENERGY) GRID tariff across all categories, times
-     ``(1 + Σ percentage-of-energy GRID tariffs)``. Loading only the energy
-     component would understate retail, and therefore understate the whole
-     vZEV benefit (which is proportional to retail − feed_in).
-   - Feed-in is energy-only: the flat ENERGY-category FEED_IN tariff.
-   - Internal (local) is energy-only too, but is commonly configured as a
-     percentage of the grid energy price ("local = 60% of Netzstrom") rather
-     than a flat rate, so a percentage-of-energy LOCAL tariff is resolved
-     against the grid energy base, and a flat LOCAL energy tariff added on top.
-   HT/NT splits within a tariff are approximated with a representative period,
-   and fixed-fee (per-month/-metering-point) tariffs are ignored. Returns None
-   for a price it can't determine — the caller then falls back to the
-   calculator's own Swiss defaults, exactly as it does for any blank field.
+Retail includes grid energy, fees and levies; feed-in and local prices use the
+existing tariff approximations. Users should review the estimates.
 """
 from __future__ import annotations
 
 import datetime as dt
+from collections import defaultdict
 from dataclasses import dataclass
 from decimal import Decimal
 
-from django.db.models import Max, Min, Sum
+from django.db.models import Max, Min, Q, Sum
+from django.db.models.functions import Least
 
 from allocation.validity import active_on
 from allocation.split import local_pool_kwh
 from metering.models import MeterReading, ReadingDirection
 from tariffs.models import BillingMode, EnergyType, Tariff, TariffCategory
 from tariffs.periods import average_percentage
-from zev.models import MeteringPoint, MeteringPointType, Participant, Zev
+from zev.models import MeteringPointAssignment, MeteringPointType, Participant, Zev
 
 from . import defaults
 
@@ -181,88 +155,96 @@ def _internal_energy_price(zev: Zev, today: dt.date) -> Decimal | None:
     return total.quantize(FIVE_PLACES) if found else None
 
 
+def _reading_summaries_by_participant(participants: list[Participant]) -> dict:
+    """Map participant IDs to meter/direction summaries.
+
+    Each summary has direction, metering_point__meter_type, total, first and last.
+    """
+    # Ignore window ordering so DISTINCT means one participant/meter pair.
+    bindings = list(
+        MeteringPointAssignment.objects.filter(participant__in=participants)
+        .order_by().values_list("participant_id", "metering_point_id").distinct()
+    )
+    by_meter = defaultdict(list)
+    for row in (
+        MeterReading.objects.filter(metering_point_id__in={mp_id for _, mp_id in bindings})
+        .values("metering_point_id", "metering_point__meter_type", "direction")
+        .annotate(total=Sum("energy_kwh"), first=Min("timestamp"), last=Max("timestamp"))
+        .order_by()
+    ):
+        by_meter[row["metering_point_id"]].append(row)
+    by_participant = defaultdict(list)
+    for participant_id, mp_id in bindings:
+        by_participant[participant_id].extend(by_meter[mp_id])
+    return by_participant
+
+
 def _extrapolated_annual_kwh(
-    participant: Participant, *, meter_types: list[str], direction: str
+    summaries, *, meter_types: list[str], direction: str
 ) -> tuple[Decimal, bool]:
-    """Sum this participant's readings of the given direction/meter type and
-    extrapolate to a full year based on however much history actually spans.
-    Returns (annual_kwh, whether any readings were found at all)."""
-    metering_point_ids = participant.metering_point_assignments.filter(
-        metering_point__meter_type__in=meter_types,
-    ).values_list("metering_point_id", flat=True)
+    """Return (annual_kwh, found) from the combined eligible meter histories.
 
-    aggregate = MeterReading.objects.filter(
-        metering_point_id__in=metering_point_ids,
-        direction=direction,
-    ).aggregate(total=Sum("energy_kwh"), first=Min("timestamp"), last=Max("timestamp"))
-
-    if not aggregate["total"] or aggregate["first"] is None or aggregate["last"] is None:
+    ``found`` means the eligible readings have a nonzero total.
+    """
+    rows = [
+        row for row in summaries
+        if row["direction"] == direction and row["metering_point__meter_type"] in meter_types
+    ]
+    total = sum((row["total"] for row in rows), Decimal("0"))
+    if not total:
         return Decimal("0"), False
 
-    span_days = max((aggregate["last"] - aggregate["first"]).days, 1)
-    annual = aggregate["total"] * Decimal(365) / Decimal(span_days)
-    return annual, True
+    first = min(row["first"] for row in rows)
+    last = max(row["last"] for row in rows)
+    span_days = max((last - first).days, 1)
+    return total * Decimal(365) / Decimal(span_days), True
 
 
 def _measured_self_consumption_rate(zev: Zev) -> Decimal | None:
-    """ZEV-level self-consumption rate (self-consumed / produced) measured
-    from all available metering data.
+    """Return Σ min(production_ts, consumption_ts) / Σ production_ts.
 
-    Mirrors the canonical per-timestamp local-pool allocation used by the
-    dashboard (``metering.analytics.owner_dashboard_summary``) and real
-    invoices (``allocation.split.local_pool_kwh``): at each timestamp the
-    locally self-consumed energy is ``min(total production, total
-    consumption)`` across every metering point in the ZEV. Because it's a
-    dimensionless ratio, it does not matter that the per-participant kWh
-    totals are separately extrapolated to a year — the rate is the same over
-    the raw period.
-
-    Returns None when it can't be measured: no production (rate undefined),
-    or no consumption at all (we'd otherwise report a misleading 0%).
+    Uses all available history, including unassigned meters. Rejects negative
+    timestamp totals; returns None if production or consumption totals are zero.
     """
-    metering_point_ids = MeteringPoint.objects.filter(zev=zev).values_list("id", flat=True)
-
-    # DB sums per (timestamp, direction); Python does the per-timestamp min.
-    ts_pivot: dict = {}
-    for row in (
-        MeterReading.objects.filter(metering_point_id__in=metering_point_ids)
-        .values("timestamp", "direction")
-        .annotate(total_kwh=Sum("energy_kwh"))
-    ):
-        entry = ts_pivot.setdefault(row["timestamp"], {})
-        entry[row["direction"]] = row["total_kwh"] or Decimal("0")
-
-    total_produced = Decimal("0")
-    total_consumed = Decimal("0")
-    self_consumed = Decimal("0")
-    for entry in ts_pivot.values():
-        produced = entry.get(ReadingDirection.OUT, Decimal("0"))
-        consumed = entry.get(ReadingDirection.IN, Decimal("0"))
-        total_produced += produced
-        total_consumed += consumed
-        self_consumed += local_pool_kwh(produced, consumed)
-
-    if total_produced <= 0 or total_consumed <= 0:
+    totals = (
+        MeterReading.objects.filter(metering_point__zev=zev)
+        .values("timestamp")
+        .annotate(
+            produced=Sum("energy_kwh", filter=Q(direction=ReadingDirection.OUT), default=Decimal("0")),
+            consumed=Sum("energy_kwh", filter=Q(direction=ReadingDirection.IN), default=Decimal("0")),
+        )
+        .order_by()
+        .aggregate(
+            total_produced=Sum("produced"), total_consumed=Sum("consumed"),
+            self_consumed=Sum(Least("produced", "consumed")),
+            min_produced=Min("produced"), min_consumed=Min("consumed"),
+        )
+    )
+    if totals["min_produced"] is None:
+        return None
+    # Reject negative timestamp totals, even when period totals are positive.
+    local_pool_kwh(totals["min_produced"], totals["min_consumed"])
+    if totals["total_produced"] <= 0 or totals["total_consumed"] <= 0:
         return None
 
-    # self_consumed <= total_produced by construction, so this is always in [0, 1].
-    return (self_consumed / total_produced).quantize(FOUR_PLACES)
+    return (totals["self_consumed"] / totals["total_produced"]).quantize(FOUR_PLACES)
 
 
 def build_prefill(zev: Zev) -> FeasibilityPrefill:
     today = dt.date.today()
 
-    active_participants = active_on(zev.participants, today)
+    active_participants = list(active_on(zev.participants, today))
+    summaries = _reading_summaries_by_participant(active_participants)
 
     participants = []
     for participant in active_participants:
         production, has_production_data = _extrapolated_annual_kwh(
-            participant,
+            summaries.get(participant.pk, ()),
             meter_types=[MeteringPointType.PRODUCTION, MeteringPointType.BIDIRECTIONAL],
             direction=ReadingDirection.OUT,
         )
         consumption, has_consumption_data = _extrapolated_annual_kwh(
-            participant,
+            summaries.get(participant.pk, ()),
             meter_types=[MeteringPointType.CONSUMPTION, MeteringPointType.BIDIRECTIONAL],
             direction=ReadingDirection.IN,
         )
@@ -283,8 +265,7 @@ def build_prefill(zev: Zev) -> FeasibilityPrefill:
         participants=participants,
         self_consumption_rate=_measured_self_consumption_rate(zev),
         retail_price_chf_per_kwh=_all_in_retail_price(zev, today),
-        # Feed-in is energy-only (ENERGY category). Internal, too, but it's
-        # often a percentage of the grid price rather than a flat rate.
+        # Feed-in and internal prices use only the ENERGY category.
         feed_in_price_chf_per_kwh=_flat_energy_price_sum(
             zev, energy_type=EnergyType.FEED_IN, today=today, categories=[TariffCategory.ENERGY]
         ),

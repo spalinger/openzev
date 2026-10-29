@@ -1,9 +1,12 @@
 """Tests for the best-effort ZEV -> feasibility calculator prefill."""
+import random
 from datetime import date, datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
 
 import pytest
 
+from allocation.errors import InvalidAllocationInputError
+from allocation.split import local_pool_kwh
 from metering.models import MeterReading, ReadingDirection
 from tariffs.models import BillingMode, EnergyType, PeriodType, TariffCategory
 from testing import factories
@@ -82,6 +85,56 @@ class TestParticipantEnergyPrefill:
         prefill = build_prefill(zev)
         assert prefill.participants == []
 
+    def test_combines_meter_spans_before_extrapolation(self):
+        zev = factories.ZevFactory()
+        participant = factories.ParticipantFactory(zev=zev)
+        meters = [factories.MeteringPointFactory(zev=zev) for _ in range(2)]
+        for meter in meters:
+            factories.MeteringPointAssignmentFactory(metering_point=meter, participant=participant)
+        _reading(meters[0], 0, "1", ReadingDirection.IN)
+        _reading(meters[0], 30, "1", ReadingDirection.IN)
+        _reading(meters[1], 15, "1", ReadingDirection.IN)
+
+        row = build_prefill(zev).participants[0]
+        assert row.annual_consumption_kwh == Decimal("36.5")
+
+    def test_repeated_assignments_count_meter_history_once_per_participant(self):
+        zev = factories.ZevFactory()
+        alice = factories.ParticipantFactory(zev=zev)
+        bob = factories.ParticipantFactory(zev=zev)
+        meter = factories.MeteringPointFactory(zev=zev)
+        for participant, start, end in (
+            (alice, date(2023, 1, 1), date(2023, 12, 31)),
+            (bob, date(2024, 1, 1), date(2024, 12, 31)),
+            (alice, date(2025, 1, 1), None),
+        ):
+            factories.MeteringPointAssignmentFactory(
+                metering_point=meter, participant=participant, valid_from=start, valid_to=end,
+            )
+        _reading(meter, 0, "100", ReadingDirection.IN)
+        _reading(meter, 30, "200", ReadingDirection.IN)
+
+        rows = build_prefill(zev).participants
+        assert len(rows) == 2
+        # Planning prefill uses all assigned-meter history, not billing's windows.
+        assert all(row.annual_consumption_kwh == Decimal("3650") for row in rows)
+
+    def test_zero_and_ineligible_directions_keep_the_default(self):
+        zev = factories.ZevFactory()
+        participant = factories.ParticipantFactory(zev=zev)
+        consumption = factories.MeteringPointFactory(zev=zev, meter_type=MeteringPointType.CONSUMPTION)
+        production = factories.MeteringPointFactory(zev=zev, meter_type=MeteringPointType.PRODUCTION)
+        for meter in (consumption, production):
+            factories.MeteringPointAssignmentFactory(metering_point=meter, participant=participant)
+        _reading(consumption, 0, "0", ReadingDirection.IN)
+        _reading(consumption, 0, "10", ReadingDirection.OUT)
+        _reading(production, 0, "10", ReadingDirection.IN)
+
+        row = build_prefill(zev).participants[0]
+        assert row.has_metering_data is False
+        assert row.annual_consumption_kwh == DEFAULT_PARTICIPANT_CONSUMPTION_KWH
+        assert row.annual_production_kwh == 0
+
 
 class TestSelfConsumptionRatePrefill:
     """Measured ZEV-level self-consumption rate = self-consumed / produced,
@@ -138,6 +191,74 @@ class TestSelfConsumptionRatePrefill:
 
         prefill = build_prefill(zev)
         assert prefill.self_consumption_rate == Decimal("1.0000")
+
+    def test_sql_rate_matches_decimal_interval_reference(self):
+        zev = factories.ZevFactory()
+        meters = [
+            factories.MeteringPointFactory(zev=zev, meter_type=MeteringPointType.BIDIRECTIONAL)
+            for _ in range(3)
+        ]
+        rng = random.Random(41)
+        total_produced = Decimal("0")
+        local = Decimal("0")
+        for day in range(12):
+            produced = consumed = Decimal("0")
+            for meter in meters:
+                for direction in (ReadingDirection.IN, ReadingDirection.OUT):
+                    energy = Decimal(rng.randrange(0, 20000)) / Decimal("10000")
+                    _reading(meter, day, str(energy), direction)
+                    if direction == ReadingDirection.IN:
+                        consumed += energy
+                    else:
+                        produced += energy
+            total_produced += produced
+            local += local_pool_kwh(produced, consumed)
+
+        expected = (local / total_produced).quantize(Decimal("0.0001"))
+        assert build_prefill(zev).self_consumption_rate == expected
+
+    @pytest.mark.parametrize("direction", [ReadingDirection.IN, ReadingDirection.OUT])
+    def test_rejects_negative_timestamp_totals_even_when_period_total_is_positive(self, direction):
+        zev = factories.ZevFactory()
+        meter = factories.MeteringPointFactory(zev=zev, meter_type=MeteringPointType.BIDIRECTIONAL)
+        _reading(meter, 0, "-1", direction)
+        _reading(meter, 1, "10", direction)
+
+        with pytest.raises(InvalidAllocationInputError):
+            build_prefill(zev)
+
+    def test_disjoint_production_and_consumption_have_no_local_pool(self):
+        zev = factories.ZevFactory()
+        meter = factories.MeteringPointFactory(zev=zev, meter_type=MeteringPointType.BIDIRECTIONAL)
+        _reading(meter, 0, "10", ReadingDirection.OUT)
+        _reading(meter, 1, "10", ReadingDirection.IN)
+
+        assert build_prefill(zev).self_consumption_rate == Decimal("0.0000")
+
+    @pytest.mark.parametrize("fraction, expected", [("0.0250", "0.1250"), ("0.0251", "0.1252")])
+    def test_preserves_decimal_half_even_rounding(self, fraction, expected):
+        zev = factories.ZevFactory()
+        meters = [
+            factories.MeteringPointFactory(zev=zev, meter_type=MeteringPointType.BIDIRECTIONAL)
+            for _ in range(2)
+        ]
+        for day in (0, 1):
+            _reading(meters[0], day, "0.3", ReadingDirection.OUT)
+            _reading(meters[1], day, "0.7", ReadingDirection.OUT)
+            _reading(meters[0], day, "0.1", ReadingDirection.IN)
+            _reading(meters[1], day, str(Decimal(fraction) + day * Decimal("0.0001")), ReadingDirection.IN)
+
+        assert build_prefill(zev).self_consumption_rate == Decimal(expected)
+
+    def test_ignores_other_zevs_and_includes_unassigned_pool_readings(self):
+        zev = factories.ZevFactory()
+        own = factories.MeteringPointFactory(zev=zev, meter_type=MeteringPointType.BIDIRECTIONAL)
+        other = factories.MeteringPointFactory(meter_type=MeteringPointType.PRODUCTION)
+        _reading(own, 0, "10", ReadingDirection.OUT)
+        _reading(own, 0, "4", ReadingDirection.IN)
+        _reading(other, 0, "1000", ReadingDirection.OUT)
+
+        assert build_prefill(zev).self_consumption_rate == Decimal("0.4000")
 
 
 class TestTariffPrefill:
