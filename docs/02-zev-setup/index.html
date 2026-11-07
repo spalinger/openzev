@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/favicon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -377,6 +377,34 @@
     
   
     Roles and Permissions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../22-notifications/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notifications
   
 
     
@@ -2187,9 +2215,13 @@ it off under <strong>Platform → Settings → Functions</strong>).</p>
   <a href="../17-zev-transfer/">ZEV Export and Import</a>)</li>
 </ul>
 <p><img alt="ZEV settings" src="../screenshots/06-zev-settings.png" /></p>
-<p>One save bar serves every tab. Switching tabs keeps your edits; <strong>Save changes</strong>
-checks all settings and opens the first invalid field. Switching communities
-or leaving settings asks for confirmation while edits are unsaved.</p>
+<p>One save bar serves the General, Billing &amp; payment and Documents &amp; e-mails
+tabs. A dot on a tab marks unsaved edits, and the bar names the tabs that hold
+them. Switching tabs keeps your edits; <strong>Save</strong> checks all settings and opens
+the first invalid field. Switching communities or leaving settings asks for
+confirmation while edits are unsaved. The People &amp; access and Energy data tabs
+save each action as you make it. If you only have read access, the fields are
+shown as flat read-only values.</p>
 <h3 id="general-tab">General tab<a class="headerlink" href="#general-tab" title="Permanent link">&para;</a></h3>
 <h4 id="general-zev-settings">General ZEV Settings<a class="headerlink" href="#general-zev-settings" title="Permanent link">&para;</a></h4>
 <table>
@@ -2298,8 +2330,9 @@ always name whoever held a role on their own date:</p>
 </tbody>
 </table>
 <ul>
-<li><strong>Change from…</strong> on the issuer or the representative picks a party and a
-  date. The current holder ends the day before. Invoices for earlier periods
+<li><strong>Change issuer</strong> and <strong>Change representative</strong> (<strong>Set issuer</strong> / <strong>Set
+  representative</strong> while nobody holds the role) open a form that picks a party
+  and a date. The current holder ends the day before. Invoices for earlier periods
   keep naming the earlier issuer, and an invoice that is already approved never
   changes.</li>
 <li><strong>The issuer and the representative manage the community.</strong> While a party
@@ -2317,7 +2350,8 @@ always name whoever held a role on their own date:</p>
   so until one is set.</li>
 <li><strong>Add landowner</strong> adds a party from a date, optionally with the building it
   owns; <strong>Set building</strong> / <strong>Change building</strong> on a landowner's row links or
-  re-links it, and <strong>End</strong> sets a landowner's last day. A party that owns two
+  re-links it (choose the building, then <strong>Save</strong>), and <strong>End</strong> (in the row's <strong>⋯</strong>
+  menu) asks for the landowner's last day and a confirmation. A party that owns two
   buildings has two landowner rows. Ending a role before it started removes
   it.</li>
 <li>Whoever a ZEV is created for — through self-registration or the admin
@@ -2328,17 +2362,19 @@ always name whoever held a role on their own date:</p>
 <h4 id="access-on-each-row">Access on each row<a class="headerlink" href="#access-on-each-row" title="Permanent link">&para;</a></h4>
 <p>Every person on the tab shows its access to OpenZEV on its own row:</p>
 <ul>
-<li><strong>Issuer and representative</strong> — <strong>Manages in OpenZEV</strong> with the login, for
-  as long as the role lasts; that access changes with the role. A holder
+<li><strong>Issuer and representative</strong> — the login that manages, for as long as the
+  role lasts; that access changes with the role. A holder
   without a login says so, and <strong>Invite</strong> sends it an invitation to set one up
   (as manager).</li>
-<li><strong>Landowners and other people</strong> — <strong>Manage</strong> or <strong>Read only</strong> with the
-  login, or <strong>No access to OpenZEV</strong>. Without access, choose <strong>Manage</strong> or
-  <strong>Read only</strong> and press <strong>Give access</strong> (or <strong>Invite</strong>, when the person has
-  no login yet — the invitation goes to the email address on the person).
-  With access: <strong>Make manager</strong> / <strong>Make viewer</strong> (making a manager a viewer
-  asks for confirmation), <strong>Resend invitation</strong> for an invitation that has not
-  been accepted, and <strong>Remove access</strong>, after a confirmation.</li>
+<li><strong>Landowners and other people</strong> — <strong>Manages in OpenZEV</strong> (through a role),
+  <strong>Manage</strong> or <strong>Read only</strong> with the login, or <strong>No access to OpenZEV</strong>.
+  Without access, press <strong>Give access</strong> (or <strong>Invite</strong>, when the person has no
+  login yet — the invitation goes to the email address on the person): a form
+  opens under the person and asks for the level (<strong>Manage</strong> or <strong>Read only</strong>)
+  and, optionally, an end date. With access, the <strong>⋯</strong> menu on the row has
+  <strong>Make manager</strong> / <strong>Make viewer</strong> (making a manager a viewer asks for
+  confirmation), <strong>Resend invitation</strong> for an invitation that has not been
+  accepted, and <strong>Remove access</strong>, after a confirmation.</li>
 </ul>
 <p><strong>Invitation pending</strong> marks a login that has not been set up yet. A ZEV
 always keeps at least one manager — by access or through a role. Removing the
@@ -2352,8 +2388,8 @@ is recorded in the ZEV's audit log.</p>
 property management company that represents the community — and everyone else
 who has access: a participant given read-only access, or a login added by email
 (a bookkeeper). <strong>Add contact</strong> creates a contact (a person, or an organisation
-with a contact person); a contact that holds no role and has no access can be
-deleted. In a role's party picker, <strong>New contact…</strong> creates one on the spot.</p>
+with a contact person); the pencil on a contact's row edits it, and a contact that holds no role
+and has no access can be deleted from the row's <strong>⋯</strong> menu. In a role's party picker, <strong>New contact…</strong> creates one on the spot.</p>
 <p><strong>Give access</strong> in the header adds someone who is not listed yet: pick a
 <strong>party of the community</strong> or enter an <strong>email address</strong>, choose <strong>Manage</strong> or
 <strong>Read only</strong> and, if the access should end, a last day. Someone with an
@@ -2578,7 +2614,7 @@ is still a draft) if you want it in the new shape.</p>
 <p>Both fields support variable placeholders such as <code>{invoice_number}</code>, <code>{zev_name}</code>, <code>{participant_name}</code>, <code>{period_start}</code>, <code>{period_end}</code>, <code>{total_chf}</code>, and <code>{amount_due_chf}</code>. See <a href="../10-email-configuration/#email-templates">Email Configuration → Email Templates</a> for the full variable reference.</p>
 <p>Subject and body can inherit the platform template or use your own text
 independently. Their badges show the saved choice; <strong>Unsaved changes</strong> marks a
-staged edit. <strong>Use platform default</strong> takes effect after <strong>Save changes</strong>. See
+staged edit. <strong>Use platform default</strong> takes effect after <strong>Save</strong>. See
 <a href="../10-email-configuration/#email-templates">Email Configuration</a> for details.</p>
 <p>If a template contains an invalid placeholder, the system falls back to defaults automatically.</p>
 <p>For more details on email delivery, see <a href="../10-email-configuration/">Email Configuration</a>. For system-wide default email templates managed by admins, see <a href="../14-admin-console/#email-templates">Platform → Templates → Email templates</a>.</p>
@@ -2748,7 +2784,7 @@ staged edit. <strong>Use platform default</strong> takes effect after <strong>Sa
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit", "toc.follow"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
         <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
       

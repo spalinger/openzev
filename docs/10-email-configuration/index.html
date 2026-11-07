@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/favicon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -377,6 +377,34 @@
     
   
     Roles and Permissions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../22-notifications/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notifications
   
 
     
@@ -2027,11 +2055,12 @@ source-build stacks):</p>
 <h2 id="email-templates">Email Templates<a class="headerlink" href="#email-templates" title="Permanent link">&para;</a></h2>
 <p><strong>Managers</strong> customize email templates in <strong>ZEV Settings → Documents &amp; emails</strong>.</p>
 <p>The sections below describe the <strong>invoice</strong> email, which is the one managers
-customize per ZEV. Five further templates are system-wide and edited by admins
+customize per ZEV. Six further templates are system-wide and edited by admins
 in <strong>Platform → Templates → Email templates</strong>: onboarding, address verification,
 the <strong>sign-in link</strong> email sent when a participant requests
-one from the QR code on their invoice, and the two <strong>community access</strong> emails
-(an invitation for someone without an account, a notice for an existing one). See
+one from the QR code on their invoice, the two <strong>community access</strong> emails
+(an invitation for someone without an account, a notice for an existing one), and the
+<strong>document delivered</strong> email (an optional link to a newly delivered document). See
 <a href="../14-admin-console/#email-templates">Platform Administration → Email Templates</a> for those,
 including their placeholders.</p>
 <h3 id="template-fields">Template Fields<a class="headerlink" href="#template-fields" title="Permanent link">&para;</a></h3>
@@ -2059,7 +2088,7 @@ including their placeholders.</p>
 <p>Subject and body can be customized independently. <strong>Customize</strong> starts from the
 platform text; <strong>Use platform default</strong> stages a reset of that field. The badge
 shows its saved source, while <strong>Unsaved changes</strong> marks a staged edit. Click
-<strong>Save changes</strong> to apply it. Later platform edits reach inherited fields; a
+<strong>Save</strong> to apply it. Later platform edits reach inherited fields; a
 saved ZEV override takes precedence even when its text matches the platform text.
 You can clear the editor and type replacement text without reopening it.
 <strong>Discard changes</strong> restores the saved text or inherited preview.</p>
@@ -2113,6 +2142,11 @@ You can clear the editor and type replacement text without reopening it.
 <td><code>{amount_due_chf}</code></td>
 <td>Amount still to pay in CHF: the total less any credit note applied</td>
 <td><code>98.45</code></td>
+</tr>
+<tr>
+<td><code>{inbox_url}</code></td>
+<td>Link to the participant's <strong>My documents</strong> page; empty when the participant has no account</td>
+<td><code>https://app.example.com/me/documents</code></td>
 </tr>
 </tbody>
 </table>
@@ -2399,7 +2433,7 @@ Emails</strong> (<code>/billing/emails</code>) for every invoice's delivery stat
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit", "toc.follow"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
         <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
       
