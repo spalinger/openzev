@@ -707,17 +707,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#general-zev-settings" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        General ZEV Settings
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#grid-connection" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -796,10 +785,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#billing--payment" class="md-nav__link">
+  <a href="#invoices" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Billing &amp; Payment
+        Invoices
       
     </span>
   </a>
@@ -807,10 +796,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#payment-details" class="md-nav__link">
+  <a href="#payment-recipient" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Payment Details
+        Payment recipient
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vat-and-rounding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        VAT and rounding
       
     </span>
   </a>
@@ -1847,17 +1847,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#general-zev-settings" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        General ZEV Settings
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#grid-connection" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1936,10 +1925,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#billing--payment" class="md-nav__link">
+  <a href="#invoices" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Billing &amp; Payment
+        Invoices
       
     </span>
   </a>
@@ -1947,10 +1936,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#payment-details" class="md-nav__link">
+  <a href="#payment-recipient" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Payment Details
+        Payment recipient
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vat-and-rounding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        VAT and rounding
       
     </span>
   </a>
@@ -2223,7 +2223,8 @@ confirmation while edits are unsaved. The People &amp; access and Energy data ta
 save each action as you make it. If you only have read access, the fields are
 shown as flat read-only values.</p>
 <h3 id="general-tab">General tab<a class="headerlink" href="#general-tab" title="Permanent link">&para;</a></h3>
-<h4 id="general-zev-settings">General ZEV Settings<a class="headerlink" href="#general-zev-settings" title="Permanent link">&para;</a></h4>
+<p>Name, start date and ZEV type come first, in one row, without a heading of their own (the tab is already called
+General). The start date is required, so its field has no clear button.</p>
 <table>
 <thead>
 <tr>
@@ -2273,7 +2274,7 @@ shown as flat read-only values.</p>
 </tr>
 <tr>
 <td><strong>Tariff document URL</strong></td>
-<td>Where this operator publishes its machine-readable tariffs (Art. 7b StromVV). Used by the <a href="../07-tariff-configuration/#importing-tariffs-from-your-grid-operator">tariff import</a></td>
+<td>Where this operator publishes its machine-readable tariffs (Art. 7b StromVV). Used by the <a href="../07-tariff-configuration/#importing-tariffs-from-your-grid-operator">tariff import</a>; the field's guidance ends in a link to it (not shown to read-only roles)</td>
 <td>No</td>
 </tr>
 <tr>
@@ -2398,7 +2399,8 @@ gets an invitation email to set up their account — a party at its own email
 address, after which the new login belongs to that party.</p>
 <h3 id="billing--payment-tab">Billing &amp; payment tab<a class="headerlink" href="#billing--payment-tab" title="Permanent link">&para;</a></h3>
 <p><img alt="Billing and payment settings" src="../screenshots/06b-zev-billing-settings.png" /></p>
-<h4 id="billing--payment">Billing &amp; Payment<a class="headerlink" href="#billing--payment" title="Permanent link">&para;</a></h4>
+<p>The tab has three sections.</p>
+<h4 id="invoices">Invoices<a class="headerlink" href="#invoices" title="Permanent link">&para;</a></h4>
 <table>
 <thead>
 <tr>
@@ -2424,6 +2426,16 @@ address, after which the new login belongs to that party.</p>
 <td>Yes</td>
 </tr>
 <tr>
+<td><strong>Invoice-number prefix</strong></td>
+<td>Prefix for invoice numbers (default: <code>INV</code>); 1–10 uppercase letters, digits or hyphens</td>
+<td>No</td>
+</tr>
+<tr>
+<td><strong>Credit-note-number prefix</strong></td>
+<td>Prefix for credit-note numbers</td>
+<td>No</td>
+</tr>
+<tr>
 <td><strong>Itemise price bands on the invoice</strong></td>
 <td>Show each price band of a multi-band tariff as its own line (see <a href="#price-bands-on-the-invoice">below</a>)</td>
 <td>No</td>
@@ -2435,7 +2447,7 @@ address, after which the new login belongs to that party.</p>
 </tr>
 </tbody>
 </table>
-<h4 id="payment-details">Payment Details<a class="headerlink" href="#payment-details" title="Permanent link">&para;</a></h4>
+<h4 id="payment-recipient">Payment recipient<a class="headerlink" href="#payment-recipient" title="Permanent link">&para;</a></h4>
 <table>
 <thead>
 <tr>
@@ -2446,20 +2458,29 @@ address, after which the new login belongs to that party.</p>
 </thead>
 <tbody>
 <tr>
-<td><strong>Invoice prefix</strong></td>
-<td>Prefix for invoice numbers (default: <code>INV</code>); 1–10 uppercase letters, digits or hyphens</td>
-<td>No</td>
-</tr>
-<tr>
 <td><strong>Bank name</strong></td>
-<td>Internal reference for the payment account</td>
+<td>Internal reference for the payment account (never printed)</td>
 <td>No</td>
 </tr>
 <tr>
 <td><strong>Bank IBAN</strong></td>
-<td>Account participants pay into; without it invoices carry no payment details or QR payment slip</td>
+<td>Account participants pay into; without it invoices carry no payment details or QR payment slip. An invalid IBAN is flagged next to the field and keeps you from saving</td>
 <td>No</td>
 </tr>
+</tbody>
+</table>
+<p>The QR-Rechnung creditor address is the address of the invoice issuer, taken
+from their record on the People &amp; access tab; the section links there.</p>
+<h4 id="vat-and-rounding">VAT and rounding<a class="headerlink" href="#vat-and-rounding" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Purpose</th>
+<th>Required</th>
+</tr>
+</thead>
+<tbody>
 <tr>
 <td><strong>VAT treatment</strong></td>
 <td>How VAT is applied when billing participants (see <a href="#vat-configuration">below</a>)</td>
@@ -2477,14 +2498,17 @@ address, after which the new login belongs to that party.</p>
 </tr>
 </tbody>
 </table>
-<p>The QR-Rechnung creditor address is the address of the ZEV's responsible
-person, taken from their participant record.</p>
 <h4 id="document-numbering">Document numbering<a class="headerlink" href="#document-numbering" title="Permanent link">&para;</a></h4>
 <p>Invoice and participation-contract numbers are assigned automatically. Their
 counters cannot be reset through settings or the standard API.</p>
 <h3 id="documents--emails-tab">Documents &amp; emails tab<a class="headerlink" href="#documents--emails-tab" title="Permanent link">&para;</a></h3>
-<p>The invoice email template (see <a href="#email-templates">Email Templates</a> below)
-and these free-text fields:</p>
+<p>Three sections:</p>
+<ul>
+<li><strong>Invoice email</strong> — the subject and text of the email that carries each invoice
+  (see <a href="#email-templates">Email Templates</a> below). Until you customise it, the
+  shipped text is used in the community's invoice language.</li>
+<li>
+<p><strong>Contract PDF</strong> — free-text fields printed in the contract participants receive:</p>
 <table>
 <thead>
 <tr>
@@ -2494,19 +2518,20 @@ and these free-text fields:</p>
 </thead>
 <tbody>
 <tr>
-<td><strong>Notes</strong></td>
-<td>General notes about the ZEV</td>
+<td><strong>Local tariff notes</strong></td>
+<td>Free-text conditions for the local tariff</td>
 </tr>
 <tr>
-<td><strong>Local Tariff Notes</strong></td>
-<td>Free-text conditions for local tariff (appears on contract PDF)</td>
-</tr>
-<tr>
-<td><strong>Additional Contract Notes</strong></td>
-<td>Extra text for participation contract PDF</td>
+<td><strong>Additional contract notes</strong></td>
+<td>Extra text for the participation contract</td>
 </tr>
 </tbody>
 </table>
+</li>
+</ul>
+<ul>
+<li><strong>Notes</strong> — your own notes about the community. They appear on no document.</li>
+</ul>
 <h3 id="billing-interval">Billing Interval<a class="headerlink" href="#billing-interval" title="Permanent link">&para;</a></h3>
 <p>Choose how often invoices are generated:</p>
 <ul>
