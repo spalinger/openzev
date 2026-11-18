@@ -2881,7 +2881,7 @@ account without community access should ask an administrator to grant it.</p>
 <li>Go to <strong>Platform → Overview</strong> to see system-wide KPIs</li>
 <li>View <strong>ZEVs</strong>, <strong>Accounts</strong>, <strong>Invoices</strong>, and <strong>Settings</strong> (regional/VAT)</li>
 <li>To work inside a community: open <strong>Platform → Overview → ZEVs</strong> and click <strong>Manage</strong> on a row — this selects the ZEV and takes you to its operational Overview. (Under <code>/admin</code> pages show <strong>Platform administration</strong> above the title instead of a community.)</li>
-<li>Anywhere else, the community name above the page title shows the working community and, when you have more than one, opens the list to choose another — so it stays visible and in reach when the navigation scrolls, the sidebar is collapsed, or you are on mobile. With more than one community it is set as a small button with an arrow. With read-only access it reads e.g. <em>Sonnenhof · Viewer (read only)</em></li>
+<li>The community name above the page title shows where you’re working. If you can switch communities, select the name and choose another. A check mark identifies the current community, which cannot be selected again. With read-only access, the heading shows, for example, <em>Sonnenhof · Viewer (read only)</em>.</li>
 <li>For keyboard access, open the community name or the account button with Enter or Space, move through the options with the arrow keys (community list) or Tab (account menu), and press Escape to close it. After choosing a community, focus returns to its name. On mobile, Escape closes the navigation drawer and returns focus to its menu button.</li>
 <li>Once signed in, the first Tab on a page reaches <strong>Skip to main content</strong>, which jumps past the navigation. After you open another page, focus starts at its title; switching tabs or changing filters keeps focus where it was. The browser tab shows the page and the community, e.g. <em>Billing · Muster ZEV – OpenZEV</em>.</li>
 </ul>
@@ -2956,9 +2956,13 @@ order. Sorts use the underlying values, so amounts are ordered numerically.
 An arrow shows the selected sort direction.
 Action columns cannot be sorted.</p>
 <p>Sort controls appear only with at least two filtered rows. Filtering down to
-one row preserves the selected order for when more rows return. On phones,
-sortable headings remain above the record cards. Calculation layouts such as
+one row preserves the selected order for when more rows return. In narrower
+windows, participant and billing rows become cards and hide their heading bar
+and sorting controls. Tariff cards keep only their category heading.
+The current order is kept; widen the window to sort again. Calculation layouts such as
 invoice line items and the hour/minute readings grid keep their fixed order.</p>
+<p>Wide admin tables scroll horizontally inside their panel, with the scrollbar
+at its bottom edge.</p>
 <h2 id="api-access">API Access<a class="headerlink" href="#api-access" title="Permanent link">&para;</a></h2>
 <p>OpenZEV provides a complete REST API for programmatic access:</p>
 <ul>
