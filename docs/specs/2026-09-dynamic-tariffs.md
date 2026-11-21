@@ -814,7 +814,10 @@ positive coverage and maintenance-link permissions.
 - **`types/api.ts`** — `DynamicTariffSource`, `DynamicTariffType`,
   `Tariff.dynamic_source` / `TariffInput.dynamic_source`,
   `VseTariffCandidate.dynamic_url`, `VseTariffImportResult.created[].dynamic`.
-- **`DynamicPriceHistoryModal`** — opened from the platform admin table; the same
+- **`DynamicPriceHistoryModal`** — opened from the platform admin table, and kept
+  a dialog (`xl`) by the UI-patterns record-pane decision
+  (SPEC-2026-10-ui-patterns §13): the source's own home is its edit dialog, and a
+  week of quarter-hour prices needs the dialog's width. The same
   `DynamicPriceHistoryPanel` is shown inline in the tariff detail pane
   (`compact`). It exposes a seven-day default/31-day maximum date window (opened
   for a tariff: the last 30 days within its validity), summary statistics, a step

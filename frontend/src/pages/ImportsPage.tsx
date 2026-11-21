@@ -1,9 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, type FormEvent } from 'react'
-import { Tooltip } from '@mantine/core'
+import { createContext, useContext, useEffect, useEffectEvent, useMemo, useRef, useState, type FormEvent } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
-    faEye,
+    faChevronRight,
     faEllipsis,
     faPlus,
     faTrash,
@@ -38,7 +37,8 @@ import type { ImportLog, ImportTimestampTimezone } from '../types/api'
 import { PageSkeleton } from '../components/PageSkeleton'
 import { BulkDeleteModal } from '../features/imports/BulkDeleteModal'
 import { ImportHistoryTable } from '../features/imports/ImportHistoryTable'
-import { ImportProtocolModal } from '../features/imports/ImportProtocolModal'
+import { ImportProtocolPane } from '../features/imports/ImportProtocolPane'
+import { useListPane } from '../components/useListPane'
 import { ImportWizardModal } from '../features/imports/ImportWizardModal'
 import {
     isFailedBatchOutcome,
@@ -69,6 +69,11 @@ import { downloadBlob } from '../lib/downloadBlob'
 import { PageHeader } from '../components/PageHeader'
 import { Notice } from '../components/Notice'
 
+/** Content width (rem) from which the history and a protocol sit side by side; below it the protocol takes the area. */
+const SPLIT_MIN_REM = 72
+/** History columns the protocol repeats, dropped while it is open beside them. */
+const PANE_COLUMNS = new Set(['zev_display', 'imported_by_display', 'rows_total', 'rows_imported', 'rows_skipped'])
+
 const SDAT_SUCCESS_MESSAGES = {
     accepted: 'pages.imports.messages.importSdat_accepted',
     correctionOnly: 'pages.imports.messages.importSdat_correctionOnly',
@@ -77,6 +82,30 @@ const SDAT_SUCCESS_MESSAGES = {
     rejected: 'pages.imports.messages.importSdatRejected',
     legacy: 'pages.imports.messages.importSuccess',
 } as const
+
+/** Opens a protocol from the history; a context keeps the cell's component type stable across renders. */
+const ProtocolContext = createContext<{ open: (log: ImportLog) => void; openId: string | undefined } | null>(null)
+
+/** The file name, as the button that opens the import's protocol (its row opens it too, as in the tariff list). */
+function ProtocolCell({ row }: { row: { original: ImportLog & { filename_display: string } } }) {
+    const protocol = useContext(ProtocolContext)
+    if (!protocol) throw new Error('ProtocolCell requires ProtocolContext')
+    const log = row.original
+    return (
+        <button
+            type="button"
+            className="row-select"
+            data-import-open={log.id}
+            aria-expanded={log.id === protocol.openId}
+            onClick={(event) => {
+                event.stopPropagation()
+                protocol.open(log)
+            }}
+        >
+            {log.filename_display}
+        </button>
+    )
+}
 
 export function ImportsPage() {
     const { t } = useTranslation()
@@ -165,6 +194,20 @@ export function ImportsContent() {
     const linkedProtocol = !!protocolLog && hash === '#correction-history'
     const correctionPeriod = billingRangeFromParams(searchParams.get('change_from'), searchParams.get('change_to'))
 
+    // The protocol opens beside the history, `?import=<id>` (SPEC-2026-10-ui-patterns §6.2); the wizard and bulk
+    // delete dialogs share the bypass, so an import that finishes behind the wizard can open its protocol.
+    const { splitRef, fitsTwoPanes, listHidden, paneTitleRef, openItem, closePane } = useListPane({
+        param: 'import',
+        paneOpen: !!protocolLog,
+        splitMinRem: SPLIT_MIN_REM,
+        confirm,
+        clearParams: ['change_from', 'change_to'],
+        clearHash: '#correction-history',
+        bypass: protocolNavigationBypass,
+    })
+    const besideList = !!protocolLog && fitsTwoPanes
+
+    /** Drops the open protocol without a history step: its import is gone, or the scope changed. */
     function closeProtocol() {
         allowNavigation(protocolNavigationBypass, () => updateParams((params) => {
             params.delete('import')
@@ -173,18 +216,14 @@ export function ImportsContent() {
         }, { clearHash: '#correction-history' }))
     }
 
-    const openProtocol = useCallback((log: ImportLog) => {
+    function openProtocol(log: ImportLog) {
         const listedLog = { ...log }
         delete listedLog.reading_changes
         queryClient.setQueryData<ImportLog[]>(queryKeys.metering.importLogs(), (logs) =>
             logs?.some((item) => item.id === log.id) ? logs : [...(logs ?? []), listedLog],
         )
-        allowNavigation(protocolNavigationBypass, () => updateParams((params) => {
-            params.set('import', log.id)
-            params.delete('change_from')
-            params.delete('change_to')
-        }, { clearHash: '#correction-history' }))
-    }, [queryClient, updateParams])
+        openItem(log)
+    }
 
     const currentStamp = useMemo<PreviewStamp | null>(() => {
         if (files.length === 0) return null
@@ -491,7 +530,7 @@ export function ImportsContent() {
             {
                 accessorKey: 'filename',
                 header: t('pages.imports.columns.filename'),
-                cell: (ctx) => ctx.row.original.filename_display,
+                cell: ProtocolCell,
             },
             {
                 accessorKey: 'rows_total',
@@ -510,55 +549,55 @@ export function ImportsContent() {
                 meta: { numeric: true },
             },
             {
-                id: 'protocol',
-                header: t('pages.imports.columns.protocol'),
-                enableSorting: false,
-                cell: (ctx) => (
-                    <Tooltip label={t('pages.imports.actions.openProtocol')} events={{ hover: true, focus: true, touch: false }}>
-                        <button type="button" className="button button-secondary button-compact" aria-label={t('pages.imports.actions.openProtocol')} onClick={() => openProtocol(ctx.row.original)}>
-                            <FontAwesomeIcon icon={faEye} fixedWidth aria-hidden="true" />
-                        </button>
-                    </Tooltip>
-                ),
-            },
-            {
                 id: 'actions',
-                header: t('pages.imports.columns.actions'),
+                // Only ever a delete button: the column needs a name for screen readers, not a visible one.
+                header: () => <span className="visually-hidden">{t('pages.imports.columns.actions')}</span>,
                 enableSorting: false,
+                // The menu acts on the import; the row's own click (opening the protocol) must not fire with it.
                 cell: (ctx) => isImportLogDeletable(ctx.row.original) ? (
-                    <ActionMenu
-                        label={t('pages.imports.actions.rowActions')}
-                        icon={<FontAwesomeIcon icon={faEllipsis} fixedWidth />}
-                        iconOnly
-                        items={[
-                            {
-                                key: 'delete',
-                                label: t('pages.imports.actions.deleteImport'),
-                                iconButtonLabel: `${t('pages.imports.actions.deleteImport')}: ${ctx.row.original.filename || formatDateTime(ctx.row.original.created_at, settings)}`,
-                                icon: <FontAwesomeIcon icon={faTrash} fixedWidth />,
-                                danger: true,
-                                disabled: deleteImportMutation.isPending || dialogLoading,
-                                onClick: () => confirm({
-                                    title: t('pages.imports.delete.singleTitle'),
-                                    message: t('pages.imports.delete.singleMessage', {
-                                        filename: ctx.row.original.filename || '-',
-                                        createdAt: formatDateTime(ctx.row.original.created_at, settings),
+                    <div onClick={(event) => event.stopPropagation()}>
+                        <ActionMenu
+                            label={t('pages.imports.actions.rowActions')}
+                            icon={<FontAwesomeIcon icon={faEllipsis} fixedWidth />}
+                            iconOnly
+                            items={[
+                                {
+                                    key: 'delete',
+                                    label: t('pages.imports.actions.deleteImport'),
+                                    iconButtonLabel: `${t('pages.imports.actions.deleteImport')}: ${ctx.row.original.filename || formatDateTime(ctx.row.original.created_at, settings)}`,
+                                    icon: <FontAwesomeIcon icon={faTrash} fixedWidth />,
+                                    danger: true,
+                                    disabled: deleteImportMutation.isPending || dialogLoading,
+                                    onClick: () => confirm({
+                                        title: t('pages.imports.delete.singleTitle'),
+                                        message: t('pages.imports.delete.singleMessage', {
+                                            filename: ctx.row.original.filename || '-',
+                                            createdAt: formatDateTime(ctx.row.original.created_at, settings),
+                                        }),
+                                        confirmText: t('pages.imports.delete.confirmAction'),
+                                        isDangerous: true,
+                                        onConfirm: () => {
+                                            if (scope.canWrite && isCurrent(scope)) deleteImportMutation.mutate({ id: ctx.row.original.id, scope })
+                                        },
                                     }),
-                                    confirmText: t('pages.imports.delete.confirmAction'),
-                                    isDangerous: true,
-                                    onConfirm: () => {
-                                        if (scope.canWrite && isCurrent(scope)) deleteImportMutation.mutate({ id: ctx.row.original.id, scope })
-                                    },
-                                }),
-                            },
-                        ]}
-                    />
+                                },
+                            ]}
+                        />
+                    </div>
                 ) : null,
             },
+            {
+                id: 'open',
+                header: () => <span className="visually-hidden">{t('pages.imports.actions.openProtocol')}</span>,
+                enableSorting: false,
+                meta: { className: 'row-open' },
+                cell: () => <FontAwesomeIcon icon={faChevronRight} fixedWidth aria-hidden="true" />,
+            },
         ]
-            return canWriteSelectedCommunity ? columns : columns.filter((column) => column.id !== 'actions')
+            return columns.filter((column) => (canWriteSelectedCommunity || column.id !== 'actions')
+                && !(besideList && PANE_COLUMNS.has(column.id ?? ('accessorKey' in column ? String(column.accessorKey) : ''))))
         },
-        [t, settings, confirm, deleteImportMutation, dialogLoading, canWriteSelectedCommunity, scope, isCurrent, openProtocol],
+        [t, settings, confirm, deleteImportMutation, dialogLoading, canWriteSelectedCommunity, scope, isCurrent, besideList],
     )
 
     function clearDetection() {
@@ -1014,14 +1053,36 @@ export function ImportsContent() {
                 <p className="warning-banner">{t('pages.imports.requestedImportMissing')}</p>
             )}
 
-            <ImportHistoryTable
-                rows={importLogRows}
-                columns={importLogColumns}
-                getRowId={(row) => row.id}
-                filters={historyFilters}
-                onFiltersChange={setHistoryFilters}
-                onNewImport={canWriteSelectedCommunity ? () => setWizardOpen(true) : undefined}
-            />
+            <div
+                ref={splitRef}
+                className="detail-split"
+                data-layout={fitsTwoPanes ? 'wide' : 'narrow'}
+                data-pane={protocolLog ? 'open' : 'closed'}
+            >
+                <div className="detail-split-list" hidden={listHidden}>
+                    <ProtocolContext.Provider value={{ open: openProtocol, openId: protocolLog?.id }}>
+                        <ImportHistoryTable
+                            rows={importLogRows}
+                            columns={importLogColumns}
+                            getRowId={(row) => row.id}
+                            filters={historyFilters}
+                            onFiltersChange={setHistoryFilters}
+                            onNewImport={canWriteSelectedCommunity ? () => setWizardOpen(true) : undefined}
+                            selectedId={protocolLog?.id}
+                            onOpen={openProtocol}
+                        />
+                    </ProtocolContext.Provider>
+                </div>
+                {protocolLog && (
+                    <ImportProtocolPane
+                        log={protocolLog}
+                        onClose={closePane}
+                        focusCorrections={linkedProtocol}
+                        correctionPeriod={correctionPeriod ?? undefined}
+                        titleRef={paneTitleRef}
+                    />
+                )}
+            </div>
 
             <BulkDeleteModal
                 open={showBulkDeleteModal}
@@ -1042,13 +1103,6 @@ export function ImportsContent() {
                 onReview={submitBulkDelete}
                 onBack={() => setBulkDeleteArmed(false)}
                 onConfirm={confirmBulkDelete}
-            />
-
-            <ImportProtocolModal
-                log={protocolLog}
-                onClose={closeProtocol}
-                focusCorrections={linkedProtocol}
-                correctionPeriod={correctionPeriod ?? undefined}
             />
 
             {dialog && (

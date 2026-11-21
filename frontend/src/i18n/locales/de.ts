@@ -1015,7 +1015,6 @@ export const de = {
                 total: 'Gesamt',
                 imported: 'Importiert',
                 skipped: 'Übersprungen',
-                protocol: 'Protokoll',
                 actions: 'Aktionen',
             },
             actions: {
@@ -1143,8 +1142,8 @@ export const de = {
                 correctionsLoading: 'Aufgezeichnete Änderungen werden geladen…',
                 correctionsUnavailable: 'Die Messwerthistorie konnte nicht geladen werden.',
                 correctionsTruncated: 'Diese Historie ist unvollständig: Einige Änderungen wurden nicht gespeichert.',
-                correctionsRetained_one: '{{count}} Änderung aufbewahrt.',
-                correctionsRetained_other: '{{count}} Änderungen aufbewahrt.',
+                correctionsRetained_one: '{{count}} Änderung erfasst.',
+                correctionsRetained_other: '{{count}} Änderungen erfasst.',
                 correctionsNoChangesConfirmed: 'Keine Messwertänderungen.',
                 correctionsNoneRecorded: 'Es wurde keine detaillierte Historie aufgezeichnet.',
                 correctionsMetadataOnly: 'Keine Änderungen an Energiewerten in der gespeicherten Historie.',
@@ -4520,7 +4519,7 @@ export const de = {
             },
             details: {
                 file: 'Datei',
-                fileKept: 'Wird aufbewahrt',
+                fileKept: 'Kein Ablaufdatum',
                 integrity: 'Integrität',
                 title: 'Sicherungsdetails',
                 archive: 'Archiv',

@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import i18next from 'i18next'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ImportProtocolModal } from '../src/features/imports/ImportProtocolModal'
+import { ImportProtocolPane } from '../src/features/imports/ImportProtocolPane'
 import { queryKeys } from '../src/lib/api/queryKeys'
 import { en } from '../src/i18n/locales/en'
 import { de } from '../src/i18n/locales/de'
@@ -50,9 +50,9 @@ async function render(language: keyof typeof locales, issues: SdatIssue[]) {
     }
     client.setQueryData(queryKeys.metering.importLog(log.id), log)
     await act(async () => root.render(createElement(I18nextProvider, { i18n: instance },
-        createElement(QueryClientProvider, { client }, createElement(ImportProtocolModal, { log, onClose: () => undefined })),
+        createElement(QueryClientProvider, { client }, createElement(ImportProtocolPane, { log, onClose: () => undefined })),
     )))
-    return document.querySelector('[role="dialog"]')!.textContent!
+    return document.querySelector('.detail-pane')!.textContent!
 }
 
 describe.each(Object.keys(locales) as Array<keyof typeof locales>)('SDAT protocol in %s', language => {

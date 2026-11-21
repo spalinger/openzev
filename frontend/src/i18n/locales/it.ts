@@ -1015,7 +1015,6 @@ export const it = {
                 total: 'Totale',
                 imported: 'Importato',
                 skipped: 'Saltato',
-                protocol: 'Protocollo',
                 actions: 'Azioni',
             },
             actions: {

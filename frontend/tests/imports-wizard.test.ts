@@ -97,6 +97,11 @@ function RouteProbe() {
     return null
 }
 
+/** The history's protocol buttons (each import's file name). */
+function openButtons(): HTMLButtonElement[] {
+    return Array.from(container.querySelectorAll<HTMLButtonElement>('[data-import-open]'))
+}
+
 function buttons(label: string): HTMLButtonElement[] {
     return Array.from(container.querySelectorAll('button')).filter(
         (button) => button.textContent === label || button.getAttribute('aria-label') === label,
@@ -246,22 +251,24 @@ describe('ImportsPage wizard gating', () => {
     it('follows same-mounted URL changes after opening a row and closes without reopening it', async () => {
         importLogsData = [logRow(), logRow({ id: 'log-8', filename: 'another.xml' })]
         renderPage('/metering/imports?keep=yes')
-        act(() => buttons('pages.imports.actions.openProtocol')[0].click())
+        act(() => openButtons()[0].click())
         await act(async () => navigate('/metering/imports?import=log-8&change_from=2026-02-03&change_to=2026-02-04&keep=yes'))
-        expect(container.querySelector('[role="dialog"]')?.textContent).toContain('another.xml')
-        act(() => container.querySelector<HTMLButtonElement>('.form-modal-close')!.click())
-        expect(container.querySelector('[role="dialog"]')).toBeNull()
+        expect(container.querySelector('.detail-pane')?.textContent).toContain('another.xml')
+        act(() => container.querySelector<HTMLButtonElement>('.detail-pane-header button')!.click())
+        expect(container.querySelector('.detail-pane')).toBeNull()
         expect(new URLSearchParams(location.search).toString()).toBe('keep=yes')
     })
 
-    it.each(['#correction-history', '#unrelated'])('clears only its own hash on row open and close: %s', (hash) => {
+    it.each(['#correction-history', '#unrelated'])('clears only its own hash on row open, and X returns to the list: %s', async (hash) => {
         importLogsData = [logRow()]
         renderPage(`/metering/imports?keep=yes${hash}`)
-        act(() => buttons('pages.imports.actions.openProtocol')[0].click())
+        act(() => openButtons()[0].click())
         expect(location.hash).toBe(hash === '#correction-history' ? '' : hash)
-        act(() => container.querySelector<HTMLButtonElement>('.form-modal-close')!.click())
-        expect(location.hash).toBe(hash === '#correction-history' ? '' : hash)
-        expect(location.search).toBe('?keep=yes')
+        // X takes back the history step opening added, so the list's own address returns as it was.
+        await act(async () => container.querySelector<HTMLButtonElement>('.detail-pane-header button')!.click())
+        await vi.waitFor(() => expect(location.search).toBe('?keep=yes'))
+        expect(location.hash).toBe(hash)
+        expect(container.querySelector('.detail-pane')).toBeNull()
     })
 
     it('lets an upload result supersede an incoming link and dismisses it once', async () => {
@@ -272,10 +279,11 @@ describe('ImportsPage wizard gating', () => {
         act(() => startButton().click())
         await act(async () => navigate('/metering/imports?import=log-7&change_from=2026-02-03&change_to=2026-02-04&keep=yes'))
         succeedUpload(logRow({ id: 'new-upload', filename: 'uploaded.xml' }))
-        expect(container.querySelector('[role="dialog"]')?.textContent).toContain('uploaded.xml')
+        expect(container.querySelector('.detail-pane')?.textContent).toContain('uploaded.xml')
         expect(new URLSearchParams(location.search).get('import')).toBe('new-upload')
-        act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
-        expect(container.querySelector('[role="dialog"]')).toBeNull()
+        // The pane is not modal: it is closed with its X (Escape only works while focus is inside it).
+        act(() => container.querySelector<HTMLButtonElement>('.detail-pane-header button')!.click())
+        expect(container.querySelector('.detail-pane')).toBeNull()
         expect(new URLSearchParams(location.search).toString()).toBe('keep=yes')
     })
 
@@ -288,10 +296,10 @@ describe('ImportsPage wizard gating', () => {
         scopeLoading = false
         selectedZevId = 'zev-1'
         renderPage(path)
-        expect(container.querySelector('[role="dialog"]')).not.toBeNull()
+        expect(container.querySelector('.detail-pane')).not.toBeNull()
         selectedZevId = 'zev-2'
         renderPage(path)
-        expect(container.querySelector('[role="dialog"]')).toBeNull()
+        expect(container.querySelector('.detail-pane')).toBeNull()
         expect(new URLSearchParams(location.search).has('import')).toBe(false)
     })
 
@@ -304,23 +312,23 @@ describe('ImportsPage wizard gating', () => {
         importLogsData = [logRow(), logRow({ id: 'log-8' })]
         logsFetching = false
         renderPage(path)
-        expect(container.querySelector('[role="dialog"]')).not.toBeNull()
+        expect(container.querySelector('.detail-pane')).not.toBeNull()
     })
 
     it('does not keep a row protocol after a refreshed list removes its import', () => {
         importLogsData = [logRow()]
         renderPage()
-        act(() => buttons('pages.imports.actions.openProtocol')[0].click())
+        act(() => openButtons()[0].click())
         importLogsData = []
         renderPage()
-        expect(container.querySelector('[role="dialog"]')).toBeNull()
+        expect(container.querySelector('.detail-pane')).toBeNull()
         expect(container.textContent).toContain('pages.imports.requestedImportMissing')
     })
 
     it('honors an invoice link to the same import that was opened from a row', async () => {
         importLogsData = [logRow()]
         renderPage()
-        act(() => buttons('pages.imports.actions.openProtocol')[0].click())
+        act(() => openButtons()[0].click())
         await act(async () => navigate('/metering/imports?import=log-7&change_from=2026-02-03&change_to=2026-02-04#correction-history'))
         expect(container.textContent).toContain('pages.imports.protocol.correctionsPeriod')
         await vi.waitFor(() => expect(document.activeElement?.id).toBe('correction-history'))
@@ -333,7 +341,7 @@ describe('ImportsPage wizard gating', () => {
         await act(async () => navigate('/metering/imports?import=log-7&change_from=2026-02-03&change_to=2026-02-04&keep=yes'))
         const mutation = mutationOptions.at(mode === 'single' ? -3 : -2)
         await act(async () => mutation.onSuccess({ deleted_logs: 1, deleted_readings: 4 }, variables))
-        expect(container.querySelector('[role="dialog"]')).toBeNull()
+        expect(container.querySelector('.detail-pane')).toBeNull()
         expect(new URLSearchParams(location.search).toString()).toBe('keep=yes')
     })
 
@@ -343,7 +351,7 @@ describe('ImportsPage wizard gating', () => {
     ])('omits invalid affected-period context: %s to %s', (from, to) => {
         importLogsData = [logRow()]
         renderPage(`/metering/imports?import=log-7&change_from=${from}&change_to=${to}`)
-        expect(container.querySelector('[role="dialog"]')).not.toBeNull()
+        expect(container.querySelector('.detail-pane')).not.toBeNull()
         expect(container.textContent).not.toContain('pages.imports.protocol.correctionsPeriod')
     })
 
@@ -357,8 +365,8 @@ describe('ImportsPage wizard gating', () => {
         })
         await vi.waitFor(() => expect(document.activeElement?.id).toBe('correction-history'))
         expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({ block: 'start' })
-        act(() => container.querySelector<HTMLButtonElement>('.form-modal-close')!.click())
-        expect(container.querySelector('[role="dialog"]')).toBeNull()
+        act(() => container.querySelector<HTMLButtonElement>('.detail-pane-header button')!.click())
+        expect(container.querySelector('.detail-pane')).toBeNull()
         expect(location.hash).toBe('')
     })
 
@@ -735,7 +743,7 @@ describe('ImportsPage wizard gating', () => {
         const row = Array.from(container.querySelectorAll('tbody tr')).find((entry) => entry.textContent?.includes('alpha.csv'))!
         const actions = row.querySelector('.button-destructive')
         expect(actions).toBeNull()
-        const protocol = row.querySelector<HTMLButtonElement>('[aria-label="pages.imports.actions.openProtocol"]')!
+        const protocol = row.querySelector<HTMLButtonElement>('[data-import-open]')!
         act(() => protocol.click())
         expect(container.textContent).toContain('pages.imports.delete.overwriteProtected')
     })
@@ -829,7 +837,7 @@ describe('ImportsPage wizard gating', () => {
         twoLogs()
         expect(buttons('pages.imports.actions.deleteImport: alpha.csv')[0].textContent).toBe('')
         expect(buttons('pages.imports.actions.deleteImport: beta.xml')[0].textContent).toBe('')
-        expect(buttons('pages.imports.actions.openProtocol')).toHaveLength(2)
+        expect(openButtons()).toHaveLength(2)
     })
 
     it('offers the direction column for both row formats', () => {
@@ -1277,7 +1285,7 @@ describe('import deletion completion ownership', () => {
         selectedZevId = 'zev-2'
         importLogsData = importLogsData.map(log => ({ ...log, id: `B-${log.id}`, zev: 'zev-2', filename: `B-${log.filename}` }))
         renderPage()
-        act(() => buttons('pages.imports.actions.openProtocol')[0].click())
+        act(() => openButtons()[0].click())
         act(() => buttons('pages.imports.actions.deleteImports')[0].click())
         const dates = container.querySelectorAll<HTMLInputElement>('input[type=date]')
         setInputValue(dates[0], '2026-03-05')

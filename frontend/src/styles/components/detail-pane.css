@@ -22,6 +22,16 @@
   display: none;
 }
 
+/* The row whose record the pane shows (a DataTable's rowClassName), marked
+   as the participant and tariff tables mark theirs. */
+.detail-split-list tbody tr.is-selected > td {
+  background: var(--surface);
+}
+
+.detail-split-list tbody tr.is-selected > td:first-child {
+  box-shadow: inset 3px 0 0 var(--brand-mid);
+}
+
 /* ── Detail pane ─────────────────────────────────────────────────────────
    Shared by the tariff and audit-log panes (SPEC-2026-10-ui-patterns §7.2).
    In flow beside the list: it takes its own column, no scrim, no scroll
@@ -91,6 +101,19 @@
 
 .detail-pane-header--brand .button-secondary:hover:not(:disabled) {
   background: var(--brand);
+}
+
+/* On a phone the app bar is pinned too (layout/responsive.css): the header
+   sticks below it instead of under it. */
+@media (max-width: 768px) {
+  .detail-pane-header {
+    top: calc(var(--shell-banner-height) + 3.5rem);
+  }
+
+  /* A pane that replaces its list is scrolled to below the app bar. */
+  .detail-pane {
+    scroll-margin-top: calc(var(--shell-banner-height) + 4.25rem);
+  }
 }
 
 .detail-pane-heading {

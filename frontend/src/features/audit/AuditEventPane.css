@@ -4,10 +4,6 @@
   cursor: pointer;
 }
 
-.audit-event-row.is-selected {
-  background: var(--surface-subtle);
-}
-
 .audit-pane-summary {
   margin: 0;
   font-size: 1.05rem;

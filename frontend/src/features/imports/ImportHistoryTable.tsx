@@ -11,9 +11,13 @@ interface ImportHistoryTableProps<T extends Record<string, any>> {
     onFiltersChange: (filters: ColumnFiltersState) => void
     /** Absent for a viewer (#761): no create action in the empty state. */
     onNewImport?: () => void
+    /** The import whose protocol is open beside the table. */
+    selectedId?: string
+    /** Opens an import's protocol: a click anywhere on its row. */
+    onOpen: (row: T) => void
 }
 
-export function ImportHistoryTable<T extends Record<string, any>>({ rows, columns, getRowId, filters, onFiltersChange, onNewImport }: ImportHistoryTableProps<T>) {
+export function ImportHistoryTable<T extends Record<string, any>>({ rows, columns, getRowId, filters, onFiltersChange, onNewImport, selectedId, onOpen }: ImportHistoryTableProps<T>) {
     const { t } = useTranslation()
     const filenameFilter = filters.find((filter) => filter.id === 'filename')?.value as string | undefined ?? ''
     const sourceFilter = filters.find((filter) => filter.id === 'source')?.value as string | undefined ?? ''
@@ -64,6 +68,8 @@ export function ImportHistoryTable<T extends Record<string, any>>({ rows, column
                 columnFilters={filters}
                 onColumnFiltersChange={onFiltersChange}
                 emptyMessage={t('pages.imports.noRows')}
+                onRowClick={onOpen}
+                rowClassName={(row) => (getRowId(row) === selectedId ? 'is-openable is-selected' : 'is-openable')}
             />
         </div>
     )

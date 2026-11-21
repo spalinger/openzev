@@ -1721,7 +1721,7 @@ reaches every ZEV-scope route and sees its pages read-only
 | `/admin` | `admin` | `AdminOverviewHubPage` (tabs = routes; default tab `overview`) |
 | `/admin/overview` · `/admin/zevs` · `/admin/invoices` · `/admin/dynamic-sources` · `/admin/audit` · `/admin/health` | `admin` | `AdminOverviewHubPage tab=…` (KPIs · ZEVs table · all invoices · dynamic price sources · platform audit log · System health) |
 | `/admin/audit-logs` | `admin` | alias → `/admin/audit` |
-| `/admin/system-settings` | `admin` | `AdminSystemSettingsPage` |
+| `/admin/system-settings` | `admin` | `AdminSystemSettingsPage`; on `?tab=backup`, `job=<id>` opens that finished backup job in its detail pane (opening from the list adds one history step, switching replaces it, X and Back close it; SPEC-2026-10-ui-patterns §6.2) |
 | `/admin/accounts` | `admin` | `AdminAccountsHubPage` (Users tab) |
 | `/admin/accounts/users` · `/admin/accounts/api-keys` | `admin` | `AdminAccountsHubPage tab=…` |
 | `/admin/api-keys` | `admin` | alias → `/admin/accounts/api-keys` |
@@ -1737,7 +1737,7 @@ reaches every ZEV-scope route and sees its pages read-only
 | `/metering-points` | ZEV scope, `participant` | alias → `/metering/points` |
 | `/metering/chart` | ZEV scope, `participant` | `MeteringChartPage` (`tab="chart"`, guarded against former participants; tab switches preserve state) |
 | `/metering/quality` | ZEV scope | `MeteringChartPage` (`tab="quality"`) — intentional participant restriction: quality shows whole-ZEV severity counts, participant names, and overlap warnings (operator view; backend role-scoping means no leak either way) |
-| `/metering/imports` | ZEV scope | `MeteringChartPage` (`tab="imports"`, consuming the header-free `ImportsContent` body) |
+| `/metering/imports` | ZEV scope | `MeteringChartPage` (`tab="imports"`, consuming the header-free `ImportsContent` body); `import=<id>` opens that import's protocol in its detail pane, with optional `change_from`/`change_to` and `#correction-history` for a correction deep link (history steps as for the backup job above; [metering import §8.4](2026-03-metering-import-and-quality.md)) |
 | `/metering-data` | any authenticated | alias → `/metering/chart`, except `?tab=quality` → guarded `/metering/quality`; `tab` is always stripped, remaining params preserved |
 | `/imports` | ZEV scope | alias → `/metering/imports` (query preserved) |
 | `/tariffs` · `/tariffs/progression` | ZEV scope | `TariffsHubPage tab=…` (components · price progression) |

@@ -1,0 +1,198 @@
+.import-protocol {
+  overflow-wrap: anywhere;
+}
+
+.import-protocol > header {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.import-protocol :is(h3, h4, p) {
+  margin: 0;
+}
+
+.import-protocol .held-readings {
+  padding: 0;
+  border: 0;
+}
+
+.import-protocol .held-readings-status {
+  padding: 0.5rem 0 0;
+}
+
+.correction-history {
+  scroll-margin-top: 5rem;
+}
+
+/* Contextual rules beat .import-protocol :is(h3, h4, p) { margin: 0 }. */
+.correction-history .correction-history-title {
+  margin-bottom: 0.4rem;
+}
+
+.correction-history .correction-history-note {
+  margin: 0 0 0.4rem;
+}
+
+.correction-history .correction-history-footnote {
+  margin: 0.4rem 0 0;
+}
+
+.correction-history-table {
+  white-space: nowrap;
+}
+
+.correction-history-promoted {
+  font-size: 0.8rem;
+}
+
+.correction-history-values {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.correction-history-document {
+  min-width: 12rem;
+  max-width: 18rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Too narrow for six columns (the pane beside the history, a phone): each
+   change becomes a card of labelled pairs, so old → new stays in view
+   instead of scrolling off to the right. The shared card-table pattern:
+   the column labels stay for screen readers, sorting hides (ResponsiveTableHead). */
+
+.correction-history .table-scroll {
+  container-type: inline-size;
+}
+
+@container (max-width: 44rem) {
+  .correction-history-table,
+  .correction-history-table tbody,
+  .correction-history-table td {
+    display: block;
+  }
+
+  .correction-history-table {
+    position: relative;
+    white-space: normal;
+  }
+
+  .correction-history-table thead {
+    --table-card-layout: 1;
+
+    position: absolute;
+    width: 100%;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .correction-history-table thead tr {
+    display: flex;
+  }
+
+  .correction-history-table thead th {
+    position: relative;
+    display: block;
+    width: auto;
+  }
+
+  .correction-history-table tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.6rem 1rem;
+    height: auto;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border-default);
+  }
+
+  .correction-history-table tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .correction-history-table tbody td {
+    padding: 0;
+    border: 0;
+    background: none;
+  }
+
+  /* Old → new may wrap at the arrow rather than run into the next pair. */
+  .correction-history-table .correction-history-values {
+    white-space: normal;
+  }
+
+  .correction-history-table .correction-history-values > * {
+    white-space: nowrap;
+  }
+
+  .correction-history-table tbody td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.15rem;
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  .correction-history-document {
+    min-width: 0;
+    max-width: none;
+  }
+}
+
+.correction-history-pagination {
+  margin-top: 0.4rem;
+}
+
+.import-protocol .sdat-issues {
+  gap: 0.5rem;
+}
+
+.import-protocol .sdat-issues-title {
+  margin-bottom: 0.2rem;
+}
+
+.import-protocol .sdat-issue {
+  gap: 0.4rem;
+}
+
+.import-protocol .sdat-issue-params {
+  display: grid;
+  gap: 0.15rem;
+  margin: 0.4rem 0 0;
+}
+
+.import-protocol .sdat-issue-param {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.import-protocol .sdat-issue-param-label {
+  font-weight: 600;
+}
+
+.import-protocol .sdat-issue-param-value {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.import-protocol .sdat-counts {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+}
+
+.import-protocol .sdat-count-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.import-protocol .sdat-count-value {
+  flex-shrink: 0;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}

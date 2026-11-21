@@ -1024,7 +1024,6 @@ export const en = {
                 total: 'Total',
                 imported: 'Imported',
                 skipped: 'Skipped',
-                protocol: 'Protocol',
                 actions: 'Actions',
             },
             actions: {

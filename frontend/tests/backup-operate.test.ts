@@ -116,7 +116,8 @@ function setValue(element: HTMLInputElement | HTMLSelectElement, value: string) 
 }
 
 const buttons = (container: Element, text: string) =>
-    Array.from(container.querySelectorAll<HTMLButtonElement>('button')).filter((b) => b.textContent?.includes(text))
+    // By visible text, or by the label of an icon-only button.
+    Array.from(container.querySelectorAll<HTMLButtonElement>('button')).filter((b) => b.textContent?.includes(text) || b.getAttribute('aria-label') === text)
 const button = (container: Element, text: string) => buttons(container, text)[0]
 
 async function click(element: Element | undefined | null) {

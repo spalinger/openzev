@@ -142,13 +142,14 @@ const labelled = (container: Element, key: string) =>
 
 it.each([
     ['destination', 'testBackupDestination', 'common.editNamed: nightly-disk', 'pages.backups.destinations.test'],
-    ['job', 'verifyBackupJob', 'pages.backups.jobs.details', 'pages.backups.jobs.check'],
+    ['job', 'verifyBackupJob', '[data-job-open]', 'pages.backups.jobs.check'],
 ] as const)('keeps %s action focus while another action is pending', async (_kind, operation, focusLabel, triggerLabel) => {
     setup({ jobs: [completed()] })
     let finish!: () => void
     api[operation].mockReturnValueOnce(new Promise<void>((resolve) => { finish = resolve }))
     const container = await render()
-    const focused = button(container, focusLabel)!
+    // A job opens from its start time, a button named by the date: find it by its open marker.
+    const focused = (focusLabel.startsWith('[') ? container.querySelector<HTMLButtonElement>(focusLabel) : button(container, focusLabel))!
     act(() => focused.focus())
     const trigger = button(container, triggerLabel)!
     await click(trigger)
@@ -485,7 +486,7 @@ describe('starting a backup', () => {
         expect(container.textContent).toContain('pages.backups.jobs.blockedKeyProblem')
         const download = button(container, 'pages.backups.jobs.download')!
         const check = button(container, 'pages.backups.jobs.check')!
-        const details = button(container, 'pages.backups.jobs.details')!
+        const details = container.querySelector<HTMLButtonElement>('[data-job-open]')!
         expect(download.disabled).toBe(false)
         expect(check.disabled).toBe(false)
         await click(download)
@@ -559,13 +560,13 @@ describe('job list', () => {
         setup({ jobs: [completed({ status: 'failed', error_message: 'Access denied: these credentials cannot write.', archive_bytes: null })] })
         const container = await render()
         expect(container.textContent).toContain('Access denied: these credentials cannot write.')
-        expect(button(container, 'pages.backups.jobs.details')).toBeUndefined()
+        expect(container.querySelector('[data-job-open]')).toBeNull()
     })
 
     it('opens the details of a finished backup', async () => {
         setup({ jobs: [completed()] })
         const container = await render()
-        await click(button(container, 'pages.backups.jobs.details'))
+        await click(container.querySelector<HTMLButtonElement>('[data-job-open]')!)
         expect(container.textContent).toContain('pages.backups.details.title')
         expect(container.textContent).toContain('deadbeef')
     })

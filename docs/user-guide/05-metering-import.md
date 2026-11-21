@@ -124,7 +124,15 @@ alike. Delimiter may be any single character (for example `,`, `;`, `|`, or tab)
 
 ### Import Protocol
 
-Open **Import Protocol** from the history table to see totals
+Open an import's protocol by clicking its row (or its file name) in the history
+table, as you open a tariff. On a wide
+screen it opens in a pane beside the history, which narrows to its date, source and
+file name; pick another import to switch, and close it with **×**, Escape or the
+browser's Back button. On a narrower screen the protocol takes the place of the
+history until you close it. The address keeps the open import, so a reload or a
+shared link shows the same protocol.
+
+The protocol shows totals
 (**Total rows / Imported rows / Skipped rows**), an informational
 **Notes** section (e.g. overwrite counts), and a **Skipped row reasons**
 table (row, meter, reason). Overwrites show a success toast; only true

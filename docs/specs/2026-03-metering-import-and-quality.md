@@ -1696,7 +1696,23 @@ type MeteringDashboardSummary =
 
 ### 8.4 Import protocol and deletion UI
 
-`ImportProtocolModal` renders SDAT-CH logs from the structured contract
+The protocol of an import is a detail pane beside the import history
+(`ImportProtocolPane`, a `DetailPane`; SPEC-2026-10-ui-patterns §5 row 2, §6.2),
+opened as tariffs open theirs: a click anywhere on the row, or the file name, which
+is the row's button (`aria-expanded`); a chevron ends the row. The selection is `?import=<id>` with the optional
+`change_from`/`change_to` correction period, through `useListPane`: opening from the
+history adds one history step and switching replaces it; X, Escape and Back close
+it (X takes back the step opening added, or removes the parameters of a pane
+reached by a link); a reload or link reopens it. The id resolves against every
+accessible log, not only the selected community. From 72rem of content width the
+history and the pane sit side by side and the history drops the columns the
+protocol repeats (community, imported by, total, imported, skipped); below 72rem the
+pane replaces the history. The open row is marked; focus moves to the pane title
+on an intentional open and back to that file-name button on close
+(`data-import-open`). The pane has the brand-green header (`tone="brand"`). Deleting the open import, a bulk
+delete and a scope change drop the selection without a history step.
+
+`ImportProtocolPane` renders SDAT-CH logs from the structured contract
 only (`frontend/src/features/imports/sdatOutcome.ts`): the outcome text
 from `result_status` (`accepted` / `held` / `unchanged` / `rejected`, plus
 `correctionOnly` for accepted overwrites with zero created rows), nonzero
@@ -1734,32 +1750,37 @@ retaining supplied identifiers and values. It never parses English diagnostics.
 
 **Correction history** (`CorrectionHistory.tsx`): opening a protocol lazily
 fetches `GET /api/v1/metering/import-logs/{id}/`; the list still omits
-`reading_changes`. The protocol uses the named `xl` dialog size. Detail data stays fresh for one minute and shares the
+`reading_changes`. Detail data stays fresh for one minute and shares the
 existing `metering` prefix invalidation. Pages mount at most 50 events by
 slicing the loaded array; this does not reduce database reads or JSON transfer.
 Upload-result protocol navigation preserves partial/rejected wizard drafts
-without a discard prompt; leaving the page still requires confirmation.
+without a discard prompt (the pane shares the page's navigation bypass with the
+wizard and bulk-delete dialogs); leaving the page still requires confirmation.
+A protocol opened while the wizard stays open (a rejected or partial batch) waits
+in its pane behind the wizard, since only a confirmation opens over a dialog.
 
 Each event shows meter, Swiss interval timestamp with UTC offset, direction,
 kind (`availability` / `value` / `metadata`), exact old/new decimal strings in
-kWh, promotion and source document. Null old energy means no previous value;
+kWh, promotion and source document. Below 44rem of its own width (the pane beside
+the history, a phone) each change is a card of labelled pairs instead of a table
+row (`ResponsiveTableHead`, `data-label` per cell), so old → new never scrolls
+out of view; sorting hides there. Null old energy means no previous value;
 zero remains zero. Old energy is muted and new energy is bold. Promotion means
 a held observation became billable. The
 section states that before/after metadata was not recorded; it never infers
 historical evidence from current readings.
-The filename heads the protocol, with community, import time and source in one
-context line. Successful outcomes, including corrections and held values, are
+The pane is titled **Import protocol**; its facts line names the file, community,
+import time and source. Successful outcomes, including corrections and held values, are
 neutral; only rejected imports use error colouring. The history follows the
-outcome. Counts and always-visible technical facts sit side by side on wide
-screens and stack on phones; findings and current held observations follow.
+outcome. Counts, then always-visible technical facts, stack in the pane's one
+column; findings and current held observations follow.
 Outcome, finding and change-kind labels use plain text without decorative
 icons or badges; informational findings omit a repeated severity prefix.
 Structured diagnostic parameters remain visible with their finding.
 The history table omits sort controls for fewer than two filtered rows; protected
 imports omit **Delete import**. Deletable rows show a trash icon named for the
 file or import timestamp.
-The protocol action uses an eye
-icon with an accessible label and hover/focus tooltip.
+The row actions stop the row's click, so a menu choice never opens the protocol.
 Import screens and dialogs render error/warning/information notices as plain
 feedback, without coloured banner backgrounds; retry actions remain usable.
 
@@ -1777,7 +1798,7 @@ background refresh keeps cached history with a warning and retry, except
 401/403/404 responses discard it until a successful read. Cancelled requests
 cannot purge later cached data. Retry is unavailable while fetching. Invoice
 links focus and scroll to the section after loading only if focus is still on
-the document or dialog container; an operator's control focus is preserved.
+the document or the pane's title; an operator's control focus is preserved.
 
 When `result_counts.held > 0`, the protocol opens `HeldReadingsPanel` filtered
 to `log.batch_id`, without a disclosure toggle. It labels these as remaining

@@ -294,10 +294,9 @@ it.each([false, true])('still protects a rejected-file draft with protocol close
     await act(async () => undefined)
     expect(router.state.location.search).toBe('?import=log-1')
     if (closeProtocol) {
-        const protocol = Array.from(container.querySelectorAll('[role=dialog]')).find(dialog =>
-            dialog.querySelector('h2')?.textContent === 'pages.imports.protocol.title',
-        )!
-        await act(async () => (protocol.querySelector('.form-modal-close') as HTMLButtonElement).click())
+        // The protocol waits in its pane behind the wizard, which stays open for a retry.
+        const protocol = container.querySelector('.detail-pane')!
+        await act(async () => (protocol.querySelector('.detail-pane-header button') as HTMLButtonElement).click())
         expect(router.state.location.search).toBe('')
     }
     await act(async () => { void router.navigate('/elsewhere') })
@@ -359,13 +358,11 @@ describe('ImportsPage SDAT-CH deletion gating', () => {
             (button) => button.getAttribute('aria-label')?.startsWith('pages.imports.actions.deleteImport:'),
         )!
         expect(actions).toBeUndefined()
-        const protocol = Array.from(heldRow.querySelectorAll('button')).find(
-            (button) => button.getAttribute('aria-label') === 'pages.imports.actions.openProtocol',
-        )!
+        const protocol = heldRow.querySelector<HTMLButtonElement>('[data-import-open]')!
         act(() => protocol.click())
         expect(container.textContent).toContain('pages.imports.delete.quarantineProtected')
         act(() => {
-            (container.querySelector('.form-modal-close') as HTMLButtonElement).click()
+            (container.querySelector('.detail-pane-header button') as HTMLButtonElement).click()
         })
         // …and a bulk selection containing it is blocked all-or-nothing.
         openBulkDelete()

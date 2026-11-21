@@ -336,10 +336,33 @@ switching, X takes it back); the pane sits beside the cards from 60rem of conten
 and replaces them below; focus goes to the title and back to the control that
 opened it; the open card and button are marked; a typed and unsaved key is a
 draft the guard asks about. Focus, history and scroll handling is now repeated
-in three pages, now one hook for the sources (`useSourcePane`). The managers' dialogs
+in three pages, now one hook for the sources.
 The managers' **Energy data** tab of the ZEV settings is the fourth adopter (a list of
-sources with the same pane; `useSourcePane` is the extracted hook): the community's
+sources with the same pane and hook): the community's
 sources moved there from the metering-point list, which no longer carries energy data.
+
+**Record panes (shared hook).** That hook is now `components/useListPane.ts`
+(`useListPane`, `useSelectedParam`), parameterised by the query parameter
+(`param`, with the opening control marked `data-<param>-open`), optional
+`clearParams` that go with the selection, and an optional page `bypass` shared
+with the page's dialogs (plus `clearHash` for a deep-link hash). It keeps the
+history, focus, scroll and draft behaviour above. A pane that replaces its list
+is scrolled to its own top on open, since a sticky header would otherwise count
+as in view. Its draft guard asks on X and on switching. Only a page whose pane
+can hold a draft (the sources) passes the returned `draftBlock` to
+`useRouterDraftBlock` for Back and links, so record panes without drafts
+register no router blocker. Its adopters are the
+energy sources (`?source=`), backup jobs (`BackupJobPane`, `?job=`, 72rem) and
+import protocols (`ImportProtocolPane`, `?import=`, 72rem). Beside the list, the
+backup table drops destination, size, encryption, integrity and its row actions,
+and the pane carries the job's file actions; the import history drops community,
+imported by and the three counts. Both open the way the tariff list does: the whole
+row (`DataTable` `onRowClick`, `tr.is-openable`), its name as the keyboard path
+(`.row-select`, `aria-expanded`), and a chevron column (`meta.className: 'row-open'`),
+styled once in `styles/components/table.css`; their panes use the brand-green header.
+A `DataTable` row whose record is open carries `.is-selected`, styled once in
+`detail-pane.css`. The tariff pane
+and the audit log keep their own handling.
 
 The metering-gaps drawer became a
 `FormModal` (`MeteringGapsModal`, size `xs`): it opens from a table row with no
@@ -678,6 +701,7 @@ matching user-guide chapter; regenerate guide screenshots as a set.
 | 6 | **Label and count sweep:** overview status decoration, decorative counts, generic pills, actionable issues, billing's narrow labels | §10.1 holds on every screen audited |
 | 7 | **Buttons and inline styles:** stray variants, missing `button` class, static `style={{}}` into CSS | Two stray forms gone; no static presentation in `style` where a class exists |
 | 8 | **Invoice labels** ([spec](2026-10-audience-specific-invoice-labels.md)) | Per that spec |
+| 3b | **Record views opened from a list (decided; §13 question 6):** backup job details and the import protocol to the pane; dynamic price history stays a dialog | Each record's outcome recorded; backup jobs and import protocols in `useListPane` panes |
 | 9 | **Usability audit (planned):** audit existing screens against all twelve rules in §10.3, including icon labels, legends, terminology and ineffective controls; migrate in scoped UI changes | Each audited screen records applicable rules and any justified exception; affected baseline specs and user-guide chapters reflect the shipped changes; desktop, narrow-layout and keyboard checks pass |
 
 ### Risks
@@ -740,3 +764,7 @@ matching user-guide chapter; regenerate guide screenshots as a set.
 3. Dialog size values and the pane's breakpoint: confirmed by pilot screenshots.
 4. ZEV creation and the import wizard: dialog or page, against §6.4? **Dialog for both (phase 5):** neither needs its own URL or recovery, and `lg` and `xl` give them the room; the criteria and the conditions to reopen are in §6.4.
 5. Row click: open the pane everywhere, or only through a named control so text selection and copy keep working?
+6. The three records still opened from a list in a modal (backup job details, the import protocol, dynamic price history): pane, disclosure or dialog? **Decided (phase 3b)** from screenshots at 1920px, 1600px, 1280px and 400px:
+   - **Backup job details: pane.** A finished job is picked from the jobs table, and its content (a facts list and a per-community table) fits the pane. The settings page has a maximum width, so even at 1920px the table with four labelled row actions did not fit beside it. Beside the pane, rows drop their actions, and the job's **Check**, **Download** and **Delete file** move into the pane, its one home (rule A). Below 72rem the pane replaces the list.
+   - **Import protocol: pane.** It is a record picked from the import history and already had a deep link (`?import=`). In the pane's single column, counts and technical facts stack. Below 44rem of its own width the six-column correction table turns each change into a card of labelled pairs (the shared card-table pattern, `ResponsiveTableHead`), so old → new stays in view. The history keeps date, source, file name and its actions beside it. Below 72rem the pane replaces the history. A protocol opened by an upload while the wizard stays open waits behind it (rule B).
+   - **Dynamic price history: dialog (`xl`).** It is a series about a source, not the source's record: the source's home is its edit dialog (`DynamicSourceFormModal`), so a history pane would be a second home (rule A). A week of quarter-hour prices (672 points) needs the dialog's width, which the 28–34rem pane cannot give (§11 Risks). Where a tariff is the record, the tariff pane already shows the compact chart. Reopen if a dynamic source gets a detail view of its own: the history belongs in it.

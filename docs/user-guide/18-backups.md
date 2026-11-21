@@ -152,8 +152,11 @@ there.
 
 **From the app:** choose *Whole instance* or *One community*, pick a destination and
 click **Back up now**. The backup runs in the background and the list updates as it
-progresses. **Details** shows what a finished backup contains, including any invoice
-PDFs that were referenced but missing from storage. **Download** is offered for
+progresses. Click a finished backup's row to open it in a pane beside the list: what it
+contains, including any invoice PDFs that were referenced but missing from storage,
+and its **Check**, **Download** and **Delete file** actions. While the pane is open the
+list shows only date, scope and status; on a narrow screen the pane takes its place
+until you close it with **×**, Escape or Back. **Download** is offered for
 archives in a local directory; archives in S3 are fetched from the bucket.
 
 **From the command line** — this needs no background worker, so it also works from

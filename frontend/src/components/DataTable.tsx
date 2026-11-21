@@ -40,7 +40,7 @@ const features = tableFeatures({
     // what `filterFn: 'auto'` picks for a text column.
     sortFns: { alphanumeric: sortFn_alphanumeric, basic: sortFn_basic, datetime: sortFn_datetime, text: sortFn_text },
     filterFns: { equalsString: filterFn_equalsString, includesString: filterFn_includesString },
-    columnMeta: metaHelper<{ numeric?: boolean }>(),
+    columnMeta: metaHelper<{ numeric?: boolean; className?: string }>(),
 })
 
 type Features = typeof features
@@ -57,6 +57,10 @@ const TANSTACK_DEFAULT_SIZE = 150
 /** One fixed page size: long enough that most lists fit on one page, so the
  *  footer offers only prev/next, never a rows-per-page choice. */
 const PAGE_SIZE = 100
+
+function cellClass(meta: { numeric?: boolean; className?: string } | undefined) {
+    return [meta?.numeric && 'numeric', meta?.className].filter(Boolean).join(' ') || undefined
+}
 
 interface DataTableProps<T extends Record<string, any>> {
     data: T[]
@@ -140,7 +144,7 @@ export function DataTable<T extends Record<string, any>>({
                                     return (
                                         <SortableHeader key={header.id} direction={dir}
                                             scope="col"
-                                            className={header.column.columnDef.meta?.numeric ? 'numeric' : undefined}
+                                            className={cellClass(header.column.columnDef.meta)}
                                             onSort={!header.isPlaceholder && canSort ? header.column.getToggleSortingHandler() : undefined}
                                             primary={header.column.getSortIndex() === 0}
                                             style={{ width: header.getSize() !== TANSTACK_DEFAULT_SIZE ? header.getSize() : undefined }}>
@@ -164,7 +168,7 @@ export function DataTable<T extends Record<string, any>>({
                                     onClick={onRowClick ? () => onRowClick(row.original) : undefined}
                                 >
                                     {row.getVisibleCells().map((cell) => (
-                                        <td key={cell.id} className={cell.column.columnDef.meta?.numeric ? 'numeric' : undefined}>
+                                        <td key={cell.id} className={cellClass(cell.column.columnDef.meta)}>
                                             {flexRender(cell.column.columnDef.cell, cell.getContext())}
                                         </td>
                                     ))}

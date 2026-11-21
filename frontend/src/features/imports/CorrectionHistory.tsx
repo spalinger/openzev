@@ -1,4 +1,4 @@
-import { SortableHeader, useTableSorting } from '../../components/tableSorting'
+import { ResponsiveTableHead, SortableHeader, useTableSorting } from '../../components/tableSorting'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -58,12 +58,23 @@ export function CorrectionHistory({ log, focusOnLoad, period }: {
 
     useEffect(() => {
         if (focusOnLoad && !detailQuery.isPending) {
-            // Follow the link after the dialog's initial focus has settled.
+            // Follow the link once the pane has settled, unless the user has focused a control of their own (the
+            // pane's title is where opening put focus, not the user).
             const frame = requestAnimationFrame(() => {
                 const section = sectionRef.current
-                if (!section || (document.activeElement !== document.body && document.activeElement !== section.closest('[role="dialog"]'))) return
+                const active = document.activeElement
+                if (!section || (active !== document.body && active !== section.closest('.detail-pane')?.querySelector('h2'))) return
                 section.focus()
                 section.scrollIntoView({ block: 'start' })
+                // The pane's sticky header must not cover the section: it scrolls inside the pane beside a list, or
+                // with the page when the pane replaces the list.
+                const pane = section.closest<HTMLElement>('.detail-pane')
+                const header = pane?.querySelector('.detail-pane-header')
+                const covered = header ? header.getBoundingClientRect().bottom - section.getBoundingClientRect().top : 0
+                if (pane && covered > 0) {
+                    const scroller = pane.scrollHeight > pane.clientHeight ? pane : window
+                    scroller.scrollBy(0, -covered - 8)
+                }
             })
             return () => cancelAnimationFrame(frame)
         }
@@ -121,7 +132,7 @@ export function CorrectionHistory({ log, focusOnLoad, period }: {
                         <>
                             <div className="table-scroll" role="region" aria-label={t('pages.imports.protocol.correctionsTable')} tabIndex={0}>
                                 <table className="data-table correction-history-table">
-                                    <thead>
+                                    <ResponsiveTableHead>
                                         <tr>
                                             <SortableHeader {...sorting.header('meter')}>{t('pages.imports.protocol.corrections.meter')}</SortableHeader>
                                             <SortableHeader {...sorting.header('interval')}>{t('pages.imports.protocol.corrections.interval')}</SortableHeader>
@@ -130,18 +141,18 @@ export function CorrectionHistory({ log, focusOnLoad, period }: {
                                             <SortableHeader {...sorting.header('values')}>{t('pages.imports.protocol.corrections.values')}</SortableHeader>
                                             <SortableHeader {...sorting.header('document')}>{t('pages.imports.protocol.corrections.document')}</SortableHeader>
                                         </tr>
-                                    </thead>
+                                    </ResponsiveTableHead>
                                     <tbody>
                                         {visibleChanges.map((change, index) => (
                                             <tr key={`${change.metering_point}-${change.timestamp}-${change.direction}-${index}`}>
-                                                <td>{change.meter_id || '—'}</td>
-                                                <td><time dateTime={change.timestamp}>{formatMeteringTimestamp(change.timestamp, settings)}</time></td>
-                                                <td>
+                                                <td data-label={t('pages.imports.protocol.corrections.meter')}>{change.meter_id || '—'}</td>
+                                                <td data-label={t('pages.imports.protocol.corrections.interval')}><time dateTime={change.timestamp}>{formatMeteringTimestamp(change.timestamp, settings)}</time></td>
+                                                <td data-label={t('pages.imports.protocol.corrections.direction')}>
                                                     {change.direction === 'in'
                                                         ? t('pages.imports.preview.directionIn')
                                                         : t('pages.imports.preview.directionOut')}
                                                 </td>
-                                                <td>
+                                                <td data-label={t('pages.imports.protocol.corrections.kind')}>
                                                     {t(`pages.imports.protocol.corrections.kinds.${change.kind}`)}
                                                     {change.promoted && (
                                                         <div className="muted correction-history-promoted">
@@ -149,14 +160,14 @@ export function CorrectionHistory({ log, focusOnLoad, period }: {
                                                         </div>
                                                     )}
                                                 </td>
-                                                <td className="correction-history-values">
+                                                <td className="correction-history-values" data-label={t('pages.imports.protocol.corrections.values')}>
                                                     <span className="muted">{change.old_energy === null
                                                         ? t('pages.imports.protocol.corrections.noPreviousValue')
                                                         : `${change.old_energy} kWh`}</span>
                                                     {' → '}
                                                     <strong>{`${change.new_energy} kWh`}</strong>
                                                 </td>
-                                                <td className="correction-history-document">
+                                                <td className="correction-history-document" data-label={t('pages.imports.protocol.corrections.document')}>
                                                     {change.source_document_id || '—'}
                                                 </td>
                                             </tr>

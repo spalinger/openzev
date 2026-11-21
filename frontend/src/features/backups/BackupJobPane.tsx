@@ -1,6 +1,7 @@
+import type { ReactNode, Ref } from 'react'
 import { SortableHeader, useTableSorting } from '../../components/tableSorting'
 import { useTranslation } from 'react-i18next'
-import { FormModal } from '../../components/FormModal'
+import { DetailPane } from '../../components/DetailPane'
 import { formatDateTime, useAppSettings } from '../../lib/appSettings'
 import { formatBytes, formatNumber } from '../../lib/numbers'
 import type { BackupJob } from '../../types/api'
@@ -15,23 +16,40 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
     )
 }
 
-/** What a finished backup holds, read from the manifest it recorded — no archive is fetched. */
-export function BackupJobDetailsModal({ job, onClose }: { job: BackupJob | null; onClose: () => void }) {
+/**
+ * What a finished backup holds, read from the manifest it recorded — no archive is fetched. Beside the jobs it was
+ * picked from (SPEC-2026-10-ui-patterns §5 row 2); picking another job swaps the contents in place.
+ */
+export function BackupJobPane({ job, actions, onClose, titleRef }: {
+    job: BackupJob
+    /** What can be done with the job's stored file. */
+    actions: ReactNode
+    onClose: () => void
+    /** The title is where focus lands when the pane is opened on purpose. */
+    titleRef?: Ref<HTMLHeadingElement>
+}) {
     const { t } = useTranslation()
     const { settings } = useAppSettings()
 
-    const manifest = job ? readManifest(job) : null
+    const manifest = readManifest(job)
     const sorting = useTableSorting(manifest?.zevs ?? [], {
         communities: row => row.name,
         records: row => Object.values(row.counts).reduce((sum, count) => sum + count, 0),
         invoicePdfs: row => row.media.files,
     })
-    if (!job) return null
     const missing = countMissingMedia(manifest)
+    const scope = job.scope === 'zev' ? job.zev_name || t('pages.backups.jobs.scopeZev') : t('pages.backups.jobs.scopeInstance')
 
     return (
-        <FormModal isOpen title={t('pages.backups.details.title')} onClose={onClose} size="md">
-            <div className="page-stack">
+        <DetailPane
+            tone="brand"
+            title={t('pages.backups.details.title')}
+            subtitle={`${scope} · ${formatDateTime(job.started_at ?? job.created_at, settings)}`}
+            onClose={onClose}
+            titleRef={titleRef}
+        >
+            <div className="detail-pane-body page-stack">
+                {!fileGone(job) && <div className="actions-row actions-row-wrap">{actions}</div>}
                 <dl className="page-stack m-0">
                     <Row label={t('pages.backups.details.archive')}>{job.archive_name || '—'}</Row>
                     <Row label={t('pages.backups.details.location')}>{job.archive_location || '—'}</Row>
@@ -98,13 +116,7 @@ export function BackupJobDetailsModal({ job, onClose }: { job: BackupJob | null;
                         </table>
                     </div>
                 )}
-
-                <div className="actions-row actions-row-end">
-                    <button type="button" className="button button-secondary" onClick={onClose}>
-                        {t('common.close')}
-                    </button>
-                </div>
             </div>
-        </FormModal>
+        </DetailPane>
     )
 }

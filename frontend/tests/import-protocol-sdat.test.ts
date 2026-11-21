@@ -36,7 +36,7 @@ vi.mock('../src/lib/appSettings', async (importOriginal) => {
     }
 })
 
-import { ImportProtocolModal } from '../src/features/imports/ImportProtocolModal'
+import { ImportProtocolPane } from '../src/features/imports/ImportProtocolPane'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
@@ -92,7 +92,8 @@ function render(log: ImportLog | null, focusCorrections = false) {
             createElement(
                 QueryClientProvider,
                 { client: queryClient },
-                createElement(ImportProtocolModal, { log, focusCorrections, onClose: () => undefined }),
+                // The page renders the pane only while an import is open.
+                log && createElement(ImportProtocolPane, { log, focusCorrections, onClose: () => undefined }),
             ),
         )
     })
@@ -103,7 +104,7 @@ async function open(log: ImportLog, focusCorrections = false) {
     await act(async () => render(log, focusCorrections))
 }
 
-describe('ImportProtocolModal structured SDAT-CH rendering', () => {
+describe('ImportProtocolPane structured SDAT-CH rendering', () => {
     it('renders a mixed billable/held result from counters, not prose', () => {
         render(baseLog({
             result_status: 'accepted',
@@ -195,9 +196,9 @@ describe('ImportProtocolModal structured SDAT-CH rendering', () => {
         }))
         expect(container.textContent).toContain('pages.imports.protocol.outcome.correctionOnly')
         expect(container.querySelector('header .error-text')).toBeNull()
-        expect(container.querySelector('header h3')?.textContent).toBe('delivery.xml')
+        expect(container.querySelector('.detail-pane-meta')?.textContent).toContain('delivery.xml')
         const history = container.querySelector('#correction-history')!
-        const technical = [...container.querySelectorAll('section')].find(section => section.textContent?.includes('pages.imports.protocol.batchId'))!
+        const technical = [...container.querySelectorAll('section.form-section')].find(section => section.textContent?.includes('pages.imports.protocol.batchId'))!
         expect(history.compareDocumentPosition(technical) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     })
 
@@ -288,13 +289,13 @@ describe('ImportProtocolModal structured SDAT-CH rendering', () => {
     })
 })
 
-describe('ImportProtocolModal correction history', () => {
+describe('ImportProtocolPane correction history', () => {
     it('shares the pending detail request across a StrictMode remount', async () => {
         let resolve!: (value: ImportLog) => void
         heldApi.fetchImportLog.mockReturnValue(new Promise<ImportLog>(done => { resolve = done }))
         await act(async () => root.render(createElement(StrictMode, null,
             createElement(QueryClientProvider, { client: queryClient },
-                createElement(ImportProtocolModal, { log: baseLog(), onClose: () => undefined }),
+                createElement(ImportProtocolPane, { log: baseLog(), onClose: () => undefined }),
             ),
         )))
         expect(heldApi.fetchImportLog).toHaveBeenCalledTimes(1)
@@ -373,7 +374,7 @@ describe('ImportProtocolModal correction history', () => {
         let resolve!: (value: ImportLog) => void
         heldApi.fetchImportLog.mockReturnValueOnce(new Promise<ImportLog>(done => { resolve = done }))
         await open(baseLog(), true)
-        const close = container.querySelector<HTMLButtonElement>('.form-modal-close')!
+        const close = container.querySelector<HTMLButtonElement>('.detail-pane-header button')!
         close.focus()
         await act(async () => resolve(baseLog({ reading_changes: [change()] })))
         await vi.waitFor(() => expect(container.textContent).toContain('1.2500 kWh'))

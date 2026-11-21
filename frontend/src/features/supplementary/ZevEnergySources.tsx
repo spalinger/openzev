@@ -13,7 +13,8 @@ import { capabilityProblem, forecastEligible, hasCapability, historyEligible, li
 import type { SupplementarySource } from '../../types/api'
 import { CapabilityProblemText } from './CapabilityProblemText'
 import { SourcePane } from './SourceDialog'
-import { useSelectedSourceId, useSourcePane } from './useSourcePane'
+import { useListPane, useSelectedParam } from '../../components/useListPane'
+import { useRouterDraftBlock } from '../../components/useDraftGuard'
 import { connectableTargets, ZevConnectDialog } from './ZevConnectDialog'
 
 /** Content width from which the list and the source pane sit side by side; below it the pane takes the area. */
@@ -58,11 +59,13 @@ export function ZevEnergySources({ zevId, canManage }: Props) {
         .sort((a, b) => Number(b.target === 'connection_point') - Number(a.target === 'connection_point') || (a.metering_point_meter_id ?? '').localeCompare(b.metering_point_meter_id ?? ''))
     const ownPoints = new Map(energyData.eligible.filter((entry) => entry.zev === zevId).map((entry) => [entry.metering_point, entry]))
 
-    const selectedSourceId = useSelectedSourceId()
+    const selectedSourceId = useSelectedParam('source')
     const selected = sources.find((source) => source.id === selectedSourceId)
-    const { splitRef, fitsTwoPanes, listHidden, paneTitleRef, setPaneDirty, openSource, closePane } = useSourcePane({
-        splitMinRem: SPLIT_MIN_REM, confirm, selectedSourceId, paneOpen: !!selected,
+    const { splitRef, fitsTwoPanes, listHidden, paneTitleRef, setPaneDirty, openItem: openSource, closePane, draftBlock } = useListPane({
+        param: 'source', splitMinRem: SPLIT_MIN_REM, confirm, paneOpen: !!selected,
     })
+    // A typed, unsaved key is a draft: Back and links ask about it too.
+    useRouterDraftBlock(draftBlock)
 
     if (energyData.isLoading || sourcesQuery.isLoading) return <PageSkeleton variant="cardList" />
     if (!energyData.featureOn) return <Notice tone="warning">{t('supplementary.zev.off')}</Notice>

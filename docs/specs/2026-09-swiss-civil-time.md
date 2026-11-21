@@ -437,7 +437,7 @@ unchanged. The module comment is rewritten for ADR 0026. Consumers
 - `uploadMeteringFile` and `previewCsvImport` in `lib/api/metering.ts` append
   `timestamp_timezone`; `UploadMeteringFilePayload` and
   `PreviewCsvImportPayload` (same file) gain `timestampTimezone?`.
-- The import protocol modal (`ImportProtocolModal.tsx`) shows the batch's zone
+- The import protocol pane (`ImportProtocolPane.tsx`) shows the batch's zone
   for CSV imports, reusing the wizard's option labels; legacy batches (`""`)
   show "UTC (imported before October 2026)".
 - The bulk-delete modal (`BulkDeleteModal.tsx`) drops "(UTC)" from the date
@@ -499,7 +499,7 @@ The bulk-delete response type's `timezone` becomes `'Europe/Zurich'`.
 | Risk | Impact | Mitigation |
 |---|---|---|
 | Operators regenerate drafts before re-anchoring legacy CSV data, so readings bill 1–2 h late | High | Release notes lead with the step; `reanchor_readings --list` makes the affected batches visible; the readiness cockpit already flags draft regeneration |
-| A legacy batch actually had offsets and gets re-anchored | High | Command is opt-in per batch with a dry run showing the first/last target instants; the protocol modal shows the batch's zone |
+| A legacy batch actually had offsets and gets re-anchored | High | Command is opt-in per batch with a dry run showing the first/last target instants; the import protocol shows the batch's zone |
 | A day assumed to be 24 h / 96 intervals somewhere not listed in §4.3 | Medium | `day_length` helper; DST-day tests for every changed module (§9); review rule: no `timedelta(days=1)` added to an instant |
 | Chart consumers read bucket strings as UTC dates | Medium | Buckets carry offsets (§5.1); frontend formats via `zonedParts`; MCP tools consume the same endpoints and return dates only |
 | Hourly chart on the autumn DST day shows 02:00 twice | Low | Intended: two distinct hours. Tooltip uses the full date-time label |

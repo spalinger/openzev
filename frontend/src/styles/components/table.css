@@ -197,7 +197,8 @@
 
 .participant-select:focus-visible,
 .audit-event-select:focus-visible,
-.tariff-select:focus-visible {
+.tariff-select:focus-visible,
+.row-select:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
   border-radius: 0.25rem;
@@ -205,6 +206,37 @@
 
 .participant-table tbody tr.is-selected .participant-select {
   font-weight: 600;
+}
+
+/* A row that opens its record in a detail pane, as the tariff list does: the
+   whole row is the target, its name button the keyboard path (aria-expanded),
+   and a chevron in the last column says where it leads. */
+
+tbody tr.is-openable {
+  cursor: pointer;
+}
+
+tbody tr.is-openable:has(:focus-visible) > td {
+  background: var(--surface);
+}
+
+.row-select {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-weight: 650;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+td.row-open,
+th.row-open {
+  width: 3.75rem;
+  color: var(--text-muted);
+  text-align: right;
+  vertical-align: middle;
 }
 
 /* Keep billing workflow columns readable on narrow screens; the existing

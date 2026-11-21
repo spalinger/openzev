@@ -605,11 +605,9 @@ test.describe('User Guide Screenshots', () => {
     await page.waitForSelector('tbody tr', { timeout: 10_000 })
     const row = page.locator('tbody tr', { hasText: 'e66-correction' })
     await expect(row).toHaveCount(1)
-    await row.getByRole('button', {
-      name: /open protocol|protokoll/i,
-    }).click()
-    await page.waitForSelector('div[role="dialog"]', { timeout: 10_000 })
-    // At 900px the findings sit below the fold of the scrolling dialog.
+    await row.getByRole('button', { name: /e66-correction/ }).click()
+    await page.waitForSelector('.detail-pane', { timeout: 10_000 })
+    // At 900px the findings sit below the fold of the scrolling pane.
     await page.setViewportSize({ width: 1440, height: 1400 })
     await expect(page.locator('#correction-history table')).toBeVisible()
     await page.waitForTimeout(400)

@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faCircleInfo, faDownload, faPlay, faShieldHalved, faTrash } from '@fortawesome/free-solid-svg-icons'
+import { faChevronRight, faDownload, faPlay, faShieldHalved, faTrash } from '@fortawesome/free-solid-svg-icons'
 import { useTranslation } from 'react-i18next'
 import {
     createBackupJob,
@@ -21,8 +21,10 @@ import { useToast } from '../../lib/toast'
 import { Badge } from '../../components/Badge'
 import { ConfirmDialog, consumeReportedError, useConfirmDialog } from '../../components/ConfirmDialog'
 import { DataTable, type CellContext, type ColumnDef } from '../../components/DataTable'
+import { IconActionButton } from '../../components/IconActionButton'
 import type { BackupJob, BackupJobScope, BackupStatus } from '../../types/api'
-import { BackupJobDetailsModal } from './BackupJobDetailsModal'
+import { useListPane, useSelectedParam } from '../../components/useListPane'
+import { BackupJobPane } from './BackupJobPane'
 import {
     BACKUP_JOB_STATUS_RANK,
     fileGone,
@@ -34,35 +36,63 @@ import {
 } from './backupHelpers'
 
 const POLL_MS = 3000
+/** Content width (rem) from which the jobs and a job's pane sit side by side; below it the pane takes the area. */
+const SPLIT_MIN_REM = 72
+/** Columns the pane repeats, dropped from the table while it is open beside it. */
+const PANE_COLUMNS = new Set(['destination', 'size', 'encryption', 'integrity', 'actions'])
 const VERIFICATION_RANK = { failed: 0, checking: 1, never: 2, ok: 3 }
 
 const JobActionsContext = createContext<{
     verifying: boolean
     downloading: boolean
     deleting: boolean
+    selectedJobId: string | null
     showDetails: (job: BackupJob) => void
     verify: (job: BackupJob) => void
     download: (job: BackupJob) => void
     deleteFile: (job: BackupJob) => void
 } | null>(null)
 
+/** When a job ran; for a finished job also the button that opens it in the pane (its row opens it too). */
+function JobOpenCell({ row }: CellContext<BackupJob, unknown>) {
+    const { settings } = useAppSettings()
+    const actions = useContext(JobActionsContext)
+    if (!actions) throw new Error('JobOpenCell requires JobActionsContext')
+    const job = row.original
+    const when = formatDateTime(job.started_at ?? job.created_at, settings)
+    if (job.status !== 'completed') return when
+    return (
+        <button
+            type="button"
+            className="row-select"
+            data-job-open={job.id}
+            aria-expanded={actions.selectedJobId === job.id}
+            onClick={(event) => {
+                event.stopPropagation()
+                actions.showDetails(job)
+            }}
+        >
+            {when}
+        </button>
+    )
+}
+
+// The buttons act on the file; the row's own click (opening the pane) must not fire with them.
 function JobActionsCell({ row }: CellContext<BackupJob, unknown>) {
+    return (
+        <div className="actions-cell-content" onClick={(event) => event.stopPropagation()}>
+            <JobFileActions job={row.original} />
+        </div>
+    )
+}
+
+/** Check, download and delete a job's stored file: in its row, or in its pane. */
+function JobFileActions({ job }: { job: BackupJob }) {
     const { t } = useTranslation()
     const actions = useContext(JobActionsContext)
-    if (!actions) throw new Error('JobActionsCell requires JobActionsContext')
-    const job = row.original
+    if (!actions) throw new Error('JobFileActions requires JobActionsContext')
     return (
-        <div className="actions-cell-content">
-            {job.status === 'completed' && (
-                <button
-                    type="button"
-                    className="button button-secondary button-compact"
-                    onClick={() => actions.showDetails(job)}
-                >
-                    <FontAwesomeIcon icon={faCircleInfo} fixedWidth />
-                    {t('pages.backups.jobs.details')}
-                </button>
-            )}
+        <>
             {hasFile(job) && (
                 <button
                     type="button"
@@ -86,17 +116,16 @@ function JobActionsCell({ row }: CellContext<BackupJob, unknown>) {
                 </button>
             )}
             {hasFile(job) && (
-                <button
-                    type="button"
-                    className="button button-danger button-compact"
+                <IconActionButton
+                    label={t('pages.backups.jobs.deleteFile')}
+                    danger
                     disabled={actions.deleting}
                     onClick={() => actions.deleteFile(job)}
                 >
                     <FontAwesomeIcon icon={faTrash} fixedWidth />
-                    {t('pages.backups.jobs.deleteFile')}
-                </button>
+                </IconActionButton>
             )}
-        </div>
+        </>
     )
 }
 
@@ -110,7 +139,6 @@ export function BackupJobsSection({ status }: { status: BackupStatus | undefined
     const [scope, setScope] = useState<BackupJobScope>('instance')
     const [zevId, setZevId] = useState('')
     const [destinationId, setDestinationId] = useState('')
-    const [detailJob, setDetailJob] = useState<BackupJob | null>(null)
 
     const destinationsQuery = useQuery({
         queryKey: queryKeys.backups.destinations(),
@@ -127,6 +155,14 @@ export function BackupJobsSection({ status }: { status: BackupStatus | undefined
     const enabledDestinations = (destinationsQuery.data ?? []).filter((destination) => destination.enabled)
     const zevs = zevsQuery.data ?? []
     const jobs = jobsQuery.data ?? []
+
+    // A finished job's details open beside the list, `?job=<id>` (SPEC-2026-10-ui-patterns §6.2).
+    const selectedJobId = useSelectedParam('job')
+    const selectedJob = jobs.find((job) => job.id === selectedJobId && job.status === 'completed') ?? null
+    const { splitRef, fitsTwoPanes, listHidden, paneTitleRef, openItem, closePane } = useListPane({
+        param: 'job', splitMinRem: SPLIT_MIN_REM, confirm, paneOpen: !!selectedJob,
+    })
+    const besideList = !!selectedJob && fitsTwoPanes
 
     // The status card (last backup, encryption) reads different data than the
     // list, so refresh it once running work has finished.
@@ -202,13 +238,13 @@ export function BackupJobsSection({ status }: { status: BackupStatus | undefined
     const compareText: ColumnDef<BackupJob>['sortFn'] = (left, right, id) =>
         collator.compare(left.getValue<string>(id) ?? '', right.getValue<string>(id) ?? '')
 
-    const columns: ColumnDef<BackupJob, unknown>[] = [
+    const allColumns: ColumnDef<BackupJob, unknown>[] = [
         {
             id: 'created',
             accessorFn: (job) => Date.parse(job.started_at ?? job.created_at),
             sortDescFirst: true,
             header: t('pages.backups.jobs.columns.created'),
-            cell: ({ row }) => formatDateTime(row.original.started_at ?? row.original.created_at, settings),
+            cell: JobOpenCell,
         },
         {
             id: 'scope',
@@ -311,116 +347,139 @@ export function BackupJobsSection({ status }: { status: BackupStatus | undefined
             enableSorting: false,
             cell: JobActionsCell,
         },
+        {
+            id: 'open',
+            header: () => <span className="visually-hidden">{t('pages.backups.jobs.details')}</span>,
+            enableSorting: false,
+            meta: { className: 'row-open' },
+            cell: ({ row }) => row.original.status === 'completed' && <FontAwesomeIcon icon={faChevronRight} fixedWidth aria-hidden="true" />,
+        },
     ]
+    const columns = besideList ? allColumns.filter((column) => !PANE_COLUMNS.has(column.id ?? '')) : allColumns
 
     return (
-        <section className="card page-stack">
-            <div>
-                <h3 className="m-0">{t('pages.backups.jobs.title')}</h3>
-                <p className="muted" style={{ margin: '0.25rem 0 0' }}>
-                    {t('pages.backups.jobs.description', { command: 'python manage.py openzev_backup' })}
-                </p>
-            </div>
-
-            <form
-                className="page-stack"
-                onSubmit={(event) => {
-                    event.preventDefault()
-                    if (canStart) startMutation.mutate()
-                }}
+        <JobActionsContext.Provider value={{
+            verifying: verifyMutation.isPending,
+            downloading: downloadMutation.isPending,
+            deleting: deleteFileMutation.isPending,
+            selectedJobId: selectedJob?.id ?? null,
+            showDetails: openItem,
+            verify: (job) => verifyMutation.mutate(job),
+            download: (job) => downloadMutation.mutate(job),
+            deleteFile: (job) => { void askToDeleteFile(job) },
+        }}>
+            <div
+                ref={splitRef}
+                className="detail-split"
+                data-layout={fitsTwoPanes ? 'wide' : 'narrow'}
+                data-pane={selectedJob ? 'open' : 'closed'}
             >
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
-                    <label>
-                        <span>{t('pages.backups.jobs.scope')}</span>
-                        <select value={scope} onChange={(event) => setScope(event.target.value as BackupJobScope)}>
-                            <option value="instance">{t('pages.backups.jobs.scopeInstance')}</option>
-                            <option value="zev">{t('pages.backups.jobs.scopeZev')}</option>
-                        </select>
-                    </label>
-
-                    {scope === 'zev' && (
-                        <label>
-                            <span>{t('pages.backups.jobs.zev')}</span>
-                            <select value={zevId} onChange={(event) => setZevId(event.target.value)}>
-                                <option value="">{t('pages.backups.jobs.selectZev')}</option>
-                                {zevs.map((zev) => (
-                                    <option key={zev.id} value={zev.id}>{zev.name}</option>
-                                ))}
-                            </select>
-                        </label>
-                    )}
-
-                    <label>
-                        <span>{t('pages.backups.jobs.destination')}</span>
-                        <select
-                            value={selectedDestination}
-                            onChange={(event) => setDestinationId(event.target.value)}
-                            disabled={enabledDestinations.length === 0}
-                        >
-                            {enabledDestinations.length === 0 && (
-                                <option value="">{t('pages.backups.jobs.noDestination')}</option>
-                            )}
-                            {enabledDestinations.map((destination) => (
-                                <option key={destination.id} value={destination.id}>{destination.name}</option>
-                            ))}
-                        </select>
-                    </label>
-                </div>
-
-                <div className="actions-row">
-                    <button type="submit" className="button button-primary" disabled={!canStart}>
-                        <FontAwesomeIcon icon={faPlay} fixedWidth />
-                        {t('pages.backups.jobs.backUpNow')}
-                    </button>
-                </div>
-                {blocked && status && (
-                    <div className="error-banner">
-                        {status.encryption_key_problem
-                            ? t('pages.backups.jobs.blockedKeyProblem', { problem: status.encryption_key_problem })
-                            : t('pages.backups.jobs.blocked')}
+                <section className="card page-stack detail-split-list" hidden={listHidden}>
+                    <div>
+                        <h3 className="m-0">{t('pages.backups.jobs.title')}</h3>
+                        <p className="muted" style={{ margin: '0.25rem 0 0' }}>
+                            {t('pages.backups.jobs.description', { command: 'python manage.py openzev_backup' })}
+                        </p>
                     </div>
+
+                    <form
+                        className="page-stack"
+                        onSubmit={(event) => {
+                            event.preventDefault()
+                            if (canStart) startMutation.mutate()
+                        }}
+                    >
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+                            <label>
+                                <span>{t('pages.backups.jobs.scope')}</span>
+                                <select value={scope} onChange={(event) => setScope(event.target.value as BackupJobScope)}>
+                                    <option value="instance">{t('pages.backups.jobs.scopeInstance')}</option>
+                                    <option value="zev">{t('pages.backups.jobs.scopeZev')}</option>
+                                </select>
+                            </label>
+
+                            {scope === 'zev' && (
+                                <label>
+                                    <span>{t('pages.backups.jobs.zev')}</span>
+                                    <select value={zevId} onChange={(event) => setZevId(event.target.value)}>
+                                        <option value="">{t('pages.backups.jobs.selectZev')}</option>
+                                        {zevs.map((zev) => (
+                                            <option key={zev.id} value={zev.id}>{zev.name}</option>
+                                        ))}
+                                    </select>
+                                </label>
+                            )}
+
+                            <label>
+                                <span>{t('pages.backups.jobs.destination')}</span>
+                                <select
+                                    value={selectedDestination}
+                                    onChange={(event) => setDestinationId(event.target.value)}
+                                    disabled={enabledDestinations.length === 0}
+                                >
+                                    {enabledDestinations.length === 0 && (
+                                        <option value="">{t('pages.backups.jobs.noDestination')}</option>
+                                    )}
+                                    {enabledDestinations.map((destination) => (
+                                        <option key={destination.id} value={destination.id}>{destination.name}</option>
+                                    ))}
+                                </select>
+                            </label>
+                        </div>
+
+                        <div className="actions-row">
+                            <button type="submit" className="button button-primary" disabled={!canStart}>
+                                <FontAwesomeIcon icon={faPlay} fixedWidth />
+                                {t('pages.backups.jobs.backUpNow')}
+                            </button>
+                        </div>
+                        {blocked && status && (
+                            <div className="error-banner">
+                                {status.encryption_key_problem
+                                    ? t('pages.backups.jobs.blockedKeyProblem', { problem: status.encryption_key_problem })
+                                    : t('pages.backups.jobs.blocked')}
+                            </div>
+                        )}
+                    </form>
+
+                    {jobsQuery.isLoading ? (
+                        <div className="muted">{t('common.loading')}</div>
+                    ) : jobs.length === 0 ? (
+                        <div className="muted">{t('pages.backups.jobs.empty')}</div>
+                    ) : (
+                        <div className="table-card">
+                            <DataTable
+                                data={jobs}
+                                columns={columns}
+                                getRowId={(job) => job.id}
+                                initialSorting={[{ id: 'created', desc: true }]}
+                                onRowClick={(job) => { if (job.status === 'completed') openItem(job) }}
+                                rowClassName={(job) => [job.status === 'completed' && 'is-openable', job.id === selectedJob?.id && 'is-selected'].filter(Boolean).join(' ') || undefined}
+                            />
+                        </div>
+                    )}
+                </section>
+                {selectedJob && (
+                    <BackupJobPane
+                        job={selectedJob}
+                        actions={<JobFileActions job={selectedJob} />}
+                        onClose={closePane}
+                        titleRef={paneTitleRef}
+                    />
                 )}
-            </form>
-
-            {jobsQuery.isLoading ? (
-                <div className="muted">{t('common.loading')}</div>
-            ) : jobs.length === 0 ? (
-                <div className="muted">{t('pages.backups.jobs.empty')}</div>
-            ) : (
-                <div className="table-card">
-                    <JobActionsContext.Provider value={{
-                        verifying: verifyMutation.isPending,
-                        downloading: downloadMutation.isPending,
-                        deleting: deleteFileMutation.isPending,
-                        showDetails: setDetailJob,
-                        verify: (job) => verifyMutation.mutate(job),
-                        download: (job) => downloadMutation.mutate(job),
-                        deleteFile: (job) => { void askToDeleteFile(job) },
-                    }}>
-                        <DataTable
-                            data={jobs}
-                            columns={columns}
-                            getRowId={(job) => job.id}
-                            initialSorting={[{ id: 'created', desc: true }]}
-                        />
-                    </JobActionsContext.Provider>
-                </div>
-            )}
-
-            <BackupJobDetailsModal job={detailJob} onClose={() => setDetailJob(null)} />
-
-            {dialog && (
-                <ConfirmDialog
-                    title={dialog.title}
-                    message={dialog.message}
-                    confirmText={dialog.confirmText}
-                    isDangerous={dialog.isDangerous}
-                    isLoading={dialogLoading}
-                    onConfirm={handleConfirm}
-                    onCancel={handleCancel}
-                />
-            )}
-        </section>
+                {dialog && (
+                    <ConfirmDialog
+                        title={dialog.title}
+                        message={dialog.message}
+                        confirmText={dialog.confirmText}
+                        isDangerous={dialog.isDangerous}
+                        isLoading={dialogLoading}
+                        onConfirm={handleConfirm}
+                        onCancel={handleCancel}
+                    />
+                )}
+            </div>
+        </JobActionsContext.Provider>
     )
 }
 

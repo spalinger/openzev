@@ -9,7 +9,8 @@ import { MyConnections } from '../features/supplementary/MyConnections'
 import { MeterDataBand } from '../features/supplementary/MeterDataBand'
 import { MeteringPointDataCard } from '../features/supplementary/MeteringPointDataCard'
 import { SourcePane } from '../features/supplementary/SourceDialog'
-import { useSelectedSourceId, useSourcePane } from '../features/supplementary/useSourcePane'
+import { useListPane, useSelectedParam } from '../components/useListPane'
+import { useRouterDraftBlock } from '../components/useDraftGuard'
 import { queryKeys } from '../lib/api/queryKeys'
 import { listSupplementarySources } from '../lib/api/supplementary'
 import { fetchMeteringPoints } from '../lib/api/zev'
@@ -72,7 +73,7 @@ function MyMeteringPointsView() {
         enabled: energyData.featureOn,
     })
 
-    const selectedSourceId = useSelectedSourceId()
+    const selectedSourceId = useSelectedParam('source')
 
     // With the live flag on the list holds every held meter: a point is set up here only for a
     // capability it has (history behind the meter, live anywhere active); the rest stays plain.
@@ -91,9 +92,11 @@ function MyMeteringPointsView() {
     )
     const selectedPoint = selectedSource?.metering_point ? heldById.get(selectedSource.metering_point) : undefined
     // The source open beside the cards (SPEC-2026-10-ui-patterns §6.2); its id lives in the URL.
-    const { splitRef, fitsTwoPanes, listHidden, paneTitleRef, setPaneDirty, openSource, closePane } = useSourcePane({
-        splitMinRem: SPLIT_MIN_REM, confirm, selectedSourceId, paneOpen: !!selectedSource,
+    const { splitRef, fitsTwoPanes, listHidden, paneTitleRef, setPaneDirty, openItem: openSource, closePane, draftBlock } = useListPane({
+        param: 'source', splitMinRem: SPLIT_MIN_REM, confirm, paneOpen: !!selectedSource,
     })
+    // A typed, unsaved key is a draft: Back and links ask about it too.
+    useRouterDraftBlock(draftBlock)
 
     const loading = energyData.isLoading || (isParticipantScope && pointsQuery.isLoading)
     if (loading) return <PageSkeleton variant="cardList" />
